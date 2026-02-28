@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: gestor-becker-db
+    environment:
+      POSTGRES_USER: gestor_user
+      POSTGRES_PASSWORD: gestor_password_dev
+      POSTGRES_DB: gestor_becker
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.UTF-8
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gestor_user -d gestor_becker"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gestor-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gestor-becker-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://gestor_user:gestor_password_dev@postgres:5432/gestor_becker
+      JWT_SECRET: your_jwt_secret_here_change_in_production
+      JWT_REFRESH_SECRET: your_jwt_refresh_secret_here_change_in_production
+      AFIP_ENV: homologacion
+      AFIP_CERT_PATH: /app/certs/test.pem
+      AFIP_KEY_PATH: /app/certs/test.key
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/certs:/app/certs
+    command: npm run dev
+    networks:
+      - gestor-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gestor-becker-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm run dev
+    networks:
+      - gestor-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  gestor-network:
+    driver: bridge
