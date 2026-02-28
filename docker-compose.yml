@@ -13,7 +13,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./backend/src/db/001-init.sql:/docker-entrypoint-initdb.d/001-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gestor_user -d gestor_becker"]
       interval: 10s
@@ -42,9 +42,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./backend/src:/app/src
       - ./backend/certs:/app/certs
-    command: npm run dev
+    command: npm start
     networks:
       - gestor-network
 
@@ -58,11 +57,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:3000/api
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-    command: npm run dev
+      - "5173:80"
     networks:
       - gestor-network
 
