@@ -1,9 +1,8 @@
-import { Router } from 'express';
+import { Router } from 'express'
+import { afipController } from './afip.controller'
 
-export const afipRouter = Router();
+export const afipRouter = Router()
 
-afipRouter.get('/', (req, res) => res.json({ message: 'List afip' }));
-afipRouter.post('/', (req, res) => res.json({ message: 'Create afip' }));
-afipRouter.get('/:id', (req, res) => res.json({ message: 'Get afip', id: req.params.id }));
-afipRouter.put('/:id', (req, res) => res.json({ message: 'Update afip', id: req.params.id }));
-afipRouter.delete('/:id', (req, res) => res.json({ message: 'Delete afip', id: req.params.id }));
+afipRouter.post('/authorize', (req, res) => afipController.authorizeInvoice(req, res))
+afipRouter.post('/verify-cuit', (req, res) => afipController.verifyCuit(req, res))
+afipRouter.get('/authorized', (req, res) => afipController.getAuthorizedInvoices(req, res))
