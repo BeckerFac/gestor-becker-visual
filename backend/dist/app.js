@@ -22,6 +22,7 @@ const inventory_router_1 = require("./modules/inventory/inventory.router");
 const reports_router_1 = require("./modules/reports/reports.router");
 const catalog_router_1 = require("./modules/catalog/catalog.router");
 const afip_router_1 = require("./modules/afip/afip.router");
+const pdf_router_1 = require("./modules/pdf/pdf.router");
 exports.app = (0, express_1.default)();
 // Middleware de seguridad
 exports.app.use((0, helmet_1.default)());
@@ -54,6 +55,7 @@ exports.app.use('/api/inventory', auth_1.authMiddleware, inventory_router_1.inve
 exports.app.use('/api/reports', auth_1.authMiddleware, reports_router_1.reportsRouter);
 exports.app.use('/api/catalog', auth_1.authMiddleware, catalog_router_1.catalogRouter);
 exports.app.use('/api/afip', auth_1.authMiddleware, afip_router_1.afipRouter);
+exports.app.use('/api/pdf', auth_1.authMiddleware, pdf_router_1.pdfRouter);
 // 404 handler
 exports.app.use((req, res) => {
     res.status(404).json({ error: 'Route not found' });
