@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: gestor-becker-db-prod
+    environment:
+      POSTGRES_USER: gestor_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-gestor_password_prod}
+      POSTGRES_DB: gestor_becker_prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gestor_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: gestor-becker-api-prod
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://gestor_user:${DB_PASSWORD:-gestor_password_prod}@postgres:5432/gestor_becker_prod
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_here}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-your_jwt_refresh_secret_here}
+      AFIP_ENV: homologacion
+      AFIP_CUIT: "20123456789"
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_USER: ${SMTP_USER:-noreply@gestorbecker.com}
+      SMTP_PASS: ${SMTP_PASS:-test123}
+      CORS_ORIGIN: http://localhost:5173
+      LOG_LEVEL: info
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+    command: npm start
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gestor-becker-frontend-prod
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
