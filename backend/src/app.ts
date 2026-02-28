@@ -17,6 +17,7 @@ import { reportsRouter } from './modules/reports/reports.router';
 import { catalogRouter } from './modules/catalog/catalog.router';
 import { afipRouter } from './modules/afip/afip.router';
 import { pdfRouter } from './modules/pdf/pdf.router';
+import { emailRouter } from './modules/email/email.router';
 
 export const app = express();
 
@@ -57,6 +58,7 @@ app.use('/api/reports', authMiddleware, reportsRouter);
 app.use('/api/catalog', authMiddleware, catalogRouter);
 app.use('/api/afip', authMiddleware, afipRouter);
 app.use('/api/pdf', authMiddleware, pdfRouter);
+app.use('/api/email', authMiddleware, emailRouter);
 
 // 404 handler
 app.use((req, res) => {
