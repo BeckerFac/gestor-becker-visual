@@ -1,0 +1,12 @@
+node_modules
+*.log
+.DS_Store
+.git
+.env
+.env.deploy
+.env.local
+.vscode
+.idea
+dist
+frontend/dist
+frontend/node_modules

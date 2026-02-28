@@ -46,6 +46,7 @@ HEROKU_RESPONSE=$(curl -n -s -X POST \
   https://api.heroku.com/apps \
   -H "Authorization: Bearer $HEROKU_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/vnd.heroku+json; version=3" \
   -d '{"name":"'$HEROKU_APP_NAME'"}')
 
 echo "Respuesta Heroku: $HEROKU_RESPONSE"
@@ -55,6 +56,7 @@ curl -n -s -X POST \
   https://api.heroku.com/apps/$HEROKU_APP_NAME/addons \
   -H "Authorization: Bearer $HEROKU_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/vnd.heroku+json; version=3" \
   -d '{"plan":"heroku-postgresql:hobby-dev"}' || echo "⚠️ PostgreSQL podría ya existir"
 
 echo "✅ PostgreSQL añadido"
@@ -66,6 +68,7 @@ curl -n -s -X PATCH \
   https://api.heroku.com/apps/$HEROKU_APP_NAME/config-vars \
   -H "Authorization: Bearer $HEROKU_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/vnd.heroku+json; version=3" \
   -d '{
     "NODE_ENV": "production",
     "JWT_SECRET": "'$JWT_SECRET'",
@@ -89,7 +92,7 @@ echo "=== PASO 4: PUSH A HEROKU ==="
 cd backend
 
 # Configurar git remote de Heroku
-heroku git:remote -a $HEROKU_APP_NAME -r heroku-prod
+npx heroku git:remote -a $HEROKU_APP_NAME -r heroku-prod
 
 # Push
 git push heroku-prod master || git push heroku-prod main || true
