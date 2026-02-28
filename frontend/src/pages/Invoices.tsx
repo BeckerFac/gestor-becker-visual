@@ -35,14 +35,14 @@ export default function Invoices() {
     }
   }
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      draft: 'background: #FFC107; color: black;',
-      pending: 'background: #2196F3; color: white;',
-      authorized: 'background: #4CAF50; color: white;',
-      cancelled: 'background: #F44336; color: white;',
+  const getStatusBadge = (status: string): Record<string, string> => {
+    const styles: Record<string, Record<string, string>> = {
+      draft: { background: '#FFC107', color: 'black' },
+      pending: { background: '#2196F3', color: 'white' },
+      authorized: { background: '#4CAF50', color: 'white' },
+      cancelled: { background: '#F44336', color: 'white' },
     }
-    return styles[status] || 'background: #9E9E9E; color: white;'
+    return styles[status] || { background: '#9E9E9E', color: 'white' }
   }
 
   if (loading) return <div className="container">Cargando...</div>
@@ -73,7 +73,7 @@ export default function Invoices() {
             <p><strong>Total:</strong> ${parseFloat(selectedInvoice.total_amount).toFixed(2)}</p>
             <p>
               <strong>Estado:</strong>
-              <span style={{ marginLeft: '10px', padding: '5px 10px', borderRadius: '4px', ...Object.fromEntries(Object.entries(getStatusBadge(selectedInvoice.status))), }}>
+              <span style={{ marginLeft: '10px', padding: '5px 10px', borderRadius: '4px', ...getStatusBadge(selectedInvoice.status) }}>
                 {selectedInvoice.status}
               </span>
             </p>
