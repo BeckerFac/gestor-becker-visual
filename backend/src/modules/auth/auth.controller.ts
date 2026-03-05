@@ -41,6 +41,7 @@ export class AuthController {
         ...result,
       });
     } catch (error) {
+      console.error('Login error:', error);
       if (error instanceof ApiError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
@@ -48,15 +49,15 @@ export class AuthController {
     }
   }
 
-  async refreshToken(req: AuthRequest, res: Response) {
+  async refreshToken(req: Request, res: Response) {
     try {
       const { refreshToken } = req.body;
 
-      if (!refreshToken || !req.user?.id) {
-        throw new ApiError(400, 'Refresh token and user ID required');
+      if (!refreshToken) {
+        throw new ApiError(400, 'Refresh token required');
       }
 
-      const tokens = await authService.refreshToken(req.user.id, refreshToken);
+      const tokens = await authService.refreshTokenDirect(refreshToken);
 
       res.json({
         message: 'Token refreshed',
@@ -67,6 +68,24 @@ export class AuthController {
         return res.status(error.statusCode).json({ error: error.message });
       }
       res.status(500).json({ error: 'Token refresh failed' });
+    }
+  }
+
+  async customerLogin(req: Request, res: Response) {
+    try {
+      const { access_code } = req.body;
+
+      if (!access_code) {
+        throw new ApiError(400, 'Código de acceso requerido');
+      }
+
+      const result = await authService.customerLogin(access_code);
+      res.json({ message: 'Login successful', ...result });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Customer login failed' });
     }
   }
 

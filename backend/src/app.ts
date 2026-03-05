@@ -7,19 +7,34 @@ import { env } from './config/env';
 import { authMiddleware, optionalAuth } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
 import { authRouter } from './modules/auth/auth.router';
-import { companiesRouter } from './modules/companies/companies.router';
 import { productsRouter } from './modules/products/products.router';
 import { pricingRouter } from './modules/pricing/pricing.router';
 import { customersRouter } from './modules/customers/customers.router';
 import { invoicesRouter } from './modules/invoices/invoices.router';
-import { inventoryRouter } from './modules/inventory/inventory.router';
-import { reportsRouter } from './modules/reports/reports.router';
 import { catalogRouter } from './modules/catalog/catalog.router';
 import { afipRouter } from './modules/afip/afip.router';
 import { pdfRouter } from './modules/pdf/pdf.router';
 import { emailRouter } from './modules/email/email.router';
+import { companiesRouter } from './modules/companies/companies.router';
+import { reportsRouter } from './modules/reports/reports.router';
+import { inventoryRouter } from './modules/inventory/inventory.router';
+import { collectionsRouter } from './modules/collections/collections.router';
+import { ordersRouter } from './modules/orders/orders.router';
+import { quotesRouter } from './modules/quotes/quotes.router';
+import { portalRouter } from './modules/portal/portal.router';
+import { chequesRouter } from './modules/cheques/cheques.router';
+import { remitosRouter } from './modules/remitos/remitos.router';
+import { banksRouter } from './modules/banks/banks.router';
+import { enterprisesRouter } from './modules/enterprises/enterprises.router';
+import { purchasesRouter } from './modules/purchases/purchases.router';
+import { cobrosRouter } from './modules/cobros/cobros.router';
+import { pagosRouter } from './modules/pagos/pagos.router';
+import { cuentaCorrienteRouter } from './modules/cuenta-corriente/cuenta-corriente.router';
 
 export const app = express();
+
+// Trust proxy (behind nginx)
+app.set('trust proxy', 1);
 
 // Middleware de seguridad
 app.use(helmet());
@@ -48,17 +63,29 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRouter);
-app.use('/api/companies', authMiddleware, companiesRouter);
 app.use('/api/products', authMiddleware, productsRouter);
 app.use('/api/pricing', authMiddleware, pricingRouter);
 app.use('/api/customers', authMiddleware, customersRouter);
 app.use('/api/invoices', authMiddleware, invoicesRouter);
-app.use('/api/inventory', authMiddleware, inventoryRouter);
-app.use('/api/reports', authMiddleware, reportsRouter);
 app.use('/api/catalog', authMiddleware, catalogRouter);
 app.use('/api/afip', authMiddleware, afipRouter);
 app.use('/api/pdf', authMiddleware, pdfRouter);
 app.use('/api/email', authMiddleware, emailRouter);
+app.use('/api/companies', authMiddleware, companiesRouter);
+app.use('/api/reports', authMiddleware, reportsRouter);
+app.use('/api/inventory', authMiddleware, inventoryRouter);
+app.use('/api/collections', authMiddleware, collectionsRouter);
+app.use('/api/orders', authMiddleware, ordersRouter);
+app.use('/api/quotes', authMiddleware, quotesRouter);
+app.use('/api/portal', portalRouter);
+app.use('/api/cheques', authMiddleware, chequesRouter);
+app.use('/api/remitos', authMiddleware, remitosRouter);
+app.use('/api/banks', authMiddleware, banksRouter);
+app.use('/api/enterprises', authMiddleware, enterprisesRouter);
+app.use('/api/purchases', authMiddleware, purchasesRouter);
+app.use('/api/cobros', authMiddleware, cobrosRouter);
+app.use('/api/pagos', authMiddleware, pagosRouter);
+app.use('/api/cuenta-corriente', authMiddleware, cuentaCorrienteRouter);
 
 // 404 handler
 app.use((req, res) => {

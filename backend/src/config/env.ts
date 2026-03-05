@@ -13,7 +13,7 @@ export const env = {
   // JWT
   JWT_SECRET: process.env.JWT_SECRET || 'your_jwt_secret_here',
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'your_jwt_refresh_secret_here',
-  JWT_EXPIRATION: process.env.JWT_EXPIRATION || '15m',
+  JWT_EXPIRATION: process.env.JWT_EXPIRATION || '24h',
   JWT_REFRESH_EXPIRATION: process.env.JWT_REFRESH_EXPIRATION || '7d',
 
   // AFIP

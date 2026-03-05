@@ -1,0 +1,13 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "default",
+  "rsc": false,
+  "tsx": true,
+  "aliasPrefix": "@",
+  "baseColor": "neutral",
+  "components": {
+    "resolvedExtends": [
+      "shadcn-ui"
+    ]
+  }
+}

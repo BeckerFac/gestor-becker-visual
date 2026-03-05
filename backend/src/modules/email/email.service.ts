@@ -69,7 +69,10 @@ export class EmailService {
       const pdfBuffer = await pdfService.generateInvoicePdf({
         invoiceId: input.invoiceId,
         companyName: company.name,
+        companyCuit: company.cuit,
         companyAddress: company.address || undefined,
+        companyCity: company.city || undefined,
+        companyProvince: company.province || undefined,
         companyPhone: company.phone || undefined,
         companyEmail: company.email || undefined,
       })

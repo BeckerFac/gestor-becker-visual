@@ -1,9 +1,9 @@
 import { Router } from 'express';
+import { reportsController } from './reports.controller';
 
 export const reportsRouter = Router();
 
-reportsRouter.get('/', (req, res) => res.json({ message: 'List reports' }));
-reportsRouter.post('/', (req, res) => res.json({ message: 'Create reports' }));
-reportsRouter.get('/:id', (req, res) => res.json({ message: 'Get reports', id: req.params.id }));
-reportsRouter.put('/:id', (req, res) => res.json({ message: 'Update reports', id: req.params.id }));
-reportsRouter.delete('/:id', (req, res) => res.json({ message: 'Delete reports', id: req.params.id }));
+reportsRouter.get('/dashboard', (req, res) => reportsController.getDashboard(req as any, res));
+reportsRouter.get('/sales', (req, res) => reportsController.getSalesReport(req as any, res));
+reportsRouter.get('/top-products', (req, res) => reportsController.getTopProducts(req as any, res));
+reportsRouter.get('/search', (req, res) => reportsController.globalSearch(req as any, res));

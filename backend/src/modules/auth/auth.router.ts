@@ -6,6 +6,7 @@ export const authRouter = Router();
 
 authRouter.post('/register', (req, res) => authController.register(req, res));
 authRouter.post('/login', (req, res) => authController.login(req, res));
-authRouter.post('/refresh', authMiddleware, (req, res) => authController.refreshToken(req, res));
+authRouter.post('/refresh', (req, res) => authController.refreshToken(req, res));
+authRouter.post('/customer-login', (req, res) => authController.customerLogin(req, res));
 authRouter.post('/logout', authMiddleware, (req, res) => authController.logout(req, res));
 authRouter.get('/me', authMiddleware, (req, res) => authController.getMe(req, res));

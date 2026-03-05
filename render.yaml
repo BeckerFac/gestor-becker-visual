@@ -1,34 +1,48 @@
+databases:
+  - name: gestor-becker-db
+    plan: free
+    databaseName: gestor_becker
+    user: gestor_user
+
 services:
   - type: web
-    name: gestor-becker-api
-    runtime: node
+    name: gestor-becker-backend
     plan: free
-    buildCommand: cd backend && npm install && npm run build
-    startCommand: cd backend && npm start
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3000
+        value: "3000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gestor-becker-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
       - key: AFIP_ENV
         value: homologacion
-      - key: AFIP_CUIT
-        value: "20123456789"
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        value: noreply@gestorbecker.com
-      - key: SMTP_PASS
-        value: test123
       - key: LOG_LEVEL
         value: info
 
-databases:
-  - name: postgres
+  - type: web
+    name: gestor-becker-frontend
     plan: free
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -1,9 +1,8 @@
 import { Router } from 'express';
+import { inventoryController } from './inventory.controller';
 
 export const inventoryRouter = Router();
 
-inventoryRouter.get('/', (req, res) => res.json({ message: 'List inventory' }));
-inventoryRouter.post('/', (req, res) => res.json({ message: 'Create inventory' }));
-inventoryRouter.get('/:id', (req, res) => res.json({ message: 'Get inventory', id: req.params.id }));
-inventoryRouter.put('/:id', (req, res) => res.json({ message: 'Update inventory', id: req.params.id }));
-inventoryRouter.delete('/:id', (req, res) => res.json({ message: 'Delete inventory', id: req.params.id }));
+inventoryRouter.get('/', (req, res) => inventoryController.getStock(req as any, res));
+inventoryRouter.post('/movements', (req, res) => inventoryController.createMovement(req as any, res));
+inventoryRouter.get('/low-stock', (req, res) => inventoryController.getLowStock(req as any, res));
