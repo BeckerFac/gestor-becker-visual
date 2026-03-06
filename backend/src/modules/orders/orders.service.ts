@@ -297,6 +297,11 @@ export class OrdersService {
 
       // Update items if provided (delete + re-insert)
       if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        // Unlink invoice_items before deleting order_items (FK constraint)
+        await db.execute(sql`
+          UPDATE invoice_items SET order_item_id = NULL
+          WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = ${orderId})
+        `).catch(() => {});
         await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
 
         let subtotal = 0;
@@ -324,6 +329,7 @@ export class OrdersService {
 
       return { id: orderId, updated: true };
     } catch (error) {
+      console.error('Update order error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update order');
     }

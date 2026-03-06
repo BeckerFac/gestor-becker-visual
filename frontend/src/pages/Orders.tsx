@@ -158,8 +158,8 @@ export const Orders: React.FC = () => {
   // Filters
   const [filterStatus, setFilterStatus] = useState<string[]>([])
   const [filterType, setFilterType] = useState<string[]>([])
-  const [filterEnterprise, setFilterEnterprise] = useState('')
-  const [filterInvoice, setFilterInvoice] = useState('')
+  const [filterEnterprise, setFilterEnterprise] = useState<string[]>([])
+  const [filterInvoice, setFilterInvoice] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -177,18 +177,22 @@ export const Orders: React.FC = () => {
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
   const [hasDraft, setHasDraft] = useState(false)
 
-  // Persist form draft to localStorage
+  // Persist form draft to localStorage (only if form has meaningful content)
   useEffect(() => {
-    if (showForm) {
-      const draft = JSON.stringify({ form, formItems, formEnterpriseId })
-      localStorage.setItem(ORDER_DRAFT_KEY, draft)
-      setHasDraft(true)
+    if (showForm && !editingOrderId) {
+      const hasContent = form.description || form.customer_id || formEnterpriseId ||
+        formItems.some(i => i.product_name || i.product_id)
+      if (hasContent) {
+        const draft = JSON.stringify({ form, formItems, formEnterpriseId })
+        localStorage.setItem(ORDER_DRAFT_KEY, draft)
+        setHasDraft(true)
+      }
     }
-  }, [showForm, form, formItems, formEnterpriseId])
+  }, [showForm, editingOrderId, form, formItems, formEnterpriseId])
 
-  // Restore draft when opening form
+  // Restore draft when opening form (only for new orders, not edits)
   useEffect(() => {
-    if (showForm) {
+    if (showForm && !editingOrderId) {
       const saved = localStorage.getItem(ORDER_DRAFT_KEY)
       if (saved) {
         try {
@@ -200,7 +204,7 @@ export const Orders: React.FC = () => {
         } catch { /* ignore corrupt data */ }
       }
     }
-  }, [showForm])
+  }, [showForm, editingOrderId])
 
   // Check if draft exists on mount
   useEffect(() => {
@@ -222,8 +226,8 @@ export const Orders: React.FC = () => {
         api.getOrders({
           status: filterStatus.length === 1 ? filterStatus[0] : undefined,
           product_type: filterType.length === 1 ? filterType[0] : undefined,
-          enterprise_id: filterEnterprise || undefined,
-          has_invoice: filterInvoice || undefined,
+          enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
+          has_invoice: filterInvoice.length === 1 ? filterInvoice[0] : undefined,
           search: search || undefined,
         }).catch(() => ({ items: [], summary: {} })),
         api.getCustomers().catch(() => ({ items: [] })),
@@ -529,10 +533,18 @@ export const Orders: React.FC = () => {
     let result = orders
     if (filterStatus.length > 0) result = result.filter(o => filterStatus.includes(o.status))
     if (filterType.length > 0) result = result.filter(o => filterType.includes(o.product_type))
+    if (filterEnterprise.length > 0) result = result.filter(o => o.enterprise && filterEnterprise.includes(o.enterprise.id))
+    if (filterInvoice.length > 0) {
+      result = result.filter(o => {
+        if (filterInvoice.includes('si') && o.has_invoice) return true
+        if (filterInvoice.includes('no') && !o.has_invoice) return true
+        return false
+      })
+    }
     if (dateFrom) result = result.filter(o => o.created_at >= dateFrom)
     if (dateTo) result = result.filter(o => o.created_at <= dateTo + 'T23:59:59')
     return result
-  }, [orders, filterStatus, filterType, dateFrom, dateTo])
+  }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, dateFrom, dateTo])
 
   const periodSummary = useMemo(() => {
     const now = new Date()
@@ -558,7 +570,7 @@ export const Orders: React.FC = () => {
   const totalPages = Math.ceil(filteredOrders.length / pageSize)
   const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
-  const isFiltered = filterStatus.length > 0 || filterType.length > 0 || !!filterEnterprise || !!filterInvoice || !!search || !!dateFrom || !!dateTo
+  const isFiltered = filterStatus.length > 0 || filterType.length > 0 || filterEnterprise.length > 0 || filterInvoice.length > 0 || !!search || !!dateFrom || !!dateTo
 
   const csvColumns = [
     { key: 'order_number', label: 'N Pedido' },
@@ -579,8 +591,8 @@ export const Orders: React.FC = () => {
   const clearFilters = () => {
     setFilterStatus([])
     setFilterType([])
-    setFilterEnterprise('')
-    setFilterInvoice('')
+    setFilterEnterprise([])
+    setFilterInvoice([])
     setSearch('')
     setDateFrom('')
     setDateTo('')
@@ -607,7 +619,15 @@ export const Orders: React.FC = () => {
               Limpiar borrador
             </button>
           )}
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) setEditingOrderId(null) }}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => {
+            if (showForm) {
+              setShowForm(false)
+              setEditingOrderId(null)
+              clearDraft()
+            } else {
+              setShowForm(true)
+            }
+          }}>
             {showForm ? 'Cancelar' : '+ Nuevo Pedido'}
           </Button>
         </div>
@@ -622,9 +642,13 @@ export const Orders: React.FC = () => {
       {/* Period Selector + Summary Cards */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-gray-500">Resumen:</span>
-        <PeriodSelector selected={summaryPeriod} onChange={p => setSummaryPeriod(p.value)} />
+        <PeriodSelector selected={summaryPeriod} onChange={p => {
+          setSummaryPeriod(p.value)
+          setDateFrom(p.dateFrom)
+          setDateTo(p.dateTo)
+        }} />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <Card className="border border-yellow-200 bg-yellow-50">
           <CardContent className="pt-3 pb-2 overflow-hidden">
             <p className="text-xs text-yellow-700 truncate">Pendientes</p>
@@ -655,12 +679,6 @@ export const Orders: React.FC = () => {
             <p className="text-lg md:text-xl font-bold text-indigo-800 truncate">{formatCurrency(periodSummary.total_facturado)}</p>
           </CardContent>
         </Card>
-        <Card className="border border-emerald-200 bg-emerald-50">
-          <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-emerald-700 truncate">Ganancia Total</p>
-            <p className="text-lg md:text-xl font-bold text-emerald-800 truncate">{formatCurrency(summary.ganancia_total || 0)} <span className="text-xs font-normal">(total)</span></p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Filters */}
@@ -681,21 +699,20 @@ export const Orders: React.FC = () => {
               onChange={setFilterType}
               placeholder="Todos"
             />
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Empresa</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
-                <option value="">Todas</option>
-                {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Factura</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterInvoice} onChange={e => setFilterInvoice(e.target.value)}>
-                <option value="">Todos</option>
-                <option value="si">Con factura</option>
-                <option value="no">Sin factura</option>
-              </select>
-            </div>
+            <MultiSelectFilter
+              label="Empresa"
+              options={enterprises.map(ent => ({ value: ent.id, label: ent.name }))}
+              selected={filterEnterprise}
+              onChange={setFilterEnterprise}
+              placeholder="Todas"
+            />
+            <MultiSelectFilter
+              label="Factura"
+              options={[{ value: 'si', label: 'Con factura' }, { value: 'no', label: 'Sin factura' }]}
+              selected={filterInvoice}
+              onChange={setFilterInvoice}
+              placeholder="Todos"
+            />
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Buscar</label>
               <div className="flex gap-1">
@@ -748,18 +765,15 @@ export const Orders: React.FC = () => {
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo</label>
-                          <input
-                            list={`product-type-list-${idx}`}
+                          <select
                             className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.product_type}
                             onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
-                            placeholder="Tipo..."
-                          />
-                          <datalist id={`product-type-list-${idx}`}>
+                          >
                             {PRODUCT_TYPES.filter(t => t.value !== 'todos' && t.value !== 'mixto').map(t => (
                               <option key={t.value} value={t.value}>{t.label}</option>
                             ))}
-                          </datalist>
+                          </select>
                         </div>
                         {/* Product selector */}
                         <div className="md:col-span-2 flex flex-col gap-1">
@@ -1035,22 +1049,47 @@ export const Orders: React.FC = () => {
                                       <p className="text-sm text-gray-800 break-words whitespace-pre-wrap">{order.description}</p>
                                     </div>
                                   )}
+                                  {/* Items list from invoicing status */}
+                                  {(() => {
+                                    const status = invoicingStatus[order.id]
+                                    const items = status?.items || []
+                                    if (items.length > 0) {
+                                      return (
+                                        <div className="space-y-1.5">
+                                          <p className="text-xs text-gray-500 font-medium">Items ({items.length})</p>
+                                          {items.map((item: any, i: number) => (
+                                            <div key={item.id || i} className="bg-white border border-gray-200 rounded px-2 py-1.5 text-xs">
+                                              <div className="flex justify-between items-start">
+                                                <span className="font-medium text-gray-800">{item.product_name}</span>
+                                                <span className="text-gray-600 whitespace-nowrap ml-2">
+                                                  {item.quantity} x {formatCurrency(parseFloat(item.unit_price || '0'))}
+                                                </span>
+                                              </div>
+                                              {item.description && (
+                                                <p className="text-gray-500 mt-0.5 break-words">{item.description}</p>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )
+                                    }
+                                    return (
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <p className="text-xs text-gray-500">Precio Unitario</p>
+                                          <p className="text-sm font-medium">{formatCurrency(parseFloat(order.unit_price || '0'))}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-gray-500">Cantidad</p>
+                                          <p className="text-sm font-medium">{order.quantity}</p>
+                                        </div>
+                                      </div>
+                                    )
+                                  })()}
                                   <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <p className="text-xs text-gray-500">Precio Unitario</p>
-                                      <p className="text-sm font-medium">{formatCurrency(parseFloat(order.unit_price || '0'))}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Cantidad</p>
-                                      <p className="text-sm font-medium">{order.quantity}</p>
-                                    </div>
                                     <div>
                                       <p className="text-xs text-gray-500">IVA</p>
                                       <p className="text-sm font-medium">{order.vat_rate}%</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">Ganancia Est.</p>
-                                      <p className="text-sm font-medium text-green-700">{formatCurrency(parseFloat(order.estimated_profit || '0'))}</p>
                                     </div>
                                   </div>
                                   {order.notes && (
