@@ -623,7 +623,7 @@ export const Orders: React.FC = () => {
                 <div className="space-y-3">
                   {formItems.map((item, idx) => (
                     <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3">
-                      <div className="grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
+                      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo</label>
@@ -686,17 +686,7 @@ export const Orders: React.FC = () => {
                             required
                           />
                         </div>
-                        {/* Cost (optional) */}
-                        <div className="flex flex-col gap-1">
-                          <label className="text-xs font-medium text-gray-500">Costo (opc.)</label>
-                          <input
-                            type="number" step="0.01" min="0"
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="0.00"
-                            value={item.cost || ''}
-                            onChange={e => updateFormItem(idx, 'cost', e.target.value)}
-                          />
-                        </div>
+                        {/* Cost tracked internally from product pricing, not shown to user */}
                         {/* Subtotal + remove */}
                         <div className="flex items-end gap-2">
                           <div className="flex-1 flex flex-col gap-1">
