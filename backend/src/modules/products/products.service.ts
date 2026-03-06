@@ -47,10 +47,17 @@ export class ProductsService {
 
         return product[0];
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ApiError) throw error;
       console.error('Create product error:', error);
-      throw new ApiError(500, 'Failed to create product');
+      const msg = error?.message || 'Error desconocido';
+      if (msg.includes('numeric field overflow') || msg.includes('out of range')) {
+        throw new ApiError(400, 'El valor del precio excede el limite permitido (max 9,999,999,999.99)');
+      }
+      if (msg.includes('unique') || msg.includes('duplicate')) {
+        throw new ApiError(409, 'Ya existe un producto con ese SKU');
+      }
+      throw new ApiError(500, `Error al crear producto: ${msg}`);
     }
   }
 
