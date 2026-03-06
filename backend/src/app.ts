@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
+import path from 'path';
 import { env } from './config/env';
 import { authMiddleware, optionalAuth } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
@@ -87,9 +88,16 @@ app.use('/api/cobros', authMiddleware, cobrosRouter);
 app.use('/api/pagos', authMiddleware, pagosRouter);
 app.use('/api/cuenta-corriente', authMiddleware, cuentaCorrienteRouter);
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+// Serve frontend static files (monolith deployment)
+const publicPath = path.join(__dirname, '..', 'public');
+app.use(express.static(publicPath));
+
+// SPA catch-all: serve index.html for non-API routes
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+  res.sendFile(path.join(publicPath, 'index.html'));
 });
 
 // Error handler (must be last)

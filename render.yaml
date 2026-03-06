@@ -10,7 +10,7 @@ services:
     plan: free
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -32,17 +32,5 @@ services:
       - key: LOG_LEVEL
         value: info
 
-  - type: web
-    name: gestor-becker-frontend
-    plan: free
-    runtime: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
-    headers:
-      - path: /*
-        name: X-Frame-Options
-        value: SAMEORIGIN
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+  # Frontend is now served by the backend (monolith deployment)
+  # Remove the old static site service from Render dashboard manually
