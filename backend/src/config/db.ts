@@ -28,6 +28,87 @@ export async function initDb() {
 
 async function runAutoMigrations() {
   try {
+    // Create core tables that are not in drizzle schema but used by services
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+        enterprise_id UUID,
+        bank_id UUID,
+        order_number INTEGER,
+        title VARCHAR(255),
+        description TEXT,
+        product_type VARCHAR(50) DEFAULT 'otro',
+        status VARCHAR(30) DEFAULT 'pendiente',
+        priority VARCHAR(20) DEFAULT 'normal',
+        quantity INTEGER DEFAULT 1,
+        unit_price DECIMAL(12,2) DEFAULT 0,
+        total_amount DECIMAL(12,2) DEFAULT 0,
+        vat_rate DECIMAL(5,2) DEFAULT 21,
+        estimated_profit DECIMAL(12,2) DEFAULT 0,
+        estimated_delivery TIMESTAMP WITH TIME ZONE,
+        payment_method VARCHAR(50),
+        payment_status VARCHAR(20) DEFAULT 'pendiente',
+        invoice_id UUID,
+        quote_id UUID,
+        notes TEXT,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS order_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+        product_name VARCHAR(255) NOT NULL,
+        description TEXT,
+        quantity DECIMAL(12,2) DEFAULT 1,
+        unit_price DECIMAL(12,2) DEFAULT 0,
+        cost DECIMAL(12,2) DEFAULT 0,
+        subtotal DECIMAL(12,2) DEFAULT 0,
+        product_type VARCHAR(50) DEFAULT 'otro',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS quotes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+        enterprise_id UUID,
+        title VARCHAR(255),
+        valid_until TIMESTAMP WITH TIME ZONE,
+        subtotal DECIMAL(12,2) DEFAULT 0,
+        vat_amount DECIMAL(12,2) DEFAULT 0,
+        total_amount DECIMAL(12,2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'borrador',
+        notes TEXT,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS quote_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        quote_id UUID NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+        product_name VARCHAR(255) NOT NULL,
+        description TEXT,
+        quantity DECIMAL(12,2) DEFAULT 1,
+        unit_price DECIMAL(12,2) DEFAULT 0,
+        vat_rate DECIMAL(5,2) DEFAULT 21,
+        subtotal DECIMAL(12,2) DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
     await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER`);
     await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`);
     await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente'`);
