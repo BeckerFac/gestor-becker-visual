@@ -12,34 +12,44 @@ export class ProductsService {
       });
       if (existingSku) throw new ApiError(409, 'SKU already exists');
 
-      const product = await db.insert(products).values({
-        id: uuid(),
-        company_id: companyId,
-        sku: data.sku,
-        name: data.name,
-        description: data.description || null,
-        barcode: data.barcode || null,
-        category_id: data.category_id || null,
-        brand_id: data.brand_id || null,
-      }).returning();
-
-      if (data.cost !== undefined && data.margin_percent !== undefined) {
-        const vat_rate = data.vat_rate || 21;
-        const final_price = Number(data.cost) * (1 + Number(data.margin_percent) / 100) * (1 + Number(vat_rate) / 100);
-
-        await db.insert(product_pricing).values({
+      return await db.transaction(async (tx) => {
+        const product = await tx.insert(products).values({
           id: uuid(),
-          product_id: product[0].id,
-          cost: data.cost,
-          margin_percent: data.margin_percent,
-          vat_rate: vat_rate,
-          final_price: final_price.toString(),
-        });
-      }
+          company_id: companyId,
+          sku: data.sku,
+          name: data.name,
+          description: data.description || null,
+          barcode: data.barcode || null,
+          category_id: data.category_id || null,
+          brand_id: data.brand_id || null,
+        }).returning();
 
-      return product[0];
+        if (data.cost !== undefined && data.margin_percent !== undefined) {
+          const cost = Number(data.cost);
+          const margin = Number(data.margin_percent);
+          const vat_rate = Number(data.vat_rate || 21);
+          const final_price = cost * (1 + margin / 100) * (1 + vat_rate / 100);
+
+          // Validate values fit in decimal(12,2)
+          if (final_price > 9999999999.99) {
+            throw new ApiError(400, 'El precio final excede el maximo permitido');
+          }
+
+          await tx.insert(product_pricing).values({
+            id: uuid(),
+            product_id: product[0].id,
+            cost: cost.toFixed(2),
+            margin_percent: margin.toFixed(2),
+            vat_rate: vat_rate.toFixed(2),
+            final_price: final_price.toFixed(2),
+          });
+        }
+
+        return product[0];
+      });
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      console.error('Create product error:', error);
       throw new ApiError(500, 'Failed to create product');
     }
   }
