@@ -47,7 +47,6 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "const p=process.env.PORT||10000;require('http').get('http://localhost:'+p+'/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
-# Copy and use start script (runs drizzle push then starts server)
-COPY backend/start.sh ./start.sh
+# start.sh is already copied via COPY backend/ above
 RUN chmod +x start.sh
 CMD ["./start.sh"]
