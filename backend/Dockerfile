@@ -25,15 +25,17 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Remove devDependencies after build
-RUN npm prune --production
+# Do NOT prune devDependencies - drizzle-kit needs them at runtime for push
+# RUN npm prune --production
 
-# Expose port
-EXPOSE 3000
+# Expose port (Render uses PORT env var, default 10000)
+EXPOSE 10000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+# Health check using PORT env var
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "const p=process.env.PORT||10000;require('http').get('http://localhost:'+p+'/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
-# Start application
-CMD ["npm", "start"]
+# Copy and use start script (runs drizzle push then starts server)
+COPY start.sh ./start.sh
+RUN chmod +x start.sh
+CMD ["./start.sh"]
