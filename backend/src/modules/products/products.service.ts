@@ -1,4 +1,5 @@
 import { db } from '../../config/db';
+import { pool } from '../../config/db';
 import { products, categories, brands, product_pricing } from '../../db/schema';
 import { eq, and, ilike, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
@@ -43,6 +44,11 @@ export class ProductsService {
             vat_rate: vat_rate.toFixed(2),
             final_price: final_price.toFixed(2),
           });
+        }
+
+        // Save product_type via raw SQL (not in drizzle schema)
+        if (data.product_type) {
+          await pool.query('UPDATE products SET product_type = $1 WHERE id = $2', [data.product_type, product[0].id]);
         }
 
         return product[0];
@@ -122,6 +128,11 @@ export class ProductsService {
         })
         .where(and(eq(products.company_id, companyId), eq(products.id, productId)))
         .returning();
+
+      // Save product_type via raw SQL (not in drizzle schema)
+      if (data.product_type !== undefined) {
+        await pool.query('UPDATE products SET product_type = $1 WHERE id = $2', [data.product_type, productId]);
+      }
 
       // Update or create pricing
       if (data.cost !== undefined) {

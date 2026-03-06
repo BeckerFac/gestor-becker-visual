@@ -345,8 +345,8 @@ export const Dashboard: React.FC = () => {
             onClick={kpi.onClick}
           >
             <CardContent className="pt-5 pb-4">
-              <p className={`text-sm font-medium ${kpi.labelColor}`}>{kpi.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${kpi.textColor}`}>{kpi.value}</p>
+              <p className={`text-sm font-medium ${kpi.labelColor} truncate`}>{kpi.label}</p>
+              <p className={`text-lg md:text-2xl font-bold mt-1 ${kpi.textColor} truncate`}>{kpi.value}</p>
             </CardContent>
           </Card>
         ))}

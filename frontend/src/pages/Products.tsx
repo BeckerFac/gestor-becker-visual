@@ -203,7 +203,7 @@ export const Products: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Productos</h1>
           <p className="text-sm text-gray-500 mt-1">{products.length} productos registrados</p>
         </div>
-        <Button variant="primary" onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
           {showForm ? 'Cancelar' : '+ Nuevo Producto'}
         </Button>
       </div>
@@ -226,9 +226,16 @@ export const Products: React.FC = () => {
                 <Input label="Código de Barras" placeholder="7790001234567" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700">Tipo de Producto</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.product_type} onChange={e => setForm({ ...form, product_type: e.target.value })}>
+                  <input
+                    list="product-types-list"
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.product_type}
+                    onChange={e => setForm({ ...form, product_type: e.target.value })}
+                    placeholder="Escribir o elegir tipo..."
+                  />
+                  <datalist id="product-types-list">
                     {PRODUCT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
+                  </datalist>
                 </div>
               </div>
               <Input label="Descripción" placeholder="Descripción del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
@@ -257,16 +264,19 @@ export const Products: React.FC = () => {
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700">IVA %</label>
-                    <select
+                    <input
+                      type="number" step="0.01" placeholder="21"
+                      list="vat-rate-list"
                       className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
                       value={form.vat_rate}
                       onChange={e => handlePriceField('vat_rate', e.target.value)}
-                    >
+                    />
+                    <datalist id="vat-rate-list">
                       <option value="0">0%</option>
                       <option value="10.5">10.5%</option>
                       <option value="21">21%</option>
                       <option value="27">27%</option>
-                    </select>
+                    </datalist>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700">Precio Final (ARS)</label>
@@ -281,7 +291,7 @@ export const Products: React.FC = () => {
                 <p className="text-xs text-gray-400 mt-2">Modificá cualquier campo y los otros se recalculan automáticamente</p>
               </div>
 
-              <Button type="submit" variant="primary" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Producto'}</Button>
+              <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Producto'}</Button>
             </form>
           </CardContent>
         </Card>

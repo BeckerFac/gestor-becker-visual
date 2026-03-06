@@ -44,7 +44,7 @@ export const Header: React.FC = () => {
             <span className="text-gray-300">/</span>
             <span className="text-gray-700 font-medium">{pageName}</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mt-0.5">{pageName}</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mt-0.5 truncate">{pageName}</h2>
         </div>
         {company && (
           <div className="text-right">

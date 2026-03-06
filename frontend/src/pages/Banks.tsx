@@ -164,7 +164,7 @@ export const Banks: React.FC = () => {
               filename="movimientos_bancos"
             />
           )}
-          <Button variant="primary" onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
             {showForm ? 'Cancelar' : '+ Nuevo Banco'}
           </Button>
         </div>
@@ -230,7 +230,7 @@ export const Banks: React.FC = () => {
                 />
               </div>
               <div className="flex items-end">
-                <Button type="submit" variant="primary" loading={saving} className="w-full">{editingId ? 'Guardar Cambios' : 'Crear Banco'}</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">{editingId ? 'Guardar Cambios' : 'Crear Banco'}</Button>
               </div>
             </form>
           </CardContent>

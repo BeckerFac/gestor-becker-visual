@@ -14,6 +14,8 @@ interface InvoicePreviewModalProps {
   invoiceType: string
   items: PreviewItem[]
   authorized: boolean
+  authFailed?: boolean
+  authErrorMsg?: string
   onClose: () => void
   onPuntoVentaChange: (v: number) => void
   onInvoiceTypeChange: (v: string) => void
@@ -33,6 +35,8 @@ export function InvoicePreviewModal({
   invoiceType,
   items,
   authorized,
+  authFailed,
+  authErrorMsg,
   onClose,
   onPuntoVentaChange,
   onInvoiceTypeChange,
@@ -242,17 +246,22 @@ export function InvoicePreviewModal({
                           </td>
                           <td className="px-3 py-2 text-center">
                             {!authorized ? (
-                              <select
-                                className="w-16 px-1 py-0.5 border border-gray-200 rounded text-sm"
-                                value={item.vat_rate}
-                                onChange={e => updateItem(idx, 'vat_rate', parseFloat(e.target.value))}
-                                aria-label={`Tasa IVA item ${idx + 1}`}
-                              >
-                                <option value="0">0%</option>
-                                <option value="10.5">10.5%</option>
-                                <option value="21">21%</option>
-                                <option value="27">27%</option>
-                              </select>
+                              <>
+                                <input
+                                  type="number" step="0.01" placeholder="21"
+                                  list={`modal-vat-list-${idx}`}
+                                  className="w-16 px-1 py-0.5 border border-gray-200 rounded text-sm"
+                                  value={item.vat_rate}
+                                  onChange={e => updateItem(idx, 'vat_rate', parseFloat(e.target.value) || 0)}
+                                  aria-label={`Tasa IVA item ${idx + 1}`}
+                                />
+                                <datalist id={`modal-vat-list-${idx}`}>
+                                  <option value="0">0%</option>
+                                  <option value="10.5">10.5%</option>
+                                  <option value="21">21%</option>
+                                  <option value="27">27%</option>
+                                </datalist>
+                              </>
                             ) : (
                               <span>{item.vat_rate}%</span>
                             )}
@@ -300,6 +309,12 @@ export function InvoicePreviewModal({
                 </div>
               )}
 
+              {authFailed && authErrorMsg && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  <strong>Error AFIP:</strong> {authErrorMsg}
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3">
                 {!authorized ? (
                   <>
@@ -321,8 +336,16 @@ export function InvoicePreviewModal({
                         disabled={authorizing}
                         className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60"
                       >
-                        {authorizing ? 'Autorizando...' : 'Autorizar con AFIP'}
+                        {authorizing ? 'Autorizando...' : authFailed ? 'Reintentar AFIP' : 'Autorizar con AFIP'}
                       </button>
+                      {authFailed && (
+                        <button
+                          onClick={() => onDownloadPdf(invoice.id, invoice)}
+                          className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors"
+                        >
+                          Descargar PDF (borrador)
+                        </button>
+                      )}
                     </div>
                   </>
                 ) : (

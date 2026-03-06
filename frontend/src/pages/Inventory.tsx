@@ -152,7 +152,7 @@ export const Inventory: React.FC = () => {
               <Input label="Cantidad *" type="number" step="0.01" placeholder="0" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} required />
               <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               <div className="flex items-end lg:col-span-4">
-                <Button type="submit" variant="primary" loading={saving}>Registrar Movimiento</Button>
+                <Button type="submit" variant="success" loading={saving}>Registrar Movimiento</Button>
               </div>
             </form>
           </CardContent>

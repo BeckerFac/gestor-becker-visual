@@ -295,6 +295,33 @@ export class OrdersService {
         WHERE id = ${orderId}
       `);
 
+      // Update items if provided (delete + re-insert)
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
+
+        let subtotal = 0;
+        for (const item of data.items) {
+          const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+          subtotal += itemSubtotal;
+          await db.execute(sql`
+            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type)
+            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'})
+          `);
+        }
+
+        // Recalculate totals
+        const vatRate = data.vat_rate !== undefined ? Number(data.vat_rate) : 21;
+        const vatAmount = subtotal * vatRate / 100;
+        const totalWithVat = subtotal + vatAmount;
+        await db.execute(sql`
+          UPDATE orders SET
+            total_amount = ${totalWithVat.toString()},
+            vat_rate = ${vatRate.toString()},
+            updated_at = NOW()
+          WHERE id = ${orderId}
+        `);
+      }
+
       return { id: orderId, updated: true };
     } catch (error) {
       if (error instanceof ApiError) throw error;

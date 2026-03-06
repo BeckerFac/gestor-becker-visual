@@ -345,7 +345,7 @@ export const Quotes: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={CSV_COLUMNS} filename="cotizaciones" />
-          <Button variant="primary" onClick={() => { setShowForm(!showForm); if (!showForm && items.length === 0) addItem() }}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (!showForm && items.length === 0) addItem() }}>
             {showForm ? 'Cancelar' : '+ Nueva Cotizacion'}
           </Button>
         </div>
@@ -516,12 +516,19 @@ export const Quotes: React.FC = () => {
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">IVA %</label>
-                            <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={item.vat_rate} onChange={e => updateItem(idx, 'vat_rate', e.target.value)}>
+                            <input
+                              type="number" step="0.01" placeholder="21"
+                              list={`quote-vat-list-${idx}`}
+                              className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-20"
+                              value={item.vat_rate}
+                              onChange={e => updateItem(idx, 'vat_rate', e.target.value)}
+                            />
+                            <datalist id={`quote-vat-list-${idx}`}>
                               <option value="0">0%</option>
                               <option value="10.5">10.5%</option>
                               <option value="21">21%</option>
                               <option value="27">27%</option>
-                            </select>
+                            </datalist>
                           </div>
                           <div className="flex items-end gap-2">
                             <div className="flex-1 flex flex-col gap-1">
@@ -565,7 +572,7 @@ export const Quotes: React.FC = () => {
                 )}
               </div>
 
-              <Button type="submit" variant="primary" loading={saving}>Crear Cotizacion</Button>
+              <Button type="submit" variant="success" loading={saving}>Crear Cotizacion</Button>
             </form>
           </CardContent>
         </Card>

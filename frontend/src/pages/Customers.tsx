@@ -150,7 +150,7 @@ export const Customers: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
           <p className="text-sm text-gray-500 mt-1">{customers.length} clientes registrados</p>
         </div>
-        <Button variant="primary" onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
           {showForm ? 'Cancelar' : '+ Nuevo Cliente'}
         </Button>
       </div>
@@ -197,7 +197,7 @@ export const Customers: React.FC = () => {
                 />
               </div>
               <div className="flex items-end">
-                <Button type="submit" variant="primary" loading={saving} className="w-full">{editingId ? 'Guardar Cambios' : 'Crear Cliente'}</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">{editingId ? 'Guardar Cambios' : 'Crear Cliente'}</Button>
               </div>
             </form>
           </CardContent>

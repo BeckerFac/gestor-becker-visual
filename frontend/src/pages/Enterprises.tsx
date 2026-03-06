@@ -238,7 +238,7 @@ export const Enterprises: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Empresas</h1>
           <p className="text-sm text-gray-500 mt-1">{enterprises.length} empresa{enterprises.length !== 1 ? 's' : ''} · {contacts.length} contacto{contacts.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button variant="primary" onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
+        <Button variant={showEnterpriseForm ? 'danger' : 'primary'} onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
           {showEnterpriseForm ? 'Cancelar' : '+ Nueva Empresa'}
         </Button>
       </div>
@@ -277,7 +277,7 @@ export const Enterprises: React.FC = () => {
                 <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={enterpriseForm.notes} onChange={e => setEnterpriseForm({ ...enterpriseForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
-                <Button type="submit" variant="primary" loading={saving} className="w-full">{editingEnterpriseId ? 'Guardar' : 'Crear Empresa'}</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">{editingEnterpriseId ? 'Guardar' : 'Crear Empresa'}</Button>
               </div>
             </form>
           </CardContent>
@@ -308,7 +308,7 @@ export const Enterprises: React.FC = () => {
                 <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={contactForm.notes} onChange={e => setContactForm({ ...contactForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end gap-2">
-                <Button type="submit" variant="primary" loading={saving} className="w-full">{editingContactId ? 'Guardar' : 'Crear Contacto'}</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">{editingContactId ? 'Guardar' : 'Crear Contacto'}</Button>
                 <Button type="button" variant="secondary" onClick={() => { setShowContactForm(false); setContactForEnterprise(null) }} className="w-full">Cancelar</Button>
               </div>
             </form>

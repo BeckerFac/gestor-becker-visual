@@ -497,7 +497,7 @@ export const Invoices: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'interno' ? 'comprobantes_internos' : 'facturas'} />
-          <Button variant="primary" onClick={showForm ? closeForm : openForm}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
             {showForm ? 'Cancelar' : vistaMode === 'interno' ? '+ Nuevo Comprobante' : '+ Nueva Factura'}
           </Button>
         </div>
@@ -819,16 +819,19 @@ export const Invoices: React.FC = () => {
                             />
                           </td>
                           <td className="px-3 py-2">
-                            <select
+                            <input
+                              type="number" step="0.01" placeholder="21"
+                              list={`invoice-vat-list-${idx}`}
                               className="w-full text-center px-2 py-1.5 border border-gray-300 rounded text-sm"
                               value={formInvoiceType === 'C' ? 0 : item.vat_rate}
                               onChange={e => handleItemChange(idx, 'vat_rate', parseFloat(e.target.value))}
                               disabled={formInvoiceType === 'C'}
-                            >
+                            />
+                            <datalist id={`invoice-vat-list-${idx}`}>
                               {VAT_RATES.map(r => (
                                 <option key={r} value={r}>{r}%</option>
                               ))}
-                            </select>
+                            </datalist>
                           </td>
                           <td className="px-3 py-2 text-right font-medium text-gray-800">
                             {formatCurrency(item.subtotal)}

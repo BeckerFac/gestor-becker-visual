@@ -8,6 +8,8 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
+import { PeriodSelector } from '@/components/shared/PeriodSelector'
+import { MultiSelectFilter } from '@/components/shared/MultiSelectFilter'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
@@ -129,6 +131,8 @@ const emptyFormItem = (): FormItem => ({
   product_type: 'otro',
 })
 
+const ORDER_DRAFT_KEY = 'bv_order_draft'
+
 export const Orders: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -137,6 +141,7 @@ export const Orders: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [summary, setSummary] = useState<any>({})
@@ -151,8 +156,8 @@ export const Orders: React.FC = () => {
   const [creatingInvoice, setCreatingInvoice] = useState<Record<string, boolean>>({})
 
   // Filters
-  const [filterStatus, setFilterStatus] = useState('todos')
-  const [filterType, setFilterType] = useState('todos')
+  const [filterStatus, setFilterStatus] = useState<string[]>([])
+  const [filterType, setFilterType] = useState<string[]>([])
   const [filterEnterprise, setFilterEnterprise] = useState('')
   const [filterInvoice, setFilterInvoice] = useState('')
   const [search, setSearch] = useState('')
@@ -160,6 +165,7 @@ export const Orders: React.FC = () => {
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
+  const [summaryPeriod, setSummaryPeriod] = useState('mes')
 
   // Form
   const [formEnterpriseId, setFormEnterpriseId] = useState('')
@@ -169,14 +175,53 @@ export const Orders: React.FC = () => {
     priority: 'normal', notes: '', payment_method: '', bank_id: '',
   })
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
+  const [hasDraft, setHasDraft] = useState(false)
+
+  // Persist form draft to localStorage
+  useEffect(() => {
+    if (showForm) {
+      const draft = JSON.stringify({ form, formItems, formEnterpriseId })
+      localStorage.setItem(ORDER_DRAFT_KEY, draft)
+      setHasDraft(true)
+    }
+  }, [showForm, form, formItems, formEnterpriseId])
+
+  // Restore draft when opening form
+  useEffect(() => {
+    if (showForm) {
+      const saved = localStorage.getItem(ORDER_DRAFT_KEY)
+      if (saved) {
+        try {
+          const draft = JSON.parse(saved)
+          if (draft.form) setForm(draft.form)
+          if (draft.formItems?.length) setFormItems(draft.formItems)
+          if (draft.formEnterpriseId) setFormEnterpriseId(draft.formEnterpriseId)
+          setHasDraft(true)
+        } catch { /* ignore corrupt data */ }
+      }
+    }
+  }, [showForm])
+
+  // Check if draft exists on mount
+  useEffect(() => {
+    setHasDraft(!!localStorage.getItem(ORDER_DRAFT_KEY))
+  }, [])
+
+  const clearDraft = () => {
+    localStorage.removeItem(ORDER_DRAFT_KEY)
+    setHasDraft(false)
+    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '' })
+    setFormItems([emptyFormItem()])
+    setFormEnterpriseId('')
+  }
 
   const loadData = async () => {
     try {
       setLoading(true)
       const [ordersRes, custRes, prodRes, entRes, banksRes] = await Promise.all([
         api.getOrders({
-          status: filterStatus !== 'todos' ? filterStatus : undefined,
-          product_type: filterType !== 'todos' ? filterType : undefined,
+          status: filterStatus.length === 1 ? filterStatus[0] : undefined,
+          product_type: filterType.length === 1 ? filterType[0] : undefined,
           enterprise_id: filterEnterprise || undefined,
           has_invoice: filterInvoice || undefined,
           search: search || undefined,
@@ -223,6 +268,7 @@ export const Orders: React.FC = () => {
             item.product_name = product.name
             item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
+            item.product_type = (product as any).product_type || 'otro'
           }
         } else if (productId === 'custom') {
           item.product_name = ''
@@ -267,7 +313,7 @@ export const Orders: React.FC = () => {
       // Derive order-level product_type from items
       const itemTypes = new Set(formItems.map(i => i.product_type || 'otro'))
       const orderProductType = itemTypes.size === 1 ? formItems[0]?.product_type || 'otro' : 'mixto'
-      await api.createOrder({
+      const payload = {
         title: formItems[0]?.product_name || 'Pedido',
         description: form.description || null,
         product_type: orderProductType,
@@ -291,8 +337,16 @@ export const Orders: React.FC = () => {
           cost: item.cost || 0,
           product_type: item.product_type || 'otro',
         })),
-      })
+      }
+      if (editingOrderId) {
+        await api.updateOrder(editingOrderId, payload)
+      } else {
+        await api.createOrder(payload)
+      }
       setShowForm(false)
+      setEditingOrderId(null)
+      localStorage.removeItem(ORDER_DRAFT_KEY)
+      setHasDraft(false)
       setFormEnterpriseId('')
       setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '' })
       setFormItems([emptyFormItem()])
@@ -302,6 +356,34 @@ export const Orders: React.FC = () => {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleEditOrder = (order: Order) => {
+    const status = invoicingStatus[order.id]
+    const orderItems: FormItem[] = (status?.items || []).map((item: any) => ({
+      product_id: item.product_id || 'custom',
+      product_name: item.product_name || '',
+      description: item.description || '',
+      quantity: Number(item.quantity) || 1,
+      unit_price: parseFloat(item.unit_price?.toString() || '0'),
+      cost: parseFloat(item.cost?.toString() || '0'),
+      product_type: item.product_type || 'otro',
+    }))
+
+    setEditingOrderId(order.id)
+    setForm({
+      description: order.description || '',
+      customer_id: order.customer?.id || '',
+      vat_rate: order.vat_rate?.toString() || '21',
+      estimated_delivery: order.estimated_delivery || '',
+      priority: order.priority || 'normal',
+      notes: order.notes || '',
+      payment_method: order.payment_method || '',
+      bank_id: order.bank?.id || '',
+    })
+    setFormEnterpriseId(order.enterprise?.id || '')
+    setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
+    setShowForm(true)
   }
 
   // --- Status / payment handlers ---
@@ -445,15 +527,38 @@ export const Orders: React.FC = () => {
   // Client-side date filter + pagination
   const filteredOrders = useMemo(() => {
     let result = orders
+    if (filterStatus.length > 0) result = result.filter(o => filterStatus.includes(o.status))
+    if (filterType.length > 0) result = result.filter(o => filterType.includes(o.product_type))
     if (dateFrom) result = result.filter(o => o.created_at >= dateFrom)
     if (dateTo) result = result.filter(o => o.created_at <= dateTo + 'T23:59:59')
     return result
-  }, [orders, dateFrom, dateTo])
+  }, [orders, filterStatus, filterType, dateFrom, dateTo])
+
+  const periodSummary = useMemo(() => {
+    const now = new Date()
+    const today = now.toISOString().split('T')[0]
+    let pFrom = '', pTo = today
+    if (summaryPeriod === 'hoy') { pFrom = today }
+    else if (summaryPeriod === 'semana') { const d = new Date(now); d.setDate(now.getDate() - now.getDay() + 1); pFrom = d.toISOString().split('T')[0] }
+    else if (summaryPeriod === 'mes') { pFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0] }
+    else if (summaryPeriod === '3meses') { pFrom = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split('T')[0] }
+    else if (summaryPeriod === 'anual') { pFrom = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0] }
+
+    const filtered = pFrom ? orders.filter(o => o.created_at >= pFrom) : orders
+    return {
+      pendientes: filtered.filter(o => o.status === 'pendiente').length,
+      en_produccion: filtered.filter(o => o.status === 'en_produccion').length,
+      terminados: filtered.filter(o => o.status === 'terminado').length,
+      entregados: filtered.filter(o => o.status === 'entregado').length,
+      total_facturado: filtered.reduce((s, o) => s + (parseFloat(o.total_amount?.toString() || '0')), 0),
+      total: filtered.length,
+    }
+  }, [orders, summaryPeriod])
 
   const totalPages = Math.ceil(filteredOrders.length / pageSize)
   const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
-  const isFiltered = filterStatus !== 'todos' || filterType !== 'todos' || !!filterEnterprise || !!filterInvoice || !!search || !!dateFrom || !!dateTo
+  const isFiltered = filterStatus.length > 0 || filterType.length > 0 || !!filterEnterprise || !!filterInvoice || !!search || !!dateFrom || !!dateTo
 
   const csvColumns = [
     { key: 'order_number', label: 'N Pedido' },
@@ -472,8 +577,8 @@ export const Orders: React.FC = () => {
   }))
 
   const clearFilters = () => {
-    setFilterStatus('todos')
-    setFilterType('todos')
+    setFilterStatus([])
+    setFilterType([])
     setFilterEnterprise('')
     setFilterInvoice('')
     setSearch('')
@@ -492,7 +597,17 @@ export const Orders: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename="pedidos" />
-          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+          {hasDraft && !showForm && (
+            <button onClick={() => { setShowForm(true) }} className="text-sm text-blue-600 hover:underline">
+              Continuar borrador
+            </button>
+          )}
+          {showForm && hasDraft && (
+            <button onClick={clearDraft} className="text-sm text-red-600 hover:underline">
+              Limpiar borrador
+            </button>
+          )}
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) setEditingOrderId(null) }}>
             {showForm ? 'Cancelar' : '+ Nuevo Pedido'}
           </Button>
         </div>
@@ -504,42 +619,46 @@ export const Orders: React.FC = () => {
         </div>
       )}
 
-      {/* Summary Cards */}
+      {/* Period Selector + Summary Cards */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-500">Resumen:</span>
+        <PeriodSelector selected={summaryPeriod} onChange={p => setSummaryPeriod(p.value)} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <Card className="border border-yellow-200 bg-yellow-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-yellow-700">Pendientes</p>
-            <p className="text-xl font-bold text-yellow-800">{summary.pendientes || 0}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-yellow-700 truncate">Pendientes</p>
+            <p className="text-lg md:text-xl font-bold text-yellow-800 truncate">{periodSummary.pendientes}</p>
           </CardContent>
         </Card>
         <Card className="border border-blue-200 bg-blue-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-blue-700">En Produccion</p>
-            <p className="text-xl font-bold text-blue-800">{summary.en_produccion || 0}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-blue-700 truncate">En Produccion</p>
+            <p className="text-lg md:text-xl font-bold text-blue-800 truncate">{periodSummary.en_produccion}</p>
           </CardContent>
         </Card>
         <Card className="border border-green-200 bg-green-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-green-700">Terminados</p>
-            <p className="text-xl font-bold text-green-800">{summary.terminados || 0}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-green-700 truncate">Terminados</p>
+            <p className="text-lg md:text-xl font-bold text-green-800 truncate">{periodSummary.terminados}</p>
           </CardContent>
         </Card>
         <Card className="border border-emerald-200 bg-emerald-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-emerald-700">Entregados</p>
-            <p className="text-xl font-bold text-emerald-800">{summary.entregados || 0}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-emerald-700 truncate">Entregados</p>
+            <p className="text-lg md:text-xl font-bold text-emerald-800 truncate">{periodSummary.entregados}</p>
           </CardContent>
         </Card>
         <Card className="border border-indigo-200 bg-indigo-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-indigo-700">Facturado</p>
-            <p className="text-xl font-bold text-indigo-800">{formatCurrency(summary.total_facturado || 0)}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-indigo-700 truncate">Facturado</p>
+            <p className="text-lg md:text-xl font-bold text-indigo-800 truncate">{formatCurrency(periodSummary.total_facturado)}</p>
           </CardContent>
         </Card>
         <Card className="border border-emerald-200 bg-emerald-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-emerald-700">Ganancia Total</p>
-            <p className="text-xl font-bold text-emerald-800">{formatCurrency(summary.ganancia_total || 0)}</p>
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-emerald-700 truncate">Ganancia Total</p>
+            <p className="text-lg md:text-xl font-bold text-emerald-800 truncate">{formatCurrency(summary.ganancia_total || 0)} <span className="text-xs font-normal">(total)</span></p>
           </CardContent>
         </Card>
       </div>
@@ -548,18 +667,20 @@ export const Orders: React.FC = () => {
       <Card>
         <CardContent className="pt-4">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Estado</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Tipo</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterType} onChange={e => setFilterType(e.target.value)}>
-                {PRODUCT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
+            <MultiSelectFilter
+              label="Estado"
+              options={STATUS_OPTIONS.filter(s => s.value !== 'todos').map(s => ({ value: s.value, label: s.label }))}
+              selected={filterStatus}
+              onChange={setFilterStatus}
+              placeholder="Todos"
+            />
+            <MultiSelectFilter
+              label="Tipo"
+              options={PRODUCT_TYPES.filter(t => t.value !== 'todos' && t.value !== 'mixto').map(t => ({ value: t.value, label: t.label }))}
+              selected={filterType}
+              onChange={setFilterType}
+              placeholder="Todos"
+            />
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
               <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
@@ -590,7 +711,7 @@ export const Orders: React.FC = () => {
       {/* Create Order Form */}
       {showForm && (
         <Card className="animate-fadeIn">
-          <CardHeader><h3 className="text-lg font-semibold">Nuevo Pedido</h3></CardHeader>
+          <CardHeader><h3 className="text-lg font-semibold">{editingOrderId ? 'Editar Pedido' : 'Nuevo Pedido'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleCreateOrder} className="space-y-4">
 
@@ -627,15 +748,18 @@ export const Orders: React.FC = () => {
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo</label>
-                          <select
+                          <input
+                            list={`product-type-list-${idx}`}
                             className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.product_type}
                             onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
-                          >
+                            placeholder="Tipo..."
+                          />
+                          <datalist id={`product-type-list-${idx}`}>
                             {PRODUCT_TYPES.filter(t => t.value !== 'todos' && t.value !== 'mixto').map(t => (
                               <option key={t.value} value={t.value}>{t.label}</option>
                             ))}
-                          </select>
+                          </datalist>
                         </div>
                         {/* Product selector */}
                         <div className="md:col-span-2 flex flex-col gap-1">
@@ -725,16 +849,19 @@ export const Orders: React.FC = () => {
                   <div className="w-72 space-y-1">
                     <div className="flex items-center justify-between gap-4 mb-1">
                       <span className="text-sm text-gray-600">% IVA:</span>
-                      <select
-                        className="px-2 py-1 border border-gray-300 rounded text-sm"
+                      <input
+                        type="number" step="0.01" placeholder="21"
+                        list="order-vat-rate-list"
+                        className="px-2 py-1 border border-gray-300 rounded text-sm w-20"
                         value={form.vat_rate}
                         onChange={e => setForm({ ...form, vat_rate: e.target.value })}
-                      >
+                      />
+                      <datalist id="order-vat-rate-list">
                         <option value="0">0%</option>
                         <option value="10.5">10.5%</option>
                         <option value="21">21%</option>
                         <option value="27">27%</option>
-                      </select>
+                      </datalist>
                     </div>
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Subtotal Neto:</span>
@@ -782,7 +909,7 @@ export const Orders: React.FC = () => {
                 <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
 
-              <Button type="submit" variant="primary" loading={saving}>Crear Pedido</Button>
+              <Button type="submit" variant="success" loading={saving}>{editingOrderId ? 'Guardar Cambios' : 'Crear Pedido'}</Button>
             </form>
           </CardContent>
         </Card>
@@ -873,6 +1000,13 @@ export const Orders: React.FC = () => {
                             ))}
                           </select>
                           <button
+                            onClick={e => { e.stopPropagation(); handleEditOrder(order) }}
+                            className="text-blue-500 hover:text-blue-700 text-xs font-medium"
+                            title="Editar pedido"
+                          >
+                            Editar
+                          </button>
+                          <button
                             onClick={e => { e.stopPropagation(); handleDeleteOrder(order.id) }}
                             className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
                             title="Eliminar pedido"
@@ -893,12 +1027,12 @@ export const Orders: React.FC = () => {
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
                                 {/* Column 1: Product & Items details */}
-                                <div className="space-y-2">
+                                <div className="space-y-2 min-w-0 overflow-hidden">
                                   <h4 className="text-sm font-semibold text-blue-800 border-b border-blue-200 pb-1">Detalle del Pedido</h4>
                                   {order.description && (
                                     <div>
                                       <p className="text-xs text-gray-500">Descripcion</p>
-                                      <p className="text-sm text-gray-800">{order.description}</p>
+                                      <p className="text-sm text-gray-800 break-words whitespace-pre-wrap">{order.description}</p>
                                     </div>
                                   )}
                                   <div className="grid grid-cols-2 gap-2">
@@ -922,7 +1056,7 @@ export const Orders: React.FC = () => {
                                   {order.notes && (
                                     <div>
                                       <p className="text-xs text-gray-500">Notas</p>
-                                      <p className="text-sm text-gray-700 bg-yellow-50 px-2 py-1 rounded">{order.notes}</p>
+                                      <p className="text-sm text-gray-700 bg-yellow-50 px-2 py-1 rounded break-words whitespace-pre-wrap">{order.notes}</p>
                                     </div>
                                   )}
                                   <div>
@@ -934,7 +1068,7 @@ export const Orders: React.FC = () => {
                                 </div>
 
                                 {/* Column 2: Delivery & Dates */}
-                                <div className="space-y-2">
+                                <div className="space-y-2 min-w-0 overflow-hidden">
                                   <h4 className="text-sm font-semibold text-blue-800 border-b border-blue-200 pb-1">Entrega y Fechas</h4>
                                   <div>
                                     <p className="text-xs text-gray-500">Fecha de Creacion</p>
@@ -964,7 +1098,7 @@ export const Orders: React.FC = () => {
                                 </div>
 
                                 {/* Column 3: Invoicing & Payment */}
-                                <div className="space-y-2">
+                                <div className="space-y-2 min-w-0 overflow-hidden">
                                   <h4 className="text-sm font-semibold text-blue-800 border-b border-blue-200 pb-1">Facturacion y Pago</h4>
 
                                   {/* Payment method */}
@@ -1174,7 +1308,8 @@ export const Orders: React.FC = () => {
                                               ) : (
                                                 <button
                                                   onClick={() => handleCreateInvoice(order.id)}
-                                                  className="w-full px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
+                                                  disabled={creatingInvoice[order.id]}
+                                                  className="w-full px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                   Crear Borrador de Factura
                                                 </button>
@@ -1221,6 +1356,8 @@ export const Orders: React.FC = () => {
           invoiceType={invoicePreview.previewInvoiceType}
           items={invoicePreview.previewItems}
           authorized={invoicePreview.invoiceAuthorized}
+          authFailed={invoicePreview.authFailed}
+          authErrorMsg={invoicePreview.authErrorMsg}
           onClose={invoicePreview.closePreview}
           onPuntoVentaChange={invoicePreview.setPreviewPuntoVenta}
           onInvoiceTypeChange={invoicePreview.setPreviewInvoiceType}

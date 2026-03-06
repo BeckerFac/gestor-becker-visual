@@ -38,6 +38,19 @@ export class RemitosController {
     res.setHeader('Content-Disposition', `attachment; filename=remito-${req.params.id.substring(0, 8)}.pdf`);
     res.send(pdf);
   }
+
+  async uploadSignedPdf(req: AuthRequest, res: Response) {
+    const { base64 } = req.body;
+    if (!base64) return res.status(400).json({ message: 'base64 field is required' });
+    const data = await remitosService.uploadSignedPdf(req.user!.company_id, req.params.id, base64);
+    res.json(data);
+  }
+
+  async getSignedPdf(req: AuthRequest, res: Response) {
+    const data = await remitosService.getSignedPdf(req.user!.company_id, req.params.id);
+    if (!data) return res.status(404).json({ message: 'No signed PDF found' });
+    res.json({ base64: data });
+  }
 }
 
 export const remitosController = new RemitosController();

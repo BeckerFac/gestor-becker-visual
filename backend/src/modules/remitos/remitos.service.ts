@@ -229,6 +229,40 @@ export class RemitosService {
     }
   }
 
+  async uploadSignedPdf(companyId: string, remitoId: string, base64Data: string) {
+    await this.ensureTables();
+    try {
+      const result = await db.execute(sql`
+        SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
+      `);
+      const rows = (result as any).rows || result || [];
+      if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+
+      await db.execute(sql`
+        UPDATE remitos SET signed_pdf_url = ${base64Data} WHERE id = ${remitoId}
+      `);
+
+      return { id: remitoId, uploaded: true };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to upload signed PDF');
+    }
+  }
+
+  async getSignedPdf(companyId: string, remitoId: string): Promise<string | null> {
+    try {
+      const result = await db.execute(sql`
+        SELECT signed_pdf_url FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
+      `);
+      const rows = (result as any).rows || result || [];
+      if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+      return rows[0].signed_pdf_url || null;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to get signed PDF');
+    }
+  }
+
   async generateRemitoPdf(companyId: string, remitoId: string): Promise<Buffer> {
     try {
       const remito = await this.getRemito(companyId, remitoId);

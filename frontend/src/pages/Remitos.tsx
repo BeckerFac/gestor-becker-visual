@@ -333,6 +333,51 @@ export const Remitos: React.FC = () => {
     }
   }
 
+  // ── Signed PDF upload/download ─────────────────────────────────────────────
+
+  const handleUploadSignedPdf = async (remitoId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('El archivo no puede superar 5 MB')
+      return
+    }
+    try {
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1]
+        await api.uploadSignedRemitoPdf(remitoId, base64)
+        await loadRemitos(currentPage)
+      }
+      reader.readAsDataURL(file)
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const handleDownloadSignedPdf = async (remitoId: string, remitoNumber: number) => {
+    try {
+      const { base64 } = await api.getSignedRemitoPdf(remitoId)
+      const byteCharacters = atob(base64)
+      const byteNumbers = new Array(byteCharacters.length)
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i)
+      }
+      const byteArray = new Uint8Array(byteNumbers)
+      const blob = new Blob([byteArray], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Remito_${String(remitoNumber).padStart(6, '0')}_firmado.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
   // ── CSV data ───────────────────────────────────────────────────────────────
 
   const csvData = remitos.map(r => ({
@@ -371,7 +416,7 @@ export const Remitos: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={CSV_COLUMNS} filename="remitos" />
-          <Button variant="primary" onClick={() => setShowForm(v => !v)}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(v => !v)}>
             {showForm ? 'Cancelar' : '+ Nuevo Remito'}
           </Button>
         </div>
@@ -649,7 +694,7 @@ export const Remitos: React.FC = () => {
 
               {/* Submit */}
               <div className="flex items-center gap-3">
-                <Button type="submit" variant="primary" loading={saving}>
+                <Button type="submit" variant="success" loading={saving}>
                   Crear Remito
                 </Button>
                 <button
@@ -740,19 +785,18 @@ export const Remitos: React.FC = () => {
                       {remito.item_count} item{remito.item_count !== 1 ? 's' : ''}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {getStatusBadge(remito.status)}
-                        <select
-                          className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:ring-1 focus:ring-blue-500"
-                          value={remito.status}
-                          onChange={e => handleStatusChange(remito.id, e.target.value)}
-                          title="Cambiar estado"
-                        >
-                          {STATUS_OPTIONS.map(s => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <select
+                        className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
+                          STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700'
+                        }`}
+                        value={remito.status}
+                        onChange={e => handleStatusChange(remito.id, e.target.value)}
+                        title="Cambiar estado"
+                      >
+                        {STATUS_OPTIONS.map(s => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
@@ -763,6 +807,27 @@ export const Remitos: React.FC = () => {
                         >
                           PDF
                         </button>
+                        <label
+                          className="px-2 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors cursor-pointer"
+                          title="Subir PDF firmado"
+                        >
+                          Firmado
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="hidden"
+                            onChange={e => handleUploadSignedPdf(remito.id, e)}
+                          />
+                        </label>
+                        {(remito as any).signed_pdf_url && (
+                          <button
+                            onClick={() => handleDownloadSignedPdf(remito.id, remito.remito_number)}
+                            className="px-2 py-1 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 transition-colors"
+                            title="Descargar PDF firmado"
+                          >
+                            Ver Firmado
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDeleteRemito(remito.id)}
                           className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"

@@ -228,7 +228,7 @@ export const Purchases: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
-          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
             {showForm ? 'Cancelar' : '+ Nueva Compra'}
           </Button>
         </div>
@@ -375,12 +375,19 @@ export const Purchases: React.FC = () => {
                 <div className="flex gap-4 items-center">
                   <div className="flex flex-col gap-1">
                     <label className="text-sm text-gray-600">IVA %</label>
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={form.vat_rate} onChange={e => setForm({ ...form, vat_rate: e.target.value })}>
+                    <input
+                      type="number" step="0.01" placeholder="21"
+                      list="purchase-vat-rate-list"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
+                      value={form.vat_rate}
+                      onChange={e => setForm({ ...form, vat_rate: e.target.value })}
+                    />
+                    <datalist id="purchase-vat-rate-list">
                       <option value="0">0%</option>
                       <option value="10.5">10.5%</option>
                       <option value="21">21%</option>
                       <option value="27">27%</option>
-                    </select>
+                    </datalist>
                   </div>
                   <div className="text-sm text-gray-600">
                     <div>Subtotal: <strong>{formatCurrency(calcSubtotal())}</strong></div>
@@ -390,7 +397,7 @@ export const Purchases: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <textarea className="px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y w-64" rows={2} placeholder="Notas..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-                  <Button type="submit" variant="primary" loading={saving}>Crear Compra</Button>
+                  <Button type="submit" variant="success" loading={saving}>Crear Compra</Button>
                 </div>
               </div>
             </form>

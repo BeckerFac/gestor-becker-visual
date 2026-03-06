@@ -27,11 +27,15 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
   const [previewInvoiceType, setPreviewInvoiceType] = useState('B')
   const [previewItems, setPreviewItems] = useState<PreviewItem[]>([])
   const [invoiceAuthorized, setInvoiceAuthorized] = useState(false)
+  const [authFailed, setAuthFailed] = useState(false)
+  const [authErrorMsg, setAuthErrorMsg] = useState('')
 
   const openPreview = useCallback(async (invoiceId: string, orderId: string) => {
     setPreviewLoading(true)
     setPreviewOrderId(orderId)
     setInvoiceAuthorized(false)
+    setAuthFailed(false)
+    setAuthErrorMsg('')
     setAuthorizeProgress('')
     try {
       const invoice = await api.getInvoice(invoiceId)
@@ -88,8 +92,11 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
       }
       await onDataRefresh()
     } catch (e: any) {
-      onError(e.response?.data?.message || e.message)
-      setAuthorizeProgress('')
+      const msg = e.response?.data?.message || e.message
+      onError(msg)
+      setAuthFailed(true)
+      setAuthErrorMsg(msg)
+      setAuthorizeProgress('Error al autorizar - puede descargar el PDF borrador')
     } finally {
       setAuthorizingInvoice(false)
     }
@@ -138,6 +145,8 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     previewItems,
     setPreviewItems,
     invoiceAuthorized,
+    authFailed,
+    authErrorMsg,
     openPreview,
     closePreview,
     saveAndAuthorize,

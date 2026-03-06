@@ -486,6 +486,14 @@ export const api = {
     const { data } = await client.delete(`/remitos/${id}`)
     return data
   },
+  uploadSignedRemitoPdf: async (id: string, base64: string) => {
+    const { data } = await client.post(`/remitos/${id}/signed-pdf`, { base64 })
+    return data
+  },
+  getSignedRemitoPdf: async (id: string) => {
+    const { data } = await client.get(`/remitos/${id}/signed-pdf`)
+    return data
+  },
 
   // Cuenta Corriente
   getCuentaCorrienteResumen: async () => {

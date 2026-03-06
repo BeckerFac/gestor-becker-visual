@@ -178,7 +178,7 @@ export const Cobros: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredCobros} columns={csvColumns} filename="cobros" />
-          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
             {showForm ? 'Cancelar' : '+ Registrar Cobro'}
           </Button>
         </div>
@@ -272,7 +272,7 @@ export const Cobros: React.FC = () => {
                 <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
-                <Button type="submit" variant="primary" loading={saving} className="w-full">Registrar Cobro</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Cobro</Button>
               </div>
             </form>
           </CardContent>

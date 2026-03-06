@@ -132,7 +132,7 @@ export const Cheques: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Cheques</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión de cheques a cobrar</p>
         </div>
-        <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
           {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
         </Button>
       </div>
@@ -207,7 +207,7 @@ export const Cheques: React.FC = () => {
                 </div>
                 <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
-              <Button type="submit" variant="primary" loading={saving}>Cargar Cheque</Button>
+              <Button type="submit" variant="success" loading={saving}>Cargar Cheque</Button>
             </form>
           </CardContent>
         </Card>
