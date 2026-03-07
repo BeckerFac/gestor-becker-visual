@@ -29,6 +29,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
   const [invoiceAuthorized, setInvoiceAuthorized] = useState(false)
   const [authFailed, setAuthFailed] = useState(false)
   const [authErrorMsg, setAuthErrorMsg] = useState('')
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
 
   const openPreview = useCallback(async (invoiceId: string, orderId: string) => {
     setPreviewLoading(true)
@@ -38,7 +39,20 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     setAuthErrorMsg('')
     setAuthorizeProgress('')
     try {
-      const invoice = await api.getInvoice(invoiceId)
+      // Load invoice data and PDF blob in parallel
+      const [invoice] = await Promise.all([
+        api.getInvoice(invoiceId),
+        api.downloadInvoicePdf(invoiceId)
+          .then(blob => {
+            setPdfBlobUrl(prev => {
+              if (prev) URL.revokeObjectURL(prev)
+              return URL.createObjectURL(blob)
+            })
+          })
+          .catch(() => {
+            // PDF generation may fail silently; tab will show loading state
+          }),
+      ])
       setPreviewInvoice(invoice)
       setPreviewInvoiceType(invoice.invoice_type || 'B')
       setPreviewPuntoVenta(invoice.punto_venta || 3)
@@ -62,6 +76,10 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     setPreviewItems([])
     setAuthorizeProgress('')
     setInvoiceAuthorized(false)
+    setPdfBlobUrl(prev => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
   }, [])
 
   const saveAndAuthorize = useCallback(async () => {
@@ -152,5 +170,6 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     saveAndAuthorize,
     deleteDraft,
     downloadPdf,
+    pdfBlobUrl,
   }
 }

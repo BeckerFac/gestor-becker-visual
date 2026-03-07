@@ -8,6 +8,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
@@ -22,6 +23,7 @@ interface Pago {
   bank_name: string | null
   reference: string | null
   payment_date: string
+  enterprise_tags?: { id: string; name: string; color: string }[]
   notes: string | null
 }
 
@@ -325,7 +327,12 @@ export const Pagos: React.FC = () => {
                 {paginatedPagos.map(pago => (
                   <tr key={pago.id} className="border-b hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-sm text-gray-600">{fmtDate(pago.payment_date)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{pago.enterprise_name || <span className="text-gray-400">-</span>}</td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="text-sm text-gray-900">{pago.enterprise_name || <span className="text-gray-400">-</span>}</p>
+                        <TagBadges tags={pago.enterprise_tags || []} size="sm" />
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       {pago.purchase_number ? (
                         <span className="font-mono text-xs bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">#{String(pago.purchase_number).padStart(4, '0')}</span>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
 
@@ -23,6 +23,7 @@ interface InvoicePreviewModalProps {
   onAuthorize: () => void
   onDeleteDraft: (invoiceId: string, orderId: string) => void
   onDownloadPdf: (invoiceId: string, invoice: any) => void
+  pdfBlobUrl?: string | null
 }
 
 export function InvoicePreviewModal({
@@ -44,8 +45,10 @@ export function InvoicePreviewModal({
   onAuthorize,
   onDeleteDraft,
   onDownloadPdf,
+  pdfBlobUrl,
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
+  const [activeTab, setActiveTab] = useState<'datos' | 'pdf'>('datos')
 
   // Focus trap + Escape key
   useEffect(() => {
@@ -124,7 +127,43 @@ export function InvoicePreviewModal({
               </div>
             </div>
 
-            {/* Invoice details */}
+            {/* Tabs */}
+            <div className="px-6 pt-4">
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg mb-4">
+                <button
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'datos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  onClick={() => setActiveTab('datos')}
+                >
+                  Datos
+                </button>
+                <button
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'pdf' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  onClick={() => setActiveTab('pdf')}
+                >
+                  Vista PDF
+                </button>
+              </div>
+            </div>
+
+            {/* Tab: Vista PDF */}
+            {activeTab === 'pdf' && (
+              <div className="px-6 py-4">
+                {pdfBlobUrl ? (
+                  <iframe
+                    src={pdfBlobUrl}
+                    className="w-full h-[70vh] border border-gray-200 rounded-lg"
+                    title="Vista previa PDF"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-[70vh] text-gray-500">
+                    Cargando PDF...
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Datos (Invoice details) */}
+            {activeTab === 'datos' && (
             <div className="px-6 py-4 space-y-4">
               {/* Company + Customer info */}
               <div className="grid grid-cols-2 gap-4">
@@ -292,6 +331,7 @@ export function InvoicePreviewModal({
                 </div>
               </div>
             </div>
+            )}
 
             {/* Actions */}
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">

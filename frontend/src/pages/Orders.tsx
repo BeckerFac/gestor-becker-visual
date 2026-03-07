@@ -1433,6 +1433,7 @@ export const Orders: React.FC = () => {
           onAuthorize={invoicePreview.saveAndAuthorize}
           onDeleteDraft={invoicePreview.deleteDraft}
           onDownloadPdf={invoicePreview.downloadPdf}
+          pdfBlobUrl={invoicePreview.pdfBlobUrl}
         />
       )}
 

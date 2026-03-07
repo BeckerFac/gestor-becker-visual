@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 
@@ -75,16 +76,24 @@ export const Banks: React.FC = () => {
   const [expandedMethod, setExpandedMethod] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Bank | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [balances, setBalances] = useState<any[]>([])
+  const [selectedBankId, setSelectedBankId] = useState<string | null>(null)
+  const [bankMovements, setBankMovements] = useState<any[]>([])
+  const [movementsLoading, setMovementsLoading] = useState(false)
+  const [movDateFrom, setMovDateFrom] = useState('')
+  const [movDateTo, setMovDateTo] = useState('')
 
   const loadData = async () => {
     try {
       setLoading(true)
-      const [banksRes, breakdownRes] = await Promise.all([
+      const [banksRes, breakdownRes, balRes] = await Promise.all([
         api.getBanks(),
         api.getBankBreakdown(),
+        api.getBankBalances().catch(() => []),
       ])
       setBanks(banksRes || [])
       setBreakdown(breakdownRes || null)
+      setBalances(balRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -92,7 +101,36 @@ export const Banks: React.FC = () => {
     }
   }
 
+  const loadMovements = async (bankId: string) => {
+    setMovementsLoading(true)
+    try {
+      const movements = await api.getBankMovements(bankId, {
+        date_from: movDateFrom || undefined,
+        date_to: movDateTo || undefined,
+      })
+      setBankMovements(movements)
+    } catch (e) {
+      setBankMovements([])
+    } finally {
+      setMovementsLoading(false)
+    }
+  }
+
+  const handleBankClick = (bankId: string) => {
+    if (selectedBankId === bankId) {
+      setSelectedBankId(null)
+      setBankMovements([])
+    } else {
+      setSelectedBankId(bankId)
+      loadMovements(bankId)
+    }
+  }
+
   useEffect(() => { loadData() }, [])
+
+  useEffect(() => {
+    if (selectedBankId) loadMovements(selectedBankId)
+  }, [movDateFrom, movDateTo])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -215,6 +253,174 @@ export const Banks: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Bank Balances Summary */}
+      {balances.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="border border-blue-200 bg-blue-50">
+            <CardContent className="pt-4">
+              <p className="text-sm text-blue-700">Total en Bancos</p>
+              <p className="text-2xl font-bold text-blue-800">
+                {formatCurrency(balances.reduce((sum: number, b: any) => sum + b.balance, 0))}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border border-green-200 bg-green-50">
+            <CardContent className="pt-4">
+              <p className="text-sm text-green-700">Total Ingresos</p>
+              <p className="text-2xl font-bold text-green-800">
+                {formatCurrency(balances.reduce((sum: number, b: any) => sum + b.income, 0))}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border border-red-200 bg-red-50">
+            <CardContent className="pt-4">
+              <p className="text-sm text-red-700">Total Egresos</p>
+              <p className="text-2xl font-bold text-red-800">
+                {formatCurrency(balances.reduce((sum: number, b: any) => sum + b.expense, 0))}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Balance Distribution Bar */}
+      {balances.length > 1 && (() => {
+        const totalBalance = balances.reduce((s: number, b: any) => s + Math.max(0, b.balance), 0)
+        if (totalBalance <= 0) return null
+        return (
+          <div className="flex h-4 rounded-full overflow-hidden bg-gray-100">
+            {balances.filter((b: any) => b.balance > 0).map((b: any, i: number) => (
+              <div
+                key={b.bank_id}
+                className="h-full"
+                style={{
+                  width: `${(b.balance / totalBalance) * 100}%`,
+                  backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1'][i % 6],
+                }}
+                title={`${b.bank_name}: ${formatCurrency(b.balance)}`}
+              />
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* Bank Account Cards */}
+      {balances.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Cuentas Bancarias</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {balances.map((b: any) => (
+              <Card
+                key={b.bank_id}
+                className={`cursor-pointer transition-all hover:shadow-md ${selectedBankId === b.bank_id ? 'ring-2 ring-blue-500' : ''} ${b.balance >= 0 ? 'border-green-200' : 'border-red-200'}`}
+                onClick={() => handleBankClick(b.bank_id)}
+              >
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-gray-900">{b.bank_name}</h3>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                      {b.account_type === 'caja de ahorro' ? 'CA' : 'CC'}
+                    </span>
+                  </div>
+                  {(b.cbu || b.alias) && (
+                    <p className="text-xs text-gray-500 mb-2 truncate">
+                      {b.alias || b.cbu}
+                    </p>
+                  )}
+                  <p className={`text-xl font-bold ${b.balance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {formatCurrency(b.balance)}
+                  </p>
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span className="text-green-600">+{formatCurrency(b.income)}</span>
+                    <span className="text-red-600">-{formatCurrency(b.expense)}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bank Movements Panel */}
+      {selectedBankId && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                Movimientos — {balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name}
+              </h3>
+              <div className="flex items-center gap-2">
+                <DateRangeFilter
+                  dateFrom={movDateFrom}
+                  dateTo={movDateTo}
+                  onDateFromChange={setMovDateFrom}
+                  onDateToChange={setMovDateTo}
+                  label="Periodo"
+                />
+                <ExportCSVButton
+                  data={bankMovements.map((m: any) => ({
+                    fecha: formatDate(m.date),
+                    tipo: m.type,
+                    detalle: m.detail || '-',
+                    empresa: m.enterprise_name || '-',
+                    monto: ['cobro', 'venta'].includes(m.type) ? parseFloat(m.amount) : -parseFloat(m.amount),
+                  }))}
+                  columns={[
+                    { key: 'fecha', label: 'Fecha' },
+                    { key: 'tipo', label: 'Tipo' },
+                    { key: 'detalle', label: 'Detalle' },
+                    { key: 'empresa', label: 'Empresa' },
+                    { key: 'monto', label: 'Monto' },
+                  ]}
+                  filename={`extracto_${balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name || 'banco'}`}
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {movementsLoading ? (
+              <SkeletonTable rows={5} cols={5} />
+            ) : bankMovements.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">Sin movimientos para este banco</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Fecha</th>
+                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Tipo</th>
+                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Detalle</th>
+                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Empresa</th>
+                      <th className="text-right py-2 px-3 text-gray-600 font-medium">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bankMovements.map((m: any, i: number) => {
+                      const isIncome = ['cobro', 'venta'].includes(m.type)
+                      return (
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-3">{formatDate(m.date)}</td>
+                          <td className="py-2 px-3">
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${isIncome ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {m.type}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-gray-700">{m.detail || '-'}</td>
+                          <td className="py-2 px-3 text-gray-600">{m.enterprise_name || '-'}</td>
+                          <td className={`py-2 px-3 text-right font-medium ${isIncome ? 'text-green-700' : 'text-red-700'}`}>
+                            {isIncome ? '+' : '-'}{formatCurrency(parseFloat(m.amount || '0'))}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Bank form */}
       {showForm && (

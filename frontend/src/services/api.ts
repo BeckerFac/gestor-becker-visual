@@ -239,6 +239,10 @@ export const api = {
     const { data } = await client.post('/purchases', purchaseData)
     return data
   },
+  updatePurchase: async (id: string, data: any) => {
+    const { data: result } = await client.put(`/purchases/${id}`, data)
+    return result
+  },
   updatePurchasePaymentStatus: async (id: string, payment_status: string) => {
     const { data } = await client.put(`/purchases/${id}/payment-status`, { payment_status })
     return data
@@ -509,17 +513,33 @@ export const api = {
   },
 
   // Cheques
-  getCheques: async (status?: string) => {
-    const params = status ? `?status=${status}` : ''
-    const { data } = await client.get(`/cheques${params}`)
+  getCheques: async (filters?: { status?: string; search?: string; due_from?: string; due_to?: string }) => {
+    const params = new URLSearchParams()
+    if (filters?.status) params.append('status', filters.status)
+    if (filters?.search) params.append('search', filters.search)
+    if (filters?.due_from) params.append('due_from', filters.due_from)
+    if (filters?.due_to) params.append('due_to', filters.due_to)
+    const { data } = await client.get(`/cheques?${params}`)
     return data
   },
   createCheque: async (chequeData: any) => {
     const { data } = await client.post('/cheques', chequeData)
     return data
   },
+  updateCheque: async (id: string, data: any) => {
+    const { data: result } = await client.put(`/cheques/${id}`, data)
+    return result
+  },
+  deleteCheque: async (id: string) => {
+    const { data } = await client.delete(`/cheques/${id}`)
+    return data
+  },
   updateChequeStatus: async (id: string, status: string) => {
     const { data } = await client.put(`/cheques/${id}/status`, { status })
+    return data
+  },
+  getChequeHistory: async (id: string) => {
+    const { data } = await client.get(`/cheques/${id}/history`)
     return data
   },
   getChequesSummary: async () => {
@@ -592,6 +612,17 @@ export const api = {
   },
   getBankBreakdown: async () => {
     const { data } = await client.get('/banks/breakdown')
+    return data
+  },
+  getBankBalances: async () => {
+    const { data } = await client.get('/banks/balances')
+    return data
+  },
+  getBankMovements: async (bankId: string, filters?: { date_from?: string; date_to?: string }) => {
+    const params = new URLSearchParams()
+    if (filters?.date_from) params.append('date_from', filters.date_from)
+    if (filters?.date_to) params.append('date_to', filters.date_to)
+    const { data } = await client.get(`/banks/${bankId}/movements?${params}`)
     return data
   },
 

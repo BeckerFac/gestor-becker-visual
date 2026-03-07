@@ -222,6 +222,25 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_product ON product_components(product_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_component ON product_components(component_product_id)`);
 
+    // --- Cheque status history ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cheque_status_history (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cheque_id UUID NOT NULL REFERENCES cheques(id) ON DELETE CASCADE,
+        old_status VARCHAR(30),
+        new_status VARCHAR(30),
+        notes TEXT,
+        changed_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cheque_history ON cheque_status_history(cheque_id)`);
+
+    // AFIP/ARCA extra columns
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS puntos_venta JSONB DEFAULT '[]'::jsonb`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS afip_last_test TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS afip_last_test_ok BOOLEAN DEFAULT false`);
+
     console.log('✅ Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

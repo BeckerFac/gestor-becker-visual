@@ -248,6 +248,97 @@ export class BanksService {
       throw new ApiError(500, 'Failed to get bank breakdown');
     }
   }
+  async getBankBalances(companyId: string) {
+    await this.ensureTables();
+    try {
+      const result = await db.execute(sql`
+        SELECT b.id as bank_id, b.bank_name, b.account_type, b.cbu, b.alias,
+          COALESCE((
+            SELECT SUM(CAST(c.amount AS decimal))
+            FROM cobros c WHERE c.bank_id = b.id AND c.company_id = ${companyId}
+          ), 0) +
+          COALESCE((
+            SELECT SUM(CAST(o.total_amount AS decimal))
+            FROM orders o WHERE o.bank_id = b.id AND o.company_id = ${companyId} AND o.payment_status = 'pagado'
+          ), 0) as income,
+          COALESCE((
+            SELECT SUM(CAST(pg.amount AS decimal))
+            FROM pagos pg WHERE pg.bank_id = b.id AND pg.company_id = ${companyId}
+          ), 0) +
+          COALESCE((
+            SELECT SUM(CAST(p.total_amount AS decimal))
+            FROM purchases p WHERE p.bank_id = b.id AND p.company_id = ${companyId} AND p.payment_status = 'pagado'
+          ), 0) as expense
+        FROM banks b
+        WHERE b.company_id = ${companyId} AND b.status = 'active'
+        ORDER BY b.bank_name ASC
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows.map((r: any) => ({
+        ...r,
+        income: parseFloat(r.income || '0'),
+        expense: parseFloat(r.expense || '0'),
+        balance: parseFloat(r.income || '0') - parseFloat(r.expense || '0'),
+      }));
+    } catch (error) {
+      console.error('Bank balances error:', error);
+      throw new ApiError(500, 'Failed to get bank balances');
+    }
+  }
+
+  async getBankMovements(companyId: string, bankId: string, filters: { date_from?: string; date_to?: string } = {}) {
+    await this.ensureTables();
+    try {
+      const result = await db.execute(sql`
+        (
+          SELECT 'cobro' as type, c.payment_method, CAST(c.amount AS decimal) as amount,
+            c.payment_date as date, c.reference as detail, e.name as enterprise_name
+          FROM cobros c
+          LEFT JOIN enterprises e ON c.enterprise_id = e.id
+          WHERE c.company_id = ${companyId} AND c.bank_id = ${bankId}
+        )
+        UNION ALL
+        (
+          SELECT 'pago' as type, pg.payment_method, CAST(pg.amount AS decimal) as amount,
+            pg.payment_date as date, pg.reference as detail, e.name as enterprise_name
+          FROM pagos pg
+          LEFT JOIN enterprises e ON pg.enterprise_id = e.id
+          WHERE pg.company_id = ${companyId} AND pg.bank_id = ${bankId}
+        )
+        UNION ALL
+        (
+          SELECT 'venta' as type, o.payment_method, CAST(o.total_amount AS decimal) as amount,
+            o.created_at as date, o.title as detail, ent.name as enterprise_name
+          FROM orders o
+          LEFT JOIN enterprises ent ON o.enterprise_id = ent.id
+          WHERE o.company_id = ${companyId} AND o.bank_id = ${bankId} AND o.payment_status = 'pagado'
+        )
+        UNION ALL
+        (
+          SELECT 'compra' as type, p.payment_method, CAST(p.total_amount AS decimal) as amount,
+            p.date as date, CAST(p.purchase_number AS TEXT) as detail, e.name as enterprise_name
+          FROM purchases p
+          LEFT JOIN enterprises e ON p.enterprise_id = e.id
+          WHERE p.company_id = ${companyId} AND p.bank_id = ${bankId} AND p.payment_status = 'pagado'
+        )
+        ORDER BY date DESC
+        LIMIT 100
+      `);
+      const rows = (result as any).rows || result || [];
+      // Apply date filters in JS to avoid drizzle sql template interpolation issues in UNION subqueries
+      const filtered = rows.filter((r: any) => {
+        if (!r.date) return true;
+        const d = r.date.toString().slice(0, 10);
+        if (filters.date_from && d < filters.date_from) return false;
+        if (filters.date_to && d > filters.date_to) return false;
+        return true;
+      });
+      return filtered;
+    } catch (error) {
+      console.error('Bank movements error:', error);
+      throw new ApiError(500, 'Failed to get bank movements');
+    }
+  }
 }
 
 export const banksService = new BanksService();

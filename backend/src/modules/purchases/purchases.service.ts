@@ -63,6 +63,9 @@ export class PurchasesService {
           e.name as enterprise_name,
           e.cuit as enterprise_cuit,
           b.bank_name,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
+            FROM entity_tags et JOIN tags t ON et.tag_id=t.id
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           COALESCE((SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0) as item_count
         FROM purchases p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
@@ -82,7 +85,10 @@ export class PurchasesService {
       const result = await db.execute(sql`
         SELECT p.*,
           e.name as enterprise_name, e.cuit as enterprise_cuit,
-          b.bank_name
+          b.bank_name,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
+            FROM entity_tags et JOIN tags t ON et.tag_id=t.id
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM purchases p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN banks b ON p.bank_id = b.id
@@ -164,6 +170,62 @@ export class PurchasesService {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update purchase payment status');
+    }
+  }
+
+  async updatePurchase(companyId: string, purchaseId: string, data: any) {
+    await this.ensureTables();
+    try {
+      // Verify ownership
+      const check = await db.execute(sql`SELECT id FROM purchases WHERE id = ${purchaseId} AND company_id = ${companyId}`);
+      const rows = (check as any).rows || check || [];
+      if (rows.length === 0) throw new ApiError(404, 'Purchase not found');
+
+      // Recalculate totals from items if provided
+      let subtotal = parseFloat(data.subtotal) || 0;
+      let vatAmount = parseFloat(data.vat_amount) || 0;
+      let totalAmount = parseFloat(data.total_amount) || 0;
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        subtotal = data.items.reduce((sum: number, item: any) => sum + (parseFloat(item.quantity) || 1) * (parseFloat(item.unit_price) || 0), 0);
+        vatAmount = subtotal * 0.21;
+        totalAmount = subtotal + vatAmount;
+      }
+
+      // Update purchase
+      await db.execute(sql`
+        UPDATE purchases SET
+          enterprise_id = ${data.enterprise_id || null},
+          date = ${data.date || new Date().toISOString()},
+          invoice_type = ${data.invoice_type || null},
+          invoice_number = ${data.invoice_number || null},
+          invoice_cae = ${data.invoice_cae || null},
+          subtotal = ${subtotal.toString()},
+          vat_amount = ${vatAmount.toString()},
+          total_amount = ${totalAmount.toString()},
+          payment_method = ${data.payment_method || null},
+          bank_id = ${data.bank_id || null},
+          notes = ${data.notes || null},
+          updated_at = NOW()
+        WHERE id = ${purchaseId} AND company_id = ${companyId}
+      `);
+
+      // Replace items if provided
+      if (data.items && Array.isArray(data.items)) {
+        await db.execute(sql`DELETE FROM purchase_items WHERE purchase_id = ${purchaseId}`);
+        for (const item of data.items) {
+          const itemId = uuid();
+          const itemSubtotal = (parseFloat(item.quantity) || 1) * (parseFloat(item.unit_price) || 0);
+          await db.execute(sql`
+            INSERT INTO purchase_items (id, purchase_id, product_name, description, quantity, unit_price, subtotal)
+            VALUES (${itemId}, ${purchaseId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit_price || 0}, ${itemSubtotal})
+          `);
+        }
+      }
+
+      return await this.getPurchase(companyId, purchaseId);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to update purchase');
     }
   }
 

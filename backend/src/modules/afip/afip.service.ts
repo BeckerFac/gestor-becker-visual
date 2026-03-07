@@ -1,4 +1,4 @@
-import { db } from '../../config/db'
+import { db, pool } from '../../config/db'
 import { invoices, companies } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { ApiError } from '../../middlewares/errorHandler'
@@ -162,6 +162,15 @@ export class AfipService {
       const response = await this.callWsfe(env, 'FEDummy', soapBody)
 
       const result = response?.FEDummyResult || response
+
+      // Save successful test result
+      try {
+        await pool.query(
+          `UPDATE companies SET afip_last_test = NOW(), afip_last_test_ok = $1 WHERE id = $2`,
+          [true, companyId]
+        )
+      } catch (_) {}
+
       return {
         success: true,
         message: `Conexión exitosa. AppServer: ${result?.AppServer}, DbServer: ${result?.DbServer}, AuthServer: ${result?.AuthServer}`,
@@ -172,6 +181,13 @@ export class AfipService {
       if (error.response?.data) {
         console.error('AFIP response:', typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : error.response.data)
       }
+      // Save failed test result
+      try {
+        await pool.query(
+          `UPDATE companies SET afip_last_test = NOW(), afip_last_test_ok = $1 WHERE id = $2`,
+          [false, companyId]
+        )
+      } catch (_) {}
       return { success: false, message: `Error: ${error.message}` }
     }
   }

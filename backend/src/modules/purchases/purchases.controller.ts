@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
+import { ApiError } from '../../middlewares/errorHandler';
 import { purchasesService } from './purchases.service';
 
 export class PurchasesController {
@@ -18,6 +19,16 @@ export class PurchasesController {
   async createPurchase(req: AuthRequest, res: Response) {
     const data = await purchasesService.createPurchase(req.user!.company_id, req.user!.id, req.body);
     res.status(201).json(data);
+  }
+
+  async updatePurchase(req: AuthRequest, res: Response) {
+    try {
+      const result = await purchasesService.updatePurchase(req.user!.company_id, req.params.id, req.body);
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update purchase' });
+    }
   }
 
   async updatePaymentStatus(req: AuthRequest, res: Response) {

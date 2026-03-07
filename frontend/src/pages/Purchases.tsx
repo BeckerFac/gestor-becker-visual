@@ -9,6 +9,7 @@ import { toast } from '@/hooks/useToast'
 import { Pagination } from '@/components/shared/Pagination'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 
@@ -32,6 +33,7 @@ interface Purchase {
   invoice_number: string | null
   invoice_cae: string | null
   notes: string | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   status: string
   created_at: string
 }
@@ -80,6 +82,7 @@ export const Purchases: React.FC = () => {
   const [expandedDetail, setExpandedDetail] = useState<Purchase | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     enterprise_id: '', date: new Date().toISOString().split('T')[0],
@@ -115,6 +118,33 @@ export const Purchases: React.FC = () => {
   const calcVat = () => calcSubtotal() * (Number(form.vat_rate) / 100)
   const calcTotal = () => calcSubtotal() + calcVat()
 
+  const handleEdit = async (purchase: Purchase) => {
+    try {
+      const detail = await api.getPurchase(purchase.id)
+      setForm({
+        enterprise_id: detail.enterprise_id || '',
+        date: detail.date ? detail.date.split('T')[0] : '',
+        payment_method: detail.payment_method || '',
+        bank_id: detail.bank_id || '',
+        notes: detail.notes || '',
+        invoice_type: detail.invoice_type || '',
+        invoice_number: detail.invoice_number || '',
+        invoice_cae: detail.invoice_cae || '',
+        vat_rate: '21',
+      })
+      setItems(detail.items?.map((i: any) => ({
+        product_name: i.product_name || '',
+        description: i.description || '',
+        quantity: i.quantity?.toString() || '1',
+        unit_price: i.unit_price?.toString() || '0',
+      })) || [{ product_name: '', description: '', quantity: '1', unit_price: '0' }])
+      setEditingId(purchase.id)
+      setShowForm(true)
+    } catch (e: any) {
+      toast.error('Error al cargar compra: ' + e.message)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const validItems = items.filter(i => i.product_name.trim())
@@ -122,7 +152,7 @@ export const Purchases: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      await api.createPurchase({
+      const payload = {
         enterprise_id: form.enterprise_id || null,
         date: form.date || null,
         payment_method: form.payment_method || null,
@@ -135,9 +165,15 @@ export const Purchases: React.FC = () => {
         vat_amount: calcVat(),
         total_amount: calcTotal(),
         items: validItems,
-      })
-      toast.success('Compra creada correctamente')
+      }
+      if (editingId) {
+        await api.updatePurchase(editingId, payload)
+      } else {
+        await api.createPurchase(payload)
+      }
+      toast.success(editingId ? 'Compra actualizada' : 'Compra registrada')
       setShowForm(false)
+      setEditingId(null)
       setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' })
       setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }])
       await loadData()
@@ -243,7 +279,7 @@ export const Purchases: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
             {showForm ? 'Cancelar' : '+ Nueva Compra'}
           </Button>
         </div>
@@ -303,7 +339,7 @@ export const Purchases: React.FC = () => {
 
       {showForm && (
         <Card className="animate-fadeIn">
-          <CardHeader><h3 className="text-lg font-semibold">Nueva Compra</h3></CardHeader>
+          <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Compra' : 'Nueva Compra'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -412,7 +448,7 @@ export const Purchases: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <textarea className="px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y w-64" rows={2} placeholder="Notas..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-                  <Button type="submit" variant="success" loading={saving}>Crear Compra</Button>
+                  <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Compra'}</Button>
                 </div>
               </div>
             </form>
@@ -461,6 +497,7 @@ export const Purchases: React.FC = () => {
                         <div>
                           <p className="text-sm font-medium text-gray-900">{purchase.enterprise_name || '-'}</p>
                           {purchase.enterprise_cuit && <p className="text-xs text-gray-500">{purchase.enterprise_cuit}</p>}
+                          <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -494,6 +531,13 @@ export const Purchases: React.FC = () => {
                               Fc {purchase.invoice_type}
                             </span>
                           )}
+                          <button
+                            onClick={e => { e.stopPropagation(); handleEdit(purchase) }}
+                            className="text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors mr-1"
+                            title="Editar compra"
+                          >
+                            Editar
+                          </button>
                           <button
                             onClick={e => { e.stopPropagation(); handleDelete(purchase) }}
                             className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
@@ -552,6 +596,7 @@ export const Purchases: React.FC = () => {
                                     <p className="text-xs text-gray-500">Empresa</p>
                                     <p className="text-sm text-gray-800 font-medium">{purchase.enterprise_name || 'Sin empresa'}</p>
                                     {purchase.enterprise_cuit && <p className="text-xs text-gray-500 font-mono">{purchase.enterprise_cuit}</p>}
+                                    <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-500">Fecha</p>

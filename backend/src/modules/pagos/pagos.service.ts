@@ -43,7 +43,10 @@ export class PagosService {
         SELECT p.*,
           e.name as enterprise_name,
           pu.purchase_number,
-          b.bank_name
+          b.bank_name,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
+            FROM entity_tags et JOIN tags t ON et.tag_id=t.id
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN purchases pu ON p.purchase_id = pu.id
@@ -73,7 +76,10 @@ export class PagosService {
       `);
 
       const result = await db.execute(sql`
-        SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name
+        SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
+            FROM entity_tags et JOIN tags t ON et.tag_id=t.id
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN purchases pu ON p.purchase_id = pu.id
