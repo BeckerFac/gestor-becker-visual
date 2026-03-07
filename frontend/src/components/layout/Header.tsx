@@ -1,6 +1,7 @@
 import React from 'react'
 import { useLocation, Link } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { useUIStore } from '@/stores/uiStore'
 
 const pageNames: Record<string, { label: string; section?: string }> = {
   '/dashboard': { label: 'Dashboard' },
@@ -24,6 +25,7 @@ const pageNames: Record<string, { label: string; section?: string }> = {
 export const Header: React.FC = () => {
   const location = useLocation()
   const company = useAuthStore((state) => state.company)
+  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const page = pageNames[location.pathname]
   const pageName = page?.label || 'Página'
   const section = page?.section
@@ -31,6 +33,17 @@ export const Header: React.FC = () => {
   return (
     <header className="border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
       <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {/* Mobile menu button */}
+          <button
+            onClick={toggleSidebar}
+            className="md:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"
+            aria-label="Abrir menu"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         <div>
           {/* Breadcrumbs */}
           <div className="flex items-center gap-1.5 text-sm">
@@ -45,6 +58,7 @@ export const Header: React.FC = () => {
             <span className="text-gray-700 font-medium">{pageName}</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mt-0.5 truncate">{pageName}</h2>
+        </div>
         </div>
         {company && (
           <div className="text-right">

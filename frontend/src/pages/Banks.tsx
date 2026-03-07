@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { EmptyState } from '@/components/shared/EmptyState'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
@@ -70,6 +73,8 @@ export const Banks: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [breakdown, setBreakdown] = useState<{ methods: Record<string, MethodBreakdown>; recent_movements: Movement[] } | null>(null)
   const [expandedMethod, setExpandedMethod] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Bank | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const loadData = async () => {
     try {
@@ -96,15 +101,17 @@ export const Banks: React.FC = () => {
     try {
       if (editingId) {
         await api.updateBank(editingId, form)
+        toast.success('Banco actualizado correctamente')
       } else {
         await api.createBank(form)
+        toast.success('Banco creado correctamente')
       }
       setShowForm(false)
       setEditingId(null)
       setForm(emptyForm)
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
@@ -120,13 +127,22 @@ export const Banks: React.FC = () => {
     setShowForm(true)
   }
 
-  const handleDelete = async (bank: Bank) => {
-    if (!confirm(`¿Eliminar banco "${bank.bank_name}"?`)) return
+  const handleDelete = (bank: Bank) => {
+    setDeleteTarget(bank)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteBank(bank.id)
+      await api.deleteBank(deleteTarget.id)
+      toast.success('Banco eliminado correctamente')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -238,7 +254,17 @@ export const Banks: React.FC = () => {
       )}
 
       {/* Bank Accounts List */}
-      {banks.length > 0 && (
+      {loading ? (
+        <Card><CardContent><SkeletonTable rows={5} cols={5} /></CardContent></Card>
+      ) : banks.length === 0 ? (
+        <Card><CardContent>
+          <EmptyState
+            title="Sin cuentas bancarias"
+            description="Agrega tu primera cuenta bancaria para empezar"
+            action={{ label: '+ Nuevo Banco', onClick: () => { setForm(emptyForm); setEditingId(null); setShowForm(true) } }}
+          />
+        </CardContent></Card>
+      ) : (
         <Card>
           <CardHeader><h3 className="text-base font-semibold text-gray-700">Cuentas Bancarias</h3></CardHeader>
           <div className="overflow-x-auto">
@@ -283,6 +309,17 @@ export const Banks: React.FC = () => {
           </div>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar Banco"
+        message={`¿Eliminar banco "${deleteTarget?.bank_name}"?`}
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Breakdown by Payment Method */}
       {breakdown && Object.keys(breakdown.methods).length > 0 && (

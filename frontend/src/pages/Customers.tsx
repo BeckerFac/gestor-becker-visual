@@ -3,6 +3,11 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { DataTable } from '@/components/shared/DataTable'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
+import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 
 interface Customer {
@@ -37,6 +42,8 @@ export const Customers: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const loadCustomers = async () => {
     try {
@@ -64,14 +71,17 @@ export const Customers: React.FC = () => {
       }
       if (editingId) {
         await api.updateCustomer(editingId, payload)
+        toast.success('Cliente actualizado')
       } else {
         await api.createCustomer(payload)
+        toast.success('Cliente creado')
       }
       setShowForm(false)
       setEditingId(null)
       setForm(emptyForm)
       await loadCustomers()
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -95,20 +105,25 @@ export const Customers: React.FC = () => {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase()
     try {
       await api.updateCustomer(customer.id, { access_code: code })
-      alert(`Código de acceso generado para ${customer.name}: ${code}\n\nEl cliente puede ingresar al portal en /portal con su CUIT y este código.`)
+      toast.success(`Código generado: ${code}`)
       await loadCustomers()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     }
   }
 
-  const handleDelete = async (customer: Customer) => {
-    if (!confirm(`¿Eliminar cliente "${customer.name}"?`)) return
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteCustomer(customer.id)
+      await api.deleteCustomer(deleteTarget.id)
+      toast.success('Cliente eliminado')
       await loadCustomers()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -138,7 +153,7 @@ export const Customers: React.FC = () => {
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Customer) => (
       <div className="flex gap-2">
         <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
-        <button onClick={(e) => { e.stopPropagation(); handleDelete(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
       </div>
     )},
   ]
@@ -150,9 +165,32 @@ export const Customers: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
           <p className="text-sm text-gray-500 mt-1">{customers.length} clientes registrados</p>
         </div>
-        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-          {showForm ? 'Cancelar' : '+ Nuevo Cliente'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportCSVButton
+            data={filtered.map(c => ({
+              cuit: c.cuit,
+              nombre: c.name,
+              contacto: c.contact_name || '-',
+              telefono: c.phone || '-',
+              email: c.email || '-',
+              condicion_iva: c.tax_condition || '-',
+              estado: c.status === 'active' ? 'Activo' : 'Inactivo',
+            }))}
+            columns={[
+              { key: 'cuit', label: 'CUIT' },
+              { key: 'nombre', label: 'Razon Social' },
+              { key: 'contacto', label: 'Contacto' },
+              { key: 'telefono', label: 'Telefono' },
+              { key: 'email', label: 'Email' },
+              { key: 'condicion_iva', label: 'Cond. IVA' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="clientes"
+          />
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+            {showForm ? 'Cancelar' : '+ Nuevo Cliente'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -207,10 +245,26 @@ export const Customers: React.FC = () => {
       <Input placeholder="Buscar por nombre, CUIT o email..." value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando clientes...</p></CardContent></Card>
+        <SkeletonTable rows={6} cols={6} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title={search ? 'Sin resultados' : 'Sin clientes'}
+          description={search ? `No se encontraron clientes para "${search}"` : 'Crea tu primer cliente para empezar.'}
+          action={!search ? { label: '+ Nuevo Cliente', onClick: () => setShowForm(true) } : undefined}
+        />
       ) : (
         <DataTable columns={columns} data={filtered} />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar cliente"
+        message={`¿Seguro que querés eliminar "${deleteTarget?.name}"? Esta acción no se puede deshacer.`}
+        confirmLabel="Eliminar"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   )
 }

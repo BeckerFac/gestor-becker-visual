@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -11,6 +14,8 @@ export const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [showRemoveCertsConfirm, setShowRemoveCertsConfirm] = useState(false)
+  const [removingCerts, setRemovingCerts] = useState(false)
   const [form, setForm] = useState({
     name: '', cuit: '', address: '', city: '', province: '',
     phone: '', email: '', afip_env: 'homologacion',
@@ -59,9 +64,9 @@ export const Settings: React.FC = () => {
     setSuccess(null)
     try {
       await api.updateMyCompany(form)
-      setSuccess('Datos de la empresa actualizados correctamente')
+      toast.success('Datos de la empresa actualizados correctamente')
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
@@ -79,6 +84,7 @@ export const Settings: React.FC = () => {
       const certContent = await certFile.text()
       const keyContent = await keyFile.text()
       await api.uploadAfipCertificates(certContent, keyContent)
+      toast.success('Certificados AFIP guardados correctamente')
       setCertSuccess('Certificados AFIP guardados correctamente')
       setHasCert(true)
       setHasKey(true)
@@ -93,15 +99,24 @@ export const Settings: React.FC = () => {
     }
   }
 
-  const handleRemoveCertificates = async () => {
-    if (!confirm('Eliminar los certificados AFIP? Las facturas no se podrán autorizar en modo producción.')) return
+  const handleRemoveCertificates = () => {
+    setShowRemoveCertsConfirm(true)
+  }
+
+  const confirmRemoveCertificates = async () => {
+    setRemovingCerts(true)
     try {
       await api.removeAfipCertificates()
       setHasCert(false)
       setHasKey(false)
+      toast.success('Certificados eliminados correctamente')
       setCertSuccess('Certificados eliminados')
     } catch (e: any) {
+      toast.error(e.message)
       setCertError(e.message)
+    } finally {
+      setRemovingCerts(false)
+      setShowRemoveCertsConfirm(false)
     }
   }
 
@@ -122,7 +137,7 @@ export const Settings: React.FC = () => {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-gray-900">Configuracion</h1>
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando...</p></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={2} /></CardContent></Card>
       </div>
     )
   }
@@ -314,6 +329,17 @@ export const Settings: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={showRemoveCertsConfirm}
+        title="Eliminar Certificados AFIP"
+        message="¿Eliminar los certificados AFIP? Las facturas no se podran autorizar en modo produccion."
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={removingCerts}
+        onConfirm={confirmRemoveCertificates}
+        onCancel={() => setShowRemoveCertsConfirm(false)}
+      />
     </div>
   )
 }

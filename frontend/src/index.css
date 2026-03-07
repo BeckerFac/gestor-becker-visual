@@ -6,6 +6,16 @@
   html {
     @apply scroll-smooth;
   }
+
+  /* Global focus ring for keyboard accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+  }
+
+  /* Hide focus ring for mouse clicks */
+  *:focus:not(:focus-visible) {
+    @apply outline-none ring-0;
+  }
 }
 
 /* Animations for forms, expandable rows, modals */
@@ -36,11 +46,21 @@
   animation: scaleIn 0.15s ease-out;
 }
 
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn,
   .animate-slideDown,
-  .animate-scaleIn {
+  .animate-scaleIn,
+  .animate-slide-in {
     animation: none !important;
   }
 }

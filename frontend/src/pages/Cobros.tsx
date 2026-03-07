@@ -2,10 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
 interface Cobro {
@@ -52,6 +55,8 @@ export const Cobros: React.FC = () => {
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
+  const [deleteTarget, setDeleteTarget] = useState<Cobro | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const [form, setForm] = useState({
     enterprise_id: '', order_id: '', invoice_id: '',
@@ -106,21 +111,27 @@ export const Cobros: React.FC = () => {
       })
       setShowForm(false)
       setForm({ enterprise_id: '', order_id: '', invoice_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
+      toast.success('Cobro registrado correctamente')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = async (cobro: Cobro) => {
-    if (!confirm('¿Eliminar este cobro? Esta acción no se puede deshacer.')) return
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteCobro(cobro.id)
+      await api.deleteCobro(deleteTarget.id)
+      toast.success('Cobro eliminado')
+      setDeleteTarget(null)
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -310,7 +321,7 @@ export const Cobros: React.FC = () => {
 
       {/* Table */}
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando cobros...</p></CardContent></Card>
+        <SkeletonTable rows={6} cols={5} />
       ) : filteredCobros.length === 0 ? (
         <EmptyState
           title={isFiltered ? 'No hay cobros con estos filtros' : 'No hay cobros registrados'}
@@ -350,7 +361,7 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3 text-sm text-gray-600">{cobro.bank_name || '-'}</td>
                     <td className="px-4 py-3">{cobro.reference ? <span className="font-mono text-xs">{cobro.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => handleDelete(cobro)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      <button onClick={() => setDeleteTarget(cobro)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
                     </td>
                   </tr>
                 ))}
@@ -367,6 +378,17 @@ export const Cobros: React.FC = () => {
           />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar cobro"
+        message="¿Eliminar este cobro? Esta accion no se puede deshacer."
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -3,7 +3,12 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { DataTable } from '@/components/shared/DataTable'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
+import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 
 interface Product {
@@ -46,6 +51,8 @@ export const Products: React.FC = () => {
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [lastEdited, setLastEdited] = useState<string>('')
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const loadProducts = async () => {
     try {
@@ -124,14 +131,17 @@ export const Products: React.FC = () => {
       }
       if (editingId) {
         await api.updateProduct(editingId, payload)
+        toast.success('Producto actualizado')
       } else {
         await api.createProduct(payload)
+        toast.success('Producto creado')
       }
       setShowForm(false)
       setEditingId(null)
       setForm(emptyForm)
       await loadProducts()
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -154,13 +164,18 @@ export const Products: React.FC = () => {
     setShowForm(true)
   }
 
-  const handleDelete = async (product: Product) => {
-    if (!confirm(`¿Eliminar producto "${product.name}"?`)) return
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteProduct(product.id)
+      await api.deleteProduct(deleteTarget.id)
+      toast.success('Producto eliminado')
       await loadProducts()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -191,7 +206,7 @@ export const Products: React.FC = () => {
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Product) => (
       <div className="flex gap-2">
         <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
-        <button onClick={(e) => { e.stopPropagation(); handleDelete(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
       </div>
     )},
   ]
@@ -203,9 +218,34 @@ export const Products: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Productos</h1>
           <p className="text-sm text-gray-500 mt-1">{products.length} productos registrados</p>
         </div>
-        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-          {showForm ? 'Cancelar' : '+ Nuevo Producto'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportCSVButton
+            data={filtered.map(p => ({
+              sku: p.sku,
+              nombre: p.name,
+              tipo: PRODUCT_TYPES.find(t => t.value === p.product_type)?.label || p.product_type || '-',
+              costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
+              margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
+              iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
+              precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
+              estado: p.active ? 'Activo' : 'Inactivo',
+            }))}
+            columns={[
+              { key: 'sku', label: 'SKU' },
+              { key: 'nombre', label: 'Producto' },
+              { key: 'tipo', label: 'Tipo' },
+              { key: 'costo', label: 'Costo' },
+              { key: 'margen', label: 'Margen' },
+              { key: 'iva', label: 'IVA' },
+              { key: 'precio_final', label: 'Precio Final' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="productos"
+          />
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+            {showForm ? 'Cancelar' : '+ Nuevo Producto'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -300,10 +340,26 @@ export const Products: React.FC = () => {
       <Input placeholder="Buscar por nombre, SKU o código de barras..." value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando productos...</p></CardContent></Card>
+        <SkeletonTable rows={6} cols={6} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title={search ? 'Sin resultados' : 'Sin productos'}
+          description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
+          action={!search ? { label: '+ Nuevo Producto', onClick: () => setShowForm(true) } : undefined}
+        />
       ) : (
         <DataTable columns={columns} data={filtered} />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar producto"
+        message={`¿Seguro que querés eliminar "${deleteTarget?.name}"? Esta acción no se puede deshacer.`}
+        confirmLabel="Eliminar"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   )
 }

@@ -21,6 +21,7 @@ import { Purchases } from '@/pages/Purchases'
 import { Cobros } from '@/pages/Cobros'
 import { Pagos } from '@/pages/Pagos'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
+import { ToastContainer } from '@/components/ui/Toast'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -53,6 +54,7 @@ function App() {
 
   return (
     <Router>
+      <ToastContainer />
       <Routes>
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
 

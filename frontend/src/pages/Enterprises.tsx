@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
+import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 
 interface Enterprise {
@@ -63,6 +68,8 @@ export const Enterprises: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'enterprise'; item: Enterprise } | { type: 'contact'; item: Contact } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const loadData = async () => {
     try {
@@ -104,15 +111,17 @@ export const Enterprises: React.FC = () => {
     try {
       if (editingEnterpriseId) {
         await api.updateEnterprise(editingEnterpriseId, enterpriseForm)
+        toast.success('Empresa actualizada correctamente')
       } else {
         await api.createEnterprise(enterpriseForm)
+        toast.success('Empresa creada correctamente')
       }
       setShowEnterpriseForm(false)
       setEditingEnterpriseId(null)
       setEnterpriseForm(emptyEnterpriseForm)
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
@@ -130,14 +139,32 @@ export const Enterprises: React.FC = () => {
     setShowContactForm(false)
   }
 
-  const handleDeleteEnterprise = async (ent: Enterprise) => {
-    if (!confirm(`¿Eliminar empresa "${ent.name}"? Los contactos se desvinculan pero no se eliminan.`)) return
+  const handleDeleteEnterprise = (ent: Enterprise) => {
+    setDeleteTarget({ type: 'enterprise', item: ent })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteEnterprise(ent.id)
-      if (expandedId === ent.id) setExpandedId(null)
+      if (deleteTarget.type === 'enterprise') {
+        await api.deleteEnterprise(deleteTarget.item.id)
+        if (expandedId === deleteTarget.item.id) setExpandedId(null)
+        toast.success('Empresa eliminada correctamente')
+      } else {
+        await api.deleteCustomer(deleteTarget.item.id)
+        toast.success('Contacto eliminado correctamente')
+      }
       await loadData()
+      if (expandedId && deleteTarget.type === 'contact') {
+        const detail = await api.getEnterprise(expandedId)
+        setExpandedContacts(detail.contacts || [])
+      }
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -177,8 +204,10 @@ export const Enterprises: React.FC = () => {
       }
       if (editingContactId) {
         await api.updateCustomer(editingContactId, payload)
+        toast.success('Contacto actualizado correctamente')
       } else {
         await api.createCustomer(payload)
+        toast.success('Contacto creado correctamente')
       }
       setShowContactForm(false)
       setEditingContactId(null)
@@ -190,31 +219,21 @@ export const Enterprises: React.FC = () => {
         setExpandedContacts(detail.contacts || [])
       }
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDeleteContact = async (contact: Contact) => {
-    if (!confirm(`¿Eliminar contacto "${contact.name}"?`)) return
-    try {
-      await api.deleteCustomer(contact.id)
-      await loadData()
-      if (expandedId) {
-        const detail = await api.getEnterprise(expandedId)
-        setExpandedContacts(detail.contacts || [])
-      }
-    } catch (e: any) {
-      setError(e.message)
-    }
+  const handleDeleteContact = (contact: Contact) => {
+    setDeleteTarget({ type: 'contact', item: contact })
   }
 
   const handleGenerateCode = async (contact: Contact) => {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase()
     try {
       await api.updateCustomer(contact.id, { access_code: code })
-      alert(`Código de acceso generado para ${contact.name}: ${code}`)
+      toast.success(`Código de acceso generado para ${contact.name}: ${code}`)
       await loadData()
       if (expandedId) {
         const detail = await api.getEnterprise(expandedId)
@@ -238,9 +257,38 @@ export const Enterprises: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Empresas</h1>
           <p className="text-sm text-gray-500 mt-1">{enterprises.length} empresa{enterprises.length !== 1 ? 's' : ''} · {contacts.length} contacto{contacts.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button variant={showEnterpriseForm ? 'danger' : 'primary'} onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
-          {showEnterpriseForm ? 'Cancelar' : '+ Nueva Empresa'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportCSVButton
+            data={filteredEnterprises.map(e => ({
+              nombre: e.name,
+              cuit: e.cuit || '-',
+              direccion: e.address || '-',
+              ciudad: e.city || '-',
+              provincia: e.province || '-',
+              telefono: e.phone || '-',
+              email: e.email || '-',
+              condicion_iva: e.tax_condition || '-',
+              contactos: e.contact_count,
+              estado: e.status === 'active' ? 'Activa' : 'Inactiva',
+            }))}
+            columns={[
+              { key: 'nombre', label: 'Empresa' },
+              { key: 'cuit', label: 'CUIT' },
+              { key: 'direccion', label: 'Direccion' },
+              { key: 'ciudad', label: 'Ciudad' },
+              { key: 'provincia', label: 'Provincia' },
+              { key: 'telefono', label: 'Telefono' },
+              { key: 'email', label: 'Email' },
+              { key: 'condicion_iva', label: 'Cond. IVA' },
+              { key: 'contactos', label: 'Contactos' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="empresas"
+          />
+          <Button variant={showEnterpriseForm ? 'danger' : 'primary'} onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
+            {showEnterpriseForm ? 'Cancelar' : '+ Nueva Empresa'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -319,7 +367,15 @@ export const Enterprises: React.FC = () => {
       <Input placeholder="Buscar empresa por nombre o CUIT..." value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando empresas...</p></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={4} /></CardContent></Card>
+      ) : filteredEnterprises.length === 0 ? (
+        <Card><CardContent>
+          <EmptyState
+            title="Sin empresas"
+            description={search ? 'No se encontraron empresas con esa busqueda' : 'Crea la primera empresa para empezar'}
+            action={!search ? { label: '+ Nueva Empresa', onClick: () => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(true) } } : undefined}
+          />
+        </CardContent></Card>
       ) : (
         <div className="space-y-3">
           {filteredEnterprises.map(ent => (
@@ -440,6 +496,21 @@ export const Enterprises: React.FC = () => {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={deleteTarget?.type === 'enterprise' ? 'Eliminar Empresa' : 'Eliminar Contacto'}
+        message={
+          deleteTarget?.type === 'enterprise'
+            ? `¿Eliminar empresa "${deleteTarget.item.name}"? Los contactos se desvinculan pero no se eliminan.`
+            : `¿Eliminar contacto "${deleteTarget?.item.name}"?`
+        }
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

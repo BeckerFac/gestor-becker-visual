@@ -3,6 +3,10 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/services/api'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { SkeletonPage } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -28,25 +32,6 @@ interface SearchResults {
   invoices: any[]
 }
 
-const ORDER_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  in_production: { label: 'En producción', color: 'bg-blue-100 text-blue-800' },
-  en_produccion: { label: 'En producción', color: 'bg-blue-100 text-blue-800' },
-  ready: { label: 'Listo', color: 'bg-purple-100 text-purple-800' },
-  terminado: { label: 'Terminado', color: 'bg-green-100 text-green-800' },
-  delivered: { label: 'Entregado', color: 'bg-green-100 text-green-800' },
-  entregado: { label: 'Entregado', color: 'bg-emerald-100 text-emerald-800' },
-  cancelled: { label: 'Cancelado', color: 'bg-red-100 text-red-800' },
-  cancelado: { label: 'Cancelado', color: 'bg-red-100 text-red-800' },
-}
-
-const INVOICE_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: 'Borrador', color: 'bg-gray-100 text-gray-800' },
-  pending: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  authorized: { label: 'Autorizada', color: 'bg-green-100 text-green-800' },
-  cancelled: { label: 'Anulada', color: 'bg-red-100 text-red-800' },
-}
 
 export const Dashboard: React.FC = () => {
   const company = useAuthStore((state) => state.company)
@@ -54,6 +39,8 @@ export const Dashboard: React.FC = () => {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [salesData, setSalesData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState('mes')
+  const [periodDates, setPeriodDates] = useState<{ from: string; to: string }>({ from: '', to: '' })
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -68,7 +55,7 @@ export const Dashboard: React.FC = () => {
       try {
         setLoading(true)
         const [dashRes, salesRes] = await Promise.all([
-          api.getDashboard().catch(() => ({
+          api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch(() => ({
             sales_month: 0, collections_pending: 0,
             cheques_pending_count: 0, cheques_pending_amount: 0,
             orders_unpaid_count: 0, orders_unpaid_amount: 0,
@@ -83,7 +70,7 @@ export const Dashboard: React.FC = () => {
       }
     }
     loadData()
-  }, [])
+  }, [periodDates])
 
   // Close search results on click outside
   useEffect(() => {
@@ -142,16 +129,7 @@ export const Dashboard: React.FC = () => {
   }
 
   if (loading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map(i => (
-            <Card key={i}><CardContent className="pt-6"><div className="animate-pulse h-16 bg-gray-200 rounded" /></CardContent></Card>
-          ))}
-        </div>
-      </div>
-    )
+    return <SkeletonPage />
   }
 
   const kpis = [
@@ -336,6 +314,9 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Period Selector */}
+      <PeriodSelector selected={period} onChange={p => { setPeriod(p.value); setPeriodDates({ from: p.dateFrom, to: p.dateTo }) }} />
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi, idx) => (
@@ -378,9 +359,7 @@ export const Dashboard: React.FC = () => {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex items-center justify-center h-40 text-gray-400">
-              <p>No hay datos de ventas para mostrar</p>
-            </div>
+            <EmptyState title="Sin datos de ventas" description="Las ventas del periodo aparecerán acá" />
           )}
         </CardContent>
       </Card>
@@ -403,9 +382,7 @@ export const Dashboard: React.FC = () => {
           <CardContent>
             {(dashboard?.recent_orders?.length || 0) > 0 ? (
               <div className="space-y-3">
-                {dashboard!.recent_orders.map((order: any) => {
-                  const s = ORDER_STATUS_MAP[order.status] || { label: order.status, color: 'bg-gray-100 text-gray-800' }
-                  return (
+                {dashboard!.recent_orders.map((order: any) => (
                     <div key={order.id} className="flex items-center justify-between py-2 border-b last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -415,18 +392,17 @@ export const Dashboard: React.FC = () => {
                           <span className="text-sm text-gray-700 truncate">{order.customer_name || 'Sin cliente'}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.color}`}>{s.label}</span>
-                          {order.payment_status === 'pagado' ? (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Pagado</span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">No pagado</span>
-                          )}
+                          <StatusBadge status={order.status} />
+                          <StatusBadge
+                            status={order.payment_status === 'pagado' ? 'pagado' : 'no_pagado'}
+                            label={order.payment_status === 'pagado' ? 'Pagado' : 'No pagado'}
+                            color={order.payment_status === 'pagado' ? 'green' : 'red'}
+                          />
                         </div>
                       </div>
                       <span className="font-bold text-gray-900 ml-3">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
                     </div>
-                  )
-                })}
+                ))}
               </div>
             ) : (
               <p className="text-center py-6 text-gray-400">No hay pedidos aún</p>
@@ -450,9 +426,7 @@ export const Dashboard: React.FC = () => {
           <CardContent>
             {(dashboard?.recent_invoices?.length || 0) > 0 ? (
               <div className="space-y-3">
-                {dashboard!.recent_invoices.map((inv: any) => {
-                  const s = INVOICE_STATUS_MAP[inv.status] || { label: inv.status, color: 'bg-gray-100 text-gray-800' }
-                  return (
+                {dashboard!.recent_invoices.map((inv: any) => (
                     <div key={inv.id} className="flex items-center justify-between py-2 border-b last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -461,14 +435,13 @@ export const Dashboard: React.FC = () => {
                           <span className="text-sm text-gray-700 truncate">{inv.customer_name || '-'}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.color}`}>{s.label}</span>
+                          <StatusBadge status={inv.status} />
                           <span className="text-xs text-gray-500">{formatDate(inv.invoice_date)}</span>
                         </div>
                       </div>
                       <span className="font-bold text-gray-900 ml-3">{formatCurrency(parseFloat(inv.total_amount || '0'))}</span>
                     </div>
-                  )
-                })}
+                ))}
               </div>
             ) : (
               <p className="text-center py-6 text-gray-400">No hay facturas aún</p>

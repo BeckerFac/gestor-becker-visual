@@ -11,6 +11,8 @@ import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { MultiSelectFilter } from '@/components/shared/MultiSelectFilter'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 
@@ -154,6 +156,8 @@ export const Orders: React.FC = () => {
   const [invoiceType, setInvoiceType] = useState<Record<string, string>>({})
   const [invoiceQtys, setInvoiceQtys] = useState<Record<string, Record<string, number>>>({})
   const [creatingInvoice, setCreatingInvoice] = useState<Record<string, boolean>>({})
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deletingOrder, setDeletingOrder] = useState(false)
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string[]>([])
@@ -344,8 +348,10 @@ export const Orders: React.FC = () => {
       }
       if (editingOrderId) {
         await api.updateOrder(editingOrderId, payload)
+        toast.success('Pedido actualizado')
       } else {
         await api.createOrder(payload)
+        toast.success('Pedido creado')
       }
       setShowForm(false)
       setEditingOrderId(null)
@@ -356,6 +362,7 @@ export const Orders: React.FC = () => {
       setFormItems([emptyFormItem()])
       await loadData()
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -419,13 +426,18 @@ export const Orders: React.FC = () => {
     }
   }
 
-  const handleDeleteOrder = async (orderId: string) => {
-    if (!confirm('Estas seguro de eliminar este pedido? Esta accion no se puede deshacer.')) return
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return
+    setDeletingOrder(true)
     try {
-      await api.deleteOrder(orderId)
+      await api.deleteOrder(deleteTarget)
+      toast.success('Pedido eliminado')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeletingOrder(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -1021,7 +1033,7 @@ export const Orders: React.FC = () => {
                             Editar
                           </button>
                           <button
-                            onClick={e => { e.stopPropagation(); handleDeleteOrder(order.id) }}
+                            onClick={e => { e.stopPropagation(); setDeleteTarget(order.id) }}
                             className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
                             title="Eliminar pedido"
                           >
@@ -1406,6 +1418,16 @@ export const Orders: React.FC = () => {
           onDownloadPdf={invoicePreview.downloadPdf}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar pedido"
+        message="¿Seguro que querés eliminar este pedido? Esta acción no se puede deshacer."
+        confirmLabel="Eliminar"
+        onConfirm={handleDeleteOrder}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deletingOrder}
+      />
     </div>
   )
 }

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -9,6 +11,7 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { toast } from '@/hooks/useToast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,12 +262,14 @@ export const Quotes: React.FC = () => {
           vat_rate: parseFloat(item.vat_rate) || 21,
         })),
       })
+      toast.success('Cotizacion creada correctamente')
       setShowForm(false)
       setForm({ title: '', customer_id: '', valid_until: '', notes: '' })
       setFormEnterpriseId('')
       setItems([])
       await loadQuotes(currentPage)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -297,11 +302,15 @@ export const Quotes: React.FC = () => {
       setStatusMessage(null)
       const result = await api.updateQuoteStatus(quoteId, newStatus)
       if (result.order) {
+        toast.success(`Pedido #${String(result.order.order_number).padStart(4, '0')} creado automaticamente`)
         setStatusMessage(`Pedido #${String(result.order.order_number).padStart(4, '0')} creado automaticamente`)
         setTimeout(() => setStatusMessage(null), 5000)
+      } else {
+        toast.success('Estado actualizado')
       }
       await loadQuotes(currentPage)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setUpdatingStatusId(null)
@@ -582,7 +591,7 @@ export const Quotes: React.FC = () => {
       {loading ? (
         <Card>
           <CardContent>
-            <p className="text-center py-10 text-gray-500 text-sm">Cargando cotizaciones...</p>
+            <SkeletonTable rows={6} cols={9} />
           </CardContent>
         </Card>
       ) : quotes.length === 0 ? (

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -8,6 +11,7 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { toast } from '@/hooks/useToast'
 
 // ---- Types ----
 
@@ -145,6 +149,10 @@ export const Invoices: React.FC = () => {
   const [formItems, setFormItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
   const [productSearch, setProductSearch] = useState('')
   const [productSearchIdx, setProductSearchIdx] = useState<number | null>(null)
+
+  // Confirm dialog for unlink
+  const [unlinkTarget, setUnlinkTarget] = useState<string | null>(null)
+  const [unlinking, setUnlinking] = useState(false)
 
   // Link/Unlink order per invoice row
   const [linkDropdownInvoiceId, setLinkDropdownInvoiceId] = useState<string | null>(null)
@@ -285,9 +293,11 @@ export const Invoices: React.FC = () => {
           vat_rate: vistaMode === 'interno' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
         })),
       })
+      toast.success(vistaMode === 'interno' ? 'Comprobante interno creado' : 'Factura creada correctamente')
       closeForm()
       await loadInvoices()
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -349,14 +359,20 @@ export const Invoices: React.FC = () => {
     }
   }
 
-  const handleUnlinkOrder = async (invoiceId: string) => {
-    if (!confirm('¿Desvincular el pedido de esta factura?')) return
+  const handleUnlinkOrder = async () => {
+    if (!unlinkTarget) return
+    setUnlinking(true)
     setError(null)
     try {
-      await api.unlinkOrderFromInvoice(invoiceId)
+      await api.unlinkOrderFromInvoice(unlinkTarget)
+      toast.success('Pedido desvinculado correctamente')
       await Promise.all([loadInvoices(), loadFormData()])
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
+    } finally {
+      setUnlinking(false)
+      setUnlinkTarget(null)
     }
   }
 
@@ -902,7 +918,7 @@ export const Invoices: React.FC = () => {
       {loading ? (
         <Card>
           <CardContent>
-            <p className="text-center py-10 text-gray-500">Cargando facturas...</p>
+            <SkeletonTable rows={6} cols={vistaMode === 'fiscal' ? 9 : 8} />
           </CardContent>
         </Card>
       ) : filteredInvoices.length === 0 ? (
@@ -983,7 +999,7 @@ export const Invoices: React.FC = () => {
                                 #{String(invoice.order.order_number).padStart(4, '0')}
                               </span>
                               <button
-                                onClick={() => handleUnlinkOrder(invoice.id)}
+                                onClick={() => setUnlinkTarget(invoice.id)}
                                 className="text-xs text-red-500 hover:text-red-700 hover:underline"
                                 title="Desvincular pedido"
                               >
@@ -1063,22 +1079,16 @@ export const Invoices: React.FC = () => {
                       {/* Estado Pago - only interno */}
                       {vistaMode === 'interno' && (
                         <td className="px-4 py-3 text-center">
-                          {(() => {
-                            const ps = PAYMENT_STATUS_MAP[invoice.payment_status || ''] || { label: invoice.payment_status || '-', color: 'bg-gray-100 text-gray-800' }
-                            return (
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${ps.color}`}>
-                                {ps.label}
-                              </span>
-                            )
-                          })()}
+                          <StatusBadge
+                            status={invoice.payment_status || ''}
+                            label={PAYMENT_STATUS_MAP[invoice.payment_status || '']?.label || invoice.payment_status || '-'}
+                          />
                         </td>
                       )}
 
                       {/* Estado */}
                       <td className="px-4 py-3 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusMeta.color}`}>
-                          {statusMeta.label}
-                        </span>
+                        <StatusBadge status={invoice.status} label={statusMeta.label} />
                       </td>
 
                       {/* CAE - only fiscal */}
@@ -1134,6 +1144,17 @@ export const Invoices: React.FC = () => {
           />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!unlinkTarget}
+        title="Desvincular pedido"
+        message="¿Desvincular el pedido de esta factura?"
+        confirmLabel="Desvincular"
+        variant="warning"
+        loading={unlinking}
+        onConfirm={handleUnlinkOrder}
+        onCancel={() => setUnlinkTarget(null)}
+      />
     </div>
   )
 }

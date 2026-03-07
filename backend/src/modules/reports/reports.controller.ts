@@ -4,7 +4,9 @@ import { reportsService } from './reports.service';
 
 export class ReportsController {
   async getDashboard(req: AuthRequest, res: Response) {
-    const data = await reportsService.getDashboard(req.user!.company_id);
+    const dateFrom = req.query.date_from as string | undefined;
+    const dateTo = req.query.date_to as string | undefined;
+    const data = await reportsService.getDashboard(req.user!.company_id, dateFrom, dateTo);
     res.json(data);
   }
 

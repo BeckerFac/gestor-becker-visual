@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
+import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 
 interface StockItem {
@@ -55,11 +59,12 @@ export const Inventory: React.FC = () => {
         quantity: parseFloat(form.quantity),
         notes: form.notes || null,
       })
+      toast.success('Movimiento de stock registrado correctamente')
       setShowForm(false)
       setForm({ product_id: '', movement_type: 'purchase', quantity: '', notes: '' })
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
@@ -95,9 +100,34 @@ export const Inventory: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Inventario</h1>
           <p className="text-sm text-gray-500 mt-1">{stock.length} productos en stock</p>
         </div>
-        <Button variant="primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Movimiento de Stock'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportCSVButton
+            data={filtered.map(s => {
+              const qty = parseFloat(s.quantity || '0')
+              const min = parseFloat(s.min_level || '0')
+              return {
+                sku: s.product?.sku || '-',
+                producto: s.product?.name || '-',
+                deposito: s.warehouse?.name || 'Principal',
+                cantidad: qty,
+                minimo: min,
+                estado: qty <= 0 ? 'Sin Stock' : qty <= min ? 'Stock Bajo' : 'OK',
+              }
+            })}
+            columns={[
+              { key: 'sku', label: 'SKU' },
+              { key: 'producto', label: 'Producto' },
+              { key: 'deposito', label: 'Deposito' },
+              { key: 'cantidad', label: 'Cantidad' },
+              { key: 'minimo', label: 'Minimo' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="inventario"
+          />
+          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Movimiento de Stock'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -162,7 +192,15 @@ export const Inventory: React.FC = () => {
       <Input placeholder="Buscar por producto o SKU..." value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando inventario...</p></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={4} /></CardContent></Card>
+      ) : filtered.length === 0 ? (
+        <Card><CardContent>
+          <EmptyState
+            title={search ? 'Sin resultados' : 'Sin productos en stock'}
+            description={search ? 'No se encontraron productos con esa busqueda' : 'Registra un movimiento de stock para empezar'}
+            action={!search ? { label: '+ Movimiento de Stock', onClick: () => setShowForm(true) } : undefined}
+          />
+        </CardContent></Card>
       ) : (
         <DataTable columns={columns} data={filtered} />
       )}

@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -9,6 +12,7 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { toast } from '@/hooks/useToast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,15 +90,6 @@ const CSV_COLUMNS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getStatusBadge(status: string) {
-  const found = STATUS_OPTIONS.find(o => o.value === status)
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${found?.color ?? 'bg-gray-100 text-gray-700'}`}>
-      {found?.label ?? status}
-    </span>
-  )
-}
-
 function getTipoBadge(tipo: string) {
   const found = TIPO_OPTIONS.find(o => o.value === tipo)
   return (
@@ -135,6 +130,10 @@ export const Remitos: React.FC = () => {
   const [error, setError]       = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+
+  // Confirm dialog for delete
+  const [deleteTarget, setDeleteTarget] = useState<Remito | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -281,11 +280,13 @@ export const Remitos: React.FC = () => {
         tipo:             form.tipo,
         items:            validItems,
       })
+      toast.success('Remito creado correctamente')
       setShowForm(false)
       setForm({ ...EMPTY_FORM, date: new Date().toISOString().split('T')[0] })
       setItems([{ ...EMPTY_ITEM }])
       await loadRemitos(currentPage)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setSaving(false)
@@ -297,21 +298,29 @@ export const Remitos: React.FC = () => {
   const handleStatusChange = async (remitoId: string, newStatus: string) => {
     try {
       await api.updateRemitoStatus(remitoId, newStatus)
+      toast.success('Estado actualizado')
       await loadRemitos(currentPage)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     }
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
 
-  const handleDeleteRemito = async (remitoId: string) => {
-    if (!confirm('¿Eliminar este remito? Esta accion no se puede deshacer.')) return
+  const handleDeleteRemito = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deleteRemito(remitoId)
+      await api.deleteRemito(deleteTarget.id)
+      toast.success('Remito eliminado correctamente')
       await loadRemitos(currentPage)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -719,7 +728,7 @@ export const Remitos: React.FC = () => {
       {loading ? (
         <Card>
           <CardContent>
-            <p className="text-center py-10 text-gray-500 text-sm">Cargando remitos...</p>
+            <SkeletonTable rows={6} cols={9} />
           </CardContent>
         </Card>
       ) : remitos.length === 0 ? (
@@ -829,7 +838,7 @@ export const Remitos: React.FC = () => {
                           </button>
                         )}
                         <button
-                          onClick={() => handleDeleteRemito(remito.id)}
+                          onClick={() => setDeleteTarget(remito)}
                           className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"
                           title="Eliminar remito"
                         >
@@ -851,6 +860,17 @@ export const Remitos: React.FC = () => {
           />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar remito"
+        message={`¿Eliminar el remito ${deleteTarget ? fmtRemitoNumber(deleteTarget.remito_number) : ''}? Esta accion no se puede deshacer.`}
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteRemito}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

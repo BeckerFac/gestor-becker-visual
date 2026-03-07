@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 
 interface Cheque {
@@ -23,6 +27,19 @@ interface Cheque {
 }
 
 interface Customer { id: string; name: string }
+
+function getDueDateAlert(dueDate: string, status: string): { label: string; className: string } | null {
+  if (status !== 'a_cobrar') return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const due = new Date(dueDate + 'T00:00:00')
+  const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays < 0) return { label: `Vencido (${Math.abs(diffDays)}d)`, className: 'bg-red-100 text-red-700 border border-red-300' }
+  if (diffDays === 0) return { label: 'Vence hoy', className: 'bg-red-100 text-red-700 border border-red-300 animate-pulse' }
+  if (diffDays <= 3) return { label: `Vence en ${diffDays}d`, className: 'bg-orange-100 text-orange-700 border border-orange-300' }
+  if (diffDays <= 7) return { label: `Vence en ${diffDays}d`, className: 'bg-yellow-100 text-yellow-700 border border-yellow-300' }
+  return null
+}
 
 export const Cheques: React.FC = () => {
   const [cheques, setCheques] = useState<Cheque[]>([])
@@ -76,11 +93,12 @@ export const Cheques: React.FC = () => {
         order_id: form.order_id || null,
         notes: form.notes || null,
       })
+      toast.success('Cheque cargado correctamente')
       setShowForm(false)
       setForm({ number: '', bank: '', drawer: '', amount: '', issue_date: '', due_date: '', customer_id: '', order_id: '', notes: '' })
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
@@ -90,9 +108,10 @@ export const Cheques: React.FC = () => {
     try {
       const newStatus = currentStatus === 'a_cobrar' ? 'cobrado' : 'a_cobrar'
       await api.updateChequeStatus(chequeId, newStatus)
+      toast.success(newStatus === 'cobrado' ? 'Cheque marcado como cobrado' : 'Cheque vuelto a pendiente')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     }
   }
 
@@ -104,7 +123,15 @@ export const Cheques: React.FC = () => {
       <span className="font-bold text-green-700">{formatCurrency(parseFloat(v || '0'))}</span>
     )},
     { key: 'issue_date' as const, label: 'Fecha Emisión', render: (v: any) => formatDate(v) },
-    { key: 'due_date' as const, label: 'Fecha Cobro', render: (v: any) => formatDate(v) },
+    { key: 'due_date' as const, label: 'Fecha Cobro', render: (v: any, row: Cheque) => {
+      const alert = getDueDateAlert(v, row.status)
+      return (
+        <div className="flex items-center gap-1.5">
+          <span>{formatDate(v)}</span>
+          {alert && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${alert.className}`}>{alert.label}</span>}
+        </div>
+      )
+    }},
     { key: 'customer_name' as const, label: 'Cliente', render: (v: any) => v || '-' },
     { key: 'status' as const, label: 'Estado', render: (v: any) => (
       v === 'cobrado'
@@ -130,11 +157,38 @@ export const Cheques: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Cheques</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestión de cheques a cobrar</p>
+          <p className="text-sm text-gray-500 mt-1">Gestion de cheques a cobrar</p>
         </div>
-        <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExportCSVButton
+            data={cheques.map(c => ({
+              numero: c.number,
+              banco: c.bank,
+              librador: c.drawer,
+              monto: parseFloat(c.amount || '0'),
+              emision: formatDate(c.issue_date),
+              cobro: formatDate(c.due_date),
+              cliente: c.customer_name || '-',
+              estado: c.status === 'cobrado' ? 'Cobrado' : 'A Cobrar',
+              notas: c.notes || '-',
+            }))}
+            columns={[
+              { key: 'numero', label: 'Numero' },
+              { key: 'banco', label: 'Banco' },
+              { key: 'librador', label: 'Librador' },
+              { key: 'monto', label: 'Monto' },
+              { key: 'emision', label: 'Fecha Emision' },
+              { key: 'cobro', label: 'Fecha Cobro' },
+              { key: 'cliente', label: 'Cliente' },
+              { key: 'estado', label: 'Estado' },
+              { key: 'notas', label: 'Notas' },
+            ]}
+            filename="cheques"
+          />
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -142,6 +196,25 @@ export const Cheques: React.FC = () => {
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
         </div>
       )}
+
+      {/* Vencimiento alert banner */}
+      {(() => {
+        const alertCheques = cheques.filter(c => c.status === 'a_cobrar' && getDueDateAlert(c.due_date, c.status))
+        const vencidos = alertCheques.filter(c => { const d = new Date(c.due_date + 'T00:00:00'); d.setHours(0,0,0,0); const t = new Date(); t.setHours(0,0,0,0); return d < t })
+        const porVencer = alertCheques.filter(c => !vencidos.includes(c))
+        if (alertCheques.length === 0) return null
+        return (
+          <div className={`px-4 py-3 rounded-lg flex items-center gap-3 text-sm font-medium ${
+            vencidos.length > 0 ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-yellow-50 border border-yellow-200 text-yellow-800'
+          }`}>
+            <span className="text-lg">{vencidos.length > 0 ? '!' : '!'}</span>
+            <span>
+              {vencidos.length > 0 && <>{vencidos.length} cheque{vencidos.length > 1 ? 's' : ''} vencido{vencidos.length > 1 ? 's' : ''}. </>}
+              {porVencer.length > 0 && <>{porVencer.length} cheque{porVencer.length > 1 ? 's' : ''} por vencer en los proximos 7 dias.</>}
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -215,9 +288,15 @@ export const Cheques: React.FC = () => {
 
       {/* Table */}
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando cheques...</p></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={4} /></CardContent></Card>
       ) : cheques.length === 0 ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">No hay cheques registrados</p></CardContent></Card>
+        <Card><CardContent>
+          <EmptyState
+            title="Sin cheques registrados"
+            description="Carga el primer cheque para empezar a gestionarlos"
+            action={{ label: '+ Nuevo Cheque', onClick: () => setShowForm(true) }}
+          />
+        </CardContent></Card>
       ) : (
         <DataTable columns={columns} data={cheques} />
       )}

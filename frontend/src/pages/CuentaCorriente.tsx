@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
+import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
 interface EnterpriseSaldo {
@@ -135,6 +137,7 @@ export const CuentaCorriente: React.FC = () => {
       const data = await api.getCuentaCorrienteResumen()
       setResumen(data || [])
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setLoading(false)
@@ -157,6 +160,7 @@ export const CuentaCorriente: React.FC = () => {
       const data = await api.getCuentaCorrienteDetalle(enterpriseId)
       setDetalle(data)
     } catch (e: any) {
+      toast.error(e.message)
       setError(e.message)
     } finally {
       setLoadingDetalle(false)
@@ -255,11 +259,7 @@ export const CuentaCorriente: React.FC = () => {
       )}
 
       {loading ? (
-        <Card>
-          <CardContent>
-            <p className="text-center py-8 text-gray-500">Cargando cuentas...</p>
-          </CardContent>
-        </Card>
+        <SkeletonTable rows={6} cols={5} />
       ) : resumen.length === 0 ? (
         <EmptyState
           title="Sin movimientos"
@@ -343,9 +343,7 @@ export const CuentaCorriente: React.FC = () => {
                       <tr>
                         <td colSpan={10} className="px-6 py-4 bg-gray-50 animate-slideDown">
                           {loadingDetalle ? (
-                            <p className="text-center text-gray-500 py-4">
-                              Cargando movimientos...
-                            </p>
+                            <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
                             <div className="space-y-6">
                               {/* Cuentas a Cobrar */}

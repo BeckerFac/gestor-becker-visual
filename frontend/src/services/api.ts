@@ -285,8 +285,12 @@ export const api = {
   },
 
   // Reports
-  getDashboard: async () => {
-    const { data } = await client.get('/reports/dashboard')
+  getDashboard: async (dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams()
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    const qs = params.toString()
+    const { data } = await client.get(`/reports/dashboard${qs ? `?${qs}` : ''}`)
     return data
   },
   getSalesReport: async (days: number = 7) => {

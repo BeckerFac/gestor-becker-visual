@@ -2,8 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast } from '@/hooks/useToast'
 import { Pagination } from '@/components/shared/Pagination'
-import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -75,6 +78,8 @@ export const Purchases: React.FC = () => {
   const [pageSize, setPageSize] = useState(25)
   const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null)
   const [expandedDetail, setExpandedDetail] = useState<Purchase | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const [form, setForm] = useState({
     enterprise_id: '', date: new Date().toISOString().split('T')[0],
@@ -131,24 +136,34 @@ export const Purchases: React.FC = () => {
         total_amount: calcTotal(),
         items: validItems,
       })
+      toast.success('Compra creada correctamente')
       setShowForm(false)
       setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' })
       setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }])
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = async (p: Purchase) => {
-    if (!confirm(`¿Eliminar compra #${String(p.purchase_number).padStart(4, '0')}?`)) return
+  const handleDelete = (p: Purchase) => {
+    setDeleteTarget(p)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deletePurchase(p.id)
+      await api.deletePurchase(deleteTarget.id)
+      toast.success('Compra eliminada correctamente')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
+      setDeleteTarget(null)
     }
   }
 
@@ -407,15 +422,15 @@ export const Purchases: React.FC = () => {
 
       {/* Purchases Table with expandable rows */}
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando compras...</p></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={5} /></CardContent></Card>
       ) : filteredPurchases.length === 0 ? (
-        <EmptyState
-          title={isFiltered ? 'No hay compras con estos filtros' : 'No hay compras registradas'}
-          description={isFiltered ? undefined : 'Registrá la primera compra para empezar'}
-          variant={isFiltered ? 'filtered' : 'empty'}
-          actionLabel={isFiltered ? 'Limpiar filtros' : '+ Nueva Compra'}
-          onAction={isFiltered ? clearFilters : () => setShowForm(true)}
-        />
+        <Card><CardContent>
+          <EmptyState
+            title={isFiltered ? 'No hay compras con estos filtros' : 'No hay compras registradas'}
+            description={isFiltered ? 'Proba ajustando los filtros de busqueda' : 'Registra la primera compra para empezar'}
+            action={{ label: isFiltered ? 'Limpiar filtros' : '+ Nueva Compra', onClick: isFiltered ? clearFilters : () => setShowForm(true) }}
+          />
+        </CardContent></Card>
       ) : (
         <Card>
           <div className="overflow-x-auto">
@@ -624,6 +639,17 @@ export const Purchases: React.FC = () => {
           />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar Compra"
+        message={`¿Eliminar compra #${String(deleteTarget?.purchase_number || 0).padStart(4, '0')}?`}
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

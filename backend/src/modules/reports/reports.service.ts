@@ -4,19 +4,27 @@ import { eq, and, gte, lte, sql, count, sum, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
 export class ReportsService {
-  async getDashboard(companyId: string) {
+  async getDashboard(companyId: string, dateFrom?: string, dateTo?: string) {
     try {
-      const firstOfMonth = new Date();
-      firstOfMonth.setDate(1);
-      firstOfMonth.setHours(0, 0, 0, 0);
+      let periodStart: Date;
+      if (dateFrom) {
+        periodStart = new Date(dateFrom);
+      } else {
+        periodStart = new Date();
+        periodStart.setDate(1);
+      }
+      periodStart.setHours(0, 0, 0, 0);
 
-      // Sales this month (authorized invoices)
+      const periodEnd = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
+
+      // Sales in period (authorized invoices)
       const salesMonthResult = await db.execute(sql`
         SELECT COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
         FROM invoices
         WHERE company_id = ${companyId}
           AND status = 'authorized'
-          AND invoice_date >= ${firstOfMonth}
+          AND invoice_date >= ${periodStart}
+          AND invoice_date <= ${periodEnd}
       `);
 
       // Collections pending: total balance on unpaid authorized invoices

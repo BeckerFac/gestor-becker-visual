@@ -2,10 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SkeletonTable } from '@/components/ui/Skeleton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
 interface Pago {
@@ -49,6 +52,8 @@ export const Pagos: React.FC = () => {
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
+  const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
@@ -100,21 +105,27 @@ export const Pagos: React.FC = () => {
       })
       setShowForm(false)
       setForm({ enterprise_id: '', purchase_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
+      toast.success('Pago registrado correctamente')
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = async (pago: Pago) => {
-    if (!confirm('¿Eliminar este pago? Esta acción no se puede deshacer.')) return
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      await api.deletePago(pago.id)
+      await api.deletePago(deleteTarget.id)
+      toast.success('Pago eliminado')
+      setDeleteTarget(null)
       await loadData()
     } catch (e: any) {
-      setError(e.message)
+      toast.error(e.message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -285,7 +296,7 @@ export const Pagos: React.FC = () => {
 
       {/* Table */}
       {loading ? (
-        <Card><CardContent><p className="text-center py-8 text-gray-500">Cargando pagos...</p></CardContent></Card>
+        <SkeletonTable rows={6} cols={5} />
       ) : filteredPagos.length === 0 ? (
         <EmptyState
           title={isFiltered ? 'No hay pagos con estos filtros' : 'No hay pagos registrados'}
@@ -325,7 +336,7 @@ export const Pagos: React.FC = () => {
                     <td className="px-4 py-3 text-sm text-gray-600">{pago.bank_name || '-'}</td>
                     <td className="px-4 py-3">{pago.reference ? <span className="font-mono text-xs">{pago.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => handleDelete(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      <button onClick={() => setDeleteTarget(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
                     </td>
                   </tr>
                 ))}
@@ -342,6 +353,17 @@ export const Pagos: React.FC = () => {
           />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar pago"
+        message="¿Eliminar este pago? Esta accion no se puede deshacer."
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

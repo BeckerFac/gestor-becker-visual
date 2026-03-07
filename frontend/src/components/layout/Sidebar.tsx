@@ -1,6 +1,7 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
 
 /*
@@ -71,14 +72,30 @@ export const Sidebar: React.FC = () => {
   const location = useLocation()
   const user = useAuthStore((state) => state.user)
   const clearAuth = useAuthStore((state) => state.clearAuth)
+  const sidebarOpen = useUIStore((state) => state.sidebarOpen)
+  const setSidebarOpen = useUIStore((state) => state.setSidebarOpen)
 
   const handleLogout = () => {
     clearAuth()
     window.location.href = '/'
   }
 
+  const handleNavClick = () => {
+    // Close sidebar on mobile after navigation
+    if (window.innerWidth < 768) setSidebarOpen(false)
+  }
+
   return (
-    <div className="w-64 bg-gray-900 text-white flex flex-col">
+    <>
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+    <div className={cn(
+      'bg-gray-900 text-white flex flex-col z-40 transition-transform duration-200',
+      'fixed md:static inset-y-0 left-0 w-64',
+      sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+    )}>
       {/* Logo */}
       <div className="px-6 py-4 border-b border-gray-700">
         <h1 className="text-xl font-bold">BeckerVisual</h1>
@@ -98,6 +115,7 @@ export const Sidebar: React.FC = () => {
               <Link
                 key={item.href}
                 to={item.href}
+                onClick={handleNavClick}
                 className={cn(
                   'flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5',
                   location.pathname === item.href
@@ -143,5 +161,6 @@ export const Sidebar: React.FC = () => {
         </button>
       </div>
     </div>
+    </>
   )
 }
