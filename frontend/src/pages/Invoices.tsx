@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
+import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
+import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
@@ -161,6 +163,14 @@ export const Invoices: React.FC = () => {
   const [linkDropdownInvoiceId, setLinkDropdownInvoiceId] = useState<string | null>(null)
   const [linkSelectedOrderId, setLinkSelectedOrderId] = useState('')
 
+  // Invoice preview modal (PDF + authorize)
+  const loadInvoicesRef = React.useRef<() => Promise<void>>(() => Promise.resolve())
+  const invoicePreview = useInvoicePreview({
+    onError: (msg) => toast.error(msg),
+    onDataRefresh: async () => { await loadInvoicesRef.current() },
+    loadInvoicingStatus: async () => {},
+  })
+
   // ---- Data Loading ----
 
   const loadInvoices = async () => {
@@ -179,6 +189,8 @@ export const Invoices: React.FC = () => {
       setLoading(false)
     }
   }
+
+  loadInvoicesRef.current = loadInvoices
 
   const loadFormData = async () => {
     try {
@@ -338,23 +350,7 @@ export const Invoices: React.FC = () => {
   // ---- Invoice Actions ----
 
   const handleAuthorize = async (invoice: Invoice) => {
-    const ptoVenta = prompt('Ingrese el Punto de Venta para autorizar en AFIP:')
-    if (ptoVenta === null) return
-    const puntoVentaNum = parseInt(ptoVenta, 10)
-    if (isNaN(puntoVentaNum) || puntoVentaNum <= 0) {
-      setError('Punto de venta inválido.')
-      return
-    }
-    setAuthorizing(invoice.id)
-    setError(null)
-    try {
-      await api.authorizeInvoice(invoice.id, puntoVentaNum)
-      await loadInvoices()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setAuthorizing(null)
-    }
+    await invoicePreview.openPreview(invoice.id, invoice.order?.id || '')
   }
 
   const handleDownloadPdf = async (invoice: Invoice) => {
@@ -1195,6 +1191,30 @@ export const Invoices: React.FC = () => {
         onConfirm={handleUnlinkOrder}
         onCancel={() => setUnlinkTarget(null)}
       />
+
+      {invoicePreview.previewInvoice && (
+        <InvoicePreviewModal
+          invoice={invoicePreview.previewInvoice}
+          loading={invoicePreview.previewLoading}
+          orderId={invoicePreview.previewOrderId}
+          authorizing={invoicePreview.authorizingInvoice}
+          authorizeProgress={invoicePreview.authorizeProgress}
+          puntoVenta={invoicePreview.previewPuntoVenta}
+          invoiceType={invoicePreview.previewInvoiceType}
+          items={invoicePreview.previewItems}
+          authorized={invoicePreview.invoiceAuthorized}
+          authFailed={invoicePreview.authFailed}
+          authErrorMsg={invoicePreview.authErrorMsg}
+          onClose={invoicePreview.closePreview}
+          onPuntoVentaChange={invoicePreview.setPreviewPuntoVenta}
+          onInvoiceTypeChange={invoicePreview.setPreviewInvoiceType}
+          onItemsChange={invoicePreview.setPreviewItems}
+          onAuthorize={invoicePreview.saveAndAuthorize}
+          onDeleteDraft={invoicePreview.deleteDraft}
+          onDownloadPdf={invoicePreview.downloadPdf}
+          pdfBlobUrl={invoicePreview.pdfBlobUrl}
+        />
+      )}
     </div>
   )
 }
