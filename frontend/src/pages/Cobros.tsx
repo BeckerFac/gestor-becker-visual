@@ -145,7 +145,7 @@ export const Cobros: React.FC = () => {
         receipt_image: receiptPreview || undefined,
       })
       setShowForm(false)
-      setForm({ enterprise_id: '', order_id: '', invoice_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
+      setForm({ enterprise_id: '', order_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
       setSelectedItems({})
       setOrderItems([])
       setReceiptFile(null)
