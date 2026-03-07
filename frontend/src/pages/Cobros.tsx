@@ -77,8 +77,17 @@ export const Cobros: React.FC = () => {
     setLoadingItems(true)
     try {
       const details = await api.getOrderPaymentDetails(orderId)
-      setOrderItems(details.items || [])
-      setSelectedItems({})
+      const items = details.items || []
+      setOrderItems(items)
+      // Initialize with remaining amount for each item
+      const initial: Record<string, string> = {}
+      items.forEach((item: any) => {
+        if (item.remaining > 0) initial[item.order_item_id] = parseFloat(item.remaining).toFixed(2)
+      })
+      setSelectedItems(initial)
+      // Auto-calculate total from initialized items
+      const itemTotal = Object.values(initial).reduce((s, v) => s + parseFloat(v || '0'), 0)
+      if (itemTotal > 0) setForm(f => ({ ...f, amount: itemTotal.toFixed(2) }))
     } catch (e: any) {
       console.warn('Could not load order items:', e.message)
       setOrderItems([])
