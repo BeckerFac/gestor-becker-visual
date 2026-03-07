@@ -54,6 +54,12 @@ export const Products: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // BOM state
+  const [bomComponents, setBomComponents] = useState<any[]>([])
+  const [bomCost, setBomCost] = useState<number | null>(null)
+  const [bomLoading, setBomLoading] = useState(false)
+  const [bomNew, setBomNew] = useState({ product_id: '', quantity: '1', unit: 'unidad' })
+
   const loadProducts = async () => {
     try {
       setLoading(true)
@@ -148,6 +154,42 @@ export const Products: React.FC = () => {
     }
   }
 
+  const loadBOM = async (productId: string) => {
+    setBomLoading(true)
+    try {
+      const [comps, costData] = await Promise.all([
+        api.getProductComponents(productId),
+        api.getProductBOMCost(productId),
+      ])
+      setBomComponents(comps || [])
+      setBomCost(costData?.bom_cost ? parseFloat(costData.bom_cost) : null)
+    } catch { setBomComponents([]); setBomCost(null) }
+    finally { setBomLoading(false) }
+  }
+
+  const handleAddComponent = async () => {
+    if (!editingId || !bomNew.product_id) return
+    try {
+      await api.addProductComponent(editingId, {
+        component_product_id: bomNew.product_id,
+        quantity_required: parseFloat(bomNew.quantity) || 1,
+        unit: bomNew.unit || 'unidad',
+      })
+      setBomNew({ product_id: '', quantity: '1', unit: 'unidad' })
+      await loadBOM(editingId)
+      toast.success('Componente agregado')
+    } catch (e: any) { toast.error(e.message) }
+  }
+
+  const handleRemoveComponent = async (componentId: string) => {
+    if (!editingId) return
+    try {
+      await api.removeProductComponent(editingId, componentId)
+      await loadBOM(editingId)
+      toast.success('Componente eliminado')
+    } catch (e: any) { toast.error(e.message) }
+  }
+
   const handleEdit = (product: Product) => {
     const pricing = product.pricing
     const cost = pricing?.cost || '0'
@@ -162,6 +204,7 @@ export const Products: React.FC = () => {
     })
     setEditingId(product.id)
     setShowForm(true)
+    loadBOM(product.id)
   }
 
   const handleDelete = async () => {
@@ -330,6 +373,68 @@ export const Products: React.FC = () => {
                 </div>
                 <p className="text-xs text-gray-400 mt-2">Modificá cualquier campo y los otros se recalculan automáticamente</p>
               </div>
+
+              {/* BOM Section */}
+              {editingId ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-amber-800 mb-3">Composicion (Lista de Materiales)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
+                    <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.product_id} onChange={e => setBomNew({ ...bomNew, product_id: e.target.value })}>
+                      <option value="">Seleccionar material...</option>
+                      {products.filter(p => p.id !== editingId).map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
+                    </select>
+                    <input type="number" step="0.0001" min="0.0001" placeholder="Cantidad" className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.quantity} onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })} />
+                    <input placeholder="Unidad (unidad, metro, kg...)" className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.unit} onChange={e => setBomNew({ ...bomNew, unit: e.target.value })} />
+                    <Button type="button" variant="primary" onClick={handleAddComponent} disabled={!bomNew.product_id}>+ Agregar</Button>
+                  </div>
+                  {bomLoading ? (
+                    <p className="text-xs text-gray-400">Cargando composicion...</p>
+                  ) : bomComponents.length > 0 ? (
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-amber-100/50 text-xs text-amber-700">
+                          <th className="px-3 py-1.5 text-left">Material</th>
+                          <th className="px-3 py-1.5 text-left">SKU</th>
+                          <th className="px-3 py-1.5 text-right">Cantidad</th>
+                          <th className="px-3 py-1.5 text-left">Unidad</th>
+                          <th className="px-3 py-1.5 text-right">Costo Unit.</th>
+                          <th className="px-3 py-1.5 text-right">Stock</th>
+                          <th className="px-3 py-1.5 w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bomComponents.map((comp: any) => (
+                          <tr key={comp.id} className="border-t border-amber-200/50">
+                            <td className="px-3 py-1.5 text-gray-800">{comp.component_name}</td>
+                            <td className="px-3 py-1.5 text-gray-500 font-mono text-xs">{comp.component_sku}</td>
+                            <td className="px-3 py-1.5 text-right">{parseFloat(comp.quantity_required)}</td>
+                            <td className="px-3 py-1.5 text-gray-600">{comp.unit || 'unidad'}</td>
+                            <td className="px-3 py-1.5 text-right">{formatCurrency(parseFloat(comp.component_cost || '0'))}</td>
+                            <td className="px-3 py-1.5 text-right">
+                              <span className={parseFloat(comp.stock_available || '0') >= parseFloat(comp.quantity_required) ? 'text-green-600' : 'text-red-600'}>
+                                {parseFloat(comp.stock_available || '0')}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <button type="button" onClick={() => handleRemoveComponent(comp.id)} className="text-red-500 hover:text-red-700 text-xs">x</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="text-xs text-gray-400">Sin componentes. Este producto no tiene lista de materiales.</p>
+                  )}
+                  {bomCost !== null && bomCost > 0 && (
+                    <div className="mt-2 flex gap-4 text-xs">
+                      <span className="text-amber-700">Costo BOM: <strong>{formatCurrency(bomCost)}</strong></span>
+                      <span className="text-gray-500">Costo manual: <strong>{formatCurrency(parseFloat(form.cost || '0'))}</strong></span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">Guarda el producto primero para agregar composicion de materiales.</p>
+              )}
 
               <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Producto'}</Button>
             </form>

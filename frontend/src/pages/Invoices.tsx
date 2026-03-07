@@ -23,6 +23,7 @@ interface InvoiceItem {
   unit_price: number
   vat_rate: number
   subtotal: number
+  order_item_id?: string
 }
 
 interface Invoice {
@@ -264,6 +265,33 @@ export const Invoices: React.FC = () => {
     setProductSearchIdx(null)
   }
 
+  // Auto-fill items from order
+  useEffect(() => {
+    if (!formOrderId) return
+    const loadOrderItems = async () => {
+      try {
+        const uninvoiced = await api.getOrderUninvoicedItems(formOrderId)
+        if (uninvoiced && uninvoiced.length > 0) {
+          const mapped: InvoiceItem[] = uninvoiced
+            .filter((item: any) => parseFloat(item.pending_qty || '0') > 0)
+            .map((item: any) => ({
+              product_id: item.product_id || undefined,
+              product_name: item.product_name || '',
+              quantity: parseFloat(item.pending_qty || item.quantity || '1'),
+              unit_price: parseFloat(item.unit_price || '0'),
+              vat_rate: 21,
+              subtotal: calcItemSubtotal(parseFloat(item.unit_price || '0'), parseFloat(item.pending_qty || item.quantity || '1')),
+              order_item_id: item.id,
+            }))
+          if (mapped.length > 0) setFormItems(mapped)
+        }
+      } catch (e) {
+        console.warn('Could not load order items for invoice:', e)
+      }
+    }
+    loadOrderItems()
+  }, [formOrderId])
+
   // Totals
 
   const formTotals = useMemo(() => {
@@ -293,6 +321,7 @@ export const Invoices: React.FC = () => {
           quantity: item.quantity,
           unit_price: item.unit_price,
           vat_rate: vistaMode === 'interno' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
+          order_item_id: item.order_item_id || null,
         })),
       })
       toast.success(vistaMode === 'interno' ? 'Comprobante interno creado' : 'Factura creada correctamente')
@@ -694,7 +723,7 @@ export const Invoices: React.FC = () => {
                     <select
                       className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                       value={formOrderId}
-                      onChange={e => setFormOrderId(e.target.value)}
+                      onChange={e => { setFormOrderId(e.target.value); if (!e.target.value) setFormItems([EMPTY_FORM_ITEM()]) }}
                     >
                       <option value="">Sin asociar</option>
                       {filteredOrdersForForm.map(o => (
@@ -763,6 +792,12 @@ export const Invoices: React.FC = () => {
                     Editar
                   </button>
                 </div>
+
+                {formOrderId && formItems.some(i => i.order_item_id) && (
+                  <div className="px-3 py-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
+                    Items cargados desde el pedido. Puede editarlos antes de facturar.
+                  </div>
+                )}
 
                 {/* Items table */}
                 <div className="overflow-x-auto">

@@ -10,7 +10,10 @@ export class InventoryService {
       const result = await db.execute(sql`
         SELECT s.id, s.quantity, s.min_level, s.max_level,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
-               json_build_object('id', w.id, 'name', w.name) as warehouse
+               json_build_object('id', w.id, 'name', w.name) as warehouse,
+               COALESCE((SELECT json_agg(json_build_object('name', pp.name, 'sku', pp.sku))
+                 FROM product_components pc JOIN products pp ON pc.product_id = pp.id
+                 WHERE pc.component_product_id = p.id), '[]'::json) as used_in_products
         FROM stock s
         JOIN products p ON s.product_id = p.id
         JOIN warehouses w ON s.warehouse_id = w.id
@@ -68,6 +71,8 @@ export class InventoryService {
         warehouse_id: warehouseId,
         movement_type: movementType,
         quantity: quantity.toString(),
+        reference_type: data.reference_type || null,
+        reference_id: data.reference_id || null,
         notes: data.notes || null,
         created_by: userId,
       });

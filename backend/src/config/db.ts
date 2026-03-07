@@ -205,6 +205,23 @@ async function runAutoMigrations() {
     // --- Receipt image on cobros ---
     await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS receipt_image TEXT`);
 
+    // --- Product components (BOM) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_components (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        component_product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        quantity_required DECIMAL(12,4) NOT NULL DEFAULT 1,
+        unit VARCHAR(50) DEFAULT 'unidad',
+        notes TEXT,
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(product_id, component_product_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_product ON product_components(product_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_component ON product_components(component_product_id)`);
+
     console.log('✅ Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

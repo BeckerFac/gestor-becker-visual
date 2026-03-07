@@ -190,6 +190,36 @@ export const api = {
     return data
   },
 
+  // Product Components (BOM)
+  getProductComponents: async (productId: string) => {
+    const { data } = await client.get(`/products/${productId}/components`)
+    return data
+  },
+  addProductComponent: async (productId: string, componentData: any) => {
+    const { data } = await client.post(`/products/${productId}/components`, componentData)
+    return data
+  },
+  updateProductComponent: async (productId: string, componentId: string, updateData: any) => {
+    const { data } = await client.put(`/products/${productId}/components/${componentId}`, updateData)
+    return data
+  },
+  removeProductComponent: async (productId: string, componentId: string) => {
+    const { data } = await client.delete(`/products/${productId}/components/${componentId}`)
+    return data
+  },
+  getProductBOMCost: async (productId: string) => {
+    const { data } = await client.get(`/products/${productId}/bom-cost`)
+    return data
+  },
+  getProductBOMAvailability: async (productId: string, quantity: number) => {
+    const { data } = await client.get(`/products/${productId}/bom-availability?quantity=${quantity}`)
+    return data
+  },
+  getProductsUsingComponent: async (productId: string) => {
+    const { data } = await client.get(`/products/${productId}/used-in`)
+    return data
+  },
+
   // Purchases
   getPurchases: async (filters?: any) => {
     const params = new URLSearchParams()

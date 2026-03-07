@@ -84,7 +84,14 @@ export const Inventory: React.FC = () => {
       return <span className={`font-bold ${qty <= 0 ? 'text-red-600' : qty < 10 ? 'text-orange-500' : 'text-green-600'}`}>{qty}</span>
     }},
     { key: 'min_level' as const, label: 'Mín.', render: (v: any) => v || '0' },
-    { key: 'id' as const, label: 'Estado', render: (_: any, row: StockItem) => {
+    { key: 'id' as const, label: 'Usado en', render: (_: any, row: any) => {
+      const usedIn = row.used_in_products || []
+      if (!usedIn.length) return <span className="text-gray-300 text-xs">-</span>
+      return <div className="flex flex-wrap gap-1">{usedIn.map((p: any, i: number) => (
+        <span key={i} className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-xs border border-amber-200">{p.name}</span>
+      ))}</div>
+    }},
+    { key: 'quantity' as const, label: 'Estado', render: (_: any, row: StockItem) => {
       const qty = parseFloat(row.quantity || '0')
       const min = parseFloat(row.min_level || '0')
       if (qty <= 0) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Sin Stock</span>

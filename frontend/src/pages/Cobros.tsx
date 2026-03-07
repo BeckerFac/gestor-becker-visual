@@ -33,7 +33,6 @@ interface Cobro {
 interface Enterprise { id: string; name: string }
 interface Order { id: string; order_number: number; title: string; total_amount: string; customer?: { enterprise_id?: string } }
 interface Bank { id: string; bank_name: string }
-interface InternalInvoice { id: string; invoice_number: number; enterprise?: { id: string; name: string } | null; total_amount: string; payment_status?: string }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
@@ -48,7 +47,6 @@ export const Cobros: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
-  const [internalInvoices, setInternalInvoices] = useState<InternalInvoice[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -69,7 +67,7 @@ export const Cobros: React.FC = () => {
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
 
   const [form, setForm] = useState({
-    enterprise_id: '', order_id: '', invoice_id: '',
+    enterprise_id: '', order_id: '',
     amount: '', payment_method: 'transferencia', bank_id: '',
     reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '',
   })
@@ -101,18 +99,16 @@ export const Cobros: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [cobrosRes, entRes, ordersRes, bankRes, intInvRes] = await Promise.all([
+      const [cobrosRes, entRes, ordersRes, bankRes] = await Promise.all([
         api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined),
         api.getEnterprises(),
         api.getOrders(),
         api.getBanks(),
-        api.getInvoices({ fiscal_type: 'interno' }).catch(() => ({ items: [] })),
       ])
       setCobros(cobrosRes || [])
       setEnterprises(entRes || [])
       setOrders((ordersRes.items || ordersRes || []))
       setBanks(bankRes || [])
-      setInternalInvoices(intInvRes.items || intInvRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -139,7 +135,6 @@ export const Cobros: React.FC = () => {
       await api.createCobro({
         enterprise_id: form.enterprise_id || null,
         order_id: form.order_id || null,
-        invoice_id: form.invoice_id || null,
         amount: parseFloat(form.amount),
         payment_method: form.payment_method,
         bank_id: form.bank_id || null,
@@ -201,10 +196,6 @@ export const Cobros: React.FC = () => {
   const filteredOrders = form.enterprise_id
     ? orders.filter((o: any) => o.enterprise_id === form.enterprise_id || o.customer?.enterprise_id === form.enterprise_id)
     : orders
-
-  const filteredInternalInvoices = form.enterprise_id
-    ? internalInvoices.filter(inv => inv.enterprise?.id === form.enterprise_id)
-    : internalInvoices
 
   const csvColumns = [
     { key: 'payment_date', label: 'Fecha' },
@@ -284,20 +275,6 @@ export const Cobros: React.FC = () => {
                 <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.order_id} onChange={e => { setForm({ ...form, order_id: e.target.value }); loadOrderItems(e.target.value) }}>
                   <option value="">Sin pedido</option>
                   {filteredOrders.map((o: any) => <option key={o.id} value={o.id}>#{String(o.order_number).padStart(4, '0')} — {o.title} ({fmt(o.total_amount)})</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Comprobante Interno</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.invoice_id} onChange={e => setForm({ ...form, invoice_id: e.target.value })}>
-                  <option value="">Sin comprobante</option>
-                  {filteredInternalInvoices.map(inv => (
-                    <option key={inv.id} value={inv.id}>
-                      CI-{String(inv.invoice_number).padStart(6, '0')}
-                      {inv.enterprise?.name ? ` | ${inv.enterprise.name}` : ''}
-                      {' '}— {fmt(inv.total_amount)}
-                      {inv.payment_status === 'pagado' ? ' [Pagado]' : inv.payment_status === 'parcial' ? ' [Parcial]' : ''}
-                    </option>
-                  ))}
                 </select>
               </div>
               <Input label="Monto *" type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />

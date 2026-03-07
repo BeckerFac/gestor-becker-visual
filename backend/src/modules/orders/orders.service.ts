@@ -262,10 +262,84 @@ export class OrdersService {
         VALUES (${uuid()}, ${orderId}, ${oldStatus}, ${newStatus}, ${data.notes || null}, ${userId})
       `);
 
+      // BOM stock deduction
+      if (newStatus === 'en_produccion') {
+        await this.deductBOMFromStock(companyId, orderId, userId);
+      }
+      if (newStatus === 'cancelado' && oldStatus === 'en_produccion') {
+        await this.reverseBOMStockDeduction(companyId, orderId, userId);
+      }
+
       return { id: orderId, old_status: oldStatus, new_status: newStatus };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update order status');
+    }
+  }
+
+  private async deductBOMFromStock(companyId: string, orderId: string, userId: string) {
+    try {
+      const itemsResult = await db.execute(sql`
+        SELECT product_id, CAST(quantity AS decimal) as quantity
+        FROM order_items WHERE order_id = ${orderId} AND product_id IS NOT NULL
+      `);
+      const items = (itemsResult as any).rows || [];
+
+      for (const item of items) {
+        const compsResult = await db.execute(sql`
+          SELECT component_product_id, CAST(quantity_required AS decimal) as quantity_required
+          FROM product_components
+          WHERE product_id = ${item.product_id} AND company_id = ${companyId}
+        `);
+        const comps = (compsResult as any).rows || [];
+        if (comps.length === 0) continue;
+
+        for (const comp of comps) {
+          const needed = parseFloat(comp.quantity_required) * parseFloat(item.quantity);
+          // Get default warehouse
+          const whResult = await db.execute(sql`SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1`);
+          const warehouseId = ((whResult as any).rows || [])[0]?.id;
+          if (!warehouseId) continue;
+
+          // Create stock movement
+          await db.execute(sql`
+            INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
+            VALUES (${uuid()}, ${comp.component_product_id}, ${warehouseId}, 'sale', ${needed.toString()}, 'order', ${orderId}, ${'BOM: descuento por produccion'}, ${userId})
+          `);
+
+          // Update stock
+          await db.execute(sql`
+            UPDATE stock SET quantity = CAST(GREATEST(CAST(quantity AS decimal) - ${needed}, 0) AS VARCHAR), updated_at = NOW()
+            WHERE product_id = ${comp.component_product_id} AND warehouse_id = ${warehouseId}
+          `);
+        }
+      }
+    } catch (error) {
+      console.warn('BOM stock deduction warning:', error);
+    }
+  }
+
+  private async reverseBOMStockDeduction(companyId: string, orderId: string, userId: string) {
+    try {
+      const movementsResult = await db.execute(sql`
+        SELECT product_id, warehouse_id, CAST(quantity AS decimal) as quantity
+        FROM stock_movements
+        WHERE reference_type = 'order' AND reference_id = ${orderId} AND movement_type = 'sale'
+      `);
+      const movements = (movementsResult as any).rows || [];
+
+      for (const mov of movements) {
+        await db.execute(sql`
+          INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
+          VALUES (${uuid()}, ${mov.product_id}, ${mov.warehouse_id}, 'adjustment', ${mov.quantity.toString()}, 'order_reversal', ${orderId}, ${'BOM: devolucion por cancelacion'}, ${userId})
+        `);
+        await db.execute(sql`
+          UPDATE stock SET quantity = CAST(CAST(quantity AS decimal) + ${parseFloat(mov.quantity)} AS VARCHAR), updated_at = NOW()
+          WHERE product_id = ${mov.product_id} AND warehouse_id = ${mov.warehouse_id}
+        `);
+      }
+    } catch (error) {
+      console.warn('BOM stock reversal warning:', error);
     }
   }
 

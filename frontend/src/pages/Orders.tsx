@@ -1188,18 +1188,18 @@ export const Orders: React.FC = () => {
                                     </div>
                                   )}
 
-                                  {/* Payment status */}
+                                  {/* Payment status - editable */}
                                   <div>
                                     <p className="text-xs text-gray-500">Estado de Pago</p>
-                                    <span
-                                      className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
-                                        order.payment_status === 'pagado' ? 'bg-green-100 text-green-800'
-                                        : order.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800'
-                                        : 'bg-red-100 text-red-800'
-                                      }`}
+                                    <select
+                                      className="text-sm border border-gray-300 rounded px-2 py-1 mt-0.5"
+                                      value={order.payment_status || 'pendiente'}
+                                      onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
                                     >
-                                      {order.payment_status === 'pagado' ? 'Pagado' : order.payment_status === 'parcial' ? 'Parcial' : 'No pagado'}
-                                    </span>
+                                      <option value="pendiente">No pagado</option>
+                                      <option value="parcial">Parcial</option>
+                                      <option value="pagado">Pagado</option>
+                                    </select>
                                   </div>
 
                                   {/* Invoicing section */}

@@ -169,7 +169,20 @@ export class CobrosService {
       if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
       else if (totalPaid > 0) status = 'parcial';
 
-      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+      // Also propagate payment_method from most recent cobro
+      const latestCobroResult = await db.execute(sql`
+        SELECT payment_method FROM cobros
+        WHERE order_id = ${orderId}
+        ORDER BY payment_date DESC, created_at DESC LIMIT 1
+      `);
+      const latestMethod = ((latestCobroResult as any).rows || latestCobroResult)?.[0]?.payment_method || null;
+
+      await db.execute(sql`
+        UPDATE orders SET
+          payment_status = ${status},
+          payment_method = COALESCE(${latestMethod}, payment_method)
+        WHERE id = ${orderId}
+      `);
     } catch (error) {
       console.warn('Recalculate payment status error:', error);
     }
