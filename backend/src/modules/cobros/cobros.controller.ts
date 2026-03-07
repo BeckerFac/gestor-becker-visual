@@ -24,6 +24,16 @@ export class CobrosController {
     const data = await cobrosService.getSummary(req.user!.company_id);
     res.json(data);
   }
+
+  async getOrderPaymentDetails(req: AuthRequest, res: Response) {
+    const data = await cobrosService.getOrderPaymentDetails(req.user!.company_id, req.params.orderId);
+    res.json(data);
+  }
+
+  async getCobroReceipt(req: AuthRequest, res: Response) {
+    const data = await cobrosService.getCobroReceipt(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
 }
 
 export const cobrosController = new CobrosController();

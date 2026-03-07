@@ -276,21 +276,24 @@ export class OrdersService {
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
 
+      // Helper: undefined = keep old value, '' = set null, value = set value
+      const v = (field: any) => field !== undefined ? (field === '' ? null : field) : undefined;
+
       await db.execute(sql`
         UPDATE orders SET
-          title = COALESCE(${data.title || null}, title),
-          description = COALESCE(${data.description || null}, description),
-          product_type = COALESCE(${data.product_type || null}, product_type),
-          priority = COALESCE(${data.priority || null}, priority),
-          customer_id = COALESCE(${data.customer_id || null}, customer_id),
-          enterprise_id = COALESCE(${data.enterprise_id || null}, enterprise_id),
-          bank_id = COALESCE(${data.bank_id || null}, bank_id),
-          invoice_id = COALESCE(${data.invoice_id || null}, invoice_id),
-          has_invoice = COALESCE(${data.has_invoice ?? null}, has_invoice),
-          estimated_delivery = COALESCE(${data.estimated_delivery || null}, estimated_delivery),
-          payment_method = COALESCE(${data.payment_method || null}, payment_method),
-          payment_status = COALESCE(${data.payment_status || null}, payment_status),
-          notes = COALESCE(${data.notes || null}, notes),
+          title = CASE WHEN ${data.title !== undefined} THEN ${v(data.title)} ELSE title END,
+          description = CASE WHEN ${data.description !== undefined} THEN ${v(data.description)} ELSE description END,
+          product_type = CASE WHEN ${data.product_type !== undefined} THEN ${v(data.product_type)} ELSE product_type END,
+          priority = CASE WHEN ${data.priority !== undefined} THEN ${v(data.priority)} ELSE priority END,
+          customer_id = CASE WHEN ${data.customer_id !== undefined} THEN ${v(data.customer_id)} ELSE customer_id END,
+          enterprise_id = CASE WHEN ${data.enterprise_id !== undefined} THEN ${v(data.enterprise_id)} ELSE enterprise_id END,
+          bank_id = CASE WHEN ${data.bank_id !== undefined} THEN ${v(data.bank_id)} ELSE bank_id END,
+          invoice_id = CASE WHEN ${data.invoice_id !== undefined} THEN ${v(data.invoice_id)} ELSE invoice_id END,
+          has_invoice = CASE WHEN ${data.has_invoice !== undefined} THEN ${data.has_invoice ?? null} ELSE has_invoice END,
+          estimated_delivery = CASE WHEN ${data.estimated_delivery !== undefined} THEN ${v(data.estimated_delivery)} ELSE estimated_delivery END,
+          payment_method = CASE WHEN ${data.payment_method !== undefined} THEN ${v(data.payment_method)} ELSE payment_method END,
+          payment_status = CASE WHEN ${data.payment_status !== undefined} THEN ${v(data.payment_status)} ELSE payment_status END,
+          notes = CASE WHEN ${data.notes !== undefined} THEN ${v(data.notes)} ELSE notes END,
           updated_at = NOW()
         WHERE id = ${orderId}
       `);
@@ -301,16 +304,20 @@ export class OrdersService {
         await db.execute(sql`
           UPDATE invoice_items SET order_item_id = NULL
           WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = ${orderId})
-        `).catch(() => {});
+        `).catch((err) => console.warn('Unlink invoice_items (non-critical):', err.message));
         await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
 
+        const validItems = data.items.filter((it: any) => it.product_name && String(it.product_name).trim());
+        if (validItems.length === 0) throw new ApiError(400, 'At least one item with a product name is required');
+
         let subtotal = 0;
-        for (const item of data.items) {
-          const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+        for (const item of validItems) {
+          const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
           subtotal += itemSubtotal;
+          const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
           await db.execute(sql`
             INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type)
-            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'})
+            VALUES (${uuid()}, ${orderId}, ${productId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${(item.unit_price || 0).toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'})
           `);
         }
 

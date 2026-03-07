@@ -41,7 +41,13 @@ export class EnterprisesService {
     try {
       const result = await db.execute(sql`
         SELECT e.*,
-          COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count
+          COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count,
+          COALESCE(
+            (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+             FROM entity_tags et JOIN tags t ON et.tag_id = t.id
+             WHERE et.entity_id = e.id AND et.entity_type = 'enterprise'),
+            '[]'::json
+          ) as tags
         FROM enterprises e
         WHERE e.company_id = ${companyId}
         ORDER BY e.name ASC

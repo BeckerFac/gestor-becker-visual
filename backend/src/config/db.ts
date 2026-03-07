@@ -164,6 +164,47 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_company_idx ON invoices(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_status_idx ON invoices(company_id, status)`);
 
+    // --- Cobro items (partial payments) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cobro_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cobro_id UUID NOT NULL REFERENCES cobros(id) ON DELETE CASCADE,
+        order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+        amount_paid DECIMAL(12,2) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cobro_items_cobro ON cobro_items(cobro_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cobro_items_item ON cobro_items(order_item_id)`);
+
+    // --- Tags system ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        color VARCHAR(7) DEFAULT '#6B7280',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tags_company ON tags(company_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS entity_tags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        entity_id UUID NOT NULL,
+        entity_type VARCHAR(20) NOT NULL,
+        tag_id UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(entity_id, tag_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_entity_tags_entity ON entity_tags(entity_id, entity_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_entity_tags_tag ON entity_tags(tag_id)`);
+
+    // --- Receipt image on cobros ---
+    await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS receipt_image TEXT`);
+
     console.log('✅ Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

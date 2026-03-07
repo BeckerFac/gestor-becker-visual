@@ -24,6 +24,8 @@ interface Cobro {
   reference: string | null
   payment_date: string
   notes: string | null
+  has_receipt: boolean
+  item_count: number
 }
 
 interface Enterprise { id: string; name: string }
@@ -58,11 +60,32 @@ export const Cobros: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Cobro | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [orderItems, setOrderItems] = useState<any[]>([])
+  const [selectedItems, setSelectedItems] = useState<Record<string, string>>({}) // order_item_id -> amount
+  const [loadingItems, setLoadingItems] = useState(false)
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
+
   const [form, setForm] = useState({
     enterprise_id: '', order_id: '', invoice_id: '',
     amount: '', payment_method: 'transferencia', bank_id: '',
     reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '',
   })
+
+  const loadOrderItems = async (orderId: string) => {
+    if (!orderId) { setOrderItems([]); setSelectedItems({}); return }
+    setLoadingItems(true)
+    try {
+      const details = await api.getOrderPaymentDetails(orderId)
+      setOrderItems(details.items || [])
+      setSelectedItems({})
+    } catch (e: any) {
+      console.warn('Could not load order items:', e.message)
+      setOrderItems([])
+    } finally {
+      setLoadingItems(false)
+    }
+  }
 
   const loadData = async () => {
     try {
@@ -98,6 +121,10 @@ export const Cobros: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
+      const items = Object.entries(selectedItems)
+        .filter(([_, amount]) => parseFloat(amount) > 0)
+        .map(([order_item_id, amount_paid]) => ({ order_item_id, amount_paid: parseFloat(amount_paid) }))
+
       await api.createCobro({
         enterprise_id: form.enterprise_id || null,
         order_id: form.order_id || null,
@@ -108,9 +135,15 @@ export const Cobros: React.FC = () => {
         reference: form.reference || null,
         payment_date: form.payment_date,
         notes: form.notes || null,
+        items: items.length > 0 ? items : undefined,
+        receipt_image: receiptPreview || undefined,
       })
       setShowForm(false)
       setForm({ enterprise_id: '', order_id: '', invoice_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
+      setSelectedItems({})
+      setOrderItems([])
+      setReceiptFile(null)
+      setReceiptPreview(null)
       toast.success('Cobro registrado correctamente')
       await loadData()
     } catch (e: any) {
@@ -237,7 +270,7 @@ export const Cobros: React.FC = () => {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700">Pedido asociado</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.order_id} onChange={e => setForm({ ...form, order_id: e.target.value })}>
+                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.order_id} onChange={e => { setForm({ ...form, order_id: e.target.value }); loadOrderItems(e.target.value) }}>
                   <option value="">Sin pedido</option>
                   {filteredOrders.map((o: any) => <option key={o.id} value={o.id}>#{String(o.order_number).padStart(4, '0')} — {o.title} ({fmt(o.total_amount)})</option>)}
                 </select>
@@ -278,6 +311,91 @@ export const Cobros: React.FC = () => {
               )}
               <Input label="Referencia" placeholder="N° transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
               <Input label="Fecha" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} />
+              {/* Partial payment items */}
+              {form.order_id && orderItems.length > 0 && (
+                <div className="col-span-full">
+                  <label className="text-sm font-medium text-gray-700 block mb-2">Items del Pedido (pago parcial)</label>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500">
+                          <th className="px-3 py-2 text-left">Producto</th>
+                          <th className="px-3 py-2 text-right">Subtotal</th>
+                          <th className="px-3 py-2 text-right">Pagado</th>
+                          <th className="px-3 py-2 text-right">Restante</th>
+                          <th className="px-3 py-2 text-right">Pagar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderItems.map((item: any) => (
+                          <tr key={item.order_item_id} className="border-t border-gray-100">
+                            <td className="px-3 py-2 text-gray-900">{item.product_name}{item.description ? ` - ${item.description}` : ''}</td>
+                            <td className="px-3 py-2 text-right text-gray-600">{fmt(item.subtotal)}</td>
+                            <td className="px-3 py-2 text-right text-green-600">{fmt(item.total_paid)}</td>
+                            <td className="px-3 py-2 text-right font-medium">{fmt(item.remaining)}</td>
+                            <td className="px-3 py-2 text-right w-32">
+                              {item.remaining > 0 ? (
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  max={item.remaining}
+                                  placeholder="0.00"
+                                  value={selectedItems[item.order_item_id] || ''}
+                                  onChange={e => {
+                                    const val = e.target.value
+                                    const newItems = { ...selectedItems }
+                                    if (val && parseFloat(val) > 0) newItems[item.order_item_id] = val
+                                    else delete newItems[item.order_item_id]
+                                    setSelectedItems(newItems)
+                                    // Auto-calculate total
+                                    const itemTotal = Object.values(newItems).reduce((s, v) => s + parseFloat(v || '0'), 0)
+                                    if (itemTotal > 0) setForm(f => ({ ...f, amount: itemTotal.toFixed(2) }))
+                                  }}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                                />
+                              ) : (
+                                <span className="text-xs text-green-600 font-medium">Completo</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {loadingItems && <p className="text-xs text-gray-400 mt-1">Cargando items...</p>}
+                </div>
+              )}
+
+              {/* Receipt upload */}
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Comprobante</label>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      if (file.size > 2 * 1024 * 1024) {
+                        toast.error('El archivo no debe superar 2MB')
+                        return
+                      }
+                      setReceiptFile(file)
+                      const reader = new FileReader()
+                      reader.onload = () => setReceiptPreview(reader.result as string)
+                      reader.readAsDataURL(file)
+                    }
+                  }}
+                  className="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+                />
+                {receiptPreview && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-xs text-green-600">Archivo seleccionado</span>
+                    <button onClick={() => { setReceiptFile(null); setReceiptPreview(null) }} className="text-xs text-red-500">Quitar</button>
+                  </div>
+                )}
+              </div>
+
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
@@ -344,6 +462,7 @@ export const Cobros: React.FC = () => {
                   <th className="px-4 py-3">Banco</th>
                   <th className="px-4 py-3">Referencia</th>
                   <th className="px-4 py-3"></th>
+                  <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -360,6 +479,30 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[cobro.payment_method] || cobro.payment_method}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{cobro.bank_name || '-'}</td>
                     <td className="px-4 py-3">{cobro.reference ? <span className="font-mono text-xs">{cobro.reference}</span> : '-'}</td>
+                    <td className="px-4 py-3 text-center">
+                      {(cobro as any).has_receipt && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              const res = await api.getCobroReceipt(cobro.id)
+                              const w = window.open('', '_blank')
+                              if (w) {
+                                w.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f3f4f6"><img src="${res.receipt_image}" style="max-width:100%;max-height:100vh" /></body></html>`)
+                              }
+                            } catch (err: any) {
+                              toast.error(err.message)
+                            }
+                          }}
+                          className="text-blue-500 hover:text-blue-700"
+                          title="Ver comprobante"
+                        >
+                          <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <button onClick={() => setDeleteTarget(cobro)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
                     </td>

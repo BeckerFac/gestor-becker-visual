@@ -164,6 +164,7 @@ export const Orders: React.FC = () => {
   const [filterType, setFilterType] = useState<string[]>([])
   const [filterEnterprise, setFilterEnterprise] = useState<string[]>([])
   const [filterInvoice, setFilterInvoice] = useState<string[]>([])
+  const [filterPayment, setFilterPayment] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -538,7 +539,7 @@ export const Orders: React.FC = () => {
 
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
 
-  useEffect(() => { setCurrentPage(1) }, [filterStatus, filterType, filterEnterprise, filterInvoice, dateFrom, dateTo, pageSize])
+  useEffect(() => { setCurrentPage(1) }, [filterStatus, filterType, filterEnterprise, filterInvoice, filterPayment, dateFrom, dateTo, pageSize])
 
   // Client-side date filter + pagination
   const filteredOrders = useMemo(() => {
@@ -553,10 +554,13 @@ export const Orders: React.FC = () => {
         return false
       })
     }
+    if (filterPayment.length > 0) {
+      result = result.filter(o => filterPayment.includes(o.payment_status))
+    }
     if (dateFrom) result = result.filter(o => o.created_at >= dateFrom)
     if (dateTo) result = result.filter(o => o.created_at <= dateTo + 'T23:59:59')
     return result
-  }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, dateFrom, dateTo])
+  }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, filterPayment, dateFrom, dateTo])
 
   const periodSummary = useMemo(() => {
     const now = new Date()
@@ -582,7 +586,7 @@ export const Orders: React.FC = () => {
   const totalPages = Math.ceil(filteredOrders.length / pageSize)
   const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
-  const isFiltered = filterStatus.length > 0 || filterType.length > 0 || filterEnterprise.length > 0 || filterInvoice.length > 0 || !!search || !!dateFrom || !!dateTo
+  const isFiltered = filterStatus.length > 0 || filterType.length > 0 || filterEnterprise.length > 0 || filterInvoice.length > 0 || filterPayment.length > 0 || !!search || !!dateFrom || !!dateTo
 
   const csvColumns = [
     { key: 'order_number', label: 'N Pedido' },
@@ -605,6 +609,7 @@ export const Orders: React.FC = () => {
     setFilterType([])
     setFilterEnterprise([])
     setFilterInvoice([])
+    setFilterPayment([])
     setSearch('')
     setDateFrom('')
     setDateTo('')
@@ -717,6 +722,13 @@ export const Orders: React.FC = () => {
               selected={filterEnterprise}
               onChange={setFilterEnterprise}
               placeholder="Todas"
+            />
+            <MultiSelectFilter
+              label="Pago"
+              options={[{ value: 'pendiente', label: 'No pagado' }, { value: 'parcial', label: 'Parcial' }, { value: 'pagado', label: 'Pagado' }]}
+              selected={filterPayment}
+              onChange={setFilterPayment}
+              placeholder="Todos"
             />
             <MultiSelectFilter
               label="Factura"
@@ -997,19 +1009,17 @@ export const Orders: React.FC = () => {
                         <span className="font-bold text-green-700">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <select
-                          className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
+                        <span
+                          className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
                             order.payment_status === 'pagado'
                               ? 'bg-green-100 text-green-800'
+                              : order.payment_status === 'parcial'
+                              ? 'bg-yellow-100 text-yellow-800'
                               : 'bg-red-100 text-red-800'
                           }`}
-                          value={order.payment_status}
-                          onChange={e => { e.stopPropagation(); handlePaymentStatusChange(order.id, e.target.value) }}
-                          onClick={e => e.stopPropagation()}
                         >
-                          <option value="pendiente">No pagado</option>
-                          <option value="pagado">Pagado</option>
-                        </select>
+                          {order.payment_status === 'pagado' ? 'Pagado' : order.payment_status === 'parcial' ? 'Parcial' : 'No pagado'}
+                        </span>
                       </td>
                       <td className="px-4 py-2 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -1173,16 +1183,15 @@ export const Orders: React.FC = () => {
                                   {/* Payment status */}
                                   <div>
                                     <p className="text-xs text-gray-500">Estado de Pago</p>
-                                    <select
-                                      className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer ${
-                                        order.payment_status === 'pagado' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                    <span
+                                      className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
+                                        order.payment_status === 'pagado' ? 'bg-green-100 text-green-800'
+                                        : order.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800'
+                                        : 'bg-red-100 text-red-800'
                                       }`}
-                                      value={order.payment_status}
-                                      onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
                                     >
-                                      <option value="pendiente">No pagado</option>
-                                      <option value="pagado">Pagado</option>
-                                    </select>
+                                      {order.payment_status === 'pagado' ? 'Pagado' : order.payment_status === 'parcial' ? 'Parcial' : 'No pagado'}
+                                    </span>
                                   </div>
 
                                   {/* Invoicing section */}

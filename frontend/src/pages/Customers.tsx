@@ -8,6 +8,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
+import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
 
 interface Customer {
@@ -26,6 +28,7 @@ interface Customer {
   notes: string | null
   status: string
   access_code: string | null
+  tags: { id: string; name: string; color: string }[]
 }
 
 const emptyForm = {
@@ -44,6 +47,12 @@ export const Customers: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [availableTags, setAvailableTags] = useState<{ id: string; name: string; color: string }[]>([])
+  const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
+
+  const loadTags = async () => {
+    try { setAvailableTags(await api.getTags()) } catch {}
+  }
 
   const loadCustomers = async () => {
     try {
@@ -57,7 +66,7 @@ export const Customers: React.FC = () => {
     }
   }
 
-  useEffect(() => { loadCustomers() }, [])
+  useEffect(() => { loadCustomers(); loadTags() }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -135,7 +144,12 @@ export const Customers: React.FC = () => {
 
   const columns = [
     { key: 'cuit' as const, label: 'CUIT' },
-    { key: 'name' as const, label: 'Razón Social' },
+    { key: 'name' as const, label: 'Razón Social', render: (v: any, row: Customer) => (
+      <div className="flex items-center gap-2">
+        <span>{v}</span>
+        <TagBadges tags={row.tags} />
+      </div>
+    )},
     { key: 'contact_name' as const, label: 'Contacto', render: (v: any) => v || '-' },
     { key: 'phone' as const, label: 'Teléfono', render: (v: any) => v || '-' },
     { key: 'email' as const, label: 'Email', render: (v: any) => v || '-' },
@@ -152,6 +166,7 @@ export const Customers: React.FC = () => {
     )},
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Customer) => (
       <div className="flex gap-2">
+        <button onClick={(e) => { e.stopPropagation(); setExpandedCustomerId(expandedCustomerId === row.id ? null : row.id) }} className="text-purple-600 hover:underline text-sm">Tags</button>
         <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
         <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
       </div>
@@ -253,7 +268,28 @@ export const Customers: React.FC = () => {
           action={!search ? { label: '+ Nuevo Cliente', onClick: () => setShowForm(true) } : undefined}
         />
       ) : (
-        <DataTable columns={columns} data={filtered} />
+        <>
+          <DataTable columns={columns} data={filtered} />
+          {expandedCustomerId && (() => {
+            const cust = customers.find(c => c.id === expandedCustomerId)
+            if (!cust) return null
+            return (
+              <Card className="border-purple-200">
+                <CardContent className="pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Etiquetas de {cust.name}</p>
+                  <TagManager
+                    entityId={cust.id}
+                    entityType="customer"
+                    availableTags={availableTags}
+                    assignedTags={cust.tags}
+                    onTagsChange={loadCustomers}
+                    onTagCreated={loadTags}
+                  />
+                </CardContent>
+              </Card>
+            )
+          })()}
+        </>
       )}
 
       <ConfirmDialog

@@ -65,7 +65,14 @@ export class CustomersService {
       await this.ensureMigrations();
       // Use raw SQL to include access_code column
       const result = await db.execute(sql`
-        SELECT * FROM customers WHERE company_id = ${companyId} ORDER BY name ASC LIMIT ${limit} OFFSET ${skip}
+        SELECT c.*,
+          COALESCE(
+            (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+             FROM entity_tags et JOIN tags t ON et.tag_id = t.id
+             WHERE et.entity_id = c.id AND et.entity_type = 'customer'),
+            '[]'::json
+          ) as tags
+        FROM customers c WHERE c.company_id = ${companyId} ORDER BY c.name ASC LIMIT ${limit} OFFSET ${skip}
       `);
       const items = (result as any).rows || result || [];
       return { items, total: items.length, skip, limit };

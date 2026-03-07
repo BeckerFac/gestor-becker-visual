@@ -329,6 +329,40 @@ export const api = {
     const { data } = await client.get('/cobros/summary')
     return data
   },
+  getOrderPaymentDetails: async (orderId: string) => {
+    const { data } = await client.get(`/cobros/order/${orderId}/payment-details`)
+    return data
+  },
+  getCobroReceipt: async (id: string) => {
+    const { data } = await client.get(`/cobros/${id}/receipt`)
+    return data
+  },
+
+  // Tags
+  getTags: async () => {
+    const { data } = await client.get('/tags')
+    return data
+  },
+  createTag: async (tagData: { name: string; color?: string }) => {
+    const { data } = await client.post('/tags', tagData)
+    return data
+  },
+  updateTag: async (id: string, tagData: { name?: string; color?: string }) => {
+    const { data } = await client.put(`/tags/${id}`, tagData)
+    return data
+  },
+  deleteTag: async (id: string) => {
+    const { data } = await client.delete(`/tags/${id}`)
+    return data
+  },
+  assignTag: async (entity_id: string, entity_type: string, tag_id: string) => {
+    const { data } = await client.post('/tags/assign', { entity_id, entity_type, tag_id })
+    return data
+  },
+  removeTag: async (entity_id: string, entity_type: string, tag_id: string) => {
+    const { data } = await client.post('/tags/remove', { entity_id, entity_type, tag_id })
+    return data
+  },
 
   // Pagos (money out)
   getPagos: async (filters?: any) => {

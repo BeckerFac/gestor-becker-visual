@@ -7,6 +7,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
+import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
 
 interface Enterprise {
@@ -22,6 +24,7 @@ interface Enterprise {
   notes: string | null
   status: string
   contact_count: number
+  tags: { id: string; name: string; color: string }[]
 }
 
 interface Contact {
@@ -70,6 +73,11 @@ export const Enterprises: React.FC = () => {
   const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'enterprise'; item: Enterprise } | { type: 'contact'; item: Contact } | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [availableTags, setAvailableTags] = useState<{ id: string; name: string; color: string }[]>([])
+
+  const loadTags = async () => {
+    try { setAvailableTags(await api.getTags()) } catch {}
+  }
 
   const loadData = async () => {
     try {
@@ -87,7 +95,7 @@ export const Enterprises: React.FC = () => {
     }
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData(); loadTags() }, [])
 
   const handleExpandEnterprise = async (enterpriseId: string) => {
     if (expandedId === enterpriseId) {
@@ -387,7 +395,10 @@ export const Enterprises: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <span className="text-2xl">{expandedId === ent.id ? '▼' : '▶'}</span>
                   <div>
-                    <h3 className="font-semibold text-gray-900">{ent.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-900">{ent.name}</h3>
+                      <TagBadges tags={ent.tags} />
+                    </div>
                     <p className="text-sm text-gray-500">
                       {ent.cuit && <span className="font-mono">{ent.cuit}</span>}
                       {ent.cuit && ent.email && ' · '}
@@ -409,7 +420,18 @@ export const Enterprises: React.FC = () => {
               </div>
 
               {expandedId === ent.id && (
-                <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+                <div className="border-t border-gray-200 bg-gray-50 px-6 py-4 space-y-4">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">Etiquetas</p>
+                    <TagManager
+                      entityId={ent.id}
+                      entityType="enterprise"
+                      availableTags={availableTags}
+                      assignedTags={ent.tags}
+                      onTagsChange={loadData}
+                      onTagCreated={loadTags}
+                    />
+                  </div>
                   {expandedContacts.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">Sin contactos. <button onClick={() => handleAddContact(ent.id)} className="text-blue-600 hover:underline">Agregar uno</button></p>
                   ) : (

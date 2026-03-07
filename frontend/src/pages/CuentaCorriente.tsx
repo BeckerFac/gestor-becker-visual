@@ -67,6 +67,8 @@ interface MovimientosTableProps {
   formatDate: (d: string) => string
   saldoLabel: string
   saldoPositiveColor: string
+  debitLabel: string
+  creditLabel: string
 }
 
 const MovimientosTable: React.FC<MovimientosTableProps> = ({
@@ -76,6 +78,8 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
   formatDate,
   saldoLabel,
   saldoPositiveColor,
+  debitLabel,
+  creditLabel,
 }) => (
   <table className="w-full text-sm">
     <thead>
@@ -83,14 +87,14 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
         <th className="pb-2">Fecha</th>
         <th className="pb-2">Tipo</th>
         <th className="pb-2">Descripcion</th>
-        <th className="pb-2 text-right">Debe</th>
-        <th className="pb-2 text-right">Haber</th>
+        <th className="pb-2 text-right">{debitLabel}</th>
+        <th className="pb-2 text-right">{creditLabel}</th>
         <th className="pb-2 text-right">Saldo</th>
       </tr>
     </thead>
     <tbody>
       {movimientos.map((m, idx) => (
-        <tr key={`${m.id}-${idx}`} className="border-b border-gray-100">
+        <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
           <td className="py-2 text-gray-600">{formatDate(m.fecha)}</td>
           <td className="py-2">
             <span
@@ -224,7 +228,7 @@ export const CuentaCorriente: React.FC = () => {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent>
             <p className="text-sm text-gray-500">Nos Deben</p>
@@ -272,56 +276,37 @@ export const CuentaCorriente: React.FC = () => {
               <thead>
                 <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
                   <th className="px-6 py-3">Empresa</th>
-                  <th className="px-6 py-3">CUIT</th>
-                  <th className="px-6 py-3 text-right">Ventas</th>
-                  <th className="px-6 py-3 text-right">Cobros</th>
-                  <th className="px-6 py-3 text-right">A Cobrar</th>
-                  <th className="px-6 py-3 text-right">Compras</th>
-                  <th className="px-6 py-3 text-right">Pagos</th>
-                  <th className="px-6 py-3 text-right">A Pagar</th>
+                  <th className="px-6 py-3 text-right">Nos Deben</th>
+                  <th className="px-6 py-3 text-right">Les Debemos</th>
                   <th className="px-6 py-3 text-right">Balance</th>
-                  <th className="px-6 py-3"></th>
+                  <th className="px-6 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
                 {resumen.map((r) => (
                   <React.Fragment key={r.id}>
                     <tr
-                      className="border-b hover:bg-gray-50 cursor-pointer"
+                      className="border-b hover:bg-gray-50 cursor-pointer even:bg-gray-50/50"
                       onClick={() => handleVerDetalle(r.id)}
                     >
-                      <td className="px-6 py-4 font-medium text-gray-900">{r.name}</td>
-                      <td className="px-6 py-4 font-mono text-sm text-gray-500">
-                        {r.cuit || '-'}
-                      </td>
-                      <td className="px-6 py-4 text-right text-blue-700">
-                        {fmt(r.total_ventas)}
-                      </td>
-                      <td className="px-6 py-4 text-right text-green-600">
-                        {fmt(r.total_cobros)}
+                      <td className="px-6 py-4">
+                        <span className="font-medium text-gray-900">{r.name}</span>
+                        {r.cuit && (
+                          <span className="block text-xs text-gray-400 font-mono mt-0.5">
+                            {r.cuit}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-right">
                         {r.a_cobrar > 0 ? (
-                          <>
-                            <span className="font-bold text-green-700">{fmt(r.a_cobrar)}</span>
-                            <span className="block text-xs text-green-600">Nos deben</span>
-                          </>
+                          <span className="font-bold text-green-700">{fmt(r.a_cobrar)}</span>
                         ) : (
                           <span className="text-gray-400">{fmt(0)}</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-right text-orange-600">
-                        {fmt(r.total_compras)}
-                      </td>
-                      <td className="px-6 py-4 text-right text-red-600">
-                        {fmt(r.total_pagos)}
-                      </td>
                       <td className="px-6 py-4 text-right">
                         {r.a_pagar > 0 ? (
-                          <>
-                            <span className="font-bold text-red-600">{fmt(r.a_pagar)}</span>
-                            <span className="block text-xs text-red-500">Les debemos</span>
-                          </>
+                          <span className="font-bold text-red-600">{fmt(r.a_pagar)}</span>
                         ) : (
                           <span className="text-gray-400">{fmt(0)}</span>
                         )}
@@ -341,11 +326,31 @@ export const CuentaCorriente: React.FC = () => {
                     {/* Expanded detail */}
                     {selectedEnterprise === r.id && (
                       <tr>
-                        <td colSpan={10} className="px-6 py-4 bg-gray-50 animate-slideDown">
+                        <td colSpan={5} className="px-6 py-4 bg-gray-50 animate-slideDown">
                           {loadingDetalle ? (
                             <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
                             <div className="space-y-6">
+                              {/* Mini summary cards */}
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                                  <span className="text-xs text-blue-600 block">Ventas totales</span>
+                                  <span className="text-base font-bold text-blue-700">{fmt(detalle.cuentas_a_cobrar.total_ventas)}</span>
+                                </div>
+                                <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                                  <span className="text-xs text-green-600 block">Total Cobrado</span>
+                                  <span className="text-base font-bold text-green-700">{fmt(detalle.cuentas_a_cobrar.total_cobros)}</span>
+                                </div>
+                                <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
+                                  <span className="text-xs text-purple-600 block">Compras totales</span>
+                                  <span className="text-base font-bold text-purple-700">{fmt(detalle.cuentas_a_pagar.total_compras)}</span>
+                                </div>
+                                <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+                                  <span className="text-xs text-orange-600 block">Total Pagado</span>
+                                  <span className="text-base font-bold text-orange-700">{fmt(detalle.cuentas_a_pagar.total_pagos)}</span>
+                                </div>
+                              </div>
+
                               {/* Cuentas a Cobrar */}
                               <div>
                                 <h4 className="font-semibold text-green-700 mb-3 text-base border-b border-green-200 pb-2">
@@ -359,6 +364,8 @@ export const CuentaCorriente: React.FC = () => {
                                     formatDate={formatDate}
                                     saldoLabel="Saldo a cobrar"
                                     saldoPositiveColor="text-green-700"
+                                    debitLabel="Facturado"
+                                    creditLabel="Cobrado"
                                   />
                                 ) : (
                                   <p className="text-sm text-gray-400 py-2">
@@ -383,6 +390,8 @@ export const CuentaCorriente: React.FC = () => {
                                     formatDate={formatDate}
                                     saldoLabel="Saldo a pagar"
                                     saldoPositiveColor="text-red-600"
+                                    debitLabel="Comprado"
+                                    creditLabel="Pagado"
                                   />
                                 ) : (
                                   <p className="text-sm text-gray-400 py-2">

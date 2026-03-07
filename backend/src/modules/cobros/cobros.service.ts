@@ -22,7 +22,18 @@ export class CobrosService {
           reference VARCHAR(255),
           payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           notes TEXT,
+          receipt_image TEXT,
           created_by UUID REFERENCES users(id),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS receipt_image TEXT`);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS cobro_items (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          cobro_id UUID NOT NULL REFERENCES cobros(id) ON DELETE CASCADE,
+          order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+          amount_paid DECIMAL(12,2) NOT NULL,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
       `);
@@ -44,7 +55,9 @@ export class CobrosService {
         SELECT c.*,
           e.name as enterprise_name,
           o.order_number, o.title as order_title,
-          b.bank_name
+          b.bank_name,
+          c.receipt_image IS NOT NULL as has_receipt,
+          (SELECT COUNT(*) FROM cobro_items ci WHERE ci.cobro_id = c.id) as item_count
         FROM cobros c
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
         LEFT JOIN orders o ON c.order_id = o.id
@@ -69,9 +82,25 @@ export class CobrosService {
     try {
       const cobroId = uuid();
       await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${userId})
+        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, created_by)
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${userId})
       `);
+
+      // Insert cobro_items for partial payments
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        for (const item of data.items) {
+          if (!item.order_item_id || !item.amount_paid || Number(item.amount_paid) <= 0) continue;
+          await db.execute(sql`
+            INSERT INTO cobro_items (id, cobro_id, order_item_id, amount_paid)
+            VALUES (${uuid()}, ${cobroId}, ${item.order_item_id}, ${Number(item.amount_paid).toString()})
+          `);
+        }
+      }
+
+      // Recalculate order payment status
+      if (data.order_id) {
+        await this.recalculateOrderPaymentStatus(data.order_id);
+      }
 
       const result = await db.execute(sql`
         SELECT c.*, e.name as enterprise_name, o.order_number, b.bank_name
@@ -85,6 +114,7 @@ export class CobrosService {
       return rows[0];
     } catch (error) {
       console.error('Create cobro error:', error);
+      if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create cobro');
     }
   }
@@ -92,15 +122,122 @@ export class CobrosService {
   async deleteCobro(companyId: string, cobroId: string) {
     await this.ensureTables();
     try {
-      const check = await db.execute(sql`SELECT id FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+      const check = await db.execute(sql`SELECT id, order_id FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
+      const orderId = rows[0].order_id;
 
       await db.execute(sql`DELETE FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+
+      if (orderId) {
+        await this.recalculateOrderPaymentStatus(orderId);
+      }
+
       return { success: true };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to delete cobro');
+    }
+  }
+
+  async recalculateOrderPaymentStatus(orderId: string) {
+    try {
+      const itemPaidResult = await db.execute(sql`
+        SELECT COALESCE(SUM(CAST(ci.amount_paid AS decimal)), 0) as total
+        FROM cobro_items ci JOIN cobros c ON ci.cobro_id = c.id
+        WHERE c.order_id = ${orderId}
+      `);
+      const totalItemPaid = parseFloat(((itemPaidResult as any).rows || itemPaidResult)?.[0]?.total || '0');
+
+      const genericResult = await db.execute(sql`
+        SELECT COALESCE(SUM(CAST(c.amount AS decimal)), 0) as total
+        FROM cobros c
+        WHERE c.order_id = ${orderId}
+          AND NOT EXISTS (SELECT 1 FROM cobro_items ci WHERE ci.cobro_id = c.id)
+      `);
+      const totalGeneric = parseFloat(((genericResult as any).rows || genericResult)?.[0]?.total || '0');
+
+      const totalPaid = totalItemPaid + totalGeneric;
+
+      const orderResult = await db.execute(sql`
+        SELECT CAST(total_amount AS decimal) as total FROM orders WHERE id = ${orderId}
+      `);
+      const orderTotal = parseFloat(((orderResult as any).rows || orderResult)?.[0]?.total || '0');
+
+      let status = 'pendiente';
+      if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
+      else if (totalPaid > 0) status = 'parcial';
+
+      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+    } catch (error) {
+      console.warn('Recalculate payment status error:', error);
+    }
+  }
+
+  async getOrderPaymentDetails(companyId: string, orderId: string) {
+    await this.ensureTables();
+    try {
+      const orderCheck = await db.execute(sql`
+        SELECT id, CAST(total_amount AS decimal) as total_amount
+        FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
+      `);
+      const orderRows = (orderCheck as any).rows || orderCheck || [];
+      if (orderRows.length === 0) throw new ApiError(404, 'Order not found');
+
+      const items = await db.execute(sql`
+        SELECT oi.id as order_item_id, oi.product_name, oi.description,
+          CAST(oi.quantity AS decimal) as quantity,
+          CAST(oi.unit_price AS decimal) as unit_price,
+          CAST(oi.subtotal AS decimal) as subtotal,
+          COALESCE((SELECT SUM(CAST(ci.amount_paid AS decimal)) FROM cobro_items ci WHERE ci.order_item_id = oi.id), 0) as total_paid
+        FROM order_items oi WHERE oi.order_id = ${orderId} ORDER BY oi.created_at
+      `);
+      const itemRows = (items as any).rows || items || [];
+
+      const cobros = await db.execute(sql`
+        SELECT c.id, c.amount, c.payment_method, c.payment_date, c.reference, c.notes,
+          (SELECT COUNT(*) FROM cobro_items ci WHERE ci.cobro_id = c.id) as item_count
+        FROM cobros c WHERE c.order_id = ${orderId} ORDER BY c.payment_date DESC
+      `);
+      const cobroRows = (cobros as any).rows || cobros || [];
+
+      const orderTotal = parseFloat(orderRows[0].total_amount || '0');
+      const totalItemPaid = itemRows.reduce((s: number, it: any) => s + parseFloat(it.total_paid || '0'), 0);
+      const totalGeneric = cobroRows.filter((c: any) => parseInt(c.item_count) === 0).reduce((s: number, c: any) => s + parseFloat(c.amount || '0'), 0);
+
+      return {
+        order_total: orderTotal,
+        total_paid: totalItemPaid + totalGeneric,
+        remaining: Math.max(0, orderTotal - totalItemPaid - totalGeneric),
+        items: itemRows.map((it: any) => ({
+          ...it,
+          quantity: parseFloat(it.quantity),
+          unit_price: parseFloat(it.unit_price),
+          subtotal: parseFloat(it.subtotal),
+          total_paid: parseFloat(it.total_paid),
+          remaining: Math.max(0, parseFloat(it.subtotal) - parseFloat(it.total_paid)),
+        })),
+        cobros: cobroRows,
+      };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to get order payment details');
+    }
+  }
+
+  async getCobroReceipt(companyId: string, cobroId: string) {
+    await this.ensureTables();
+    try {
+      const result = await db.execute(sql`
+        SELECT receipt_image FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
+      `);
+      const rows = (result as any).rows || result || [];
+      if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
+      if (!rows[0].receipt_image) throw new ApiError(404, 'No receipt found');
+      return { receipt_image: rows[0].receipt_image };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to get receipt');
     }
   }
 
