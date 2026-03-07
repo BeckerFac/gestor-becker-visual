@@ -64,7 +64,8 @@ export class OrdersService {
           CASE WHEN o.invoice_id IS NOT NULL THEN
             json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'punto_venta', (i.afip_response->'FeCabResp'->>'PtoVta')::int, 'cae', i.cae)
           ELSE NULL END as invoice,
-          CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank
+          CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
@@ -124,7 +125,8 @@ export class OrdersService {
           CASE WHEN o.invoice_id IS NOT NULL THEN
             json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'total_amount', i.total_amount, 'cae', i.cae)
           ELSE NULL END as invoice,
-          CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank
+          CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
@@ -380,7 +382,8 @@ export class OrdersService {
         SELECT o.id, o.order_number, o.title, o.total_amount, c.name as customer_name,
           CASE WHEN e.id IS NOT NULL THEN json_build_object('id', e.id, 'name', e.name)
           ELSE CASE WHEN c.enterprise_id IS NOT NULL THEN (SELECT json_build_object('id', e2.id, 'name', e2.name) FROM enterprises e2 WHERE e2.id = c.enterprise_id) ELSE NULL END
-          END as enterprise
+          END as enterprise,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id

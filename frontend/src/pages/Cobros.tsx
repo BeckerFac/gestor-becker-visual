@@ -8,6 +8,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
@@ -15,6 +16,7 @@ interface Cobro {
   id: string
   enterprise_name: string | null
   enterprise_id: string | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   order_id: string | null
   order_number: number | null
   order_title: string | null
@@ -478,7 +480,12 @@ export const Cobros: React.FC = () => {
                 {paginatedCobros.map(cobro => (
                   <tr key={cobro.id} className="border-b hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-sm text-gray-600">{fmtDate(cobro.payment_date)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{cobro.enterprise_name || <span className="text-gray-400">-</span>}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <div className="flex items-center gap-1.5">
+                        {cobro.enterprise_name || <span className="text-gray-400">-</span>}
+                        <TagBadges tags={cobro.enterprise_tags || []} size="sm" />
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       {cobro.order_number ? (
                         <span className="font-mono text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">#{String(cobro.order_number).padStart(4, '0')}</span>

@@ -10,6 +10,7 @@ import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustom
 import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { MultiSelectFilter } from '@/components/shared/MultiSelectFilter'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
@@ -37,6 +38,7 @@ interface Order {
   notes: string | null
   customer?: { id: string; name: string; cuit: string }
   enterprise?: { id: string; name: string } | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   invoice?: { id: string; invoice_number: number; invoice_type: string; status: string; punto_venta?: number; cae?: string } | null
   bank?: { id: string; bank_name: string } | null
   created_at: string
@@ -993,7 +995,10 @@ export const Orders: React.FC = () => {
                       <td className="px-4 py-3 text-sm text-gray-600">{formatDate(order.created_at)}</td>
                       <td className="px-4 py-3">
                         <div>
-                          <p className="text-sm font-medium text-gray-900">{order.enterprise?.name || '-'}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-medium text-gray-900">{order.enterprise?.name || '-'}</p>
+                            <TagBadges tags={order.enterprise_tags || []} size="sm" />
+                          </div>
                           {order.customer?.name && <p className="text-xs text-gray-500">{order.customer.name}</p>}
                         </div>
                       </td>
@@ -1154,7 +1159,10 @@ export const Orders: React.FC = () => {
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-500">Empresa</p>
-                                    <p className="text-sm text-gray-800">{order.enterprise?.name || 'Sin empresa'}</p>
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="text-sm text-gray-800">{order.enterprise?.name || 'Sin empresa'}</p>
+                                      <TagBadges tags={order.enterprise_tags || []} size="sm" />
+                                    </div>
                                   </div>
                                 </div>
 

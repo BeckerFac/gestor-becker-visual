@@ -9,6 +9,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
@@ -31,6 +32,7 @@ interface Invoice {
   invoice_date: string
   customer?: { id: string; name: string; cuit: string } | null
   enterprise?: { id: string; name: string } | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   order?: { id: string; order_number: number; title: string } | null
   subtotal: string
   vat_amount: string
@@ -982,7 +984,10 @@ export const Invoices: React.FC = () => {
 
                       {/* Empresa */}
                       <td className="px-4 py-3 font-medium text-gray-800">
-                        {invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}
+                        <div className="flex items-center gap-1.5">
+                          {invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}
+                          <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
+                        </div>
                       </td>
 
                       {/* Cliente */}

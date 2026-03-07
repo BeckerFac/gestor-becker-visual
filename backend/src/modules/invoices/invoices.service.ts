@@ -254,6 +254,7 @@ export class InvoicesService {
           CASE WHEN o.id IS NOT NULL THEN
             json_build_object('id', o.id, 'order_number', o.order_number, 'title', o.title, 'total_amount', o.total_amount)
           ELSE NULL END as "order",
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta,
           COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.invoice_id = i.id), 0) as total_cobrado,
           CASE
@@ -302,6 +303,7 @@ export class InvoicesService {
           CASE WHEN o.id IS NOT NULL THEN
             json_build_object('id', o.id, 'order_number', o.order_number, 'title', o.title)
           ELSE NULL END as "order",
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta
         FROM invoices i
         LEFT JOIN customers c ON i.customer_id = c.id

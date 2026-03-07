@@ -10,6 +10,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
@@ -34,6 +35,7 @@ interface Remito {
   tipo: 'entrega' | 'recepcion'
   status: 'pendiente' | 'entregado' | 'firmado'
   enterprise?: { id: string; name: string } | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   customer?: { id: string; name: string; cuit: string } | null
   order?: { id: string; order_number: number; title: string } | null
   item_count: number
@@ -776,7 +778,10 @@ export const Remitos: React.FC = () => {
                       {getTipoBadge(remito.tipo)}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
-                      {remito.enterprise?.name ?? <span className="text-gray-400">-</span>}
+                      <div className="flex items-center gap-1.5">
+                        {remito.enterprise?.name ?? <span className="text-gray-400">-</span>}
+                        <TagBadges tags={remito.enterprise_tags || []} size="sm" />
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {remito.customer?.name ?? <span className="text-gray-400">-</span>}

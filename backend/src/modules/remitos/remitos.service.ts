@@ -96,7 +96,8 @@ export class RemitosService {
           CASE WHEN r.order_id IS NOT NULL THEN
             json_build_object('id', o.id, 'order_number', o.order_number, 'title', o.title)
           ELSE NULL END as "order",
-          (SELECT COUNT(*) FROM remito_items ri WHERE ri.remito_id = r.id)::int as item_count
+          (SELECT COUNT(*) FROM remito_items ri WHERE ri.remito_id = r.id)::int as item_count,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM remitos r
         LEFT JOIN customers c ON r.customer_id = c.id
         LEFT JOIN enterprises e ON r.enterprise_id = e.id

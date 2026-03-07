@@ -9,6 +9,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
@@ -36,6 +37,7 @@ interface Quote {
   notes: string | null
   customer?: { id: string; name: string; cuit: string }
   enterprise?: { id: string; name: string } | null
+  enterprise_tags?: { id: string; name: string; color: string }[]
   items?: QuoteItem[]
   created_at: string
 }
@@ -637,7 +639,10 @@ export const Quotes: React.FC = () => {
                       {quote.customer?.name ?? <span className="text-gray-400">Sin cliente</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
-                      {quote.enterprise?.name ?? <span className="text-gray-400">-</span>}
+                      <div className="flex items-center gap-1.5">
+                        {quote.enterprise?.name ?? <span className="text-gray-400">-</span>}
+                        <TagBadges tags={quote.enterprise_tags || []} size="sm" />
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                       {formatDate(quote.created_at)}

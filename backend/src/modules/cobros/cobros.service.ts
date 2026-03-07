@@ -57,7 +57,8 @@ export class CobrosService {
           o.order_number, o.title as order_title,
           b.bank_name,
           c.receipt_image IS NOT NULL as has_receipt,
-          (SELECT COUNT(*) FROM cobro_items ci WHERE ci.cobro_id = c.id) as item_count
+          (SELECT COUNT(*) FROM cobro_items ci WHERE ci.cobro_id = c.id) as item_count,
+          COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM cobros c
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
         LEFT JOIN orders o ON c.order_id = o.id
