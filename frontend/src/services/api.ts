@@ -96,8 +96,9 @@ client.interceptors.response.use(
         // Refresh permissions after token refresh
         try {
           const meRes = await client.get('/auth/me')
-          if (meRes.data?.permissions !== undefined) {
-            useAuthStore.getState().updatePermissions(meRes.data.permissions)
+          const meUser = meRes.data?.user || meRes.data
+          if (meUser?.permissions !== undefined) {
+            useAuthStore.getState().updatePermissions(meUser.permissions)
           }
         } catch (_) { /* permissions refresh failed, not critical */ }
 
@@ -155,9 +156,9 @@ export const api = {
     return data
   },
 
-  getMe: async (): Promise<User> => {
-    const { data } = await client.get<User>('/auth/me')
-    return data
+  getMe: async () => {
+    const { data } = await client.get('/auth/me')
+    return data.user || data
   },
 
   // Enterprises
@@ -671,19 +672,19 @@ export const api = {
   // Users
   getUsers: async () => {
     const { data } = await client.get('/users')
-    return data
+    return data.users
   },
   getUser: async (id: string) => {
     const { data } = await client.get(`/users/${id}`)
-    return data
+    return data.user
   },
   createUser: async (userData: any) => {
     const { data } = await client.post('/users', userData)
-    return data
+    return data.user
   },
   updateUser: async (id: string, userData: any) => {
     const { data } = await client.put(`/users/${id}`, userData)
-    return data
+    return data.user
   },
   deleteUser: async (id: string) => {
     const { data } = await client.delete(`/users/${id}`)
@@ -691,15 +692,15 @@ export const api = {
   },
   getUserPermissions: async (id: string) => {
     const { data } = await client.get(`/users/${id}/permissions`)
-    return data
+    return data.permissions
   },
   setUserPermissions: async (id: string, permissions: Record<string, string[]>) => {
     const { data } = await client.put(`/users/${id}/permissions`, { permissions })
-    return data
+    return data.permissions
   },
   applyTemplate: async (id: string, template: string) => {
     const { data } = await client.post(`/users/${id}/apply-template`, { template })
-    return data
+    return data.permissions
   },
   resetUserPassword: async (id: string, password: string) => {
     const { data } = await client.post(`/users/${id}/reset-password`, { password })
