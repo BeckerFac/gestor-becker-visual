@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Order {
   id: string
@@ -638,17 +639,19 @@ export const Orders: React.FC = () => {
               Limpiar borrador
             </button>
           )}
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => {
-            if (showForm) {
-              setShowForm(false)
-              setEditingOrderId(null)
-              clearDraft()
-            } else {
-              setShowForm(true)
-            }
-          }}>
-            {showForm ? 'Cancelar' : '+ Nuevo Pedido'}
-          </Button>
+          <PermissionGate module="orders" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => {
+              if (showForm) {
+                setShowForm(false)
+                setEditingOrderId(null)
+                clearDraft()
+              } else {
+                setShowForm(true)
+              }
+            }}>
+              {showForm ? 'Cancelar' : '+ Nuevo Pedido'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -1028,32 +1031,38 @@ export const Orders: React.FC = () => {
                       </td>
                       <td className="px-4 py-2 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          <select
-                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                              STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'
-                            }`}
-                            value={order.status}
-                            onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value) }}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            {STATUS_OPTIONS.filter(s => s.value !== 'todos').map(s => (
-                              <option key={s.value} value={s.value}>{s.label}</option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={e => { e.stopPropagation(); handleEditOrder(order) }}
-                            className="text-blue-500 hover:text-blue-700 text-xs font-medium"
-                            title="Editar pedido"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={e => { e.stopPropagation(); setDeleteTarget(order.id) }}
-                            className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
-                            title="Eliminar pedido"
-                          >
-                            x
-                          </button>
+                          <PermissionGate module="orders" action="edit">
+                            <select
+                              className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
+                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'
+                              }`}
+                              value={order.status}
+                              onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value) }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {STATUS_OPTIONS.filter(s => s.value !== 'todos').map(s => (
+                                <option key={s.value} value={s.value}>{s.label}</option>
+                              ))}
+                            </select>
+                          </PermissionGate>
+                          <PermissionGate module="orders" action="edit">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleEditOrder(order) }}
+                              className="text-blue-500 hover:text-blue-700 text-xs font-medium"
+                              title="Editar pedido"
+                            >
+                              Editar
+                            </button>
+                          </PermissionGate>
+                          <PermissionGate module="orders" action="delete">
+                            <button
+                              onClick={e => { e.stopPropagation(); setDeleteTarget(order.id) }}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
+                              title="Eliminar pedido"
+                            >
+                              x
+                            </button>
+                          </PermissionGate>
                           <span className="text-gray-400 text-xs">{expandedOrder === order.id ? 'v' : 'v'}</span>
                         </div>
                       </td>
@@ -1173,13 +1182,15 @@ export const Orders: React.FC = () => {
                                   {/* Payment method */}
                                   <div>
                                     <p className="text-xs text-gray-500">Forma de Pago</p>
-                                    <select
-                                      className="text-sm border rounded px-2 py-1 w-full"
-                                      value={order.payment_method || ''}
-                                      onChange={e => handlePaymentMethodChange(order.id, e.target.value)}
-                                    >
-                                      {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                                    </select>
+                                    <PermissionGate module="orders" action="edit">
+                                      <select
+                                        className="text-sm border rounded px-2 py-1 w-full"
+                                        value={order.payment_method || ''}
+                                        onChange={e => handlePaymentMethodChange(order.id, e.target.value)}
+                                      >
+                                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                      </select>
+                                    </PermissionGate>
                                   </div>
                                   {order.bank && (
                                     <div>
@@ -1191,15 +1202,17 @@ export const Orders: React.FC = () => {
                                   {/* Payment status - editable */}
                                   <div>
                                     <p className="text-xs text-gray-500">Estado de Pago</p>
-                                    <select
-                                      className="text-sm border border-gray-300 rounded px-2 py-1 mt-0.5"
-                                      value={order.payment_status || 'pendiente'}
-                                      onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
-                                    >
-                                      <option value="pendiente">No pagado</option>
-                                      <option value="parcial">Parcial</option>
-                                      <option value="pagado">Pagado</option>
-                                    </select>
+                                    <PermissionGate module="orders" action="edit">
+                                      <select
+                                        className="text-sm border border-gray-300 rounded px-2 py-1 mt-0.5"
+                                        value={order.payment_status || 'pendiente'}
+                                        onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
+                                      >
+                                        <option value="pendiente">No pagado</option>
+                                        <option value="parcial">Parcial</option>
+                                        <option value="pagado">Pagado</option>
+                                      </select>
+                                    </PermissionGate>
                                   </div>
 
                                   {/* Invoicing section */}
@@ -1215,21 +1228,25 @@ export const Orders: React.FC = () => {
                                         <div className="space-y-2">
                                           {/* Status indicator + action button */}
                                           {status.invoicing_status === 'sin_facturar' && (
-                                            <button
-                                              onClick={() => handleShowInvoiceForm(order.id)}
-                                              className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors"
-                                            >
-                                              Facturar
-                                            </button>
+                                            <PermissionGate module="invoices" action="create">
+                                              <button
+                                                onClick={() => handleShowInvoiceForm(order.id)}
+                                                className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors"
+                                              >
+                                                Facturar
+                                              </button>
+                                            </PermissionGate>
                                           )}
                                           {status.invoicing_status === 'parcial' && (
                                             <div className="space-y-1">
-                                              <button
-                                                onClick={() => handleShowInvoiceForm(order.id)}
-                                                className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-medium hover:bg-yellow-600 transition-colors"
-                                              >
-                                                Facturar Restante
-                                              </button>
+                                              <PermissionGate module="invoices" action="create">
+                                                <button
+                                                  onClick={() => handleShowInvoiceForm(order.id)}
+                                                  className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-medium hover:bg-yellow-600 transition-colors"
+                                                >
+                                                  Facturar Restante
+                                                </button>
+                                              </PermissionGate>
                                               <p className="text-xs text-yellow-700 font-medium">Parcialmente facturado</p>
                                             </div>
                                           )}

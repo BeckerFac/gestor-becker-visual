@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 export const Settings: React.FC = () => {
   const authCompany = useAuthStore((state) => state.company)
@@ -186,7 +187,9 @@ export const Settings: React.FC = () => {
               <Input label="Telefono" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
               <Input label="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
             </div>
-            <Button type="submit" variant="primary" loading={saving}>Guardar Cambios</Button>
+            <PermissionGate module="settings" action="edit">
+              <Button type="submit" variant="primary" loading={saving}>Guardar Cambios</Button>
+            </PermissionGate>
           </form>
         </CardContent>
       </Card>
@@ -334,8 +337,14 @@ export const Settings: React.FC = () => {
                 </div>
 
                 <div className="flex gap-3">
-                  <Button variant="primary" onClick={handleUploadCertificates} loading={uploadingCerts} disabled={!certFile || !keyFile}>Subir Certificados</Button>
-                  {(hasCert || hasKey) && <Button variant="secondary" onClick={handleRemoveCertificates}>Eliminar Certificados</Button>}
+                  <PermissionGate module="settings" action="edit">
+                    <Button variant="primary" onClick={handleUploadCertificates} loading={uploadingCerts} disabled={!certFile || !keyFile}>Subir Certificados</Button>
+                  </PermissionGate>
+                  {(hasCert || hasKey) && (
+                    <PermissionGate module="settings" action="edit">
+                      <Button variant="secondary" onClick={handleRemoveCertificates}>Eliminar Certificados</Button>
+                    </PermissionGate>
+                  )}
                 </div>
 
                 <div className="flex gap-2 mt-4">
@@ -385,7 +394,9 @@ export const Settings: React.FC = () => {
                 {/* Test conexion */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <h4 className="font-medium text-blue-800 mb-2">Probar Conexion con AFIP</h4>
-                  <Button variant="primary" onClick={handleTestConnection} loading={testing}>Probar Conexion</Button>
+                  <PermissionGate module="settings" action="edit">
+                    <Button variant="primary" onClick={handleTestConnection} loading={testing}>Probar Conexion</Button>
+                  </PermissionGate>
                   {testResult && (
                     <div className={`mt-3 px-3 py-2 rounded text-sm ${testResult.success ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`}>
                       {testResult.success ? 'Conexion exitosa con AFIP' : testResult.message}
@@ -401,7 +412,9 @@ export const Settings: React.FC = () => {
 
                 <div className="flex gap-2">
                   <Button variant="secondary" onClick={() => setWizardStep(4)}>Anterior</Button>
-                  <Button variant="primary" onClick={handleSubmit} loading={saving}>Guardar Todo</Button>
+                  <PermissionGate module="settings" action="edit">
+                    <Button variant="primary" onClick={handleSubmit} loading={saving}>Guardar Todo</Button>
+                  </PermissionGate>
                 </div>
               </div>
             )}

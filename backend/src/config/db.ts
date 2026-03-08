@@ -241,6 +241,20 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS afip_last_test TIMESTAMP WITH TIME ZONE`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS afip_last_test_ok BOOLEAN DEFAULT false`);
 
+    // --- RBAC permissions ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permissions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        module VARCHAR(50) NOT NULL,
+        action VARCHAR(20) NOT NULL,
+        allowed BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(user_id, module, action)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permissions_user ON permissions(user_id)`);
+
     console.log('✅ Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

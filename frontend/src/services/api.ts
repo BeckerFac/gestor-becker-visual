@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
-import { User, Company } from '@/stores/authStore'
+import { User, Company, useAuthStore } from '@/stores/authStore'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -93,6 +93,14 @@ client.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`
         processQueue(null, newAccessToken)
 
+        // Refresh permissions after token refresh
+        try {
+          const meRes = await client.get('/auth/me')
+          if (meRes.data?.permissions !== undefined) {
+            useAuthStore.getState().updatePermissions(meRes.data.permissions)
+          }
+        } catch (_) { /* permissions refresh failed, not critical */ }
+
         return client(originalRequest)
       } catch (refreshError) {
         processQueue(refreshError, null)
@@ -105,6 +113,11 @@ client.interceptors.response.use(
       }
     }
 
+    if (error.response?.status === 403) {
+      const msg = error.response?.data?.message || error.response?.data?.error || 'No tiene permisos para esta accion'
+      throw new Error(msg)
+    }
+
     const msg = error.response?.data?.error || error.response?.data?.message || error.message || 'Error de conexión'
     throw new Error(msg)
   }
@@ -115,6 +128,7 @@ interface AuthResponse {
   company?: Company | null  // Optional because backend might not return it
   accessToken: string
   refreshToken: string
+  permissions?: Record<string, string[]> | null
 }
 
 export const api = {
@@ -651,6 +665,44 @@ export const api = {
   },
   getLastAfipVoucher: async (puntoVenta: number = 1, invoiceType: string = 'B') => {
     const { data } = await client.get(`/afip/last-voucher?punto_venta=${puntoVenta}&invoice_type=${invoiceType}`)
+    return data
+  },
+
+  // Users
+  getUsers: async () => {
+    const { data } = await client.get('/users')
+    return data
+  },
+  getUser: async (id: string) => {
+    const { data } = await client.get(`/users/${id}`)
+    return data
+  },
+  createUser: async (userData: any) => {
+    const { data } = await client.post('/users', userData)
+    return data
+  },
+  updateUser: async (id: string, userData: any) => {
+    const { data } = await client.put(`/users/${id}`, userData)
+    return data
+  },
+  deleteUser: async (id: string) => {
+    const { data } = await client.delete(`/users/${id}`)
+    return data
+  },
+  getUserPermissions: async (id: string) => {
+    const { data } = await client.get(`/users/${id}/permissions`)
+    return data
+  },
+  setUserPermissions: async (id: string, permissions: Record<string, string[]>) => {
+    const { data } = await client.put(`/users/${id}/permissions`, { permissions })
+    return data
+  },
+  applyTemplate: async (id: string, template: string) => {
+    const { data } = await client.post(`/users/${id}/apply-template`, { template })
+    return data
+  },
+  resetUserPassword: async (id: string, password: string) => {
+    const { data } = await client.post(`/users/${id}/reset-password`, { password })
     return data
   },
 

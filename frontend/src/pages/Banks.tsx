@@ -10,6 +10,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Bank {
   id: string
@@ -218,9 +219,11 @@ export const Banks: React.FC = () => {
               filename="movimientos_bancos"
             />
           )}
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-            {showForm ? 'Cancelar' : '+ Nuevo Banco'}
-          </Button>
+          <PermissionGate module="banks" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+              {showForm ? 'Cancelar' : '+ Nuevo Banco'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -504,8 +507,12 @@ export const Banks: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
-                        <button onClick={() => handleEdit(bank)} className="text-blue-600 hover:underline text-sm">Editar</button>
-                        <button onClick={() => handleDelete(bank)} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                        <PermissionGate module="banks" action="edit">
+                          <button onClick={() => handleEdit(bank)} className="text-blue-600 hover:underline text-sm">Editar</button>
+                        </PermissionGate>
+                        <PermissionGate module="banks" action="delete">
+                          <button onClick={() => handleDelete(bank)} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                        </PermissionGate>
                       </div>
                     </td>
                   </tr>

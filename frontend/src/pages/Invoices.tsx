@@ -15,6 +15,7 @@ import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 // ---- Types ----
 
@@ -540,9 +541,11 @@ export const Invoices: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'interno' ? 'comprobantes_internos' : 'facturas'} />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
-            {showForm ? 'Cancelar' : vistaMode === 'interno' ? '+ Nuevo Comprobante' : '+ Nueva Factura'}
-          </Button>
+          <PermissionGate module="invoices" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
+              {showForm ? 'Cancelar' : vistaMode === 'interno' ? '+ Nuevo Comprobante' : '+ Nueva Factura'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -1141,13 +1144,15 @@ export const Invoices: React.FC = () => {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-2">
                           {vistaMode === 'fiscal' && invoice.status === 'draft' && (
-                            <button
-                              onClick={() => handleAuthorize(invoice)}
-                              disabled={authorizing === invoice.id}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors disabled:opacity-60"
-                            >
-                              {authorizing === invoice.id ? 'Autorizando...' : 'Autorizar'}
-                            </button>
+                            <PermissionGate module="invoices" action="edit">
+                              <button
+                                onClick={() => handleAuthorize(invoice)}
+                                disabled={authorizing === invoice.id}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors disabled:opacity-60"
+                              >
+                                {authorizing === invoice.id ? 'Autorizando...' : 'Autorizar'}
+                              </button>
+                            </PermissionGate>
                           )}
                           {(invoice.status === 'authorized' || invoice.status === 'emitido') && (
                             <button

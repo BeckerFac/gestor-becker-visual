@@ -100,8 +100,10 @@ export class AuthController {
         throw new ApiError(401, 'Not authenticated');
       }
 
+      const result = await authService.me(req.user.id);
+
       res.json({
-        user: req.user,
+        user: result,
       });
     } catch (error) {
       if (error instanceof ApiError) {

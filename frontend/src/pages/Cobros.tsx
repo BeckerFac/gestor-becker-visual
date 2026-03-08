@@ -11,6 +11,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Cobro {
   id: string
@@ -224,9 +225,11 @@ export const Cobros: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredCobros} columns={csvColumns} filename="cobros" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Registrar Cobro'}
-          </Button>
+          <PermissionGate module="cobros" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancelar' : '+ Registrar Cobro'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -497,7 +500,9 @@ export const Cobros: React.FC = () => {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <button onClick={() => setDeleteTarget(cobro)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      <PermissionGate module="cobros" action="delete">
+                        <button onClick={() => setDeleteTarget(cobro)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      </PermissionGate>
                     </td>
                   </tr>
                 ))}

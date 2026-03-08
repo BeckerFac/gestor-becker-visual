@@ -10,6 +10,7 @@ import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Product {
   id: string
@@ -248,8 +249,12 @@ export const Products: React.FC = () => {
     )},
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Product) => (
       <div className="flex gap-2">
-        <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
-        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+        <PermissionGate module="products" action="edit">
+          <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
+        </PermissionGate>
+        <PermissionGate module="products" action="delete">
+          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+        </PermissionGate>
       </div>
     )},
   ]
@@ -285,9 +290,11 @@ export const Products: React.FC = () => {
             ]}
             filename="productos"
           />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-            {showForm ? 'Cancelar' : '+ Nuevo Producto'}
-          </Button>
+          <PermissionGate module="products" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+              {showForm ? 'Cancelar' : '+ Nuevo Producto'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 

@@ -12,6 +12,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Purchase {
   id: string
@@ -279,9 +280,11 @@ export const Purchases: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
-            {showForm ? 'Cancelar' : '+ Nueva Compra'}
-          </Button>
+          <PermissionGate module="purchases" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
+              {showForm ? 'Cancelar' : '+ Nueva Compra'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -531,20 +534,24 @@ export const Purchases: React.FC = () => {
                               Fc {purchase.invoice_type}
                             </span>
                           )}
-                          <button
-                            onClick={e => { e.stopPropagation(); handleEdit(purchase) }}
-                            className="text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors mr-1"
-                            title="Editar compra"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={e => { e.stopPropagation(); handleDelete(purchase) }}
-                            className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
-                            title="Eliminar compra"
-                          >
-                            ×
-                          </button>
+                          <PermissionGate module="purchases" action="edit">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleEdit(purchase) }}
+                              className="text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors mr-1"
+                              title="Editar compra"
+                            >
+                              Editar
+                            </button>
+                          </PermissionGate>
+                          <PermissionGate module="purchases" action="delete">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleDelete(purchase) }}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
+                              title="Eliminar compra"
+                            >
+                              ×
+                            </button>
+                          </PermissionGate>
                           <span className="text-gray-400 text-xs">{expandedPurchase === purchase.id ? '▲' : '▼'}</span>
                         </div>
                       </td>

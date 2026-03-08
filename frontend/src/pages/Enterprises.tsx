@@ -10,6 +10,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Enterprise {
   id: string
@@ -293,9 +294,11 @@ export const Enterprises: React.FC = () => {
             ]}
             filename="empresas"
           />
-          <Button variant={showEnterpriseForm ? 'danger' : 'primary'} onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
-            {showEnterpriseForm ? 'Cancelar' : '+ Nueva Empresa'}
-          </Button>
+          <PermissionGate module="enterprises" action="create">
+            <Button variant={showEnterpriseForm ? 'danger' : 'primary'} onClick={() => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(!showEnterpriseForm); setShowContactForm(false) }}>
+              {showEnterpriseForm ? 'Cancelar' : '+ Nueva Empresa'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -412,9 +415,15 @@ export const Enterprises: React.FC = () => {
                     {ent.status === 'active' ? 'Activa' : 'Inactiva'}
                   </span>
                   <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => handleAddContact(ent.id)} className="text-green-600 hover:underline text-sm">+ Contacto</button>
-                    <button onClick={() => handleEditEnterprise(ent)} className="text-blue-600 hover:underline text-sm">Editar</button>
-                    <button onClick={() => handleDeleteEnterprise(ent)} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                    <PermissionGate module="enterprises" action="create">
+                      <button onClick={() => handleAddContact(ent.id)} className="text-green-600 hover:underline text-sm">+ Contacto</button>
+                    </PermissionGate>
+                    <PermissionGate module="enterprises" action="edit">
+                      <button onClick={() => handleEditEnterprise(ent)} className="text-blue-600 hover:underline text-sm">Editar</button>
+                    </PermissionGate>
+                    <PermissionGate module="enterprises" action="delete">
+                      <button onClick={() => handleDeleteEnterprise(ent)} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                    </PermissionGate>
                   </div>
                 </div>
               </div>
@@ -464,8 +473,12 @@ export const Enterprises: React.FC = () => {
                             </td>
                             <td className="py-2">
                               <div className="flex gap-2">
-                                <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
-                                <button onClick={() => handleDeleteContact(c)} className="text-red-600 hover:underline">Eliminar</button>
+                                <PermissionGate module="enterprises" action="edit">
+                                  <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
+                                </PermissionGate>
+                                <PermissionGate module="enterprises" action="delete">
+                                  <button onClick={() => handleDeleteContact(c)} className="text-red-600 hover:underline">Eliminar</button>
+                                </PermissionGate>
                               </div>
                             </td>
                           </tr>
@@ -505,8 +518,12 @@ export const Enterprises: React.FC = () => {
                         <td className="py-2 text-gray-600">{c.email || '-'}</td>
                         <td className="py-2">
                           <div className="flex gap-2">
-                            <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
-                            <button onClick={() => handleDeleteContact(c)} className="text-red-600 hover:underline">Eliminar</button>
+                            <PermissionGate module="enterprises" action="edit">
+                              <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
+                            </PermissionGate>
+                            <PermissionGate module="enterprises" action="delete">
+                              <button onClick={() => handleDeleteContact(c)} className="text-red-600 hover:underline">Eliminar</button>
+                            </PermissionGate>
                           </div>
                         </td>
                       </tr>

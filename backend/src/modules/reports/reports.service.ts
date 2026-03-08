@@ -3,8 +3,20 @@ import { invoices, invoice_items, customers, products, product_pricing, stock, p
 import { eq, and, gte, lte, sql, count, sum, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
+// Helper: check if user has view access to a module (undefined permissions = admin = full access)
+function canView(permissions: Map<string, Set<string>> | undefined, module: string): boolean {
+  if (!permissions) return true; // Admin (permissions not loaded = bypassed authorize)
+  const modulePerms = permissions.get(module);
+  return !!modulePerms && modulePerms.has('view');
+}
+
 export class ReportsService {
-  async getDashboard(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getDashboard(
+    companyId: string,
+    dateFrom?: string,
+    dateTo?: string,
+    userPermissions?: Map<string, Set<string>>,
+  ) {
     try {
       let periodStart: Date;
       if (dateFrom) {
@@ -17,81 +29,108 @@ export class ReportsService {
 
       const periodEnd = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
 
-      // Sales in period (authorized invoices)
-      const salesMonthResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
-        FROM invoices
-        WHERE company_id = ${companyId}
-          AND status = 'authorized'
-          AND invoice_date >= ${periodStart}
-          AND invoice_date <= ${periodEnd}
-      `);
+      // Default empty values
+      let salesMonth = 0;
+      let collectionsPending = 0;
+      let chequesPendingCount = 0;
+      let chequesPendingAmount = 0;
+      let ordersUnpaidCount = 0;
+      let ordersUnpaidAmount = 0;
+      let recentInvoicesList: any[] = [];
+      let recentOrdersList: any[] = [];
 
-      // Collections pending: total balance on unpaid authorized invoices
-      const collectionsPendingResult = await db.execute(sql`
-        SELECT COALESCE(SUM(
-          CAST(i.total_amount AS decimal) - COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-          )
-        ), 0) as total
-        FROM invoices i
-        WHERE i.company_id = ${companyId}
-          AND i.status = 'authorized'
-          AND CAST(i.total_amount AS decimal) > COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-          )
-      `);
+      // Sales in period (authorized invoices) - requires invoices view
+      if (canView(userPermissions, 'invoices')) {
+        const salesMonthResult = await db.execute(sql`
+          SELECT COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
+          FROM invoices
+          WHERE company_id = ${companyId}
+            AND status = 'authorized'
+            AND invoice_date >= ${periodStart}
+            AND invoice_date <= ${periodEnd}
+        `);
 
-      // Cheques pending (a_cobrar)
-      const chequesPendingResult = await db.execute(sql`
-        SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-        FROM cheques
-        WHERE company_id = ${companyId} AND status = 'a_cobrar'
-      `);
+        const salesMonthRows = (salesMonthResult as any).rows || salesMonthResult || [];
+        salesMonth = parseFloat(salesMonthRows[0]?.total || '0');
 
-      // Orders unpaid
-      const ordersUnpaidResult = await db.execute(sql`
-        SELECT COUNT(*) as count, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
-        FROM orders
-        WHERE company_id = ${companyId} AND payment_status = 'pendiente'
-      `);
+        // Collections pending - requires invoices view
+        const collectionsPendingResult = await db.execute(sql`
+          SELECT COALESCE(SUM(
+            CAST(i.total_amount AS decimal) - COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+          ), 0) as total
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND CAST(i.total_amount AS decimal) > COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+        `);
 
-      // Recent invoices (last 5)
-      const recentInvoices = await db.execute(sql`
-        SELECT i.id, i.invoice_type, i.invoice_number, i.invoice_date, i.total_amount, i.status, i.cae,
-               c.name as customer_name
-        FROM invoices i
-        LEFT JOIN customers c ON i.customer_id = c.id
-        WHERE i.company_id = ${companyId}
-        ORDER BY i.created_at DESC
-        LIMIT 5
-      `);
+        const collectionsRows = (collectionsPendingResult as any).rows || collectionsPendingResult || [];
+        collectionsPending = parseFloat(collectionsRows[0]?.total || '0');
 
-      // Recent orders (last 5)
-      const recentOrders = await db.execute(sql`
-        SELECT o.id, o.order_number, o.title, o.total_amount, o.status, o.payment_status, o.payment_method, o.created_at,
-               c.name as customer_name
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = ${companyId}
-        ORDER BY o.created_at DESC
-        LIMIT 5
-      `);
+        // Recent invoices (last 5)
+        const recentInvoicesResult = await db.execute(sql`
+          SELECT i.id, i.invoice_type, i.invoice_number, i.invoice_date, i.total_amount, i.status, i.cae,
+                 c.name as customer_name
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE i.company_id = ${companyId}
+          ORDER BY i.created_at DESC
+          LIMIT 5
+        `);
+        recentInvoicesList = (recentInvoicesResult as any).rows || recentInvoicesResult || [];
+      }
 
-      const salesMonthRows = (salesMonthResult as any).rows || salesMonthResult || [];
-      const collectionsRows = (collectionsPendingResult as any).rows || collectionsPendingResult || [];
-      const chequesRows = (chequesPendingResult as any).rows || chequesPendingResult || [];
-      const ordersRows = (ordersUnpaidResult as any).rows || ordersUnpaidResult || [];
+      // Cheques pending - requires cheques view
+      if (canView(userPermissions, 'cheques')) {
+        const chequesPendingResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM cheques
+          WHERE company_id = ${companyId} AND status = 'a_cobrar'
+        `);
+
+        const chequesRows = (chequesPendingResult as any).rows || chequesPendingResult || [];
+        chequesPendingCount = parseInt(chequesRows[0]?.count || '0');
+        chequesPendingAmount = parseFloat(chequesRows[0]?.total || '0');
+      }
+
+      // Orders unpaid - requires orders view
+      if (canView(userPermissions, 'orders')) {
+        const ordersUnpaidResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
+          FROM orders
+          WHERE company_id = ${companyId} AND payment_status = 'pendiente'
+        `);
+
+        const ordersRows = (ordersUnpaidResult as any).rows || ordersUnpaidResult || [];
+        ordersUnpaidCount = parseInt(ordersRows[0]?.count || '0');
+        ordersUnpaidAmount = parseFloat(ordersRows[0]?.total || '0');
+
+        // Recent orders (last 5)
+        const recentOrdersResult = await db.execute(sql`
+          SELECT o.id, o.order_number, o.title, o.total_amount, o.status, o.payment_status, o.payment_method, o.created_at,
+                 c.name as customer_name
+          FROM orders o
+          LEFT JOIN customers c ON o.customer_id = c.id
+          WHERE o.company_id = ${companyId}
+          ORDER BY o.created_at DESC
+          LIMIT 5
+        `);
+        recentOrdersList = (recentOrdersResult as any).rows || recentOrdersResult || [];
+      }
 
       return {
-        sales_month: parseFloat(salesMonthRows[0]?.total || '0'),
-        collections_pending: parseFloat(collectionsRows[0]?.total || '0'),
-        cheques_pending_count: parseInt(chequesRows[0]?.count || '0'),
-        cheques_pending_amount: parseFloat(chequesRows[0]?.total || '0'),
-        orders_unpaid_count: parseInt(ordersRows[0]?.count || '0'),
-        orders_unpaid_amount: parseFloat(ordersRows[0]?.total || '0'),
-        recent_invoices: (recentInvoices as any).rows || recentInvoices || [],
-        recent_orders: (recentOrders as any).rows || recentOrders || [],
+        sales_month: salesMonth,
+        collections_pending: collectionsPending,
+        cheques_pending_count: chequesPendingCount,
+        cheques_pending_amount: chequesPendingAmount,
+        orders_unpaid_count: ordersUnpaidCount,
+        orders_unpaid_amount: ordersUnpaidAmount,
+        recent_invoices: recentInvoicesList,
+        recent_orders: recentOrdersList,
       };
     } catch (error) {
       console.error('Dashboard report error:', error);
@@ -175,54 +214,82 @@ export class ReportsService {
       throw new ApiError(500, 'Failed to generate top products report');
     }
   }
-  async globalSearch(companyId: string, query: string) {
+
+  async globalSearch(
+    companyId: string,
+    query: string,
+    userPermissions?: Map<string, Set<string>>,
+  ) {
     if (!query || query.trim().length < 2) return { enterprises: [], customers: [], orders: [], purchases: [], products: [], invoices: [] };
 
     const q = `%${query.trim()}%`;
     try {
-      const [entResult, custResult, ordResult, purResult, prodResult, invResult] = await Promise.all([
-        db.execute(sql`
+      // Build queries only for modules the user can access
+      const queries: Record<string, Promise<any>> = {};
+
+      if (canView(userPermissions, 'enterprises')) {
+        queries.enterprises = db.execute(sql`
           SELECT id, name, cuit, 'enterprise' as _type FROM enterprises
           WHERE company_id = ${companyId} AND (name ILIKE ${q} OR cuit ILIKE ${q})
           ORDER BY name LIMIT 5
-        `),
-        db.execute(sql`
+        `);
+        queries.customers = db.execute(sql`
           SELECT id, name, email, cuit, 'customer' as _type FROM customers
           WHERE company_id = ${companyId} AND (name ILIKE ${q} OR email ILIKE ${q} OR cuit ILIKE ${q})
           ORDER BY name LIMIT 5
-        `),
-        db.execute(sql`
+        `);
+      }
+
+      if (canView(userPermissions, 'orders')) {
+        queries.orders = db.execute(sql`
           SELECT o.id, o.order_number, o.title, o.total_amount, o.status, c.name as customer_name, 'order' as _type
           FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
           WHERE o.company_id = ${companyId} AND (o.title ILIKE ${q} OR CAST(o.order_number AS TEXT) ILIKE ${q} OR c.name ILIKE ${q})
           ORDER BY o.created_at DESC LIMIT 5
-        `),
-        db.execute(sql`
+        `);
+      }
+
+      if (canView(userPermissions, 'purchases')) {
+        queries.purchases = db.execute(sql`
           SELECT p.id, p.purchase_number, p.total_amount, p.status, e.name as enterprise_name, 'purchase' as _type
           FROM purchases p LEFT JOIN enterprises e ON p.enterprise_id = e.id
           WHERE p.company_id = ${companyId} AND (CAST(p.purchase_number AS TEXT) ILIKE ${q} OR e.name ILIKE ${q})
           ORDER BY p.created_at DESC LIMIT 5
-        `),
-        db.execute(sql`
+        `);
+      }
+
+      if (canView(userPermissions, 'products')) {
+        queries.products = db.execute(sql`
           SELECT id, name, sku, 'product' as _type FROM products
           WHERE company_id = ${companyId} AND (name ILIKE ${q} OR sku ILIKE ${q})
           ORDER BY name LIMIT 5
-        `),
-        db.execute(sql`
+        `);
+      }
+
+      if (canView(userPermissions, 'invoices')) {
+        queries.invoices = db.execute(sql`
           SELECT i.id, i.invoice_number, i.invoice_type, i.total_amount, i.status, c.name as customer_name, 'invoice' as _type
           FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId} AND (CAST(i.invoice_number AS TEXT) ILIKE ${q} OR c.name ILIKE ${q})
           ORDER BY i.created_at DESC LIMIT 5
-        `),
-      ]);
+        `);
+      }
+
+      const keys = Object.keys(queries);
+      const results = await Promise.all(Object.values(queries));
+
+      const resolved: Record<string, any[]> = {};
+      keys.forEach((key, idx) => {
+        resolved[key] = (results[idx] as any).rows || results[idx] || [];
+      });
 
       return {
-        enterprises: (entResult as any).rows || entResult || [],
-        customers: (custResult as any).rows || custResult || [],
-        orders: (ordResult as any).rows || ordResult || [],
-        purchases: (purResult as any).rows || purResult || [],
-        products: (prodResult as any).rows || prodResult || [],
-        invoices: (invResult as any).rows || invResult || [],
+        enterprises: resolved.enterprises || [],
+        customers: resolved.customers || [],
+        orders: resolved.orders || [],
+        purchases: resolved.purchases || [],
+        products: resolved.products || [],
+        invoices: resolved.invoices || [],
       };
     } catch (error) {
       console.error('Global search error:', error);

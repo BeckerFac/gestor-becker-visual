@@ -8,6 +8,7 @@ import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface StockItem {
   id: string
@@ -131,9 +132,11 @@ export const Inventory: React.FC = () => {
             ]}
             filename="inventario"
           />
-          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Movimiento de Stock'}
-          </Button>
+          <PermissionGate module="inventory" action="create">
+            <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancelar' : '+ Movimiento de Stock'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 

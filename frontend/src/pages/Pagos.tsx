@@ -11,6 +11,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Pago {
   id: string
@@ -180,9 +181,11 @@ export const Pagos: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPagos} columns={csvColumns} filename="pagos" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Registrar Pago'}
-          </Button>
+          <PermissionGate module="pagos" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancelar' : '+ Registrar Pago'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -343,7 +346,9 @@ export const Pagos: React.FC = () => {
                     <td className="px-4 py-3 text-sm text-gray-600">{pago.bank_name || '-'}</td>
                     <td className="px-4 py-3">{pago.reference ? <span className="font-mono text-xs">{pago.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => setDeleteTarget(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      <PermissionGate module="pagos" action="delete">
+                        <button onClick={() => setDeleteTarget(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                      </PermissionGate>
                     </td>
                   </tr>
                 ))}

@@ -7,6 +7,21 @@ import { eq, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
 export class AuthService {
+  async getUserPermissions(userId: string): Promise<Record<string, string[]> | null> {
+    const result = await db.execute(sql`
+      SELECT module, action FROM permissions WHERE user_id = ${userId} AND allowed = true
+    `);
+    const rows = (result as any).rows || result || [];
+    if (rows.length === 0) return null;
+    const perms: Record<string, string[]> = {};
+    for (const row of rows) {
+      const r = row as { module: string; action: string };
+      if (!perms[r.module]) perms[r.module] = [];
+      perms[r.module].push(r.action);
+    }
+    return perms;
+  }
+
   async register(email: string, password: string, name: string, company_name: string, cuit: string) {
     try {
       // Check if user exists
@@ -99,6 +114,9 @@ export class AuthService {
       // Generate tokens
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
 
+      // Load permissions for non-admin users
+      const permissions = user.role === 'admin' ? null : await this.getUserPermissions(user.id);
+
       return {
         user: {
           id: user.id,
@@ -112,6 +130,7 @@ export class AuthService {
           name: company.name,
           cuit: company.cuit,
         } : null,
+        permissions,
         ...tokens,
       };
     } catch (error) {
@@ -169,6 +188,9 @@ export class AuthService {
 
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
 
+      // Load permissions for non-admin users
+      const permissions = user.role === 'admin' ? null : await this.getUserPermissions(user.id);
+
       return {
         ...tokens,
         user: {
@@ -183,11 +205,28 @@ export class AuthService {
           name: company.name,
           cuit: company.cuit,
         } : null,
+        permissions,
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(401, 'Token refresh failed');
     }
+  }
+
+  async me(userId: string) {
+    const result = await db.execute(sql`
+      SELECT id, email, name, role, company_id, active FROM users WHERE id = ${userId}
+    `);
+    const rows = (result as any).rows || result || [];
+    if (rows.length === 0) {
+      throw new ApiError(404, 'User not found');
+    }
+    const user = rows[0] as { id: string; email: string; name: string; role: string; company_id: string; active: boolean };
+    if (!user.active) {
+      throw new ApiError(403, 'User deactivated');
+    }
+    const permissions = user.role === 'admin' ? null : await this.getUserPermissions(userId);
+    return { ...user, permissions };
   }
 
   async customerLogin(accessCode: string) {

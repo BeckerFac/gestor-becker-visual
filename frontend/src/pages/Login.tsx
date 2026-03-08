@@ -56,7 +56,7 @@ export const Login: React.FC = () => {
         name: 'Mi Empresa',
         cuit: '00000000000',
       }
-      setAuth(response.user, company, response.accessToken, response.refreshToken)
+      setAuth(response.user, company, response.accessToken, response.refreshToken, response.permissions ?? null)
       navigate('/dashboard')
     } catch (error: any) {
       const msg = typeof error === 'string' ? error : error?.message || 'Error en el login'
@@ -82,7 +82,7 @@ export const Login: React.FC = () => {
         name: data.company_name,
         cuit: data.cuit,
       }
-      setAuth(response.user, company, response.accessToken, response.refreshToken)
+      setAuth(response.user, company, response.accessToken, response.refreshToken, response.permissions ?? null)
       navigate('/dashboard')
     } catch (error: any) {
       const msg = typeof error === 'string' ? error : error?.message || 'Error en el registro'

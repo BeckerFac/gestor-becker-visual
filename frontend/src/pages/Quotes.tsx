@@ -13,6 +13,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -356,9 +357,11 @@ export const Quotes: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={CSV_COLUMNS} filename="cotizaciones" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (!showForm && items.length === 0) addItem() }}>
-            {showForm ? 'Cancelar' : '+ Nueva Cotizacion'}
-          </Button>
+          <PermissionGate module="quotes" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (!showForm && items.length === 0) addItem() }}>
+              {showForm ? 'Cancelar' : '+ Nueva Cotizacion'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -654,16 +657,18 @@ export const Quotes: React.FC = () => {
                       <span className="font-bold text-green-700">{formatCurrency(parseFloat(quote.total_amount || '0'))}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        className={`px-2 py-1 rounded-lg text-xs font-medium border cursor-pointer ${STATUS_COLORS[quote.status] || 'bg-gray-100 text-gray-800'}`}
-                        value={quote.status}
-                        onChange={e => handleStatusChange(quote.id, e.target.value)}
-                        disabled={updatingStatusId === quote.id}
-                      >
-                        <option value="draft">Borrador</option>
-                        <option value="accepted">Aceptada</option>
-                        <option value="rejected">Rechazada</option>
-                      </select>
+                      <PermissionGate module="quotes" action="edit">
+                        <select
+                          className={`px-2 py-1 rounded-lg text-xs font-medium border cursor-pointer ${STATUS_COLORS[quote.status] || 'bg-gray-100 text-gray-800'}`}
+                          value={quote.status}
+                          onChange={e => handleStatusChange(quote.id, e.target.value)}
+                          disabled={updatingStatusId === quote.id}
+                        >
+                          <option value="draft">Borrador</option>
+                          <option value="accepted">Aceptada</option>
+                          <option value="rejected">Rechazada</option>
+                        </select>
+                      </PermissionGate>
                     </td>
                     <td className="px-4 py-3">
                       <button

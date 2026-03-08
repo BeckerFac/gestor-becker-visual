@@ -21,18 +21,26 @@ import { Purchases } from '@/pages/Purchases'
 import { Cobros } from '@/pages/Cobros'
 import { Pagos } from '@/pages/Pagos'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
+import { Users } from '@/pages/Users'
+import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
+  module?: string
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, module }) => {
   const user = useAuthStore((state) => state.user)
   const accessToken = useAuthStore((state) => state.accessToken)
+  const canAny = useAuthStore((state) => state.canAny)
 
   if (!user || !accessToken) {
     return <Navigate to="/" replace />
+  }
+
+  if (module && !canAny(module)) {
+    return <AppShell><UnauthorizedPage /></AppShell>
   }
 
   return <AppShell>{children}</AppShell>
@@ -59,21 +67,22 @@ function App() {
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
 
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />
+        <Route path="/products" element={<ProtectedRoute module="products"><Products /></ProtectedRoute>} />
         <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
-        <Route path="/empresas" element={<ProtectedRoute><Enterprises /></ProtectedRoute>} />
-        <Route path="/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
-        <Route path="/compras" element={<ProtectedRoute><Purchases /></ProtectedRoute>} />
-        <Route path="/quotes" element={<ProtectedRoute><Quotes /></ProtectedRoute>} />
-        <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
-        <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
-        <Route path="/cobros" element={<ProtectedRoute><Cobros /></ProtectedRoute>} />
-        <Route path="/pagos" element={<ProtectedRoute><Pagos /></ProtectedRoute>} />
-        <Route path="/cuenta-corriente" element={<ProtectedRoute><CuentaCorriente /></ProtectedRoute>} />
-        <Route path="/cheques" element={<ProtectedRoute><Cheques /></ProtectedRoute>} />
-        <Route path="/remitos" element={<ProtectedRoute><Remitos /></ProtectedRoute>} />
-        <Route path="/bancos" element={<ProtectedRoute><Banks /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/empresas" element={<ProtectedRoute module="enterprises"><Enterprises /></ProtectedRoute>} />
+        <Route path="/orders" element={<ProtectedRoute module="orders"><Orders /></ProtectedRoute>} />
+        <Route path="/compras" element={<ProtectedRoute module="purchases"><Purchases /></ProtectedRoute>} />
+        <Route path="/quotes" element={<ProtectedRoute module="quotes"><Quotes /></ProtectedRoute>} />
+        <Route path="/invoices" element={<ProtectedRoute module="invoices"><Invoices /></ProtectedRoute>} />
+        <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
+        <Route path="/cobros" element={<ProtectedRoute module="cobros"><Cobros /></ProtectedRoute>} />
+        <Route path="/pagos" element={<ProtectedRoute module="pagos"><Pagos /></ProtectedRoute>} />
+        <Route path="/cuenta-corriente" element={<ProtectedRoute module="cuenta_corriente"><CuentaCorriente /></ProtectedRoute>} />
+        <Route path="/cheques" element={<ProtectedRoute module="cheques"><Cheques /></ProtectedRoute>} />
+        <Route path="/remitos" element={<ProtectedRoute module="remitos"><Remitos /></ProtectedRoute>} />
+        <Route path="/bancos" element={<ProtectedRoute module="banks"><Banks /></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute module="users"><Users /></ProtectedRoute>} />
 
         {/* Customer Portal - standalone, no admin auth required */}
         <Route path="/portal" element={<CustomerPortal />} />

@@ -6,7 +6,8 @@ export class ReportsController {
   async getDashboard(req: AuthRequest, res: Response) {
     const dateFrom = req.query.date_from as string | undefined;
     const dateTo = req.query.date_to as string | undefined;
-    const data = await reportsService.getDashboard(req.user!.company_id, dateFrom, dateTo);
+    const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
+    const data = await reportsService.getDashboard(req.user!.company_id, dateFrom, dateTo, userPermissions);
     res.json(data);
   }
 
@@ -23,7 +24,8 @@ export class ReportsController {
   }
   async globalSearch(req: AuthRequest, res: Response) {
     const query = (req.query.q as string) || '';
-    const data = await reportsService.globalSearch(req.user!.company_id, query);
+    const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
+    const data = await reportsService.globalSearch(req.user!.company_id, query, userPermissions);
     res.json(data);
   }
 }

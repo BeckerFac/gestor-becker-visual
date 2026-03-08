@@ -14,6 +14,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -427,9 +428,11 @@ export const Remitos: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={CSV_COLUMNS} filename="remitos" />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(v => !v)}>
-            {showForm ? 'Cancelar' : '+ Nuevo Remito'}
-          </Button>
+          <PermissionGate module="remitos" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(v => !v)}>
+              {showForm ? 'Cancelar' : '+ Nuevo Remito'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -799,18 +802,20 @@ export const Remitos: React.FC = () => {
                       {remito.item_count} item{remito.item_count !== 1 ? 's' : ''}
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                          STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700'
-                        }`}
-                        value={remito.status}
-                        onChange={e => handleStatusChange(remito.id, e.target.value)}
-                        title="Cambiar estado"
-                      >
-                        {STATUS_OPTIONS.map(s => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
+                      <PermissionGate module="remitos" action="edit">
+                        <select
+                          className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
+                            STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700'
+                          }`}
+                          value={remito.status}
+                          onChange={e => handleStatusChange(remito.id, e.target.value)}
+                          title="Cambiar estado"
+                        >
+                          {STATUS_OPTIONS.map(s => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                      </PermissionGate>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
@@ -842,13 +847,15 @@ export const Remitos: React.FC = () => {
                             Ver Firmado
                           </button>
                         )}
-                        <button
-                          onClick={() => setDeleteTarget(remito)}
-                          className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"
-                          title="Eliminar remito"
-                        >
-                          ×
-                        </button>
+                        <PermissionGate module="remitos" action="delete">
+                          <button
+                            onClick={() => setDeleteTarget(remito)}
+                            className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"
+                            title="Eliminar remito"
+                          >
+                            ×
+                          </button>
+                        </PermissionGate>
                       </div>
                     </td>
                   </tr>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+import { useCanAny } from '@/components/shared/PermissionGate'
 import { api } from '@/services/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SkeletonPage } from '@/components/ui/Skeleton'
@@ -132,7 +133,12 @@ export const Dashboard: React.FC = () => {
     return <SkeletonPage />
   }
 
-  const kpis = [
+  const canInvoices = useCanAny('invoices')
+  const canCobros = useCanAny('cobros')
+  const canCheques = useCanAny('cheques')
+  const canOrders = useCanAny('orders')
+
+  const allKpis = [
     {
       label: 'Facturado este Mes',
       value: formatCurrency(dashboard?.sales_month || 0),
@@ -140,6 +146,7 @@ export const Dashboard: React.FC = () => {
       textColor: 'text-blue-800',
       labelColor: 'text-blue-600',
       onClick: () => navigate('/invoices'),
+      visible: canInvoices,
     },
     {
       label: 'Por Cobrar',
@@ -148,6 +155,7 @@ export const Dashboard: React.FC = () => {
       textColor: 'text-orange-800',
       labelColor: 'text-orange-600',
       onClick: () => navigate('/cobros'),
+      visible: canCobros,
     },
     {
       label: `Cheques a Cobrar (${dashboard?.cheques_pending_count || 0})`,
@@ -156,6 +164,7 @@ export const Dashboard: React.FC = () => {
       textColor: 'text-purple-800',
       labelColor: 'text-purple-600',
       onClick: () => navigate('/cheques'),
+      visible: canCheques,
     },
     {
       label: `Pedidos sin Pagar (${dashboard?.orders_unpaid_count || 0})`,
@@ -164,8 +173,10 @@ export const Dashboard: React.FC = () => {
       textColor: 'text-red-800',
       labelColor: 'text-red-600',
       onClick: () => navigate('/orders'),
+      visible: canOrders,
     },
   ]
+  const kpis = allKpis.filter(k => k.visible)
 
   return (
     <div className="space-y-6">

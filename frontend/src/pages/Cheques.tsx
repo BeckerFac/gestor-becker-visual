@@ -11,6 +11,7 @@ import { DataTable } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Cheque {
   id: string
@@ -259,20 +260,26 @@ export const Cheques: React.FC = () => {
     )},
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Cheque) => (
       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-        <select
-          className="text-xs border rounded px-1 py-0.5"
-          value={row.status}
-          onChange={e => handleStatusChange(row.id, e.target.value)}
-        >
-          <option value={row.status}>{STATUS_LABELS[row.status]}</option>
-          {(VALID_TRANSITIONS[row.status] || []).map((s: string) => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
+        <PermissionGate module="cheques" action="edit">
+          <select
+            className="text-xs border rounded px-1 py-0.5"
+            value={row.status}
+            onChange={e => handleStatusChange(row.id, e.target.value)}
+          >
+            <option value={row.status}>{STATUS_LABELS[row.status]}</option>
+            {(VALID_TRANSITIONS[row.status] || []).map((s: string) => (
+              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+            ))}
+          </select>
+        </PermissionGate>
         {row.status === 'a_cobrar' && (
           <>
-            <button onClick={e => { e.stopPropagation(); handleEdit(row) }} className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">Editar</button>
-            <button onClick={e => { e.stopPropagation(); setDeleteTarget(row) }} className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200">Eliminar</button>
+            <PermissionGate module="cheques" action="edit">
+              <button onClick={e => { e.stopPropagation(); handleEdit(row) }} className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">Editar</button>
+            </PermissionGate>
+            <PermissionGate module="cheques" action="delete">
+              <button onClick={e => { e.stopPropagation(); setDeleteTarget(row) }} className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200">Eliminar</button>
+            </PermissionGate>
           </>
         )}
       </div>
@@ -312,9 +319,11 @@ export const Cheques: React.FC = () => {
             ]}
             filename="cheques"
           />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-            {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
-          </Button>
+          <PermissionGate module="cheques" action="create">
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+              {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
+            </Button>
+          </PermissionGate>
         </div>
       </div>
 
