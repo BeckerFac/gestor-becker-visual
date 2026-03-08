@@ -25,6 +25,42 @@ import { Users } from '@/pages/Users'
 import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
 
+// Error Boundary to catch and display React render errors
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, fontFamily: 'monospace' }}>
+          <h1 style={{ color: 'red' }}>Error en la aplicacion</h1>
+          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 16 }}>
+            {this.state.error?.message}
+          </pre>
+          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 8, fontSize: 12, color: '#666' }}>
+            {this.state.error?.stack}
+          </pre>
+          <button
+            onClick={() => { localStorage.clear(); window.location.href = '/' }}
+            style={{ marginTop: 20, padding: '8px 16px', cursor: 'pointer' }}
+          >
+            Limpiar sesion y recargar
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 interface ProtectedRouteProps {
   children: React.ReactNode
   module?: string
@@ -61,6 +97,7 @@ function App() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
+    <ErrorBoundary>
     <Router>
       <ToastContainer />
       <Routes>
@@ -90,6 +127,7 @@ function App() {
         <Route path="*" element={<Navigate to={user ? '/dashboard' : '/'} replace />} />
       </Routes>
     </Router>
+    </ErrorBoundary>
   )
 }
 

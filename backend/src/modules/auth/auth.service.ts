@@ -222,7 +222,7 @@ export class AuthService {
       throw new ApiError(404, 'User not found');
     }
     const user = rows[0] as { id: string; email: string; name: string; role: string; company_id: string; active: boolean };
-    if (!user.active) {
+    if (user.active === false) {
       throw new ApiError(403, 'User deactivated');
     }
     const permissions = user.role === 'admin' ? null : await this.getUserPermissions(userId);
