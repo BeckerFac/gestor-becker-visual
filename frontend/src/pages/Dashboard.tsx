@@ -47,6 +47,12 @@ export const Dashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
   const [searchLoading, setSearchLoading] = useState(false)
+
+  // Permission hooks - must be called before any conditional return
+  const canInvoices = useCanAny('invoices')
+  const canCobros = useCanAny('cobros')
+  const canCheques = useCanAny('cheques')
+  const canOrders = useCanAny('orders')
   const [showResults, setShowResults] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -132,11 +138,6 @@ export const Dashboard: React.FC = () => {
   if (loading) {
     return <SkeletonPage />
   }
-
-  const canInvoices = useCanAny('invoices')
-  const canCobros = useCanAny('cobros')
-  const canCheques = useCanAny('cheques')
-  const canOrders = useCanAny('orders')
 
   const allKpis = [
     {
