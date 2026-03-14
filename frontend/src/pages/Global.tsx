@@ -175,8 +175,17 @@ export const Global: React.FC = () => {
           break
         }
         case 'cheques': {
-          const chequesData = await api.getCheques({ search: selectedEnterprise?.name })
-          setCheques(chequesData.items || chequesData || [])
+          // Get contacts for this enterprise, then filter cheques by those customer IDs
+          const entDetail = await api.getEnterprise(enterpriseId)
+          const contactIds = (entDetail.contacts || []).map((c: any) => c.id)
+          if (contactIds.length > 0) {
+            const allCheques = await api.getCheques({})
+            const filtered = (Array.isArray(allCheques) ? allCheques : allCheques.items || [])
+              .filter((c: any) => contactIds.includes(c.customer_id))
+            setCheques(filtered)
+          } else {
+            setCheques([])
+          }
           break
         }
       }

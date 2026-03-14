@@ -173,7 +173,7 @@ export class InventoryService {
       const movementId = uuid();
       await db.execute(sql`
         INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, notes, created_by)
-        VALUES (${movementId}, ${data.product_id}, ${warehouseId}, 'adjustment', ${Math.abs(quantityChange).toString()}, ${data.reason || null}, ${userId})
+        VALUES (${movementId}, ${data.product_id}, ${warehouseId}, 'adjustment', ${quantityChange.toString()}, ${(data.reason || '') + (quantityChange < 0 ? ' (salida)' : ' (ingreso)')}, ${userId})
       `);
 
       // Upsert stock
