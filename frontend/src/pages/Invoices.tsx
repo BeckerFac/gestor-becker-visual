@@ -73,9 +73,9 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 }
 
 const PAYMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pagado: { label: 'Pagado', color: 'bg-green-100 text-green-800' },
-  parcial: { label: 'Parcial', color: 'bg-yellow-100 text-yellow-800' },
-  pendiente: { label: 'Pendiente', color: 'bg-red-100 text-red-800' },
+  pagado: { label: 'Pagada', color: 'bg-green-100 text-green-800' },
+  parcial: { label: 'Pago parcial', color: 'bg-orange-100 text-orange-800' },
+  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
 }
 
 const TYPE_BADGE_COLORS: Record<string, string> = {
@@ -954,7 +954,7 @@ export const Invoices: React.FC = () => {
       {loading ? (
         <Card>
           <CardContent>
-            <SkeletonTable rows={6} cols={vistaMode === 'fiscal' ? 9 : 8} />
+            <SkeletonTable rows={6} cols={vistaMode === 'fiscal' ? 10 : 8} />
           </CardContent>
         </Card>
       ) : filteredInvoices.length === 0 ? (
@@ -981,8 +981,7 @@ export const Invoices: React.FC = () => {
                   <th className="px-4 py-3">Cliente</th>
                   {vistaMode === 'fiscal' && <th className="px-4 py-3">Pedido</th>}
                   <th className="px-4 py-3 text-right">Total</th>
-                  {vistaMode === 'interno' && <th className="px-4 py-3 text-right">Cobrado</th>}
-                  {vistaMode === 'interno' && <th className="px-4 py-3 text-center">Estado Pago</th>}
+                  <th className="px-4 py-3 text-center">Estado Pago</th>
                   <th className="px-4 py-3 text-center">Estado</th>
                   {vistaMode === 'fiscal' && <th className="px-4 py-3">CAE</th>}
                   <th className="px-4 py-3 text-center">Acciones</th>
@@ -1108,22 +1107,18 @@ export const Invoices: React.FC = () => {
                         {formatCurrency(parseFloat(invoice.total_amount || '0'))}
                       </td>
 
-                      {/* Cobrado - only interno */}
-                      {vistaMode === 'interno' && (
-                        <td className="px-4 py-3 text-right font-medium text-gray-700">
-                          {formatCurrency(parseFloat(invoice.total_cobrado || '0'))}
-                        </td>
-                      )}
-
-                      {/* Estado Pago - only interno */}
-                      {vistaMode === 'interno' && (
-                        <td className="px-4 py-3 text-center">
-                          <StatusBadge
-                            status={invoice.payment_status || ''}
-                            label={PAYMENT_STATUS_MAP[invoice.payment_status || '']?.label || invoice.payment_status || '-'}
-                          />
-                        </td>
-                      )}
+                      {/* Estado Pago */}
+                      <td className="px-4 py-3 text-center">
+                        {(() => {
+                          const ps = invoice.payment_status || 'pendiente'
+                          const meta = PAYMENT_STATUS_MAP[ps]
+                          return meta ? (
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${meta.color}`}>
+                              {meta.label}
+                            </span>
+                          ) : <span className="text-gray-400">-</span>
+                        })()}
+                      </td>
 
                       {/* Estado */}
                       <td className="px-4 py-3 text-center">

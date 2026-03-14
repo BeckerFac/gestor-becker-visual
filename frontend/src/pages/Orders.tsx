@@ -580,6 +580,43 @@ export const Orders: React.FC = () => {
     }
   }
 
+  const handleCreateNoFiscalInvoice = async (orderId: string) => {
+    const status = invoicingStatus[orderId]
+    if (!status) return
+    if (creatingInvoice[orderId]) return
+    const qtys = invoiceQtys[orderId] || {}
+    const selectedItems = (status.items || [])
+      .filter(item => (qtys[item.id] || 0) > 0)
+      .map(item => ({
+        order_item_id: item.id,
+        quantity: qtys[item.id] || 0,
+        product_name: item.product_name || '',
+        unit_price: item.unit_price?.toString() || '0',
+        vat_rate: '0',
+      }))
+    if (selectedItems.length === 0) {
+      setError('Selecciona al menos un item con cantidad mayor a 0 para facturar')
+      return
+    }
+    setCreatingInvoice(prev => ({ ...prev, [orderId]: true }))
+    setInvoiceProgress(prev => ({ ...prev, [orderId]: 'Creando comprobante no fiscal...' }))
+    setError(null)
+    try {
+      await api.createInvoice({
+        order_id: orderId,
+        fiscal_type: 'no_fiscal',
+        items: selectedItems,
+      })
+      setShowInvoiceForm(prev => ({ ...prev, [orderId]: false }))
+      await loadInvoicingStatus(orderId)
+    } catch (e: any) {
+      setError(e.response?.data?.message || e.message)
+    } finally {
+      setCreatingInvoice(prev => ({ ...prev, [orderId]: false }))
+      setInvoiceProgress(prev => ({ ...prev, [orderId]: '' }))
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const s = STATUS_OPTIONS.find(o => o.value === status)
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${s?.color || 'bg-gray-100 text-gray-800'}`}>{s?.label || status}</span>
@@ -1534,13 +1571,23 @@ export const Orders: React.FC = () => {
                                                   <p className="text-[10px] text-indigo-500 mt-1">No cierres esta ventana</p>
                                                 </div>
                                               ) : (
-                                                <button
-                                                  onClick={() => handleCreateInvoice(order.id)}
-                                                  disabled={creatingInvoice[order.id]}
-                                                  className="w-full px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                  Crear Borrador de Factura
-                                                </button>
+                                                <div className="flex gap-2">
+                                                  <button
+                                                    onClick={() => handleCreateInvoice(order.id)}
+                                                    disabled={creatingInvoice[order.id]}
+                                                    className="flex-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                  >
+                                                    Crear Borrador de Factura
+                                                  </button>
+                                                  <button
+                                                    onClick={() => handleCreateNoFiscalInvoice(order.id)}
+                                                    disabled={creatingInvoice[order.id]}
+                                                    className="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-xs font-medium hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    title="Crear comprobante sin autorizacion AFIP"
+                                                  >
+                                                    No Fiscal
+                                                  </button>
+                                                </div>
                                               )}
                                             </div>
                                           )}

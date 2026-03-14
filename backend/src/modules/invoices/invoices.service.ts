@@ -36,15 +36,15 @@ export class InvoicesService {
     await this.ensureMigrations();
     try {
       const invoiceId = uuid();
-      const fiscalType = data.fiscal_type === 'interno' ? 'interno' : 'fiscal';
-      const invoiceType = fiscalType === 'interno' ? null : (data.invoice_type || 'B');
+      const fiscalType = data.fiscal_type === 'interno' ? 'interno' : (data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal');
+      const invoiceType = (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? null : (data.invoice_type || 'B');
 
       // Get next sequential invoice number — separate sequences for fiscal vs internal
       let nextNumber: number;
-      if (fiscalType === 'interno') {
+      if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
         const maxResult = await db.execute(sql`
           SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
-          FROM invoices WHERE company_id = ${companyId} AND fiscal_type = 'interno'
+          FROM invoices WHERE company_id = ${companyId} AND fiscal_type = ${fiscalType}
         `);
         const rows = (maxResult as any).rows || maxResult || [];
         nextNumber = parseInt(rows[0]?.next_number || '1');
@@ -66,13 +66,13 @@ export class InvoicesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
-      if (fiscalType === 'interno') {
-        // Internal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
+      if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
+        // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
         await db.execute(sql`
           INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
             subtotal, vat_amount, total_amount, status, fiscal_type, created_by, created_at, updated_at)
           VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, NULL, ${nextNumber}, NOW(),
-            '0', '0', '0', 'emitido', 'interno', ${userId}, NOW(), NOW())
+            '0', '0', '0', 'emitido', ${fiscalType}, ${userId}, NOW(), NOW())
         `);
       } else {
         await db.insert(invoices).values({
@@ -215,6 +215,8 @@ export class InvoicesService {
       // Filter by fiscal_type (default: 'fiscal' to preserve backward compatibility)
       if (fiscal_type === 'interno') {
         whereClause = sql`${whereClause} AND i.fiscal_type = 'interno'`;
+      } else if (fiscal_type === 'no_fiscal') {
+        whereClause = sql`${whereClause} AND i.fiscal_type = 'no_fiscal'`;
       } else if (fiscal_type === 'all') {
         // show all
       } else {
@@ -510,8 +512,9 @@ export class InvoicesService {
     try {
       // Block internal vouchers from AFIP authorization
       const ftCheck = await db.execute(sql`SELECT fiscal_type FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}`);
-      if (((ftCheck as any).rows || [])[0]?.fiscal_type === 'interno') {
-        throw new ApiError(400, 'Los comprobantes internos no pueden autorizarse en AFIP');
+      const ft = ((ftCheck as any).rows || [])[0]?.fiscal_type;
+      if (ft === 'interno' || ft === 'no_fiscal') {
+        throw new ApiError(400, 'Los comprobantes internos/no fiscales no pueden autorizarse en AFIP');
       }
 
       validateNumeric(puntoVenta, 'Punto de venta', { min: 1, max: 99999, allowZero: false });

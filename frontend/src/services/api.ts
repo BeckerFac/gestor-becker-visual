@@ -417,6 +417,20 @@ export const api = {
     return data
   },
 
+  // Receipts (recibos)
+  getReceipts: async () => {
+    const { data } = await client.get('/receipts')
+    return data
+  },
+  createReceipt: async (receiptData: any) => {
+    const { data } = await client.post('/receipts', receiptData)
+    return data
+  },
+  deleteReceipt: async (id: string) => {
+    const { data } = await client.delete(`/receipts/${id}`)
+    return data
+  },
+
   // Tags
   getTags: async () => {
     const { data } = await client.get('/tags')

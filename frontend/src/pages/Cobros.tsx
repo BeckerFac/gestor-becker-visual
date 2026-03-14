@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -35,6 +35,38 @@ interface Enterprise { id: string; name: string }
 interface Order { id: string; order_number: number; title: string; total_amount: string; customer?: { enterprise_id?: string } }
 interface Bank { id: string; bank_name: string }
 
+interface Receipt {
+  id: string
+  receipt_number: number
+  receipt_date: string
+  total_amount: string
+  payment_method: string | null
+  notes: string | null
+  items: {
+    id: string
+    invoice_id: string
+    amount: string
+    invoice_number: number
+    invoice_type: string | null
+    invoice_total: string
+    fiscal_type: string | null
+    enterprise_name: string
+    customer_name: string
+  }[]
+}
+
+interface InvoiceForReceipt {
+  id: string
+  invoice_number: number
+  invoice_type: string | null
+  fiscal_type: string | null
+  total_amount: string
+  enterprise?: { name: string } | null
+  customer?: { name: string } | null
+  payment_status: string
+  total_cobrado: string
+}
+
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
   mercado_pago: 'Mercado Pago',
@@ -44,6 +76,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 }
 
 export const Cobros: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'cobros' | 'recibos'>('cobros')
   const [cobros, setCobros] = useState<Cobro[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [orders, setOrders] = useState<Order[]>([])
@@ -60,6 +93,21 @@ export const Cobros: React.FC = () => {
   const [pageSize, setPageSize] = useState(25)
   const [deleteTarget, setDeleteTarget] = useState<Cobro | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Recibos state
+  const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [receiptsLoading, setReceiptsLoading] = useState(false)
+  const [showReceiptForm, setShowReceiptForm] = useState(false)
+  const [savingReceipt, setSavingReceipt] = useState(false)
+  const [invoicesForReceipt, setInvoicesForReceipt] = useState<InvoiceForReceipt[]>([])
+  const [receiptFormItems, setReceiptFormItems] = useState<Record<string, string>>({})
+  const [receiptForm, setReceiptForm] = useState({
+    payment_method: 'transferencia',
+    receipt_date: new Date().toISOString().split('T')[0],
+    notes: '',
+  })
+  const [deleteReceiptTarget, setDeleteReceiptTarget] = useState<Receipt | null>(null)
+  const [deletingReceipt, setDeletingReceipt] = useState(false)
 
   const [orderItems, setOrderItems] = useState<any[]>([])
   const [selectedItems, setSelectedItems] = useState<Record<string, string>>({}) // order_item_id -> amount
@@ -117,7 +165,86 @@ export const Cobros: React.FC = () => {
     }
   }
 
+  const loadReceipts = useCallback(async () => {
+    setReceiptsLoading(true)
+    try {
+      const data = await api.getReceipts()
+      setReceipts(data || [])
+    } catch (e: any) {
+      console.warn('Could not load receipts:', e.message)
+    } finally {
+      setReceiptsLoading(false)
+    }
+  }, [])
+
+  const loadInvoicesForReceipt = useCallback(async () => {
+    try {
+      const res = await api.getInvoices({ fiscal_type: 'all', limit: 200 })
+      const items: InvoiceForReceipt[] = (res.items || []).filter((inv: any) =>
+        (inv.status === 'authorized' || inv.status === 'emitido') &&
+        (inv.payment_status !== 'pagado')
+      )
+      setInvoicesForReceipt(items)
+    } catch (e: any) {
+      console.warn('Could not load invoices for receipt:', e.message)
+    }
+  }, [])
+
+  const handleOpenReceiptForm = async () => {
+    setShowReceiptForm(true)
+    setReceiptFormItems({})
+    setReceiptForm({ payment_method: 'transferencia', receipt_date: new Date().toISOString().split('T')[0], notes: '' })
+    await loadInvoicesForReceipt()
+  }
+
+  const handleCreateReceipt = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const items = Object.entries(receiptFormItems)
+      .filter(([_, amount]) => parseFloat(amount) > 0)
+      .map(([invoice_id, amount]) => ({ invoice_id, amount: parseFloat(amount) }))
+    if (items.length === 0) {
+      toast.error('Selecciona al menos una factura con monto a pagar')
+      return
+    }
+    setSavingReceipt(true)
+    try {
+      await api.createReceipt({
+        receipt_date: receiptForm.receipt_date,
+        payment_method: receiptForm.payment_method,
+        notes: receiptForm.notes || null,
+        items,
+      })
+      setShowReceiptForm(false)
+      toast.success('Recibo creado correctamente')
+      await Promise.all([loadReceipts(), loadData()])
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || e.message)
+    } finally {
+      setSavingReceipt(false)
+    }
+  }
+
+  const handleDeleteReceipt = async () => {
+    if (!deleteReceiptTarget) return
+    setDeletingReceipt(true)
+    try {
+      await api.deleteReceipt(deleteReceiptTarget.id)
+      toast.success('Recibo eliminado')
+      setDeleteReceiptTarget(null)
+      await Promise.all([loadReceipts(), loadData()])
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setDeletingReceipt(false)
+    }
+  }
+
+  const receiptTotal = useMemo(() => {
+    return Object.values(receiptFormItems).reduce((sum, v) => sum + parseFloat(v || '0'), 0)
+  }, [receiptFormItems])
+
   useEffect(() => { loadData() }, [filterEnterprise])
+  useEffect(() => { if (activeTab === 'recibos') loadReceipts() }, [activeTab, loadReceipts])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -224,15 +351,43 @@ export const Cobros: React.FC = () => {
           <p className="text-sm text-gray-500 mt-1">Pagos recibidos de empresas</p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportCSVButton data={filteredCobros} columns={csvColumns} filename="cobros" />
-          <PermissionGate module="cobros" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
-              {showForm ? 'Cancelar' : '+ Registrar Cobro'}
-            </Button>
-          </PermissionGate>
+          {activeTab === 'cobros' && (
+            <>
+              <ExportCSVButton data={filteredCobros} columns={csvColumns} filename="cobros" />
+              <PermissionGate module="cobros" action="create">
+                <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
+                  {showForm ? 'Cancelar' : '+ Registrar Cobro'}
+                </Button>
+              </PermissionGate>
+            </>
+          )}
+          {activeTab === 'recibos' && (
+            <PermissionGate module="cobros" action="create">
+              <Button variant={showReceiptForm ? 'danger' : 'primary'} onClick={() => showReceiptForm ? setShowReceiptForm(false) : handleOpenReceiptForm()}>
+                {showReceiptForm ? 'Cancelar' : '+ Nuevo Recibo'}
+              </Button>
+            </PermissionGate>
+          )}
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+        <button
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'cobros' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setActiveTab('cobros')}
+        >
+          Cobros
+        </button>
+        <button
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'recibos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setActiveTab('recibos')}
+        >
+          Recibos
+        </button>
+      </div>
+
+      {activeTab === 'cobros' && (<>
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card className="border border-green-200 bg-green-50">
@@ -520,6 +675,200 @@ export const Cobros: React.FC = () => {
         </Card>
       )}
 
+      </>)}
+
+      {/* Recibos Tab */}
+      {activeTab === 'recibos' && (
+        <>
+          {/* Receipt Form */}
+          {showReceiptForm && (
+            <Card className="animate-fadeIn">
+              <CardHeader><h3 className="text-lg font-semibold">Nuevo Recibo</h3></CardHeader>
+              <CardContent>
+                <form onSubmit={handleCreateReceipt} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-sm font-medium text-gray-700">Metodo de Pago</label>
+                      <select
+                        className="px-3 py-2 border border-gray-300 rounded-lg"
+                        value={receiptForm.payment_method}
+                        onChange={e => setReceiptForm(f => ({ ...f, payment_method: e.target.value }))}
+                      >
+                        <option value="efectivo">Efectivo</option>
+                        <option value="mercado_pago">Mercado Pago</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="tarjeta">Tarjeta</option>
+                      </select>
+                    </div>
+                    <Input
+                      label="Fecha"
+                      type="date"
+                      value={receiptForm.receipt_date}
+                      onChange={e => setReceiptForm(f => ({ ...f, receipt_date: e.target.value }))}
+                    />
+                    <Input
+                      label="Notas"
+                      placeholder="Observaciones..."
+                      value={receiptForm.notes}
+                      onChange={e => setReceiptForm(f => ({ ...f, notes: e.target.value }))}
+                    />
+                  </div>
+
+                  {/* Invoice selector */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-2">Facturas a cobrar</label>
+                    {invoicesForReceipt.length === 0 ? (
+                      <p className="text-sm text-gray-400 italic">No hay facturas pendientes de cobro</p>
+                    ) : (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 text-xs text-gray-500">
+                              <th className="px-3 py-2 text-left">Factura</th>
+                              <th className="px-3 py-2 text-left">Cliente / Empresa</th>
+                              <th className="px-3 py-2 text-right">Total</th>
+                              <th className="px-3 py-2 text-right">Cobrado</th>
+                              <th className="px-3 py-2 text-right">Restante</th>
+                              <th className="px-3 py-2 text-right w-36">Monto a pagar</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invoicesForReceipt.map(inv => {
+                              const total = parseFloat(inv.total_amount || '0')
+                              const cobrado = parseFloat(inv.total_cobrado || '0')
+                              const remaining = Math.max(0, total - cobrado)
+                              const invLabel = inv.fiscal_type === 'interno'
+                                ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
+                                : inv.fiscal_type === 'no_fiscal'
+                                  ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
+                                  : `${inv.invoice_type || ''} ${String(inv.invoice_number).padStart(8, '0')}`
+                              return (
+                                <tr key={inv.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                  <td className="px-3 py-2 font-mono text-xs font-semibold">{invLabel}</td>
+                                  <td className="px-3 py-2 text-gray-700">{inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'}</td>
+                                  <td className="px-3 py-2 text-right text-gray-600">{fmt(total)}</td>
+                                  <td className="px-3 py-2 text-right text-green-600">{fmt(cobrado)}</td>
+                                  <td className="px-3 py-2 text-right font-medium">{fmt(remaining)}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    {remaining > 0 ? (
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        max={remaining}
+                                        placeholder="0.00"
+                                        value={receiptFormItems[inv.id] || ''}
+                                        onChange={e => {
+                                          const val = e.target.value
+                                          setReceiptFormItems(prev => {
+                                            const next = { ...prev }
+                                            if (val && parseFloat(val) > 0) next[inv.id] = val
+                                            else delete next[inv.id]
+                                            return next
+                                          })
+                                        }}
+                                        className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                                      />
+                                    ) : (
+                                      <span className="text-xs text-green-600 font-medium">Completo</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Total */}
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                    <div className="text-sm text-gray-600">
+                      Total del recibo: <span className="font-bold text-lg text-green-700 ml-2">{fmt(receiptTotal)}</span>
+                    </div>
+                    <Button type="submit" variant="success" loading={savingReceipt} disabled={receiptTotal <= 0}>
+                      Crear Recibo
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Receipts list */}
+          {receiptsLoading ? (
+            <SkeletonTable rows={4} cols={5} />
+          ) : receipts.length === 0 ? (
+            <EmptyState
+              title="No hay recibos registrados"
+              description="Crea el primer recibo para empezar"
+              variant="empty"
+              actionLabel="+ Nuevo Recibo"
+              onAction={handleOpenReceiptForm}
+            />
+          ) : (
+            <Card>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                      <th className="px-4 py-3">N° Recibo</th>
+                      <th className="px-4 py-3">Fecha</th>
+                      <th className="px-4 py-3 text-right">Total</th>
+                      <th className="px-4 py-3">Metodo</th>
+                      <th className="px-4 py-3">Facturas</th>
+                      <th className="px-4 py-3">Notas</th>
+                      <th className="px-4 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receipts.map(receipt => (
+                      <tr key={receipt.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-mono font-semibold text-gray-800">
+                          #{String(receipt.receipt_number).padStart(6, '0')}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{fmtDate(receipt.receipt_date)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-green-700">{fmt(receipt.total_amount)}</td>
+                        <td className="px-4 py-3">{PAYMENT_METHOD_LABELS[receipt.payment_method || ''] || receipt.payment_method || '-'}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {(receipt.items || []).map((item, idx) => {
+                              const label = item.fiscal_type === 'interno'
+                                ? `CI-${String(item.invoice_number).padStart(6, '0')}`
+                                : item.fiscal_type === 'no_fiscal'
+                                  ? `NF-${String(item.invoice_number).padStart(6, '0')}`
+                                  : `${item.invoice_type || ''} ${String(item.invoice_number).padStart(8, '0')}`
+                              return (
+                                <span key={item.id || idx} className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono" title={`${item.customer_name} - ${fmt(item.amount)}`}>
+                                  {label} ({fmt(item.amount)})
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{receipt.notes || '-'}</td>
+                        <td className="px-4 py-3">
+                          <PermissionGate module="cobros" action="delete">
+                            <button
+                              onClick={() => setDeleteReceiptTarget(receipt)}
+                              className="text-red-500 hover:text-red-700 text-sm transition-colors"
+                            >
+                              Eliminar
+                            </button>
+                          </PermissionGate>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
       <ConfirmDialog
         open={!!deleteTarget}
         title="Eliminar cobro"
@@ -529,6 +878,17 @@ export const Cobros: React.FC = () => {
         loading={deleting}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteReceiptTarget}
+        title="Eliminar recibo"
+        message={`¿Eliminar el recibo #${deleteReceiptTarget ? String(deleteReceiptTarget.receipt_number).padStart(6, '0') : ''}? Los cobros asociados tambien se eliminaran.`}
+        confirmLabel="Eliminar"
+        variant="danger"
+        loading={deletingReceipt}
+        onConfirm={handleDeleteReceipt}
+        onCancel={() => setDeleteReceiptTarget(null)}
       />
     </div>
   )

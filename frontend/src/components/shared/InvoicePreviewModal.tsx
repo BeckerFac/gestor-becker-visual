@@ -4,6 +4,12 @@ import type { PreviewItem } from '@/hooks/useInvoicePreview'
 
 const INVOICE_TYPES = ['A', 'B', 'C']
 
+const TAX_CONDITION_MAP: Record<string, string> = {
+  A: 'Responsable Inscripto',
+  B: 'Consumidor Final / Exento',
+  C: 'Monotributista',
+}
+
 interface InvoicePreviewModalProps {
   invoice: any
   loading: boolean
@@ -49,6 +55,13 @@ export function InvoicePreviewModal({
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState<'datos' | 'pdf'>('datos')
+  const [showConfirmAuthorize, setShowConfirmAuthorize] = useState(false)
+
+  // CUIT validation: for fiscal type A, CUIT is required
+  const customerCuit = invoice?.customer?.cuit || ''
+  const isFiscal = !invoice?.fiscal_type || invoice?.fiscal_type === 'fiscal'
+  const needsCuit = isFiscal && invoiceType === 'A'
+  const missingCuit = needsCuit && !customerCuit
 
   // Focus trap + Escape key
   useEffect(() => {
@@ -171,11 +184,17 @@ export function InvoicePreviewModal({
                   <p className="text-xs text-gray-500 mb-1">Emisor</p>
                   <p className="text-sm font-semibold">BeckerVisual</p>
                   <p className="text-xs text-gray-500">CUIT: {invoice.enterprise?.cuit || '27-23091318-3'}</p>
+                  <p className="text-xs text-gray-500">Cond. fiscal: {TAX_CONDITION_MAP[invoiceType] || 'Resp. Inscripto'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Cliente</p>
                   <p className="text-sm font-semibold">{invoice.customer?.name || 'Consumidor Final'}</p>
                   <p className="text-xs text-gray-500">CUIT: {invoice.customer?.cuit || '-'}</p>
+                  {missingCuit && (
+                    <p className="text-xs text-red-600 font-semibold mt-1">
+                      El cliente no tiene CUIT cargado. Requerido para Factura A.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -333,6 +352,26 @@ export function InvoicePreviewModal({
             </div>
             )}
 
+            {/* Confirmation preview before AFIP authorization */}
+            {showConfirmAuthorize && !authorized && (
+              <div className="px-6 py-3 bg-yellow-50 border-t border-yellow-200">
+                <p className="text-sm font-semibold text-yellow-800 mb-2">Resumen antes de autorizar con AFIP:</p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-700">
+                  <div><span className="text-gray-500">Cliente:</span> {invoice.customer?.name || 'Consumidor Final'}</div>
+                  <div><span className="text-gray-500">CUIT:</span> {invoice.customer?.cuit || '-'}</div>
+                  <div><span className="text-gray-500">Tipo:</span> Factura {invoiceType}</div>
+                  <div><span className="text-gray-500">Punto de Venta:</span> {puntoVenta}</div>
+                  <div><span className="text-gray-500">Fecha:</span> {formatDate(invoice.invoice_date || invoice.created_at)}</div>
+                  <div><span className="text-gray-500">Items:</span> {items.length}</div>
+                  <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(subtotal)}</div>
+                  <div><span className="text-gray-500">IVA:</span> {formatCurrency(vatAmount)}</div>
+                  <div className="col-span-2 text-sm font-bold text-gray-900 pt-1 border-t border-yellow-200 mt-1">
+                    Total: {formatCurrency(total)}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
               {authorizeProgress && (
@@ -371,13 +410,35 @@ export function InvoicePreviewModal({
                       >
                         Cerrar
                       </button>
-                      <button
-                        onClick={onAuthorize}
-                        disabled={authorizing}
-                        className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60"
-                      >
-                        {authorizing ? 'Autorizando...' : authFailed ? 'Reintentar AFIP' : 'Autorizar con AFIP'}
-                      </button>
+                      {!showConfirmAuthorize ? (
+                        <button
+                          onClick={() => {
+                            if (missingCuit) return
+                            setShowConfirmAuthorize(true)
+                          }}
+                          disabled={authorizing || missingCuit}
+                          className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60"
+                          title={missingCuit ? 'El cliente no tiene CUIT cargado' : ''}
+                        >
+                          {authFailed ? 'Reintentar AFIP' : 'Autorizar con AFIP'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setShowConfirmAuthorize(false); onAuthorize() }}
+                          disabled={authorizing}
+                          className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-60 animate-pulse"
+                        >
+                          {authorizing ? 'Autorizando...' : 'Confirmar y Autorizar'}
+                        </button>
+                      )}
+                      {showConfirmAuthorize && !authorizing && (
+                        <button
+                          onClick={() => setShowConfirmAuthorize(false)}
+                          className="px-3 py-2 text-gray-500 border border-gray-300 rounded-lg text-sm hover:bg-gray-100 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                      )}
                       {authFailed && (
                         <button
                           onClick={() => onDownloadPdf(invoice.id, invoice)}
