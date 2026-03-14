@@ -22,6 +22,7 @@ import { Cobros } from '@/pages/Cobros'
 import { Pagos } from '@/pages/Pagos'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { Users } from '@/pages/Users'
+import { Global } from '@/pages/Global'
 import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
 
@@ -104,6 +105,7 @@ function App() {
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
 
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/global" element={<ProtectedRoute><Global /></ProtectedRoute>} />
         <Route path="/products" element={<ProtectedRoute module="products"><Products /></ProtectedRoute>} />
         <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
         <Route path="/empresas" element={<ProtectedRoute module="enterprises"><Enterprises /></ProtectedRoute>} />

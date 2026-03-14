@@ -32,6 +32,7 @@ const navSections: NavSection[] = [
     label: '',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+      { href: '/global', label: 'Busqueda Global', icon: '🔍' },
     ],
   },
   {
