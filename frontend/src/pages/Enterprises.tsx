@@ -53,6 +53,7 @@ const emptyEnterpriseForm = {
   fiscal_address: '', fiscal_city: '', fiscal_province: '', fiscal_postal_code: '',
   same_fiscal_address: true,
   phone: '', email: '', tax_condition: 'Responsable Inscripto', notes: '',
+  price_list_id: '',
 }
 
 const emptyContactForm = {
@@ -83,6 +84,7 @@ export const Enterprises: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'enterprise'; item: Enterprise } | { type: 'contact'; item: Contact } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [availableTags, setAvailableTags] = useState<{ id: string; name: string; color: string }[]>([])
+  const [priceLists, setPriceLists] = useState<any[]>([])
 
   const loadTags = async () => {
     try { setAvailableTags(await api.getTags()) } catch {}
@@ -91,12 +93,14 @@ export const Enterprises: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [entRes, custRes] = await Promise.all([
+      const [entRes, custRes, plRes] = await Promise.all([
         api.getEnterprises(),
         api.getCustomers(),
+        api.getPriceLists().catch(() => []),
       ])
       setEnterprises(entRes || [])
       setContacts((custRes.items || custRes || []))
+      setPriceLists(Array.isArray(plRes) ? plRes : [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -126,7 +130,7 @@ export const Enterprises: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      const { same_fiscal_address, ...formData } = enterpriseForm
+      const { same_fiscal_address, price_list_id, ...formData } = enterpriseForm
       const payload = {
         ...formData,
         fiscal_address: same_fiscal_address ? null : formData.fiscal_address,
@@ -136,9 +140,17 @@ export const Enterprises: React.FC = () => {
       }
       if (editingEnterpriseId) {
         await api.updateEnterprise(editingEnterpriseId, payload)
+        // Link price list if changed
+        if (price_list_id !== undefined) {
+          await api.linkEnterpriseToPriceList(editingEnterpriseId, price_list_id || '').catch(() => {})
+        }
         toast.success('Empresa actualizada correctamente')
       } else {
-        await api.createEnterprise(payload)
+        const created = await api.createEnterprise(payload)
+        // Link price list to newly created enterprise
+        if (price_list_id && created?.id) {
+          await api.linkEnterpriseToPriceList(created.id, price_list_id).catch(() => {})
+        }
         toast.success('Empresa creada correctamente')
       }
       setShowEnterpriseForm(false)
@@ -163,6 +175,7 @@ export const Enterprises: React.FC = () => {
       same_fiscal_address: hasSameFiscal,
       phone: ent.phone || '', email: ent.email || '',
       tax_condition: ent.tax_condition || 'Responsable Inscripto', notes: ent.notes || '',
+      price_list_id: (ent as any).price_list_id || '',
     })
     setEditingEnterpriseId(ent.id)
     setShowEnterpriseForm(true)
@@ -357,6 +370,13 @@ export const Enterprises: React.FC = () => {
                     <option>Monotributo</option>
                     <option>Exento</option>
                     <option>Consumidor Final</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Lista de Precios</label>
+                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.price_list_id} onChange={e => setEnterpriseForm({ ...enterpriseForm, price_list_id: e.target.value })}>
+                    <option value="">Sin lista de precios</option>
+                    {priceLists.map((pl: any) => <option key={pl.id} value={pl.id}>{pl.name} ({pl.type})</option>)}
                   </select>
                 </div>
               </div>

@@ -225,6 +225,16 @@ export const api = {
     return data
   },
 
+  // Price Lists
+  getPriceLists: async () => { const { data } = await client.get('/price-lists'); return data },
+  getPriceList: async (id: string) => { const { data } = await client.get(`/price-lists/${id}`); return data },
+  createPriceList: async (listData: any) => { const { data } = await client.post('/price-lists', listData); return data },
+  updatePriceList: async (id: string, listData: any) => { const { data } = await client.put(`/price-lists/${id}`, listData); return data },
+  deletePriceList: async (id: string) => { const { data } = await client.delete(`/price-lists/${id}`); return data },
+  setPriceListItems: async (id: string, items: any[]) => { const { data } = await client.put(`/price-lists/${id}/items`, { items }); return data },
+  getEnterprisePriceForProduct: async (enterpriseId: string, productId: string) => { const { data } = await client.get(`/price-lists/enterprise-price/${enterpriseId}/${productId}`); return data },
+  linkEnterpriseToPriceList: async (enterpriseId: string, priceListId: string) => { const { data } = await client.put(`/price-lists/link-enterprise/${enterpriseId}`, { price_list_id: priceListId }); return data },
+
   // Product Components (BOM)
   getProductComponents: async (productId: string) => {
     const { data } = await client.get(`/products/${productId}/components`)

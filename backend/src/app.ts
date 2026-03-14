@@ -33,6 +33,7 @@ import { pagosRouter } from './modules/pagos/pagos.router';
 import { cuentaCorrienteRouter } from './modules/cuenta-corriente/cuenta-corriente.router';
 import { tagsRouter } from './modules/tags/tags.router';
 import { usersRouter } from './modules/users/users.router';
+import { priceListsRouter } from './modules/price-lists/price-lists.router';
 
 export const app = express();
 
@@ -98,6 +99,7 @@ app.use('/api/pagos', authMiddleware, pagosRouter);
 app.use('/api/cuenta-corriente', authMiddleware, cuentaCorrienteRouter);
 app.use('/api/tags', authMiddleware, tagsRouter);
 app.use('/api/users', authMiddleware, usersRouter);
+app.use('/api/price-lists', authMiddleware, priceListsRouter);
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');
