@@ -21,6 +21,8 @@ interface Product {
   product_type: string | null
   category_id: string | null
   active: boolean
+  controls_stock?: boolean
+  low_stock_threshold?: string | number
   pricing?: { cost: string; margin_percent: string; vat_rate: string; final_price: string }
 }
 
@@ -46,6 +48,7 @@ const VAT_OPTIONS = [
 const emptyForm = {
   sku: '', name: '', description: '', barcode: '', product_type: 'otro',
   cost: '', margin_percent: '30', vat_rate: '21', final_price: '',
+  controls_stock: false, low_stock_threshold: '0',
 }
 
 export const Products: React.FC = () => {
@@ -170,6 +173,8 @@ export const Products: React.FC = () => {
         margin_percent: margin,
         vat_rate: vat,
         final_price: Math.round(finalPrice * 100) / 100,
+        controls_stock: form.controls_stock,
+        low_stock_threshold: form.controls_stock ? parseFloat(form.low_stock_threshold) || 0 : 0,
       }
       if (editingId) {
         await api.updateProduct(editingId, payload)
@@ -237,6 +242,8 @@ export const Products: React.FC = () => {
       sku: product.sku, name: product.name, description: product.description || '',
       barcode: product.barcode || '', product_type: (product as any).product_type || 'otro',
       cost, margin_percent: margin, vat_rate: vatRate, final_price: finalPrice,
+      controls_stock: !!(product as any).controls_stock,
+      low_stock_threshold: String((product as any).low_stock_threshold || '0'),
     })
     setEditingId(product.id)
     setShowForm(true)
@@ -505,7 +512,41 @@ export const Products: React.FC = () => {
                   </datalist>
                 </div>
               </div>
-              <Input label="Descripción" placeholder="Descripción del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+              <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+
+              {/* Stock control */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.controls_stock}
+                      onChange={e => setForm({ ...form, controls_stock: e.target.checked })}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Controla stock</span>
+                  </label>
+                  {form.controls_stock && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600">Alerta stock bajo:</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm w-24 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        value={form.low_stock_threshold}
+                        onChange={e => setForm({ ...form, low_stock_threshold: e.target.value })}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  {form.controls_stock
+                    ? 'Este producto se descontara del inventario en pedidos y se sumara en compras'
+                    : 'Activar para gestionar el stock de este producto'}
+                </p>
+              </div>
 
               {/* Bidirectional Price Fields */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">

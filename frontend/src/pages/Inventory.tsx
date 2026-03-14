@@ -19,17 +19,25 @@ interface StockItem {
   max_level: string
 }
 
-interface Product { id: string; sku: string; name: string }
+interface Product {
+  id: string
+  sku: string
+  name: string
+  controls_stock?: boolean
+  low_stock_threshold?: string | number
+}
 
 export const Inventory: React.FC = () => {
   const [stock, setStock] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showAdjustForm, setShowAdjustForm] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState({ product_id: '', movement_type: 'purchase', quantity: '', notes: '' })
+  const [adjustForm, setAdjustForm] = useState({ product_id: '', quantity_change: '', reason: '' })
 
   const loadData = async () => {
     try {
@@ -71,6 +79,35 @@ export const Inventory: React.FC = () => {
     }
   }
 
+  const handleAdjust = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      await api.adjustStock({
+        product_id: adjustForm.product_id,
+        quantity_change: parseFloat(adjustForm.quantity_change),
+        reason: adjustForm.reason,
+      })
+      toast.success('Ajuste de stock registrado correctamente')
+      setShowAdjustForm(false)
+      setAdjustForm({ product_id: '', quantity_change: '', reason: '' })
+      await loadData()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const stockControlProducts = products.filter((p: any) => p.controls_stock)
+
+  const getProductThreshold = (productId: string): number => {
+    const product = products.find(p => p.id === productId) as any
+    if (!product) return 0
+    return parseFloat(String(product.low_stock_threshold || '0'))
+  }
+
   const filtered = stock.filter(s =>
     s.product?.name?.toLowerCase().includes(search.toLowerCase()) ||
     s.product?.sku?.toLowerCase().includes(search.toLowerCase())
@@ -79,12 +116,23 @@ export const Inventory: React.FC = () => {
   const columns = [
     { key: 'product' as const, label: 'SKU', render: (v: any) => v?.sku || '-' },
     { key: 'product' as const, label: 'Producto', render: (v: any) => v?.name || '-' },
-    { key: 'warehouse' as const, label: 'Depósito', render: (v: any) => v?.name || 'Principal' },
-    { key: 'quantity' as const, label: 'Cantidad', render: (v: any) => {
-      const qty = parseFloat(v || '0')
-      return <span className={`font-bold ${qty <= 0 ? 'text-red-600' : qty < 10 ? 'text-orange-500' : 'text-green-600'}`}>{qty}</span>
+    { key: 'warehouse' as const, label: 'Deposito', render: (v: any) => v?.name || 'Principal' },
+    { key: 'quantity' as const, label: 'Cantidad', render: (_: any, row: StockItem) => {
+      const qty = parseFloat(row.quantity || '0')
+      const threshold = getProductThreshold(row.product?.id)
+      const isBelowThreshold = threshold > 0 && qty <= threshold && qty > 0
+      return (
+        <span className={`font-bold ${qty <= 0 ? 'text-red-600' : isBelowThreshold ? 'text-orange-500' : qty < 10 ? 'text-orange-500' : 'text-green-600'}`}>
+          {qty}
+          {isBelowThreshold && (
+            <span className="ml-1 text-xs font-normal text-orange-600" title={`Umbral: ${threshold}`}>
+              (bajo umbral)
+            </span>
+          )}
+        </span>
+      )
     }},
-    { key: 'min_level' as const, label: 'Mín.', render: (v: any) => v || '0' },
+    { key: 'min_level' as const, label: 'Min.', render: (v: any) => v || '0' },
     { key: 'id' as const, label: 'Usado en', render: (_: any, row: any) => {
       const usedIn = row.used_in_products || []
       if (!usedIn.length) return <span className="text-gray-300 text-xs">-</span>
@@ -95,11 +143,20 @@ export const Inventory: React.FC = () => {
     { key: 'quantity' as const, label: 'Estado', render: (_: any, row: StockItem) => {
       const qty = parseFloat(row.quantity || '0')
       const min = parseFloat(row.min_level || '0')
+      const threshold = getProductThreshold(row.product?.id)
       if (qty <= 0) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Sin Stock</span>
+      if (threshold > 0 && qty <= threshold) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">Stock Bajo</span>
       if (qty <= min) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">Stock Bajo</span>
       return <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">OK</span>
     }},
   ]
+
+  const lowStockCount = stock.filter(s => {
+    const q = parseFloat(s.quantity || '0')
+    const m = parseFloat(s.min_level || '0')
+    const threshold = getProductThreshold(s.product?.id)
+    return q > 0 && (q <= m || (threshold > 0 && q <= threshold))
+  }).length
 
   return (
     <div className="space-y-6">
@@ -113,13 +170,14 @@ export const Inventory: React.FC = () => {
             data={filtered.map(s => {
               const qty = parseFloat(s.quantity || '0')
               const min = parseFloat(s.min_level || '0')
+              const threshold = getProductThreshold(s.product?.id)
               return {
                 sku: s.product?.sku || '-',
                 producto: s.product?.name || '-',
                 deposito: s.warehouse?.name || 'Principal',
                 cantidad: qty,
                 minimo: min,
-                estado: qty <= 0 ? 'Sin Stock' : qty <= min ? 'Stock Bajo' : 'OK',
+                estado: qty <= 0 ? 'Sin Stock' : (qty <= min || (threshold > 0 && qty <= threshold)) ? 'Stock Bajo' : 'OK',
               }
             })}
             columns={[
@@ -133,7 +191,12 @@ export const Inventory: React.FC = () => {
             filename="inventario"
           />
           <PermissionGate module="inventory" action="create">
-            <Button variant="primary" onClick={() => setShowForm(!showForm)}>
+            <Button variant="secondary" onClick={() => { setShowAdjustForm(!showAdjustForm); if (showForm) setShowForm(false) }}>
+              {showAdjustForm ? 'Cancelar Ajuste' : 'Ajustar stock'}
+            </Button>
+          </PermissionGate>
+          <PermissionGate module="inventory" action="create">
+            <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showAdjustForm) setShowAdjustForm(false) }}>
               {showForm ? 'Cancelar' : '+ Movimiento de Stock'}
             </Button>
           </PermissionGate>
@@ -142,7 +205,7 @@ export const Inventory: React.FC = () => {
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
+          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
 
@@ -151,13 +214,18 @@ export const Inventory: React.FC = () => {
         <Card className="border border-green-200 bg-green-50">
           <CardContent className="pt-4">
             <p className="text-sm text-green-700">Stock Normal</p>
-            <p className="text-2xl font-bold text-green-800">{stock.filter(s => parseFloat(s.quantity || '0') > parseFloat(s.min_level || '0')).length}</p>
+            <p className="text-2xl font-bold text-green-800">{stock.filter(s => {
+              const q = parseFloat(s.quantity || '0')
+              const m = parseFloat(s.min_level || '0')
+              const threshold = getProductThreshold(s.product?.id)
+              return q > 0 && q > m && (threshold <= 0 || q > threshold)
+            }).length}</p>
           </CardContent>
         </Card>
         <Card className="border border-orange-200 bg-orange-50">
           <CardContent className="pt-4">
             <p className="text-sm text-orange-700">Stock Bajo</p>
-            <p className="text-2xl font-bold text-orange-800">{stock.filter(s => { const q = parseFloat(s.quantity || '0'); const m = parseFloat(s.min_level || '0'); return q > 0 && q <= m; }).length}</p>
+            <p className="text-2xl font-bold text-orange-800">{lowStockCount}</p>
           </CardContent>
         </Card>
         <Card className="border border-red-200 bg-red-50">
@@ -167,6 +235,47 @@ export const Inventory: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Adjust stock form */}
+      {showAdjustForm && (
+        <Card className="border-orange-200">
+          <CardHeader><h3 className="text-lg font-semibold">Ajustar Stock</h3></CardHeader>
+          <CardContent>
+            <form onSubmit={handleAdjust} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Producto *</label>
+                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={adjustForm.product_id} onChange={e => setAdjustForm({ ...adjustForm, product_id: e.target.value })} required>
+                  <option value="">Seleccionar producto...</option>
+                  {stockControlProducts.length > 0
+                    ? stockControlProducts.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)
+                    : products.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)
+                  }
+                </select>
+                {stockControlProducts.length > 0 && (
+                  <p className="text-xs text-gray-400">Solo productos que controlan stock</p>
+                )}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Cambio de cantidad *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Ej: 5 o -3"
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                  value={adjustForm.quantity_change}
+                  onChange={e => setAdjustForm({ ...adjustForm, quantity_change: e.target.value })}
+                  required
+                />
+                <p className="text-xs text-gray-400">Positivo para sumar, negativo para restar</p>
+              </div>
+              <Input label="Motivo *" placeholder="Razon del ajuste..." value={adjustForm.reason} onChange={e => setAdjustForm({ ...adjustForm, reason: e.target.value })} required />
+              <div className="flex items-end">
+                <Button type="submit" variant="success" loading={saving}>Registrar Ajuste</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {showForm && (
         <Card>
@@ -185,8 +294,8 @@ export const Inventory: React.FC = () => {
                 <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.movement_type} onChange={e => setForm({ ...form, movement_type: e.target.value })}>
                   <option value="purchase">Compra (Ingreso)</option>
                   <option value="adjustment">Ajuste</option>
-                  <option value="return_customer">Devolución Cliente</option>
-                  <option value="return_supplier">Devolución Proveedor</option>
+                  <option value="return_customer">Devolucion Cliente</option>
+                  <option value="return_supplier">Devolucion Proveedor</option>
                 </select>
               </div>
               <Input label="Cantidad *" type="number" step="0.01" placeholder="0" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} required />

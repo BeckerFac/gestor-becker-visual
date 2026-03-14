@@ -44,12 +44,15 @@ interface Bank { id: string; bank_name: string }
 
 interface PurchaseItem {
   id?: string
+  product_id?: string
   product_name: string
   description: string
   quantity: number | string
   unit_price: number | string
   subtotal?: number | string
 }
+
+interface ProductOption { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string } }
 
 const PAYMENT_METHODS = [
   { value: '', label: 'Sin especificar' },
@@ -70,6 +73,7 @@ export const Purchases: React.FC = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
+  const [availableProducts, setAvailableProducts] = useState<ProductOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -84,6 +88,7 @@ export const Purchases: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [addingToInventory, setAddingToInventory] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     enterprise_id: '', date: new Date().toISOString().split('T')[0],
@@ -92,20 +97,22 @@ export const Purchases: React.FC = () => {
     vat_rate: '21',
   })
   const [items, setItems] = useState<PurchaseItem[]>([
-    { product_name: '', description: '', quantity: 1, unit_price: 0 },
+    { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 },
   ])
 
   const loadData = async () => {
     try {
       setLoading(true)
-      const [purchRes, entRes, bankRes] = await Promise.all([
+      const [purchRes, entRes, bankRes, prodRes] = await Promise.all([
         api.getPurchases(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined),
         api.getEnterprises(),
         api.getBanks(),
+        api.getProducts().catch(() => ({ items: [] })),
       ])
       setPurchases(purchRes || [])
       setEnterprises(entRes || [])
       setBanks(bankRes || [])
+      setAvailableProducts(prodRes.items || prodRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -134,11 +141,12 @@ export const Purchases: React.FC = () => {
         vat_rate: '21',
       })
       setItems(detail.items?.map((i: any) => ({
+        product_id: i.product_id || '',
         product_name: i.product_name || '',
         description: i.description || '',
         quantity: i.quantity?.toString() || '1',
         unit_price: i.unit_price?.toString() || '0',
-      })) || [{ product_name: '', description: '', quantity: '1', unit_price: '0' }])
+      })) || [{ product_id: '', product_name: '', description: '', quantity: '1', unit_price: '0' }])
       setEditingId(purchase.id)
       setShowForm(true)
     } catch (e: any) {
@@ -165,7 +173,10 @@ export const Purchases: React.FC = () => {
         subtotal: calcSubtotal(),
         vat_amount: calcVat(),
         total_amount: calcTotal(),
-        items: validItems,
+        items: validItems.map(i => ({
+          ...i,
+          product_id: i.product_id && i.product_id !== 'custom' ? i.product_id : null,
+        })),
       }
       if (editingId) {
         await api.updatePurchase(editingId, payload)
@@ -176,7 +187,7 @@ export const Purchases: React.FC = () => {
       setShowForm(false)
       setEditingId(null)
       setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' })
-      setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }])
+      setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }])
       await loadData()
     } catch (e: any) {
       toast.error(e.message)
@@ -213,7 +224,50 @@ export const Purchases: React.FC = () => {
     }
   }
 
-  const addItem = () => setItems([...items, { product_name: '', description: '', quantity: 1, unit_price: 0 }])
+  const handleAddToInventory = async (purchase: Purchase) => {
+    if (!purchase.items || purchase.items.length === 0) {
+      // Need to fetch detail first
+      try {
+        setAddingToInventory(purchase.id)
+        const detail = await api.getPurchase(purchase.id)
+        const purchaseItems = (detail.items || []).map((i: any) => ({
+          product_id: i.product_id || i.id || '',
+          quantity: parseFloat(i.quantity || '0'),
+        })).filter((i: any) => i.product_id && i.quantity > 0)
+        if (purchaseItems.length === 0) {
+          toast.error('No hay items con productos asociados en esta compra')
+          return
+        }
+        await api.addStockFromPurchase(purchase.id, purchaseItems)
+        toast.success('Stock agregado al inventario desde la compra')
+      } catch (e: any) {
+        toast.error(e.message || 'Error al agregar stock')
+      } finally {
+        setAddingToInventory(null)
+      }
+      return
+    }
+
+    try {
+      setAddingToInventory(purchase.id)
+      const purchaseItems = purchase.items.map(i => ({
+        product_id: (i as any).product_id || '',
+        quantity: parseFloat(String(i.quantity || '0')),
+      })).filter(i => i.product_id && i.quantity > 0)
+      if (purchaseItems.length === 0) {
+        toast.error('No hay items con productos asociados en esta compra')
+        return
+      }
+      await api.addStockFromPurchase(purchase.id, purchaseItems)
+      toast.success('Stock agregado al inventario desde la compra')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al agregar stock')
+    } finally {
+      setAddingToInventory(null)
+    }
+  }
+
+  const addItem = () => setItems([...items, { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }])
   const removeItem = (idx: number) => { if (items.length > 1) setItems(items.filter((_, i) => i !== idx)) }
   const updateItem = (idx: number, field: keyof PurchaseItem, value: any) => {
     const newItems = [...items]
@@ -281,7 +335,7 @@ export const Purchases: React.FC = () => {
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <PermissionGate module="purchases" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
               {showForm ? 'Cancelar' : '+ Nueva Compra'}
             </Button>
           </PermissionGate>
@@ -403,10 +457,38 @@ export const Purchases: React.FC = () => {
                   {items.map((item, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-4">
-                        <Input placeholder="Producto" value={item.product_name} onChange={e => updateItem(idx, 'product_name', e.target.value)} />
+                        <div className="flex flex-col gap-1">
+                          <select
+                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                            value={item.product_id || ''}
+                            onChange={e => {
+                              const pid = e.target.value
+                              const prod = availableProducts.find(p => p.id === pid)
+                              if (prod) {
+                                const newItems = [...items]
+                                newItems[idx] = {
+                                  ...newItems[idx],
+                                  product_id: pid,
+                                  product_name: prod.name,
+                                  unit_price: parseFloat(prod.pricing?.cost || '0'),
+                                }
+                                setItems(newItems)
+                              } else {
+                                updateItem(idx, 'product_id', pid)
+                              }
+                            }}
+                          >
+                            <option value="">Seleccionar producto...</option>
+                            {availableProducts.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
+                            <option value="custom">Producto manual...</option>
+                          </select>
+                          {(!item.product_id || item.product_id === 'custom') && (
+                            <Input placeholder="Nombre del producto" value={item.product_name} onChange={e => updateItem(idx, 'product_name', e.target.value)} />
+                          )}
+                        </div>
                       </div>
                       <div className="col-span-3">
-                        <Input placeholder="Descripción" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
+                        <Input placeholder="Descripcion" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
                       </div>
                       <div className="col-span-2">
                         <Input type="number" placeholder="Cant." value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} />
@@ -416,7 +498,7 @@ export const Purchases: React.FC = () => {
                       </div>
                       <div className="col-span-1">
                         {items.length > 1 && (
-                          <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-lg px-2">×</button>
+                          <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-lg px-2">x</button>
                         )}
                       </div>
                     </div>
@@ -668,6 +750,18 @@ export const Purchases: React.FC = () => {
                                       <option value="parcial">Parcial</option>
                                       <option value="pagado">Pagado</option>
                                     </select>
+                                  </div>
+                                  <div className="pt-2 border-t border-orange-200">
+                                    <PermissionGate module="inventory" action="create">
+                                      <button
+                                        onClick={() => handleAddToInventory(purchase)}
+                                        disabled={addingToInventory === purchase.id}
+                                        className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                                      >
+                                        {addingToInventory === purchase.id ? 'Agregando...' : 'Agregar al inventario'}
+                                      </button>
+                                      <p className="text-xs text-gray-400 mt-1">Suma stock de los productos que controlan inventario</p>
+                                    </PermissionGate>
                                   </div>
                                 </div>
                               </div>

@@ -12,6 +12,7 @@ export class OrdersService {
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`);
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`);
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`);
       this.migrationsRun = true;
     } catch (error) {
       console.error('Orders migrations error:', error);
@@ -231,6 +232,12 @@ export class OrdersService {
         VALUES (${uuid()}, ${orderId}, 'pendiente', 'Pedido creado', ${userId})
       `);
 
+      // Deduct stock if requested
+      if (data.deduct_stock && data.items && Array.isArray(data.items)) {
+        await db.execute(sql`UPDATE orders SET deduct_stock = true WHERE id = ${orderId}`);
+        await this.deductStockForOrder(companyId, orderId, userId, data.items);
+      }
+
       return { id: orderId, status: 'pendiente' };
     } catch (error) {
       console.error('Create order error:', error);
@@ -340,6 +347,43 @@ export class OrdersService {
       }
     } catch (error) {
       console.warn('BOM stock reversal warning:', error);
+    }
+  }
+
+  private async deductStockForOrder(companyId: string, orderId: string, userId: string, items: any[]) {
+    try {
+      // Get default warehouse
+      const whResult = await db.execute(sql`SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1`);
+      const warehouseId = ((whResult as any).rows || [])[0]?.id;
+      if (!warehouseId) return;
+
+      for (const item of items) {
+        if (!item.product_id || item.product_id === 'custom') continue;
+
+        // Check if product has controls_stock=true
+        const productResult = await db.execute(sql`
+          SELECT id, controls_stock FROM products WHERE id = ${item.product_id} AND company_id = ${companyId}
+        `);
+        const productRows = (productResult as any).rows || productResult || [];
+        if (productRows.length === 0 || !productRows[0].controls_stock) continue;
+
+        const quantity = parseFloat(String(item.quantity)) || 0;
+        if (quantity <= 0) continue;
+
+        // Create stock movement
+        await db.execute(sql`
+          INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
+          VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, 'sale', ${quantity.toString()}, 'order', ${orderId}, ${'Descuento por pedido'}, ${userId})
+        `);
+
+        // Update stock
+        await db.execute(sql`
+          UPDATE stock SET quantity = CAST(GREATEST(CAST(quantity AS decimal) - ${quantity}, 0) AS VARCHAR), updated_at = NOW()
+          WHERE product_id = ${item.product_id} AND warehouse_id = ${warehouseId}
+        `);
+      }
+    } catch (error) {
+      console.warn('Stock deduction for order warning:', error);
     }
   }
 

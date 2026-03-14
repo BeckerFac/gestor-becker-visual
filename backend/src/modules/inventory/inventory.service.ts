@@ -136,6 +136,171 @@ export class InventoryService {
       throw new ApiError(500, 'Failed to get low stock items');
     }
   }
+  async adjustStock(companyId: string, userId: string, data: { product_id: string; warehouse_id?: string; quantity_change: number; reason: string }) {
+    try {
+      // Verify product belongs to company
+      const product = await db.execute(sql`
+        SELECT id FROM products WHERE id = ${data.product_id} AND company_id = ${companyId}
+      `);
+      const productRows = (product as any).rows || product || [];
+      if (productRows.length === 0) {
+        throw new ApiError(404, 'Product not found');
+      }
+
+      // Get or create default warehouse
+      let warehouseId = data.warehouse_id;
+      if (!warehouseId) {
+        const whResult = await db.execute(sql`
+          SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1
+        `);
+        const whRows = (whResult as any).rows || whResult || [];
+        if (whRows.length === 0) {
+          const newId = uuid();
+          await db.insert(warehouses).values({
+            id: newId,
+            company_id: companyId,
+            name: 'Principal',
+          });
+          warehouseId = newId;
+        } else {
+          warehouseId = whRows[0].id;
+        }
+      }
+
+      const quantityChange = parseFloat(String(data.quantity_change));
+
+      // Create movement
+      const movementId = uuid();
+      await db.insert(stock_movements).values({
+        id: movementId,
+        product_id: data.product_id,
+        warehouse_id: warehouseId,
+        movement_type: 'adjustment',
+        quantity: Math.abs(quantityChange).toString(),
+        notes: data.reason || null,
+        created_by: userId,
+      });
+
+      // Upsert stock
+      const existingStock = await db.execute(sql`
+        SELECT id, quantity FROM stock
+        WHERE product_id = ${data.product_id} AND warehouse_id = ${warehouseId}
+      `);
+      const stockRows = (existingStock as any).rows || existingStock || [];
+
+      let newQty: number;
+      if (stockRows.length === 0) {
+        newQty = Math.max(0, quantityChange);
+        await db.insert(stock).values({
+          id: uuid(),
+          product_id: data.product_id,
+          warehouse_id: warehouseId,
+          quantity: newQty.toString(),
+          min_level: '0',
+          max_level: '0',
+        });
+      } else {
+        const currentQty = parseFloat(stockRows[0].quantity || '0');
+        newQty = Math.max(0, currentQty + quantityChange);
+        await db.execute(sql`
+          UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
+          WHERE id = ${stockRows[0].id}
+        `);
+      }
+
+      return { id: movementId, product_id: data.product_id, quantity_change: quantityChange, new_quantity: newQty };
+    } catch (error) {
+      console.error('Adjust stock error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to adjust stock');
+    }
+  }
+
+  async addStockFromPurchase(companyId: string, userId: string, purchaseId: string, items: { product_id: string; quantity: number }[]) {
+    try {
+      // Get or create default warehouse
+      let warehouseResult = await db.execute(sql`
+        SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1
+      `);
+      let warehouseRows = (warehouseResult as any).rows || warehouseResult || [];
+
+      let warehouseId: string;
+      if (warehouseRows.length === 0) {
+        const newId = uuid();
+        await db.insert(warehouses).values({
+          id: newId,
+          company_id: companyId,
+          name: 'Principal',
+        });
+        warehouseId = newId;
+      } else {
+        warehouseId = warehouseRows[0].id;
+      }
+
+      const results: any[] = [];
+
+      for (const item of items) {
+        // Check if product has controls_stock=true
+        const productResult = await db.execute(sql`
+          SELECT id, controls_stock FROM products WHERE id = ${item.product_id} AND company_id = ${companyId}
+        `);
+        const productRows = (productResult as any).rows || productResult || [];
+        if (productRows.length === 0) continue;
+        if (!productRows[0].controls_stock) continue;
+
+        const quantity = parseFloat(String(item.quantity));
+
+        // Create movement
+        const movementId = uuid();
+        await db.insert(stock_movements).values({
+          id: movementId,
+          product_id: item.product_id,
+          warehouse_id: warehouseId,
+          movement_type: 'purchase',
+          quantity: quantity.toString(),
+          reference_type: 'purchase',
+          reference_id: purchaseId,
+          notes: 'Ingreso por compra',
+          created_by: userId,
+        });
+
+        // Upsert stock
+        const existingStock = await db.execute(sql`
+          SELECT id, quantity FROM stock
+          WHERE product_id = ${item.product_id} AND warehouse_id = ${warehouseId}
+        `);
+        const stockRows = (existingStock as any).rows || existingStock || [];
+
+        let newQty: number;
+        if (stockRows.length === 0) {
+          newQty = Math.max(0, quantity);
+          await db.insert(stock).values({
+            id: uuid(),
+            product_id: item.product_id,
+            warehouse_id: warehouseId,
+            quantity: newQty.toString(),
+            min_level: '0',
+            max_level: '0',
+          });
+        } else {
+          const currentQty = parseFloat(stockRows[0].quantity || '0');
+          newQty = currentQty + quantity;
+          await db.execute(sql`
+            UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
+            WHERE id = ${stockRows[0].id}
+          `);
+        }
+
+        results.push({ product_id: item.product_id, quantity_added: quantity, new_quantity: newQty });
+      }
+
+      return { purchase_id: purchaseId, items_processed: results };
+    } catch (error) {
+      console.error('Add stock from purchase error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to add stock from purchase');
+    }
+  }
 }
 
 export const inventoryService = new InventoryService();

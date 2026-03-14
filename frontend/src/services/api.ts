@@ -480,6 +480,14 @@ export const api = {
     const { data } = await client.get('/inventory/low-stock')
     return data
   },
+  adjustStock: async (adjustData: { product_id: string; warehouse_id?: string; quantity_change: number; reason: string }) => {
+    const { data: result } = await client.post('/inventory/adjust', adjustData)
+    return result
+  },
+  addStockFromPurchase: async (purchaseId: string, items: { product_id: string; quantity: number }[]) => {
+    const { data: result } = await client.post('/inventory/from-purchase', { purchase_id: purchaseId, items })
+    return result
+  },
 
   // Orders
   getOrders: async (filters?: any) => {

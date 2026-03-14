@@ -6,7 +6,21 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 
 export class ProductsService {
+  private migrationsRun = false;
+
+  async ensureMigrations() {
+    if (this.migrationsRun) return;
+    try {
+      await db.execute(sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS controls_stock BOOLEAN DEFAULT false`);
+      await db.execute(sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12,2) DEFAULT 0`);
+      this.migrationsRun = true;
+    } catch (error) {
+      console.error('Products migrations error:', error);
+    }
+  }
+
   async createProduct(companyId: string, data: any) {
+    await this.ensureMigrations();
     try {
       const existingSku = await db.query.products.findFirst({
         where: and(eq(products.company_id, companyId), eq(products.sku, data.sku)),
@@ -46,9 +60,15 @@ export class ProductsService {
           });
         }
 
-        // Save product_type via raw SQL (not in drizzle schema)
+        // Save product_type, controls_stock, low_stock_threshold via raw SQL (not in drizzle schema)
         if (data.product_type) {
           await pool.query('UPDATE products SET product_type = $1 WHERE id = $2', [data.product_type, product[0].id]);
+        }
+        if (data.controls_stock !== undefined) {
+          await pool.query('UPDATE products SET controls_stock = $1 WHERE id = $2', [!!data.controls_stock, product[0].id]);
+        }
+        if (data.low_stock_threshold !== undefined) {
+          await pool.query('UPDATE products SET low_stock_threshold = $1 WHERE id = $2', [Number(data.low_stock_threshold) || 0, product[0].id]);
         }
 
         return product[0];
@@ -68,6 +88,7 @@ export class ProductsService {
   }
 
   async getProducts(companyId: string, { skip = 0, limit = 50, search = '' } = {}) {
+    await this.ensureMigrations();
     try {
       const result = await db.execute(sql`
         SELECT p.*,
@@ -129,9 +150,15 @@ export class ProductsService {
         .where(and(eq(products.company_id, companyId), eq(products.id, productId)))
         .returning();
 
-      // Save product_type via raw SQL (not in drizzle schema)
+      // Save product_type, controls_stock, low_stock_threshold via raw SQL (not in drizzle schema)
       if (data.product_type !== undefined) {
         await pool.query('UPDATE products SET product_type = $1 WHERE id = $2', [data.product_type, productId]);
+      }
+      if (data.controls_stock !== undefined) {
+        await pool.query('UPDATE products SET controls_stock = $1 WHERE id = $2', [!!data.controls_stock, productId]);
+      }
+      if (data.low_stock_threshold !== undefined) {
+        await pool.query('UPDATE products SET low_stock_threshold = $1 WHERE id = $2', [Number(data.low_stock_threshold) || 0, productId]);
       }
 
       // Update or create pricing

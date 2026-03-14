@@ -44,6 +44,7 @@ export class PurchasesService {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
       `);
+      await db.execute(sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS product_id UUID REFERENCES products(id) ON DELETE SET NULL`);
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure purchases tables error:', error);
@@ -140,8 +141,8 @@ export class PurchasesService {
           const itemId = uuid();
           const subtotal = (parseFloat(item.quantity) || 1) * (parseFloat(item.unit_price) || 0);
           await db.execute(sql`
-            INSERT INTO purchase_items (id, purchase_id, product_name, description, quantity, unit_price, subtotal)
-            VALUES (${itemId}, ${purchaseId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit_price || 0}, ${subtotal})
+            INSERT INTO purchase_items (id, purchase_id, product_id, product_name, description, quantity, unit_price, subtotal)
+            VALUES (${itemId}, ${purchaseId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit_price || 0}, ${subtotal})
           `);
         }
       }
@@ -216,8 +217,8 @@ export class PurchasesService {
           const itemId = uuid();
           const itemSubtotal = (parseFloat(item.quantity) || 1) * (parseFloat(item.unit_price) || 0);
           await db.execute(sql`
-            INSERT INTO purchase_items (id, purchase_id, product_name, description, quantity, unit_price, subtotal)
-            VALUES (${itemId}, ${purchaseId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit_price || 0}, ${itemSubtotal})
+            INSERT INTO purchase_items (id, purchase_id, product_id, product_name, description, quantity, unit_price, subtotal)
+            VALUES (${itemId}, ${purchaseId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit_price || 0}, ${itemSubtotal})
           `);
         }
       }

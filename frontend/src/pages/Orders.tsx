@@ -181,6 +181,7 @@ export const Orders: React.FC = () => {
     description: '', customer_id: '',
     vat_rate: '21', estimated_delivery: '',
     priority: 'normal', notes: '', payment_method: '', bank_id: '',
+    deduct_stock: false,
   })
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
   const [hasDraft, setHasDraft] = useState(false)
@@ -222,7 +223,7 @@ export const Orders: React.FC = () => {
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
-    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '' })
+    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
   }
@@ -340,6 +341,7 @@ export const Orders: React.FC = () => {
         priority: form.priority,
         payment_method: form.payment_method || null,
         notes: form.notes || null,
+        deduct_stock: form.deduct_stock,
         items: formItems.map(item => ({
           product_id: item.product_id && item.product_id !== 'custom' ? item.product_id : null,
           product_name: item.product_name,
@@ -362,7 +364,7 @@ export const Orders: React.FC = () => {
       localStorage.removeItem(ORDER_DRAFT_KEY)
       setHasDraft(false)
       setFormEnterpriseId('')
-      setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '' })
+      setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
       setFormItems([emptyFormItem()])
       await loadData()
     } catch (e: any) {
@@ -950,6 +952,20 @@ export const Orders: React.FC = () => {
                   </select>
                 </div>
                 <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+              </div>
+
+              {/* Stock deduction */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.deduct_stock}
+                    onChange={e => setForm({ ...form, deduct_stock: e.target.checked })}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Descontar del inventario</span>
+                </label>
+                <p className="text-xs text-gray-400 mt-1">Si esta activo, se descontara el stock de los productos que controlan inventario</p>
               </div>
 
               <Button type="submit" variant="success" loading={saving}>{editingOrderId ? 'Guardar Cambios' : 'Crear Pedido'}</Button>
