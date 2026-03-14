@@ -15,10 +15,16 @@ import { PermissionGate } from '@/components/shared/PermissionGate'
 interface Enterprise {
   id: string
   name: string
+  razon_social: string | null
   cuit: string | null
   address: string | null
   city: string | null
   province: string | null
+  postal_code: string | null
+  fiscal_address: string | null
+  fiscal_city: string | null
+  fiscal_province: string | null
+  fiscal_postal_code: string | null
   phone: string | null
   email: string | null
   tax_condition: string | null
@@ -43,7 +49,9 @@ interface Contact {
 }
 
 const emptyEnterpriseForm = {
-  name: '', cuit: '', address: '', city: '', province: '',
+  name: '', razon_social: '', cuit: '', address: '', city: '', province: '', postal_code: '',
+  fiscal_address: '', fiscal_city: '', fiscal_province: '', fiscal_postal_code: '',
+  same_fiscal_address: true,
   phone: '', email: '', tax_condition: 'Responsable Inscripto', notes: '',
 }
 
@@ -118,11 +126,19 @@ export const Enterprises: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
+      const { same_fiscal_address, ...formData } = enterpriseForm
+      const payload = {
+        ...formData,
+        fiscal_address: same_fiscal_address ? null : formData.fiscal_address,
+        fiscal_city: same_fiscal_address ? null : formData.fiscal_city,
+        fiscal_province: same_fiscal_address ? null : formData.fiscal_province,
+        fiscal_postal_code: same_fiscal_address ? null : formData.fiscal_postal_code,
+      }
       if (editingEnterpriseId) {
-        await api.updateEnterprise(editingEnterpriseId, enterpriseForm)
+        await api.updateEnterprise(editingEnterpriseId, payload)
         toast.success('Empresa actualizada correctamente')
       } else {
-        await api.createEnterprise(enterpriseForm)
+        await api.createEnterprise(payload)
         toast.success('Empresa creada correctamente')
       }
       setShowEnterpriseForm(false)
@@ -137,11 +153,16 @@ export const Enterprises: React.FC = () => {
   }
 
   const handleEditEnterprise = (ent: Enterprise) => {
+    const hasSameFiscal = !ent.fiscal_address && !ent.fiscal_city && !ent.fiscal_province && !ent.fiscal_postal_code
     setEnterpriseForm({
-      name: ent.name, cuit: ent.cuit || '', address: ent.address || '',
-      city: ent.city || '', province: ent.province || '', phone: ent.phone || '',
-      email: ent.email || '', tax_condition: ent.tax_condition || 'Responsable Inscripto',
-      notes: ent.notes || '',
+      name: ent.name, razon_social: ent.razon_social || '', cuit: ent.cuit || '',
+      address: ent.address || '', city: ent.city || '', province: ent.province || '',
+      postal_code: ent.postal_code || '',
+      fiscal_address: ent.fiscal_address || '', fiscal_city: ent.fiscal_city || '',
+      fiscal_province: ent.fiscal_province || '', fiscal_postal_code: ent.fiscal_postal_code || '',
+      same_fiscal_address: hasSameFiscal,
+      phone: ent.phone || '', email: ent.email || '',
+      tax_condition: ent.tax_condition || 'Responsable Inscripto', notes: ent.notes || '',
     })
     setEditingEnterpriseId(ent.id)
     setShowEnterpriseForm(true)
@@ -270,10 +291,13 @@ export const Enterprises: React.FC = () => {
           <ExportCSVButton
             data={filteredEnterprises.map(e => ({
               nombre: e.name,
+              razon_social: e.razon_social || '-',
               cuit: e.cuit || '-',
               direccion: e.address || '-',
               ciudad: e.city || '-',
               provincia: e.province || '-',
+              codigo_postal: e.postal_code || '-',
+              dir_fiscal: e.fiscal_address || e.address || '-',
               telefono: e.phone || '-',
               email: e.email || '-',
               condicion_iva: e.tax_condition || '-',
@@ -282,10 +306,13 @@ export const Enterprises: React.FC = () => {
             }))}
             columns={[
               { key: 'nombre', label: 'Empresa' },
+              { key: 'razon_social', label: 'Razon Social' },
               { key: 'cuit', label: 'CUIT' },
               { key: 'direccion', label: 'Direccion' },
               { key: 'ciudad', label: 'Ciudad' },
               { key: 'provincia', label: 'Provincia' },
+              { key: 'codigo_postal', label: 'CP' },
+              { key: 'dir_fiscal', label: 'Dir. Fiscal' },
               { key: 'telefono', label: 'Telefono' },
               { key: 'email', label: 'Email' },
               { key: 'condicion_iva', label: 'Cond. IVA' },
@@ -314,23 +341,71 @@ export const Enterprises: React.FC = () => {
         <Card>
           <CardHeader><h3 className="text-lg font-semibold">{editingEnterpriseId ? 'Editar Empresa' : 'Nueva Empresa'}</h3></CardHeader>
           <CardContent>
-            <form onSubmit={handleEnterpriseSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Input label="Razón Social *" placeholder="Nombre de la empresa" value={enterpriseForm.name} onChange={e => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })} required />
-              <Input label="CUIT" placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
-              <Input label="Teléfono" placeholder="+54 11 1234-5678" value={enterpriseForm.phone} onChange={e => setEnterpriseForm({ ...enterpriseForm, phone: e.target.value })} />
-              <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Condición IVA</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
-                  <option>Responsable Inscripto</option>
-                  <option>Monotributo</option>
-                  <option>Exento</option>
-                  <option>Consumidor Final</option>
-                </select>
+            <form onSubmit={handleEnterpriseSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Input label="Nombre Comercial *" placeholder="Nombre de la empresa" value={enterpriseForm.name} onChange={e => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })} required />
+                <Input label="Razon Social" placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} />
+                <Input label="CUIT" placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
               </div>
-              <Input label="Dirección" placeholder="Av. Ejemplo 1234" value={enterpriseForm.address} onChange={e => setEnterpriseForm({ ...enterpriseForm, address: e.target.value })} />
-              <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.city} onChange={e => setEnterpriseForm({ ...enterpriseForm, city: e.target.value })} />
-              <Input label="Provincia" placeholder="CABA" value={enterpriseForm.province} onChange={e => setEnterpriseForm({ ...enterpriseForm, province: e.target.value })} />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Input label="Telefono" placeholder="+54 11 1234-5678" value={enterpriseForm.phone} onChange={e => setEnterpriseForm({ ...enterpriseForm, phone: e.target.value })} />
+                <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Condicion IVA</label>
+                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
+                    <option>Responsable Inscripto</option>
+                    <option>Monotributo</option>
+                    <option>Exento</option>
+                    <option>Consumidor Final</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Direccion de la empresa */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Direccion de la Empresa</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <Input label="Direccion" placeholder="Av. Ejemplo 1234" value={enterpriseForm.address} onChange={e => setEnterpriseForm({ ...enterpriseForm, address: e.target.value })} />
+                  <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.city} onChange={e => setEnterpriseForm({ ...enterpriseForm, city: e.target.value })} />
+                  <Input label="Provincia" placeholder="CABA" value={enterpriseForm.province} onChange={e => setEnterpriseForm({ ...enterpriseForm, province: e.target.value })} />
+                  <Input label="Codigo Postal" placeholder="C1234ABC" value={enterpriseForm.postal_code} onChange={e => setEnterpriseForm({ ...enterpriseForm, postal_code: e.target.value })} />
+                </div>
+              </div>
+
+              {/* Direccion fiscal */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-blue-700">Direccion Fiscal</h4>
+                  <label className="flex items-center gap-2 text-sm text-blue-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enterpriseForm.same_fiscal_address}
+                      onChange={e => {
+                        const checked = e.target.checked
+                        setEnterpriseForm(prev => ({
+                          ...prev,
+                          same_fiscal_address: checked,
+                          fiscal_address: checked ? '' : prev.fiscal_address,
+                          fiscal_city: checked ? '' : prev.fiscal_city,
+                          fiscal_province: checked ? '' : prev.fiscal_province,
+                          fiscal_postal_code: checked ? '' : prev.fiscal_postal_code,
+                        }))
+                      }}
+                      className="rounded border-blue-300"
+                    />
+                    Igual a direccion de empresa
+                  </label>
+                </div>
+                {!enterpriseForm.same_fiscal_address && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Input label="Direccion Fiscal" placeholder="Av. Fiscal 5678" value={enterpriseForm.fiscal_address} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_address: e.target.value })} />
+                    <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.fiscal_city} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_city: e.target.value })} />
+                    <Input label="Provincia" placeholder="CABA" value={enterpriseForm.fiscal_province} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_province: e.target.value })} />
+                    <Input label="Codigo Postal" placeholder="C1234ABC" value={enterpriseForm.fiscal_postal_code} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_postal_code: e.target.value })} />
+                  </div>
+                )}
+              </div>
+
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={enterpriseForm.notes} onChange={e => setEnterpriseForm({ ...enterpriseForm, notes: e.target.value })} />
@@ -400,6 +475,9 @@ export const Enterprises: React.FC = () => {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-gray-900">{ent.name}</h3>
+                      {ent.razon_social && ent.razon_social !== ent.name && (
+                        <span className="text-xs text-gray-400">({ent.razon_social})</span>
+                      )}
                       <TagBadges tags={ent.tags} />
                     </div>
                     <p className="text-sm text-gray-500">
