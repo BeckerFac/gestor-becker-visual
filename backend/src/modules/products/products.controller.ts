@@ -67,6 +67,65 @@ export class ProductsController {
     }
   }
 
+  async getProductTypes(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const types = await productsService.getProductTypes(req.user.company_id);
+      res.json(types);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get product types' });
+    }
+  }
+
+  async getCategories(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const cats = await productsService.getCategories(req.user.company_id);
+      res.json(cats);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get categories' });
+    }
+  }
+
+  async createCategory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const cat = await productsService.createCategory(req.user.company_id, req.body);
+      res.status(201).json(cat);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to create category' });
+    }
+  }
+
+  async deleteCategory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      await productsService.deleteCategory(req.user.company_id, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to delete category' });
+    }
+  }
+
+  async bulkUpdatePrice(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { product_ids, percent } = req.body;
+      if (!Array.isArray(product_ids) || typeof percent !== 'number') {
+        throw new ApiError(400, 'product_ids (array) and percent (number) required');
+      }
+      const result = await productsService.bulkUpdatePrice(req.user.company_id, product_ids, percent);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to bulk update prices' });
+    }
+  }
+
   async deleteProduct(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');

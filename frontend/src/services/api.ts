@@ -204,6 +204,26 @@ export const api = {
     const { data } = await client.delete(`/products/${id}`)
     return data
   },
+  getProductTypes: async () => {
+    const { data } = await client.get('/products/types')
+    return data
+  },
+  getCategories: async () => {
+    const { data } = await client.get('/products/categories')
+    return data
+  },
+  createCategory: async (catData: { name: string; description?: string; parent_id?: string }) => {
+    const { data } = await client.post('/products/categories', catData)
+    return data
+  },
+  deleteCategory: async (id: string) => {
+    const { data } = await client.delete(`/products/categories/${id}`)
+    return data
+  },
+  bulkUpdatePrice: async (productIds: string[], percent: number) => {
+    const { data } = await client.post('/products/bulk-price', { product_ids: productIds, percent })
+    return data
+  },
 
   // Product Components (BOM)
   getProductComponents: async (productId: string) => {

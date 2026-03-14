@@ -19,22 +19,28 @@ interface Product {
   name: string
   description: string | null
   product_type: string | null
+  category_id: string | null
   active: boolean
   pricing?: { cost: string; margin_percent: string; vat_rate: string; final_price: string }
 }
 
-const PRODUCT_TYPES = [
-  { value: 'portabanner', label: 'Portabanner' },
-  { value: 'bandera', label: 'Bandera' },
-  { value: 'ploteo', label: 'Ploteo' },
-  { value: 'carteleria', label: 'Cartelería' },
-  { value: 'vinilo', label: 'Vinilo' },
-  { value: 'lona', label: 'Lona' },
-  { value: 'backing', label: 'Backing' },
-  { value: 'senaletica', label: 'Señalética' },
-  { value: 'vehicular', label: 'Vehicular' },
-  { value: 'textil', label: 'Textil' },
-  { value: 'otro', label: 'Otro' },
+interface Category {
+  id: string
+  name: string
+  parent_id: string | null
+  product_count: number
+}
+
+const DEFAULT_TYPES = [
+  'portabanner', 'bandera', 'ploteo', 'carteleria', 'vinilo',
+  'lona', 'backing', 'senaletica', 'vehicular', 'textil', 'otro',
+]
+
+const VAT_OPTIONS = [
+  { value: '0', label: '0%' },
+  { value: '10.5', label: '10.5%' },
+  { value: '21', label: '21%' },
+  { value: '27', label: '27%' },
 ]
 
 const emptyForm = {
@@ -55,6 +61,19 @@ export const Products: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // Product types & categories
+  const [productTypes, setProductTypes] = useState<string[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newCategoryParent, setNewCategoryParent] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+
+  // Bulk price update
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkPercent, setBulkPercent] = useState('')
+  const [bulkUpdating, setBulkUpdating] = useState(false)
+
   // BOM state
   const [bomComponents, setBomComponents] = useState<any[]>([])
   const [bomCost, setBomCost] = useState<number | null>(null)
@@ -64,8 +83,14 @@ export const Products: React.FC = () => {
   const loadProducts = async () => {
     try {
       setLoading(true)
-      const res = await api.getProducts()
+      const [res, typesRes, catsRes] = await Promise.all([
+        api.getProducts(),
+        api.getProductTypes().catch(() => []),
+        api.getCategories().catch(() => []),
+      ])
       setProducts(res.items || res || [])
+      setProductTypes(Array.isArray(typesRes) ? typesRes : [])
+      setCategories(Array.isArray(catsRes) ? catsRes : [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -208,6 +233,56 @@ export const Products: React.FC = () => {
     loadBOM(product.id)
   }
 
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) return
+    try {
+      await api.createCategory({ name: newCategoryName.trim(), parent_id: newCategoryParent || undefined })
+      setNewCategoryName('')
+      setNewCategoryParent('')
+      const catsRes = await api.getCategories().catch(() => [])
+      setCategories(Array.isArray(catsRes) ? catsRes : [])
+      toast.success('Categoria creada')
+    } catch (e: any) { toast.error(e.message) }
+  }
+
+  const handleDeleteCategory = async (catId: string) => {
+    try {
+      await api.deleteCategory(catId)
+      const catsRes = await api.getCategories().catch(() => [])
+      setCategories(Array.isArray(catsRes) ? catsRes : [])
+      toast.success('Categoria eliminada')
+    } catch (e: any) { toast.error(e.message) }
+  }
+
+  const handleBulkPriceUpdate = async () => {
+    const pct = parseFloat(bulkPercent)
+    if (!pct || selectedIds.size === 0) return
+    setBulkUpdating(true)
+    try {
+      await api.bulkUpdatePrice(Array.from(selectedIds), pct)
+      toast.success(`${selectedIds.size} productos actualizados (${pct > 0 ? '+' : ''}${pct}%)`)
+      setSelectedIds(new Set())
+      setShowBulkModal(false)
+      setBulkPercent('')
+      await loadProducts()
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBulkUpdating(false) }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(filtered.map(p => p.id)))
+  }
+
   const handleDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -223,22 +298,39 @@ export const Products: React.FC = () => {
     }
   }
 
-  const filtered = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase()) ||
-    (p.barcode || '').includes(search)
-  )
+  const allTypes = [...new Set([...DEFAULT_TYPES, ...productTypes])].sort()
+
+  const filtered = products.filter(p => {
+    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku.toLowerCase().includes(search.toLowerCase()) ||
+      (p.barcode || '').includes(search)
+    const matchCategory = !filterCategory || p.category_id === filterCategory
+    return matchSearch && matchCategory
+  })
+
+  const getPriceWithoutVat = (pricing: Product['pricing']) => {
+    if (!pricing) return null
+    const final = parseFloat(pricing.final_price)
+    const vat = parseFloat(pricing.vat_rate) || 0
+    return final / (1 + vat / 100)
+  }
 
   const columns = [
+    { key: 'id' as const, label: '', render: (_: any, row: Product) => (
+      <input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleSelect(row.id)} onClick={e => e.stopPropagation()} className="rounded border-gray-300" />
+    )},
     { key: 'sku' as const, label: 'SKU' },
     { key: 'name' as const, label: 'Producto' },
-    { key: 'product_type' as const, label: 'Tipo', render: (v: any) => {
-      const t = PRODUCT_TYPES.find(pt => pt.value === v)
-      return <span className="px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{t?.label || v || '-'}</span>
-    }},
+    { key: 'product_type' as const, label: 'Tipo', render: (v: any) => (
+      <span className="px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{v || '-'}</span>
+    )},
     { key: 'pricing' as const, label: 'Costo', render: (v: any) => v ? formatCurrency(parseFloat(v.cost)) : '-' },
     { key: 'pricing' as const, label: 'Margen', render: (v: any) => v ? `${v.margin_percent}%` : '-' },
     { key: 'pricing' as const, label: 'IVA', render: (v: any) => v ? `${v.vat_rate}%` : '-' },
+    { key: 'pricing' as const, label: 'Sin IVA', render: (v: any) => {
+      const p = getPriceWithoutVat(v)
+      return p !== null ? <span className="text-gray-600">{formatCurrency(p)}</span> : '-'
+    }},
     { key: 'pricing' as const, label: 'Precio Final', render: (v: any) => v ? (
       <span className="font-bold text-green-700">{formatCurrency(parseFloat(v.final_price))}</span>
     ) : '-' },
@@ -271,7 +363,7 @@ export const Products: React.FC = () => {
             data={filtered.map(p => ({
               sku: p.sku,
               nombre: p.name,
-              tipo: PRODUCT_TYPES.find(t => t.value === p.product_type)?.label || p.product_type || '-',
+              tipo: p.product_type || '-',
               costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
               margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
               iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
@@ -324,7 +416,7 @@ export const Products: React.FC = () => {
                     placeholder="Escribir o elegir tipo..."
                   />
                   <datalist id="product-types-list">
-                    {PRODUCT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    {allTypes.map(t => <option key={t} value={t}>{t}</option>)}
                   </datalist>
                 </div>
               </div>
@@ -354,19 +446,13 @@ export const Products: React.FC = () => {
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700">IVA %</label>
-                    <input
-                      type="number" step="0.01" placeholder="21"
-                      list="vat-rate-list"
+                    <select
                       className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
                       value={form.vat_rate}
                       onChange={e => handlePriceField('vat_rate', e.target.value)}
-                    />
-                    <datalist id="vat-rate-list">
-                      <option value="0">0%</option>
-                      <option value="10.5">10.5%</option>
-                      <option value="21">21%</option>
-                      <option value="27">27%</option>
-                    </datalist>
+                    >
+                      {VAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700">Precio Final (ARS)</label>
@@ -449,7 +535,81 @@ export const Products: React.FC = () => {
         </Card>
       )}
 
-      <Input placeholder="Buscar por nombre, SKU o código de barras..." value={search} onChange={e => setSearch(e.target.value)} />
+      {/* Filters row */}
+      <div className="flex items-center gap-3">
+        <Input placeholder="Buscar por nombre, SKU o codigo de barras..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
+        {categories.length > 0 && (
+          <select
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+          >
+            <option value="">Todas las categorias</option>
+            {categories.filter(c => !c.parent_id).map(c => (
+              <React.Fragment key={c.id}>
+                <option value={c.id}>{c.name} ({c.product_count})</option>
+                {categories.filter(sub => sub.parent_id === c.id).map(sub => (
+                  <option key={sub.id} value={sub.id}>&nbsp;&nbsp;{sub.name} ({sub.product_count})</option>
+                ))}
+              </React.Fragment>
+            ))}
+          </select>
+        )}
+        {selectedIds.size > 0 && (
+          <Button variant="secondary" onClick={() => setShowBulkModal(true)}>
+            Aumentar precio ({selectedIds.size})
+          </Button>
+        )}
+      </div>
+
+      {/* Categories management (collapsible) */}
+      <details className="text-sm">
+        <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar categorias ({categories.length})</summary>
+        <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <input placeholder="Nombre categoria..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
+            <select value={newCategoryParent} onChange={e => setNewCategoryParent(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
+              <option value="">Sin padre</option>
+              {categories.filter(c => !c.parent_id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <Button variant="primary" onClick={handleCreateCategory} disabled={!newCategoryName.trim()}>+ Crear</Button>
+          </div>
+          {categories.length > 0 && (
+            <div className="space-y-1">
+              {categories.filter(c => !c.parent_id).map(c => (
+                <div key={c.id}>
+                  <div className="flex items-center justify-between py-1 px-2 bg-white rounded">
+                    <span className="font-medium">{c.name} <span className="text-gray-400 text-xs">({c.product_count})</span></span>
+                    <button onClick={() => handleDeleteCategory(c.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
+                  </div>
+                  {categories.filter(sub => sub.parent_id === c.id).map(sub => (
+                    <div key={sub.id} className="flex items-center justify-between py-1 px-2 ml-6 bg-white rounded">
+                      <span className="text-gray-600">{sub.name} <span className="text-gray-400 text-xs">({sub.product_count})</span></span>
+                      <button onClick={() => handleDeleteCategory(sub.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
+
+      {/* Bulk price modal */}
+      {showBulkModal && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="pt-4">
+            <h4 className="text-sm font-semibold text-blue-800 mb-3">Aumento masivo de precios — {selectedIds.size} producto{selectedIds.size > 1 ? 's' : ''}</h4>
+            <div className="flex items-center gap-3">
+              <input type="number" step="0.1" placeholder="Ej: 15 para +15%" value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
+              <span className="text-sm text-gray-600">%</span>
+              <Button variant="success" onClick={handleBulkPriceUpdate} loading={bulkUpdating} disabled={!bulkPercent}>Aplicar</Button>
+              <Button variant="secondary" onClick={() => { setShowBulkModal(false); setBulkPercent('') }}>Cancelar</Button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">Usa valores negativos para disminuir (ej: -10 para -10%)</p>
+          </CardContent>
+        </Card>
+      )}
 
       {loading ? (
         <SkeletonTable rows={6} cols={6} />

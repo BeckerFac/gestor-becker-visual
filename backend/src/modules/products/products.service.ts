@@ -172,6 +172,85 @@ export class ProductsService {
     }
   }
 
+  async getProductTypes(companyId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT DISTINCT product_type FROM products
+        WHERE company_id = ${companyId} AND product_type IS NOT NULL AND product_type != ''
+        ORDER BY product_type ASC
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows.map((r: any) => r.product_type);
+    } catch {
+      return [];
+    }
+  }
+
+  async getCategories(companyId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) as product_count
+        FROM categories c
+        WHERE c.company_id = ${companyId} AND c.active = true
+        ORDER BY c.parent_id NULLS FIRST, c.name ASC
+      `);
+      return (result as any).rows || result || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async createCategory(companyId: string, data: { name: string; description?: string; parent_id?: string }) {
+    try {
+      const id = uuid();
+      await db.insert(categories).values({
+        id,
+        company_id: companyId,
+        name: data.name,
+        description: data.description || null,
+        parent_id: data.parent_id || null,
+      });
+      return { id, name: data.name };
+    } catch (error) {
+      throw new ApiError(500, 'Failed to create category');
+    }
+  }
+
+  async deleteCategory(companyId: string, categoryId: string) {
+    try {
+      // Unlink products
+      await db.update(products).set({ category_id: null }).where(eq(products.category_id, categoryId));
+      // Delete children
+      await db.execute(sql`UPDATE categories SET parent_id = NULL WHERE parent_id = ${categoryId}`);
+      await db.execute(sql`DELETE FROM categories WHERE id = ${categoryId} AND company_id = ${companyId}`);
+      return { success: true };
+    } catch (error) {
+      throw new ApiError(500, 'Failed to delete category');
+    }
+  }
+
+  async bulkUpdatePrice(companyId: string, productIds: string[], percentIncrease: number) {
+    try {
+      if (productIds.length === 0) throw new ApiError(400, 'No products selected');
+      if (percentIncrease === 0) throw new ApiError(400, 'Percentage must be non-zero');
+
+      const multiplier = 1 + percentIncrease / 100;
+      for (const pid of productIds) {
+        await db.execute(sql`
+          UPDATE product_pricing SET
+            cost = ROUND(CAST(cost AS decimal) * ${multiplier.toString()}, 2),
+            final_price = ROUND(CAST(final_price AS decimal) * ${multiplier.toString()}, 2),
+            updated_at = NOW()
+          WHERE product_id = ${pid}
+        `);
+      }
+      return { updated: productIds.length };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to bulk update prices');
+    }
+  }
+
   async deleteProduct(companyId: string, productId: string) {
     try {
       const product = await this.getProduct(companyId, productId);
