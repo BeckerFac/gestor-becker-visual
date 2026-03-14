@@ -13,6 +13,8 @@ export class OrdersService {
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`);
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`);
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`);
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`);
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`);
       this.migrationsRun = true;
     } catch (error) {
       console.error('Orders migrations error:', error);
@@ -66,12 +68,16 @@ export class OrdersService {
             json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'punto_venta', (i.afip_response->'FeCabResp'->>'PtoVta')::int, 'cae', i.cae)
           ELSE NULL END as invoice,
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
+          CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
+          CASE WHEN o.cobro_id IS NOT NULL THEN json_build_object('id', cb.id, 'amount', cb.amount, 'payment_method', cb.payment_method) ELSE NULL END as cobro,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
         LEFT JOIN invoices i ON o.invoice_id = i.id
         LEFT JOIN banks bk ON o.bank_id = bk.id
+        LEFT JOIN quotes qt ON o.quote_id = qt.id
+        LEFT JOIN cobros cb ON o.cobro_id = cb.id
         WHERE ${whereClause}
         ORDER BY o.created_at DESC
         LIMIT ${limit} OFFSET ${skip}
@@ -127,12 +133,16 @@ export class OrdersService {
             json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'total_amount', i.total_amount, 'cae', i.cae)
           ELSE NULL END as invoice,
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
+          CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
+          CASE WHEN o.cobro_id IS NOT NULL THEN json_build_object('id', cb.id, 'amount', cb.amount, 'payment_method', cb.payment_method) ELSE NULL END as cobro,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
         LEFT JOIN invoices i ON o.invoice_id = i.id
         LEFT JOIN banks bk ON o.bank_id = bk.id
+        LEFT JOIN quotes qt ON o.quote_id = qt.id
+        LEFT JOIN cobros cb ON o.cobro_id = cb.id
         WHERE o.company_id = ${companyId} AND o.id = ${orderId}
       `);
       const rows = (result as any).rows || result || [];
@@ -261,6 +271,7 @@ export class OrdersService {
       await db.execute(sql`
         UPDATE orders SET status = ${newStatus}, updated_at = NOW()
         ${newStatus === 'entregado' ? sql`, actual_delivery = NOW()` : sql``}
+        ${newStatus === 'en_produccion' ? sql`, production_started_at = NOW()` : sql``}
         WHERE id = ${orderId}
       `);
 
@@ -414,6 +425,7 @@ export class OrdersService {
           payment_method = CASE WHEN ${data.payment_method !== undefined} THEN ${v(data.payment_method)} ELSE payment_method END,
           payment_status = CASE WHEN ${data.payment_status !== undefined} THEN ${v(data.payment_status)} ELSE payment_status END,
           notes = CASE WHEN ${data.notes !== undefined} THEN ${v(data.notes)} ELSE notes END,
+          production_started_at = CASE WHEN ${data.production_started_at !== undefined} THEN ${v(data.production_started_at)} ELSE production_started_at END,
           updated_at = NOW()
         WHERE id = ${orderId}
       `);

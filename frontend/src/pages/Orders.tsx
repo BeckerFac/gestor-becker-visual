@@ -37,11 +37,14 @@ interface Order {
   payment_method: string | null
   payment_status: string
   notes: string | null
+  production_started_at: string | null
   customer?: { id: string; name: string; cuit: string }
   enterprise?: { id: string; name: string } | null
   enterprise_tags?: { id: string; name: string; color: string }[]
   invoice?: { id: string; invoice_number: number; invoice_type: string; status: string; punto_venta?: number; cae?: string } | null
   bank?: { id: string; bank_name: string } | null
+  quote?: { id: string; quote_number: number } | null
+  cobro?: { id: string; amount: string; payment_method: string } | null
   created_at: string
 }
 
@@ -177,6 +180,7 @@ export const Orders: React.FC = () => {
 
   // Form
   const [formEnterpriseId, setFormEnterpriseId] = useState('')
+  const [formTitle, setFormTitle] = useState('')
   const [form, setForm] = useState({
     description: '', customer_id: '',
     vat_rate: '21', estimated_delivery: '',
@@ -189,15 +193,15 @@ export const Orders: React.FC = () => {
   // Persist form draft to localStorage (only if form has meaningful content)
   useEffect(() => {
     if (showForm && !editingOrderId) {
-      const hasContent = form.description || form.customer_id || formEnterpriseId ||
+      const hasContent = form.description || form.customer_id || formEnterpriseId || formTitle ||
         formItems.some(i => i.product_name || i.product_id)
       if (hasContent) {
-        const draft = JSON.stringify({ form, formItems, formEnterpriseId })
+        const draft = JSON.stringify({ form, formItems, formEnterpriseId, formTitle })
         localStorage.setItem(ORDER_DRAFT_KEY, draft)
         setHasDraft(true)
       }
     }
-  }, [showForm, editingOrderId, form, formItems, formEnterpriseId])
+  }, [showForm, editingOrderId, form, formItems, formEnterpriseId, formTitle])
 
   // Restore draft when opening form (only for new orders, not edits)
   useEffect(() => {
@@ -209,6 +213,7 @@ export const Orders: React.FC = () => {
           if (draft.form) setForm(draft.form)
           if (draft.formItems?.length) setFormItems(draft.formItems)
           if (draft.formEnterpriseId) setFormEnterpriseId(draft.formEnterpriseId)
+          if (draft.formTitle) setFormTitle(draft.formTitle)
           setHasDraft(true)
         } catch { /* ignore corrupt data */ }
       }
@@ -226,6 +231,7 @@ export const Orders: React.FC = () => {
     setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
+    setFormTitle('')
   }
 
   const loadData = async () => {
@@ -327,7 +333,7 @@ export const Orders: React.FC = () => {
       const itemTypes = new Set(formItems.map(i => i.product_type || 'otro'))
       const orderProductType = itemTypes.size === 1 ? formItems[0]?.product_type || 'otro' : 'mixto'
       const payload = {
-        title: formItems[0]?.product_name || 'Pedido',
+        title: formTitle || formItems[0]?.product_name || 'Pedido',
         description: form.description || null,
         product_type: orderProductType,
         customer_id: form.customer_id || null,
@@ -364,6 +370,7 @@ export const Orders: React.FC = () => {
       localStorage.removeItem(ORDER_DRAFT_KEY)
       setHasDraft(false)
       setFormEnterpriseId('')
+      setFormTitle('')
       setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
       setFormItems([emptyFormItem()])
       await loadData()
@@ -388,6 +395,7 @@ export const Orders: React.FC = () => {
     }))
 
     setEditingOrderId(order.id)
+    setFormTitle(order.title || '')
     setForm({
       description: order.description || '',
       customer_id: order.customer?.id || '',
@@ -467,6 +475,41 @@ export const Orders: React.FC = () => {
       // Silently fail - invoicing status not critical
     } finally {
       setInvoicingLoading(prev => ({ ...prev, [orderId]: false }))
+    }
+  }
+
+  // Production timer state
+  const [timerTick, setTimerTick] = useState(0)
+  const [editingTimer, setEditingTimer] = useState<string | null>(null)
+  const [editTimerValue, setEditTimerValue] = useState('')
+
+  useEffect(() => {
+    const interval = setInterval(() => setTimerTick(t => t + 1), 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const formatElapsedTime = (startDate: string, endDate?: string | null) => {
+    const start = new Date(startDate).getTime()
+    const end = endDate ? new Date(endDate).getTime() : Date.now()
+    const diffMs = Math.max(0, end - start)
+    const totalMinutes = Math.floor(diffMs / 60000)
+    const days = Math.floor(totalMinutes / 1440)
+    const hours = Math.floor((totalMinutes % 1440) / 60)
+    const minutes = totalMinutes % 60
+    const parts: string[] = []
+    if (days > 0) parts.push(`${days}d`)
+    if (hours > 0 || days > 0) parts.push(`${hours}h`)
+    parts.push(`${minutes}m`)
+    return parts.join(' ')
+  }
+
+  const handleProductionStartedAtChange = async (orderId: string, value: string) => {
+    try {
+      await api.updateOrder(orderId, { production_started_at: value || null })
+      setEditingTimer(null)
+      await loadData()
+    } catch (e: any) {
+      toast.error(e.message)
     }
   }
 
@@ -775,6 +818,11 @@ export const Orders: React.FC = () => {
                 customerLabel="Cliente / Contacto"
               />
 
+              {/* Title */}
+              <div className="grid grid-cols-1 gap-4">
+                <Input label="Nombre del pedido" placeholder="Ej: Carteleria evento, Ploteo vehicular..." value={formTitle} onChange={e => setFormTitle(e.target.value)} />
+              </div>
+
               {/* Description */}
               <div className="grid grid-cols-1 gap-4">
                 <Input label="Descripcion general" placeholder="Detalles del trabajo..." value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
@@ -1013,20 +1061,38 @@ export const Orders: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">{formatDate(order.created_at)}</td>
                       <td className="px-4 py-3">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-medium text-gray-900">{order.enterprise?.name || '-'}</p>
-                            <TagBadges tags={order.enterprise_tags || []} size="sm" />
+                        {order.enterprise ? (
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-semibold text-gray-900">{order.enterprise.name}</p>
+                              <TagBadges tags={order.enterprise_tags || []} size="sm" />
+                            </div>
+                            {order.customer?.name && <p className="text-xs text-gray-500">{order.customer.name}</p>}
                           </div>
-                          {order.customer?.name && <p className="text-xs text-gray-500">{order.customer.name}</p>}
-                        </div>
+                        ) : (
+                          <div>
+                            <p className="text-sm text-gray-600">{order.customer?.name || 'Sin cliente'}</p>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-medium text-sm">{order.title}</p>
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
-                            {PRODUCT_TYPES.find(t => t.value === order.product_type)?.label || order.product_type}
-                          </span>
+                          <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
+                              {PRODUCT_TYPES.find(t => t.value === order.product_type)?.label || order.product_type}
+                            </span>
+                            {order.quote && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-mono">
+                                Cot #{String(order.quote.quote_number || 0).padStart(4, '0')}
+                              </span>
+                            )}
+                            {order.cobro && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">
+                                Cobro: {formatCurrency(parseFloat(order.cobro.amount || '0'))}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -1177,6 +1243,51 @@ export const Orders: React.FC = () => {
                                       <p className="text-sm text-green-700 font-medium">{formatDate(order.actual_delivery)}</p>
                                     </div>
                                   )}
+                                  {/* Production Timer */}
+                                  {order.production_started_at && (order.status === 'en_produccion' || order.status === 'terminado' || order.status === 'entregado') && (
+                                    <div>
+                                      <p className="text-xs text-gray-500">Tiempo de Produccion</p>
+                                      {editingTimer === order.id ? (
+                                        <div className="flex items-center gap-1 mt-0.5">
+                                          <input
+                                            type="datetime-local"
+                                            className="text-xs border border-gray-300 rounded px-1.5 py-1"
+                                            value={editTimerValue}
+                                            onChange={e => setEditTimerValue(e.target.value)}
+                                          />
+                                          <button
+                                            onClick={() => handleProductionStartedAtChange(order.id, editTimerValue)}
+                                            className="text-xs px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                          >
+                                            OK
+                                          </button>
+                                          <button
+                                            onClick={() => setEditingTimer(null)}
+                                            className="text-xs px-1.5 py-0.5 text-gray-500 hover:text-gray-700"
+                                          >
+                                            x
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <p
+                                          className={`text-sm font-bold cursor-pointer hover:underline ${order.status === 'en_produccion' ? 'text-blue-700' : 'text-green-700'}`}
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            setEditingTimer(order.id)
+                                            const d = new Date(order.production_started_at!)
+                                            const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                                            setEditTimerValue(local)
+                                          }}
+                                        >
+                                          {formatElapsedTime(
+                                            order.production_started_at,
+                                            order.status === 'en_produccion' ? null : (order.actual_delivery || order.created_at)
+                                          )}
+                                          {order.status === 'en_produccion' && <span className="ml-1 text-xs text-blue-500 font-normal">(en curso)</span>}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
                                   <div>
                                     <p className="text-xs text-gray-500">Cliente</p>
                                     <p className="text-sm text-gray-800">{order.customer?.name || 'Sin cliente'}</p>
@@ -1189,6 +1300,22 @@ export const Orders: React.FC = () => {
                                       <TagBadges tags={order.enterprise_tags || []} size="sm" />
                                     </div>
                                   </div>
+                                  {order.quote && (
+                                    <div>
+                                      <p className="text-xs text-gray-500">Cotizacion Asociada</p>
+                                      <span className="text-sm font-mono font-semibold text-purple-700">
+                                        #{String(order.quote.quote_number || 0).padStart(4, '0')}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {order.cobro && (
+                                    <div>
+                                      <p className="text-xs text-gray-500">Cobro Asociado</p>
+                                      <p className="text-sm text-green-700 font-medium">
+                                        {formatCurrency(parseFloat(order.cobro.amount || '0'))} ({order.cobro.payment_method})
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Column 3: Invoicing & Payment */}

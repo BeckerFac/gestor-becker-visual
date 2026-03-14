@@ -217,9 +217,16 @@ export class QuotesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
+      // Generate quote_number
+      const numResult = await db.execute(sql`
+        SELECT COALESCE(MAX(quote_number), 0) + 1 as next_num FROM quotes WHERE company_id = ${companyId}
+      `);
+      const numRows = (numResult as any).rows || numResult || [];
+      const quoteNumber = parseInt(numRows[0]?.next_num || '1');
+
       await db.execute(sql`
-        INSERT INTO quotes (id, company_id, customer_id, enterprise_id, title, valid_until, subtotal, vat_amount, total_amount, status, notes, created_by)
-        VALUES (${quoteId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.title || 'Cotización'}, ${data.valid_until || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, 'draft', ${data.notes || null}, ${userId})
+        INSERT INTO quotes (id, company_id, customer_id, enterprise_id, quote_number, title, valid_until, subtotal, vat_amount, total_amount, status, notes, created_by)
+        VALUES (${quoteId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${quoteNumber}, ${data.title || 'Cotización'}, ${data.valid_until || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, 'draft', ${data.notes || null}, ${userId})
       `);
 
       if (data.items && Array.isArray(data.items)) {
