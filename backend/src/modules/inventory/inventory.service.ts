@@ -171,15 +171,10 @@ export class InventoryService {
 
       // Create movement
       const movementId = uuid();
-      await db.insert(stock_movements).values({
-        id: movementId,
-        product_id: data.product_id,
-        warehouse_id: warehouseId,
-        movement_type: 'adjustment',
-        quantity: Math.abs(quantityChange).toString(),
-        notes: data.reason || null,
-        created_by: userId,
-      });
+      await db.execute(sql`
+        INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, notes, created_by)
+        VALUES (${movementId}, ${data.product_id}, ${warehouseId}, 'adjustment', ${Math.abs(quantityChange).toString()}, ${data.reason || null}, ${userId})
+      `);
 
       // Upsert stock
       const existingStock = await db.execute(sql`
@@ -191,14 +186,10 @@ export class InventoryService {
       let newQty: number;
       if (stockRows.length === 0) {
         newQty = Math.max(0, quantityChange);
-        await db.insert(stock).values({
-          id: uuid(),
-          product_id: data.product_id,
-          warehouse_id: warehouseId,
-          quantity: newQty.toString(),
-          min_level: '0',
-          max_level: '0',
-        });
+        await db.execute(sql`
+          INSERT INTO stock (id, product_id, warehouse_id, quantity, min_level, max_level)
+          VALUES (${uuid()}, ${data.product_id}, ${warehouseId}, ${newQty.toString()}, '0', '0')
+        `);
       } else {
         const currentQty = parseFloat(stockRows[0].quantity || '0');
         newQty = Math.max(0, currentQty + quantityChange);
@@ -252,17 +243,10 @@ export class InventoryService {
 
         // Create movement
         const movementId = uuid();
-        await db.insert(stock_movements).values({
-          id: movementId,
-          product_id: item.product_id,
-          warehouse_id: warehouseId,
-          movement_type: 'purchase',
-          quantity: quantity.toString(),
-          reference_type: 'purchase',
-          reference_id: purchaseId,
-          notes: 'Ingreso por compra',
-          created_by: userId,
-        });
+        await db.execute(sql`
+          INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
+          VALUES (${movementId}, ${item.product_id}, ${warehouseId}, 'purchase', ${quantity.toString()}, 'purchase', ${purchaseId}, 'Ingreso por compra', ${userId})
+        `);
 
         // Upsert stock
         const existingStock = await db.execute(sql`
@@ -274,14 +258,10 @@ export class InventoryService {
         let newQty: number;
         if (stockRows.length === 0) {
           newQty = Math.max(0, quantity);
-          await db.insert(stock).values({
-            id: uuid(),
-            product_id: item.product_id,
-            warehouse_id: warehouseId,
-            quantity: newQty.toString(),
-            min_level: '0',
-            max_level: '0',
-          });
+          await db.execute(sql`
+            INSERT INTO stock (id, product_id, warehouse_id, quantity, min_level, max_level)
+            VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, ${newQty.toString()}, '0', '0')
+          `);
         } else {
           const currentQty = parseFloat(stockRows[0].quantity || '0');
           newQty = currentQty + quantity;
