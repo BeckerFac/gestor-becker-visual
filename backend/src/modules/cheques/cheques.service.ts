@@ -12,7 +12,21 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 export class ChequesService {
+  private migrationsRun = false;
+
+  async ensureMigrations() {
+    if (this.migrationsRun) return;
+    try {
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cheque_type VARCHAR(50) DEFAULT 'comun'`).catch(() => {});
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS drawer_cuit VARCHAR(20)`).catch(() => {});
+      this.migrationsRun = true;
+    } catch (error) {
+      console.error('Cheques migrations error:', error);
+    }
+  }
+
   async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string } = {}) {
+    await this.ensureMigrations();
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
       if (filters.status && filters.status !== 'todos') {
@@ -45,11 +59,12 @@ export class ChequesService {
   }
 
   async createCheque(companyId: string, userId: string, data: any) {
+    await this.ensureMigrations();
     try {
       const chequeId = uuid();
       await db.execute(sql`
-        INSERT INTO cheques (id, company_id, number, bank, drawer, amount, issue_date, due_date, status, customer_id, order_id, notes, created_by)
-        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, 'a_cobrar', ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${userId})
+        INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, customer_id, order_id, notes, created_by)
+        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, 'a_cobrar', ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${userId})
       `);
       return { id: chequeId, status: 'a_cobrar' };
     } catch (error) {
@@ -124,6 +139,8 @@ export class ChequesService {
           number = ${data.number},
           bank = ${data.bank},
           drawer = ${data.drawer},
+          drawer_cuit = ${data.drawer_cuit || null},
+          cheque_type = ${data.cheque_type || 'comun'},
           amount = ${data.amount.toString()},
           issue_date = ${new Date(data.issue_date)},
           due_date = ${new Date(data.due_date)},

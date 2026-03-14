@@ -18,6 +18,8 @@ interface Cheque {
   number: string
   bank: string
   drawer: string
+  drawer_cuit: string | null
+  cheque_type: string
   amount: string
   issue_date: string
   due_date: string
@@ -48,6 +50,15 @@ const STATUS_COLORS: Record<string, string> = {
   rechazado: 'bg-red-100 text-red-700',
 }
 
+const CHEQUE_TYPES: { value: string; label: string }[] = [
+  { value: 'comun', label: 'Comun' },
+  { value: 'cruzado', label: 'Cruzado' },
+  { value: 'no_a_la_orden', label: 'No a la Orden' },
+  { value: 'cruzado_no_a_la_orden', label: 'Cruzado No a la Orden' },
+]
+
+const CHEQUE_TYPE_LABELS: Record<string, string> = Object.fromEntries(CHEQUE_TYPES.map(t => [t.value, t.label]))
+
 const VALID_TRANSITIONS: Record<string, string[]> = {
   a_cobrar: ['endosado', 'depositado', 'cobrado', 'rechazado'],
   endosado: ['cobrado', 'rechazado', 'a_cobrar'],
@@ -70,8 +81,8 @@ function getDueDateAlert(dueDate: string, status: string): { label: string; clas
 }
 
 const emptyForm = {
-  number: '', bank: '', drawer: '', amount: '',
-  issue_date: '', due_date: '', customer_id: '',
+  number: '', bank: '', drawer: '', drawer_cuit: '', cheque_type: 'comun',
+  amount: '', issue_date: '', due_date: '', customer_id: '',
   order_id: '', notes: '',
 }
 
@@ -154,6 +165,8 @@ export const Cheques: React.FC = () => {
         number: form.number,
         bank: form.bank,
         drawer: form.drawer,
+        drawer_cuit: form.drawer_cuit || null,
+        cheque_type: form.cheque_type || 'comun',
         amount: parseFloat(form.amount),
         issue_date: form.issue_date,
         due_date: form.due_date,
@@ -184,6 +197,8 @@ export const Cheques: React.FC = () => {
       number: cheque.number,
       bank: cheque.bank,
       drawer: cheque.drawer,
+      drawer_cuit: cheque.drawer_cuit || '',
+      cheque_type: cheque.cheque_type || 'comun',
       amount: cheque.amount,
       issue_date: cheque.issue_date?.split('T')[0] || '',
       due_date: cheque.due_date?.split('T')[0] || '',
@@ -237,8 +252,16 @@ export const Cheques: React.FC = () => {
 
   const columns = [
     { key: 'number' as const, label: 'Numero', render: (v: any) => <span className="font-mono font-bold">{v}</span> },
+    { key: 'cheque_type' as const, label: 'Tipo', render: (v: any) => (
+      <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700 font-medium">{CHEQUE_TYPE_LABELS[v] || v || 'Comun'}</span>
+    )},
     { key: 'bank' as const, label: 'Banco' },
-    { key: 'drawer' as const, label: 'Librador' },
+    { key: 'drawer' as const, label: 'Librador', render: (v: any, row: Cheque) => (
+      <div>
+        <span>{v}</span>
+        {row.drawer_cuit && <span className="block text-xs text-gray-400 font-mono">{row.drawer_cuit}</span>}
+      </div>
+    )},
     { key: 'amount' as const, label: 'Monto', render: (v: any) => (
       <span className="font-bold text-green-700">{formatCurrency(parseFloat(v || '0'))}</span>
     )},
@@ -253,16 +276,11 @@ export const Cheques: React.FC = () => {
       )
     }},
     { key: 'customer_name' as const, label: 'Cliente', render: (v: any) => v || '-' },
-    { key: 'status' as const, label: 'Estado', render: (v: any) => (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[v] || 'bg-gray-100 text-gray-700'}`}>
-        {STATUS_LABELS[v] || v}
-      </span>
-    )},
-    { key: 'id' as const, label: 'Acciones', render: (_: any, row: Cheque) => (
+    { key: 'id' as const, label: 'Estado / Acciones', render: (_: any, row: Cheque) => (
       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
         <PermissionGate module="cheques" action="edit">
           <select
-            className="text-xs border rounded px-1 py-0.5"
+            className={`text-xs border rounded px-1 py-0.5 font-medium ${STATUS_COLORS[row.status] || 'bg-gray-100 text-gray-700'}`}
             value={row.status}
             onChange={e => handleStatusChange(row.id, e.target.value)}
           >
@@ -297,8 +315,10 @@ export const Cheques: React.FC = () => {
           <ExportCSVButton
             data={cheques.map(c => ({
               numero: c.number,
+              tipo: CHEQUE_TYPE_LABELS[c.cheque_type] || c.cheque_type || 'Comun',
               banco: c.bank,
               librador: c.drawer,
+              cuit_librador: c.drawer_cuit || '-',
               monto: parseFloat(c.amount || '0'),
               emision: formatDate(c.issue_date),
               cobro: formatDate(c.due_date),
@@ -308,8 +328,10 @@ export const Cheques: React.FC = () => {
             }))}
             columns={[
               { key: 'numero', label: 'Numero' },
+              { key: 'tipo', label: 'Tipo' },
               { key: 'banco', label: 'Banco' },
               { key: 'librador', label: 'Librador' },
+              { key: 'cuit_librador', label: 'CUIT Librador' },
               { key: 'monto', label: 'Monto' },
               { key: 'emision', label: 'Fecha Emision' },
               { key: 'cobro', label: 'Fecha Cobro' },
@@ -423,13 +445,20 @@ export const Cheques: React.FC = () => {
           <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Cheque' : 'Nuevo Cheque'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleCreate} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Input label="Numero de Cheque *" placeholder="Ej: 12345678" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} required />
                 <Input label="Banco *" placeholder="Ej: Banco Nacion" value={form.bank} onChange={e => setForm({ ...form, bank: e.target.value })} required />
-                <Input label="Librador *" placeholder="Nombre del emisor" value={form.drawer} onChange={e => setForm({ ...form, drawer: e.target.value })} required />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Tipo de Cheque</label>
+                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.cheque_type} onChange={e => setForm({ ...form, cheque_type: e.target.value })}>
+                    {CHEQUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
                 <Input label="Monto *" type="number" step="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Input label="Librador *" placeholder="Nombre del emisor" value={form.drawer} onChange={e => setForm({ ...form, drawer: e.target.value })} required />
+                <Input label="CUIT del Librador" placeholder="20-12345678-9" value={form.drawer_cuit} onChange={e => setForm({ ...form, drawer_cuit: e.target.value })} />
                 <Input label="Fecha de Emision *" type="date" value={form.issue_date} onChange={e => setForm({ ...form, issue_date: e.target.value })} required />
                 <Input label="Fecha de Cobro *" type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} required />
               </div>
@@ -474,7 +503,13 @@ export const Cheques: React.FC = () => {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h4 className="font-semibold text-gray-900">Cheque N. {cheque.number}</h4>
-                      <p className="text-sm text-gray-600">{cheque.bank} - {cheque.drawer}</p>
+                      <p className="text-sm text-gray-600">
+                        {cheque.bank} - {cheque.drawer}
+                        {cheque.drawer_cuit && <span className="font-mono text-gray-400 ml-1">({cheque.drawer_cuit})</span>}
+                      </p>
+                      {cheque.cheque_type && cheque.cheque_type !== 'comun' && (
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{CHEQUE_TYPE_LABELS[cheque.cheque_type] || cheque.cheque_type}</span>
+                      )}
                       {cheque.notes && <p className="text-sm text-gray-500 mt-1">Notas: {cheque.notes}</p>}
                       {cheque.collected_date && (
                         <p className="text-sm text-green-700 mt-1">Cobrado el: {formatDate(cheque.collected_date)}</p>
