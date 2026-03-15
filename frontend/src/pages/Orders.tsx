@@ -244,7 +244,10 @@ export const Orders: React.FC = () => {
           enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
           has_invoice: filterInvoice.length === 1 ? filterInvoice[0] : undefined,
           search: search || undefined,
-        }).catch(() => ({ items: [], summary: {} })),
+        }).catch((err: any) => {
+          setError(`Error cargando pedidos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return { items: [], summary: {} }
+        }),
         api.getCustomers().catch(() => ({ items: [] })),
         api.getProducts().catch(() => ({ items: [] })),
         api.getEnterprises().catch(() => []),
