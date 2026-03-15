@@ -37,6 +37,8 @@ export class OrdersService {
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`).catch(() => {});
+      // Ensure quotes table has quote_number column (may not exist if quotes module hasn't run)
+      await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_number INTEGER`).catch(() => {});
       this.migrationsRun = true;
     } catch (error) {
       console.error('Orders migrations error:', error);
