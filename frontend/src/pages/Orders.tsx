@@ -405,6 +405,7 @@ export const Orders: React.FC = () => {
       notes: order.notes || '',
       payment_method: order.payment_method || '',
       bank_id: order.bank?.id || '',
+      deduct_stock: (order as any).deduct_stock || false,
     })
     setFormEnterpriseId(order.enterprise?.id || '')
     setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
