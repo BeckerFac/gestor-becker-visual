@@ -95,8 +95,11 @@ export const Enterprises: React.FC = () => {
     try {
       setLoading(true)
       const [entRes, custRes, plRes] = await Promise.all([
-        api.getEnterprises(),
-        api.getCustomers(),
+        api.getEnterprises().catch((err: any) => {
+          setError(`Error cargando empresas: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
+        api.getCustomers().catch(() => ({ items: [] })),
         api.getPriceLists().catch(() => []),
       ])
       setEnterprises(entRes || [])

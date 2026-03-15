@@ -76,6 +76,7 @@ export const CustomerPortal: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([])
   const [quotes, setQuotes] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<PortalTab>('orders')
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
 
@@ -131,7 +132,10 @@ export const CustomerPortal: React.FC = () => {
     try {
       setLoading(true)
       const [summaryRes, ordersRes, invoicesRes, quotesRes] = await Promise.all([
-        api.portalGetSummary().catch(() => ({})),
+        api.portalGetSummary().catch((err: any) => {
+          setError(`Error cargando datos del portal: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return {}
+        }),
         api.portalGetOrders().catch(() => ({ items: [] })),
         api.portalGetInvoices().catch(() => ({ items: [] })),
         api.portalGetQuotes().catch(() => ({ items: [] })),
@@ -300,6 +304,12 @@ export const CustomerPortal: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg overflow-x-auto">

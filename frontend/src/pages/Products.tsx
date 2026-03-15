@@ -95,7 +95,10 @@ export const Products: React.FC = () => {
     try {
       setLoading(true)
       const [res, typesRes, catsRes, plRes] = await Promise.all([
-        api.getProducts(),
+        api.getProducts().catch((err: any) => {
+          setError(`Error cargando productos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return { items: [] }
+        }),
         api.getProductTypes().catch(() => []),
         api.getCategories().catch(() => []),
         api.getPriceLists().catch(() => []),
@@ -199,8 +202,8 @@ export const Products: React.FC = () => {
     setBomLoading(true)
     try {
       const [comps, costData] = await Promise.all([
-        api.getProductComponents(productId),
-        api.getProductBOMCost(productId),
+        api.getProductComponents(productId).catch(() => []),
+        api.getProductBOMCost(productId).catch(() => null),
       ])
       setBomComponents(comps || [])
       setBomCost(costData?.bom_cost ? parseFloat(costData.bom_cost) : null)

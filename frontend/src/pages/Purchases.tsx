@@ -104,9 +104,12 @@ export const Purchases: React.FC = () => {
     try {
       setLoading(true)
       const [purchRes, entRes, bankRes, prodRes] = await Promise.all([
-        api.getPurchases(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined),
-        api.getEnterprises(),
-        api.getBanks(),
+        api.getPurchases(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
+          setError(`Error cargando compras: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
+        api.getEnterprises().catch(() => []),
+        api.getBanks().catch(() => []),
         api.getProducts().catch(() => ({ items: [] })),
       ])
       setPurchases(purchRes || [])

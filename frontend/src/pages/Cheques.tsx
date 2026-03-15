@@ -124,7 +124,10 @@ export const Cheques: React.FC = () => {
           search: search || undefined,
           due_from: dueDateFrom || undefined,
           due_to: dueDateTo || undefined,
-        }).catch(() => []),
+        }).catch((err: any) => {
+          setError(`Error cargando cheques: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
         api.getChequesSummary().catch(() => ({
           total_a_cobrar: 0, total_cobrado: 0, count_a_cobrar: 0, count_cobrado: 0,
           total_endosado: 0, total_depositado: 0, total_rechazado: 0,

@@ -69,10 +69,13 @@ export const Pagos: React.FC = () => {
     try {
       setLoading(true)
       const [pagosRes, entRes, purchRes, bankRes] = await Promise.all([
-        api.getPagos(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined),
-        api.getEnterprises(),
-        api.getPurchases(),
-        api.getBanks(),
+        api.getPagos(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
+          setError(`Error cargando pagos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
+        api.getEnterprises().catch(() => []),
+        api.getPurchases().catch(() => []),
+        api.getBanks().catch(() => []),
       ])
       setPagos(pagosRes || [])
       setEnterprises(entRes || [])

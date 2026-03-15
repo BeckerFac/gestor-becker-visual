@@ -43,7 +43,10 @@ export const Inventory: React.FC = () => {
     try {
       setLoading(true)
       const [stockRes, prodRes] = await Promise.all([
-        api.getInventory().catch(() => ({ items: [] })),
+        api.getInventory().catch((err: any) => {
+          setError(`Error cargando inventario: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return { items: [] }
+        }),
         api.getProducts().catch(() => ({ items: [] }))
       ])
       setStock(stockRes.items || stockRes || [])

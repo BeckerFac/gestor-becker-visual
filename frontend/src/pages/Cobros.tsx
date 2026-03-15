@@ -150,7 +150,10 @@ export const Cobros: React.FC = () => {
     try {
       setLoading(true)
       const [cobrosRes, entRes, ordersRes, bankRes] = await Promise.all([
-        api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch(() => []),
+        api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
+          setError(`Error cargando cobros: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
         api.getEnterprises().catch(() => []),
         api.getOrders().catch(() => ({ items: [] })),
         api.getBanks().catch(() => []),

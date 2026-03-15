@@ -40,6 +40,7 @@ export const Dashboard: React.FC = () => {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [salesData, setSalesData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState('mes')
   const [periodDates, setPeriodDates] = useState<{ from: string; to: string }>({ from: '', to: '' })
 
@@ -61,13 +62,17 @@ export const Dashboard: React.FC = () => {
     const loadData = async () => {
       try {
         setLoading(true)
+        setError(null)
         const [dashRes, salesRes] = await Promise.all([
-          api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch(() => ({
-            sales_month: 0, collections_pending: 0,
-            cheques_pending_count: 0, cheques_pending_amount: 0,
-            orders_unpaid_count: 0, orders_unpaid_amount: 0,
-            recent_invoices: [], recent_orders: [],
-          })),
+          api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
+            setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+            return {
+              sales_month: 0, collections_pending: 0,
+              cheques_pending_count: 0, cheques_pending_amount: 0,
+              orders_unpaid_count: 0, orders_unpaid_amount: 0,
+              recent_invoices: [], recent_orders: [],
+            }
+          }),
           api.getSalesReport(7).catch(() => []),
         ])
         setDashboard(dashRes)
@@ -201,6 +206,11 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
+        </div>
+      )}
       {/* Header with Search */}
       <div className="flex items-start justify-between gap-4">
         <div>

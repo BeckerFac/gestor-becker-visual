@@ -88,8 +88,11 @@ export const Banks: React.FC = () => {
     try {
       setLoading(true)
       const [banksRes, breakdownRes, balRes] = await Promise.all([
-        api.getBanks(),
-        api.getBankBreakdown(),
+        api.getBanks().catch((err: any) => {
+          setError(`Error cargando bancos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+          return []
+        }),
+        api.getBankBreakdown().catch(() => null),
         api.getBankBalances().catch(() => []),
       ])
       setBanks(banksRes || [])
