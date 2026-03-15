@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { Pagination } from '@/components/shared/Pagination'
@@ -549,7 +549,8 @@ export const Purchases: React.FC = () => {
           <EmptyState
             title={isFiltered ? 'No hay compras con estos filtros' : 'No hay compras registradas'}
             description={isFiltered ? 'Proba ajustando los filtros de busqueda' : 'Registra la primera compra para empezar'}
-            action={{ label: isFiltered ? 'Limpiar filtros' : '+ Nueva Compra', onClick: isFiltered ? clearFilters : () => setShowForm(true) }}
+            actionLabel={isFiltered ? 'Limpiar filtros' : '+ Nueva Compra'}
+            onAction={isFiltered ? clearFilters : () => setShowForm(true)}
           />
         </CardContent></Card>
       ) : (

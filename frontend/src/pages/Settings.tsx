@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
+import { formatDateTime } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 
 export const Settings: React.FC = () => {
@@ -404,7 +405,7 @@ export const Settings: React.FC = () => {
                   )}
                   {afipLastTest && (
                     <p className="text-xs text-gray-500 mt-2">
-                      Ultimo test: {new Date(afipLastTest).toLocaleString('es-AR')} —
+                      Ultimo test: {formatDateTime(afipLastTest)} —
                       <span className={afipLastTestOk ? 'text-green-600' : 'text-red-600'}>{afipLastTestOk ? ' Exitoso' : ' Fallido'}</span>
                     </p>
                   )}

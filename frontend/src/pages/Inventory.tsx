@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
@@ -170,22 +170,25 @@ export const Inventory: React.FC = () => {
             data={filtered.map(s => {
               const qty = parseFloat(s.quantity || '0')
               const min = parseFloat(s.min_level || '0')
+              const max = parseFloat((s as any).max_level || '0')
               const threshold = getProductThreshold(s.product?.id)
               return {
-                sku: s.product?.sku || '-',
                 producto: s.product?.name || '-',
+                sku: s.product?.sku || '-',
                 deposito: s.warehouse?.name || 'Principal',
                 cantidad: qty,
-                minimo: min,
+                nivel_minimo: min,
+                nivel_maximo: max,
                 estado: qty <= 0 ? 'Sin Stock' : (qty <= min || (threshold > 0 && qty <= threshold)) ? 'Stock Bajo' : 'OK',
               }
             })}
             columns={[
-              { key: 'sku', label: 'SKU' },
               { key: 'producto', label: 'Producto' },
+              { key: 'sku', label: 'SKU' },
               { key: 'deposito', label: 'Deposito' },
               { key: 'cantidad', label: 'Cantidad' },
-              { key: 'minimo', label: 'Minimo' },
+              { key: 'nivel_minimo', label: 'Nivel Minimo' },
+              { key: 'nivel_maximo', label: 'Nivel Maximo' },
               { key: 'estado', label: 'Estado' },
             ]}
             filename="inventario"
@@ -317,7 +320,8 @@ export const Inventory: React.FC = () => {
           <EmptyState
             title={search ? 'Sin resultados' : 'Sin productos en stock'}
             description={search ? 'No se encontraron productos con esa busqueda' : 'Registra un movimiento de stock para empezar'}
-            action={!search ? { label: '+ Movimiento de Stock', onClick: () => setShowForm(true) } : undefined}
+            actionLabel={!search ? '+ Movimiento de Stock' : undefined}
+            onAction={!search ? () => setShowForm(true) : undefined}
           />
         </CardContent></Card>
       ) : (

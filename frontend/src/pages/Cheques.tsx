@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { toast } from '@/hooks/useToast'
@@ -12,6 +12,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 
 interface Cheque {
   id: string
@@ -486,7 +487,8 @@ export const Cheques: React.FC = () => {
           <EmptyState
             title="Sin cheques registrados"
             description="Carga el primer cheque para empezar a gestionarlos"
-            action={{ label: '+ Nuevo Cheque', onClick: () => { setForm(emptyForm); setEditingId(null); setShowForm(true) } }}
+            actionLabel="+ Nuevo Cheque"
+            onAction={() => { setForm(emptyForm); setEditingId(null); setShowForm(true) }}
           />
         </CardContent></Card>
       ) : (
@@ -524,13 +526,15 @@ export const Cheques: React.FC = () => {
                       <div className="space-y-2">
                         {chequeHistory.map((h: any, i: number) => (
                           <div key={h.id || i} className="flex items-center gap-3 text-sm border-l-2 border-blue-300 pl-3 py-1">
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[h.old_status] || 'bg-gray-100'}`}>
-                              {STATUS_LABELS[h.old_status] || h.old_status || '—'}
-                            </span>
+                            <StatusBadge
+                              status={h.old_status || ''}
+                              label={STATUS_LABELS[h.old_status] || h.old_status || '\u2014'}
+                            />
                             <span className="text-gray-400">-&gt;</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[h.new_status] || 'bg-gray-100'}`}>
-                              {STATUS_LABELS[h.new_status] || h.new_status}
-                            </span>
+                            <StatusBadge
+                              status={h.new_status || ''}
+                              label={STATUS_LABELS[h.new_status] || h.new_status}
+                            />
                             <span className="text-gray-400 text-xs">{formatDate(h.created_at)}</span>
                             {h.changed_by_name && <span className="text-gray-500 text-xs">por {h.changed_by_name}</span>}
                             {h.notes && <span className="text-gray-500 text-xs italic">- {h.notes}</span>}

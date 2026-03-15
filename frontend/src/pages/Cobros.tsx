@@ -11,6 +11,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 
 interface Cobro {
@@ -302,8 +303,8 @@ export const Cobros: React.FC = () => {
     }
   }
 
-  const fmt = (n: any) => Number(n || 0).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })
-  const fmtDate = (d: string) => new Date(d).toLocaleDateString('es-AR')
+  const fmt = (n: any) => formatCurrency(n)
+  const fmtDate = (d: string) => formatDate(d)
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
 
   // Filtered + paginated data

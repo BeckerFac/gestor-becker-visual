@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { DataTable } from '@/components/shared/DataTable'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
@@ -183,21 +183,19 @@ export const Customers: React.FC = () => {
         <div className="flex items-center gap-2">
           <ExportCSVButton
             data={filtered.map(c => ({
-              cuit: c.cuit,
               nombre: c.name,
-              contacto: c.contact_name || '-',
+              cuit: c.cuit,
+              empresa: c.contact_name || '-',
               telefono: c.phone || '-',
               email: c.email || '-',
-              condicion_iva: c.tax_condition || '-',
               estado: c.status === 'active' ? 'Activo' : 'Inactivo',
             }))}
             columns={[
+              { key: 'nombre', label: 'Nombre' },
               { key: 'cuit', label: 'CUIT' },
-              { key: 'nombre', label: 'Razon Social' },
-              { key: 'contacto', label: 'Contacto' },
+              { key: 'empresa', label: 'Empresa' },
               { key: 'telefono', label: 'Telefono' },
               { key: 'email', label: 'Email' },
-              { key: 'condicion_iva', label: 'Cond. IVA' },
               { key: 'estado', label: 'Estado' },
             ]}
             filename="clientes"
@@ -265,7 +263,8 @@ export const Customers: React.FC = () => {
         <EmptyState
           title={search ? 'Sin resultados' : 'Sin clientes'}
           description={search ? `No se encontraron clientes para "${search}"` : 'Crea tu primer cliente para empezar.'}
-          action={!search ? { label: '+ Nuevo Cliente', onClick: () => setShowForm(true) } : undefined}
+          actionLabel={!search ? '+ Nuevo Cliente' : undefined}
+          onAction={!search ? () => setShowForm(true) : undefined}
         />
       ) : (
         <>

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
@@ -470,7 +470,8 @@ export const Banks: React.FC = () => {
           <EmptyState
             title="Sin cuentas bancarias"
             description="Agrega tu primera cuenta bancaria para empezar"
-            action={{ label: '+ Nuevo Banco', onClick: () => { setForm(emptyForm); setEditingId(null); setShowForm(true) } }}
+            actionLabel="+ Nuevo Banco"
+            onAction={() => { setForm(emptyForm); setEditingId(null); setShowForm(true) }}
           />
         </CardContent></Card>
       ) : (

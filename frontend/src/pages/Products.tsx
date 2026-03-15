@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { DataTable } from '@/components/shared/DataTable'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
@@ -830,7 +830,8 @@ export const Products: React.FC = () => {
         <EmptyState
           title={search ? 'Sin resultados' : 'Sin productos'}
           description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
-          action={!search ? { label: '+ Nuevo Producto', onClick: () => setShowForm(true) } : undefined}
+          actionLabel={!search ? '+ Nuevo Producto' : undefined}
+          onAction={!search ? () => setShowForm(true) : undefined}
         />
       ) : (
         <DataTable columns={columns} data={filtered} />

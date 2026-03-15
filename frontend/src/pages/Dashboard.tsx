@@ -6,7 +6,7 @@ import { useCanAny } from '@/components/shared/PermissionGate'
 import { api } from '@/services/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SkeletonPage } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -135,13 +135,33 @@ export const Dashboard: React.FC = () => {
     return `${d.getDate()}/${d.getMonth() + 1}`
   }
 
+  const periodLabels: Record<string, string> = {
+    hoy: 'Hoy',
+    semana: 'esta Semana',
+    mes: 'este Mes',
+    '3meses': 'ultimos 3 Meses',
+    anual: 'este Ano',
+    todos: 'Total Historico',
+  }
+  const periodLabel = periodLabels[period] || 'este Mes'
+
+  const chartTitleLabels: Record<string, string> = {
+    hoy: 'Hoy',
+    semana: 'Esta Semana',
+    mes: 'Este Mes',
+    '3meses': 'Ultimos 3 Meses',
+    anual: 'Este Ano',
+    todos: 'Historico',
+  }
+  const chartTitle = `Ventas - ${chartTitleLabels[period] || 'Ultimos 7 Dias'}`
+
   if (loading) {
     return <SkeletonPage />
   }
 
   const allKpis = [
     {
-      label: 'Facturado este Mes',
+      label: `Facturado ${periodLabel}`,
       value: formatCurrency(dashboard?.sales_month || 0),
       color: 'border-blue-200 bg-blue-50',
       textColor: 'text-blue-800',
@@ -347,7 +367,7 @@ export const Dashboard: React.FC = () => {
 
       {/* Sales Chart */}
       <Card>
-        <CardHeader><h3 className="text-lg font-semibold">Ventas - Últimos 7 Días</h3></CardHeader>
+        <CardHeader><h3 className="text-lg font-semibold">{chartTitle}</h3></CardHeader>
         <CardContent>
           {salesData.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>

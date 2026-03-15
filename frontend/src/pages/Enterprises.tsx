@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/ui/EmptyState'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
@@ -70,6 +70,7 @@ export const Enterprises: React.FC = () => {
   const [expandedContacts, setExpandedContacts] = useState<Contact[]>([])
 
   const [showEnterpriseForm, setShowEnterpriseForm] = useState(false)
+  const [originalPriceListId, setOriginalPriceListId] = useState('')
   const [editingEnterpriseId, setEditingEnterpriseId] = useState<string | null>(null)
   const [enterpriseForm, setEnterpriseForm] = useState(emptyEnterpriseForm)
 
@@ -140,8 +141,8 @@ export const Enterprises: React.FC = () => {
       }
       if (editingEnterpriseId) {
         await api.updateEnterprise(editingEnterpriseId, payload)
-        // Link price list if changed
-        if (price_list_id !== undefined) {
+        // Link price list only if it actually changed
+        if (price_list_id !== originalPriceListId) {
           await api.linkEnterpriseToPriceList(editingEnterpriseId, price_list_id || '').catch(() => {})
         }
         toast.success('Empresa actualizada correctamente')
@@ -178,6 +179,7 @@ export const Enterprises: React.FC = () => {
       price_list_id: (ent as any).price_list_id || '',
     })
     setEditingEnterpriseId(ent.id)
+    setOriginalPriceListId((ent as any).price_list_id || '')
     setShowEnterpriseForm(true)
     setShowContactForm(false)
   }
@@ -479,7 +481,8 @@ export const Enterprises: React.FC = () => {
           <EmptyState
             title="Sin empresas"
             description={search ? 'No se encontraron empresas con esa busqueda' : 'Crea la primera empresa para empezar'}
-            action={!search ? { label: '+ Nueva Empresa', onClick: () => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(true) } } : undefined}
+            actionLabel={!search ? '+ Nueva Empresa' : undefined}
+            onAction={!search ? () => { setEnterpriseForm(emptyEnterpriseForm); setEditingEnterpriseId(null); setShowEnterpriseForm(true) } : undefined}
           />
         </CardContent></Card>
       ) : (

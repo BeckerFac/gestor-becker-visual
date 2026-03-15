@@ -19,30 +19,85 @@ const defaultStatusColors: Record<string, StatusColor> = {
   pendiente: 'yellow',
   en_produccion: 'blue',
   produccion: 'blue',
+  terminado: 'green',
   listo: 'purple',
   entregado: 'green',
   facturado: 'green',
   cancelado: 'red',
+  // Cheques
+  a_cobrar: 'yellow',
+  endosado: 'blue',
+  depositado: 'purple',
+  cobrado: 'green',
+  rechazado: 'red',
+  cartera: 'blue',
+  // Quotes
+  draft: 'gray',
+  sent: 'blue',
+  accepted: 'green',
+  rejected: 'red',
+  expired: 'yellow',
   // Invoices
   autorizada: 'green',
+  authorized: 'green',
+  emitido: 'green',
   rechazada: 'red',
+  cancelled: 'red',
   borrador: 'gray',
+  // Payments
+  pagado: 'green',
+  pago_parcial: 'orange',
+  no_pagado: 'red',
   // Remitos
   en_preparacion: 'blue',
   despachado: 'purple',
   recibido: 'green',
-  // Cheques
-  cartera: 'blue',
-  depositado: 'green',
-  rechazado: 'red',
-  endosado: 'purple',
   // Cobros/Pagos
   parcial: 'orange',
   completo: 'green',
   anulado: 'red',
   // Generic
+  active: 'green',
+  inactive: 'gray',
   activo: 'green',
   inactivo: 'gray',
+}
+
+// Spanish labels for all statuses across the app
+export const STATUS_LABELS: Record<string, string> = {
+  // Orders
+  pendiente: 'Pendiente',
+  en_produccion: 'En Produccion',
+  terminado: 'Terminado',
+  listo: 'Listo',
+  entregado: 'Entregado',
+  facturado: 'Facturado',
+  cancelado: 'Cancelado',
+  // Cheques
+  a_cobrar: 'A Cobrar',
+  endosado: 'Endosado',
+  depositado: 'Depositado',
+  cobrado: 'Cobrado',
+  rechazado: 'Rechazado',
+  // Quotes
+  draft: 'Borrador',
+  sent: 'Enviada',
+  accepted: 'Aceptada',
+  rejected: 'Rechazada',
+  expired: 'Vencida',
+  // Invoices
+  authorized: 'Autorizada',
+  emitido: 'Emitido',
+  cancelled: 'Cancelada',
+  // Payments
+  pagado: 'Pagado',
+  pago_parcial: 'Pago Parcial',
+  no_pagado: 'No Pagado',
+  // Generic
+  active: 'Activo',
+  inactive: 'Inactivo',
+  completo: 'Completo',
+  parcial: 'Parcial',
 }
 
 interface StatusBadgeProps {

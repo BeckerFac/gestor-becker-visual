@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface EnterpriseSaldo {
   id: string
@@ -171,10 +172,7 @@ export const CuentaCorriente: React.FC = () => {
     }
   }
 
-  const fmt = (n: number) =>
-    n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })
-
-  const formatDate = (d: string) => new Date(d).toLocaleDateString('es-AR')
+  const fmt = (n: number) => formatCurrency(n)
 
   const totalNosDebem = resumen
     .filter((r) => r.a_cobrar > 0)
