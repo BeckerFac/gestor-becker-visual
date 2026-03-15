@@ -100,33 +100,39 @@ export class ReceiptsService {
 
       const receiptId = uuid();
 
-      await db.execute(sql`
-        INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, created_by, created_at)
-        VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${userId}, NOW())
-      `);
-
-      // Create receipt items and corresponding cobros entries
-      for (const item of items) {
-        const itemId = uuid();
+      // Transaction: all inserts succeed or all rollback
+      await db.execute(sql`BEGIN`);
+      try {
         await db.execute(sql`
-          INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
-          VALUES (${itemId}, ${receiptId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, NOW())
+          INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, created_by, created_at)
+          VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${userId}, NOW())
         `);
 
-        // Also create a cobro linked to the invoice
-        const cobroId = uuid();
-        // Get enterprise_id and order_id from invoice
-        const invResult = await db.execute(sql`
-          SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
-        `);
-        const invRows = (invResult as any).rows || invResult || [];
-        const enterpriseId = invRows[0]?.enterprise_id || null;
-        const orderId = invRows[0]?.order_id || null;
+        for (const item of items) {
+          const itemId = uuid();
+          await db.execute(sql`
+            INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
+            VALUES (${itemId}, ${receiptId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, NOW())
+          `);
 
-        await db.execute(sql`
-          INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
-          VALUES (${cobroId}, ${companyId}, ${enterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
-        `);
+          const cobroId = uuid();
+          const invResult = await db.execute(sql`
+            SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
+          `);
+          const invRows = (invResult as any).rows || invResult || [];
+          const enterpriseId = invRows[0]?.enterprise_id || null;
+          const orderId = invRows[0]?.order_id || null;
+
+          await db.execute(sql`
+            INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
+            VALUES (${cobroId}, ${companyId}, ${enterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
+          `);
+        }
+
+        await db.execute(sql`COMMIT`);
+      } catch (txError) {
+        await db.execute(sql`ROLLBACK`);
+        throw txError;
       }
 
       return { id: receiptId, receipt_number: receiptNumber, total_amount: totalAmount };

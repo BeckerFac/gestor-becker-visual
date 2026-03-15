@@ -9,12 +9,33 @@ export class OrdersService {
   async ensureMigrations() {
     if (this.migrationsRun) return;
     try {
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`);
-      await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`);
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`);
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`);
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`);
+      // Ensure tables we JOIN on exist (they're normally created by their own modules,
+      // but if orders loads first, the JOIN would crash)
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS cobros (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_id UUID NOT NULL,
+          enterprise_id UUID,
+          order_id UUID,
+          invoice_id UUID,
+          amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+          payment_method VARCHAR(50),
+          bank_id UUID,
+          reference VARCHAR(255),
+          payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          notes TEXT,
+          receipt_image TEXT,
+          created_by UUID,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `).catch(() => {});
+
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`).catch(() => {});
       this.migrationsRun = true;
     } catch (error) {
       console.error('Orders migrations error:', error);

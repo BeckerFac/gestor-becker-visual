@@ -149,10 +149,10 @@ export const Cobros: React.FC = () => {
     try {
       setLoading(true)
       const [cobrosRes, entRes, ordersRes, bankRes] = await Promise.all([
-        api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined),
-        api.getEnterprises(),
-        api.getOrders(),
-        api.getBanks(),
+        api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch(() => []),
+        api.getEnterprises().catch(() => []),
+        api.getOrders().catch(() => ({ items: [] })),
+        api.getBanks().catch(() => []),
       ])
       setCobros(cobrosRes || [])
       setEnterprises(entRes || [])
