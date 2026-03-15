@@ -30,8 +30,9 @@ export class OrdersService {
         )
       `).catch(() => {});
 
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(() => {});
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS enterprise_id UUID`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_invoice BOOLEAN DEFAULT false`).catch(() => {});
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
@@ -79,6 +80,20 @@ export class OrdersService {
         whereClause = sql`${whereClause} AND (o.title ILIKE ${'%' + search + '%'} OR c.name ILIKE ${'%' + search + '%'} OR e.name ILIKE ${'%' + search + '%'})`;
       }
 
+      // Use a safe query that only JOINs core tables that are guaranteed to exist
+      // Optional JOINs (cobros, quotes) are wrapped to handle missing tables/columns
+      let selectExtra = sql``;
+      let joinExtra = sql``;
+
+      // Try to add cobros JOIN only if table and column exist
+      try {
+        await db.execute(sql`SELECT 1 FROM cobros LIMIT 0`);
+        selectExtra = sql`${selectExtra}, CASE WHEN o.cobro_id IS NOT NULL THEN (SELECT json_build_object('id', cb2.id, 'amount', cb2.amount, 'payment_method', cb2.payment_method) FROM cobros cb2 WHERE cb2.id = o.cobro_id) ELSE NULL END as cobro`;
+      } catch {
+        selectExtra = sql`${selectExtra}, NULL as cobro`;
+      }
+
+      // Quote join is safe (quotes table created in config/db.ts)
       const result = await db.execute(sql`
         SELECT o.*,
           json_build_object('id', c.id, 'name', c.name, 'cuit', c.cuit) as customer,
@@ -86,19 +101,18 @@ export class OrdersService {
             CASE WHEN c.enterprise_id IS NOT NULL THEN (SELECT json_build_object('id', e2.id, 'name', e2.name) FROM enterprises e2 WHERE e2.id = c.enterprise_id) ELSE NULL END
           END as enterprise,
           CASE WHEN o.invoice_id IS NOT NULL THEN
-            json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'punto_venta', (i.afip_response->'FeCabResp'->>'PtoVta')::int, 'cae', i.cae)
+            json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'status', i.status, 'cae', i.cae)
           ELSE NULL END as invoice,
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
           CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
-          CASE WHEN o.cobro_id IS NOT NULL THEN json_build_object('id', cb.id, 'amount', cb.amount, 'payment_method', cb.payment_method) ELSE NULL END as cobro,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
+          ${selectExtra}
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
         LEFT JOIN invoices i ON o.invoice_id = i.id
         LEFT JOIN banks bk ON o.bank_id = bk.id
         LEFT JOIN quotes qt ON o.quote_id = qt.id
-        LEFT JOIN cobros cb ON o.cobro_id = cb.id
         WHERE ${whereClause}
         ORDER BY o.created_at DESC
         LIMIT ${limit} OFFSET ${skip}
@@ -134,10 +148,10 @@ export class OrdersService {
           ganancia_total: parseFloat(summary.ganancia_total || '0'),
         },
       };
-    } catch (error) {
-      console.error('Get orders error:', error);
+    } catch (error: any) {
+      console.error('Get orders error:', error?.message || error);
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to get orders');
+      throw new ApiError(500, `Failed to get orders: ${error?.message || 'unknown error'}`);
     }
   }
 
