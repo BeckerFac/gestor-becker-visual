@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -166,11 +165,11 @@ export const Quotes: React.FC = () => {
     const [custRes, prodRes, entRes] = await Promise.all([
       api.getCustomers().catch(() => ({ items: [] })),
       api.getProducts().catch(() => ({ items: [] })),
-      api.getEnterprises().catch(() => ({ items: [] })),
+      api.getEnterprises().catch(() => []),
     ])
     setCustomers(custRes.items || custRes || [])
     setProducts(prodRes.items || prodRes || [])
-    setEnterprises(entRes.items || entRes || [])
+    setEnterprises(Array.isArray(entRes) ? entRes : (entRes.items || []))
   }, [])
 
   useEffect(() => {
@@ -180,7 +179,7 @@ export const Quotes: React.FC = () => {
   useEffect(() => {
     setCurrentPage(1)
     loadQuotes(1)
-  }, [filterEnterprise, filterStatus, filterSearch, filterDateFrom, filterDateTo])
+  }, [loadQuotes])
 
   // ── Filter helpers ─────────────────────────────────────────────────────────
 
@@ -665,6 +664,7 @@ export const Quotes: React.FC = () => {
                           disabled={updatingStatusId === quote.id}
                         >
                           <option value="draft">Borrador</option>
+                          <option value="sent">Enviada</option>
                           <option value="accepted">Aceptada</option>
                           <option value="rejected">Rechazada</option>
                         </select>

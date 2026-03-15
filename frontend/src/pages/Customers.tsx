@@ -51,14 +51,17 @@ export const Customers: React.FC = () => {
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
 
   const loadTags = async () => {
-    try { setAvailableTags(await api.getTags()) } catch {}
+    try {
+      const res = await api.getTags()
+      setAvailableTags(Array.isArray(res) ? res : res?.items || [])
+    } catch { /* ignore */ }
   }
 
   const loadCustomers = async () => {
     try {
       setLoading(true)
       const res = await api.getCustomers()
-      setCustomers(res.items || res || [])
+      setCustomers(Array.isArray(res) ? res : res?.items || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -296,6 +299,7 @@ export const Customers: React.FC = () => {
         title="Eliminar cliente"
         message={`¿Seguro que querés eliminar "${deleteTarget?.name}"? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar"
+        variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
         loading={deleting}

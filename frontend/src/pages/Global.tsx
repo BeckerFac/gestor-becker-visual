@@ -79,7 +79,8 @@ export const Global: React.FC = () => {
     const loadEnterprises = async () => {
       try {
         const data = await api.getEnterprises()
-        setEnterprises(data)
+        const items = Array.isArray(data) ? data : (data?.items ?? data ?? [])
+        setEnterprises(items)
       } catch (e) {
         console.error('Failed to load enterprises', e)
       }
@@ -146,27 +147,27 @@ export const Global: React.FC = () => {
           break
         case 'pedidos': {
           const ordersData = await api.getOrders({ enterprise_id: enterpriseId, limit: 100 })
-          setOrders(ordersData.items || ordersData || [])
+          setOrders(Array.isArray(ordersData) ? ordersData : ordersData?.items || [])
           break
         }
         case 'cotizaciones': {
           const quotesData = await api.getQuotes({ enterprise_id: enterpriseId, limit: 100 })
-          setQuotes(quotesData.items || quotesData || [])
+          setQuotes(Array.isArray(quotesData) ? quotesData : quotesData?.items || [])
           break
         }
         case 'facturas': {
           const invoicesData = await api.getInvoices({ enterprise_id: enterpriseId, limit: 100 })
-          setInvoices(invoicesData.items || invoicesData || [])
+          setInvoices(Array.isArray(invoicesData) ? invoicesData : invoicesData?.items || [])
           break
         }
         case 'cobros': {
           const cobrosData = await api.getCobros({ enterprise_id: enterpriseId })
-          setCobros(cobrosData.items || cobrosData || [])
+          setCobros(Array.isArray(cobrosData) ? cobrosData : cobrosData?.items || [])
           break
         }
         case 'pagos': {
           const pagosData = await api.getPagos({ enterprise_id: enterpriseId })
-          setPagos(pagosData.items || pagosData || [])
+          setPagos(Array.isArray(pagosData) ? pagosData : pagosData?.items || [])
           break
         }
         case 'cuenta_corriente': {
@@ -180,8 +181,8 @@ export const Global: React.FC = () => {
           const contactIds = (entDetail.contacts || []).map((c: any) => c.id)
           if (contactIds.length > 0) {
             const allCheques = await api.getCheques({})
-            const filtered = (Array.isArray(allCheques) ? allCheques : allCheques.items || [])
-              .filter((c: any) => contactIds.includes(c.customer_id))
+            const chequesArr = Array.isArray(allCheques) ? allCheques : allCheques?.items || []
+            const filtered = chequesArr.filter((c: any) => contactIds.includes(c.customer_id))
             setCheques(filtered)
           } else {
             setCheques([])
@@ -194,14 +195,15 @@ export const Global: React.FC = () => {
     } finally {
       setTabLoading(false)
     }
-  }, [selectedEnterprise])
+  }, [])
 
   const handleTabChange = useCallback((tab: TabKey) => {
     setActiveTab(tab)
     if (selectedEnterprise && tab !== 'contactos') {
       loadTabData(tab, selectedEnterprise.id)
     }
-  }, [selectedEnterprise, loadTabData])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEnterprise?.id, loadTabData])
 
   const clearSelection = () => {
     setSelectedEnterprise(null)

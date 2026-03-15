@@ -179,9 +179,9 @@ export const Remitos: React.FC = () => {
       api.getCustomers().catch(() => ({ items: [] })),
       api.getOrders({ status: undefined }).catch(() => ({ items: [] })),
     ])
-    setEnterprises(entRes.items ?? entRes ?? [])
-    setCustomers(custRes.items ?? custRes ?? [])
-    setOrders(ordRes.items ?? ordRes ?? [])
+    setEnterprises(Array.isArray(entRes) ? entRes : entRes?.items ?? [])
+    setCustomers(Array.isArray(custRes) ? custRes : custRes?.items ?? [])
+    setOrders(Array.isArray(ordRes) ? ordRes : ordRes?.items ?? [])
   }, [])
 
   useEffect(() => {
@@ -191,7 +191,8 @@ export const Remitos: React.FC = () => {
   useEffect(() => {
     setCurrentPage(1)
     loadRemitos(1)
-  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo, loadRemitos])
 
   // ── Filter helpers ─────────────────────────────────────────────────────────
 
@@ -357,13 +358,22 @@ export const Remitos: React.FC = () => {
     try {
       const reader = new FileReader()
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1]
-        await api.uploadSignedRemitoPdf(remitoId, base64)
-        await loadRemitos(currentPage)
+        try {
+          const base64 = (reader.result as string).split(',')[1]
+          await api.uploadSignedRemitoPdf(remitoId, base64)
+          toast.success('PDF firmado subido correctamente')
+          await loadRemitos(currentPage)
+        } catch (err: any) {
+          setError(err.message)
+          toast.error('Error al subir PDF firmado')
+        }
+      }
+      reader.onerror = () => {
+        setError('Error al leer el archivo')
       }
       reader.readAsDataURL(file)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (err: any) {
+      setError(err.message)
     }
   }
 

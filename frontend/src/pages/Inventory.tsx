@@ -49,8 +49,8 @@ export const Inventory: React.FC = () => {
         }),
         api.getProducts().catch(() => ({ items: [] }))
       ])
-      setStock(stockRes.items || stockRes || [])
-      setProducts(prodRes.items || prodRes || [])
+      setStock(Array.isArray(stockRes) ? stockRes : stockRes?.items || [])
+      setProducts(Array.isArray(prodRes) ? prodRes : prodRes?.items || [])
     } catch (e: any) {
       setError(e.message)
     } finally {

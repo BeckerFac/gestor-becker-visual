@@ -112,10 +112,10 @@ export const Purchases: React.FC = () => {
         api.getBanks().catch(() => []),
         api.getProducts().catch(() => ({ items: [] })),
       ])
-      setPurchases(purchRes || [])
-      setEnterprises(entRes || [])
-      setBanks(bankRes || [])
-      setAvailableProducts(prodRes.items || prodRes || [])
+      setPurchases(Array.isArray(purchRes) ? purchRes : purchRes?.items || [])
+      setEnterprises(Array.isArray(entRes) ? entRes : entRes?.items || [])
+      setBanks(Array.isArray(bankRes) ? bankRes : bankRes?.items || [])
+      setAvailableProducts(Array.isArray(prodRes) ? prodRes : prodRes?.items || [])
     } catch (e: any) {
       setError(e.message)
     } finally {

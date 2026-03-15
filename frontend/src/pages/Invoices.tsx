@@ -101,6 +101,9 @@ function formatInvoiceNumber(invoice: Pick<Invoice, 'punto_venta' | 'invoice_num
   if (invoice.fiscal_type === 'interno') {
     return `CI-${String(invoice.invoice_number).padStart(6, '0')}`
   }
+  if (invoice.fiscal_type === 'no_fiscal') {
+    return `NF-${String(invoice.invoice_number).padStart(6, '0')}`
+  }
   const nro = String(invoice.invoice_number).padStart(8, '0')
   if (invoice.punto_venta) {
     const pv = String(invoice.punto_venta).padStart(5, '0')
@@ -132,8 +135,8 @@ export const Invoices: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
-  // Vista mode: fiscal (AFIP) or interno (sin AFIP)
-  const [vistaMode, setVistaMode] = useState<'fiscal' | 'interno'>('fiscal')
+  // Vista mode: fiscal (AFIP), interno (sin AFIP), or no_fiscal (from orders)
+  const [vistaMode, setVistaMode] = useState<'fiscal' | 'interno' | 'no_fiscal'>('fiscal')
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -182,8 +185,12 @@ export const Invoices: React.FC = () => {
       if (filterType) filters.invoice_type = filterType
       if (filterStatus) filters.status = filterStatus
       if (search) filters.search = search
-      const res = await api.getInvoices(filters)
+      const [res, entRes] = await Promise.all([
+        api.getInvoices(filters),
+        enterprises.length === 0 ? api.getEnterprises().catch(() => []) : Promise.resolve(null),
+      ])
       setInvoices(res.items || res || [])
+      if (entRes) setEnterprises(entRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -325,7 +332,7 @@ export const Invoices: React.FC = () => {
       await api.createInvoice({
         customer_id: formCustomerId || null,
         enterprise_id: formEnterpriseId || null,
-        invoice_type: vistaMode === 'interno' ? undefined : formInvoiceType,
+        invoice_type: vistaMode === 'fiscal' ? formInvoiceType : undefined,
         order_id: formOrderId || null,
         fiscal_type: vistaMode,
         items: formItems.map(item => ({
@@ -333,11 +340,11 @@ export const Invoices: React.FC = () => {
           product_name: item.product_name,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          vat_rate: vistaMode === 'interno' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
+          vat_rate: vistaMode !== 'fiscal' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
           order_item_id: item.order_item_id || null,
         })),
       })
-      toast.success(vistaMode === 'interno' ? 'Comprobante interno creado' : 'Factura creada correctamente')
+      toast.success(vistaMode === 'fiscal' ? 'Factura creada correctamente' : 'Comprobante creado correctamente')
       closeForm()
       await loadInvoices()
     } catch (e: any) {
@@ -415,7 +422,7 @@ export const Invoices: React.FC = () => {
     setDateTo('')
   }
 
-  const handleChangeVistaMode = (mode: 'fiscal' | 'interno') => {
+  const handleChangeVistaMode = (mode: 'fiscal' | 'interno' | 'no_fiscal') => {
     setVistaMode(mode)
     clearFilters()
     setShowForm(false)
@@ -450,7 +457,7 @@ export const Invoices: React.FC = () => {
 
   // ---- CSV Export ----
 
-  const csvColumns = vistaMode === 'interno'
+  const csvColumns = vistaMode !== 'fiscal'
     ? [
         { key: 'invoice_number_fmt', label: 'N° Comprobante' },
         { key: 'invoice_date_fmt', label: 'Fecha' },
@@ -529,21 +536,31 @@ export const Invoices: React.FC = () => {
         >
           Comprobantes Internos
         </button>
+        <button
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            vistaMode === 'no_fiscal'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+          onClick={() => handleChangeVistaMode('no_fiscal')}
+        >
+          No Fiscal
+        </button>
       </div>
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
-            {vistaMode === 'interno' ? 'Comprobantes Internos' : 'Facturas'}
+            {vistaMode === 'interno' ? 'Comprobantes Internos' : vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas'}
           </h1>
           <p className="text-sm text-gray-500 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'interno' ? 'comprobantes_internos' : 'facturas'} />
+          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'interno' ? 'comprobantes_internos' : vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
-              {showForm ? 'Cancelar' : vistaMode === 'interno' ? '+ Nuevo Comprobante' : '+ Nueva Factura'}
+              {showForm ? 'Cancelar' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
             </Button>
           </PermissionGate>
         </div>
@@ -653,7 +670,7 @@ export const Invoices: React.FC = () => {
         <Card className="animate-fadeIn">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{vistaMode === 'interno' ? 'Nuevo Comprobante Interno' : 'Nueva Factura'}</h3>
+              <h3 className="text-lg font-semibold">{vistaMode === 'fiscal' ? 'Nueva Factura' : vistaMode === 'interno' ? 'Nuevo Comprobante Interno' : 'Nuevo Comprobante No Fiscal'}</h3>
               <div className="flex items-center gap-2">
                 <span className={`text-sm px-3 py-1 rounded-full font-medium ${formStep === 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                   1. Datos
@@ -712,6 +729,11 @@ export const Invoices: React.FC = () => {
                     Este comprobante es interno y no se emitira en AFIP. No tiene valor fiscal.
                   </div>
                 )}
+                {vistaMode === 'no_fiscal' && (
+                  <div className="px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
+                    Este comprobante no fiscal no se emitira en AFIP.
+                  </div>
+                )}
 
                 {/* Link to order (optional) */}
                 {ordersWithoutInvoice.length > 0 && (
@@ -760,9 +782,13 @@ export const Invoices: React.FC = () => {
                     <span className={`text-xl font-bold px-2 py-0.5 rounded ${TYPE_BADGE_COLORS[formInvoiceType]}`}>
                       {formInvoiceType}
                     </span>
-                  ) : (
+                  ) : vistaMode === 'interno' ? (
                     <span className="text-sm font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-800">
                       CI
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-800">
+                      NF
                     </span>
                   )}
                   <span className="text-blue-800 font-medium">
@@ -875,9 +901,9 @@ export const Invoices: React.FC = () => {
                               type="number" step="0.01" placeholder="21"
                               list={`invoice-vat-list-${idx}`}
                               className="w-full text-center px-2 py-1.5 border border-gray-300 rounded text-sm"
-                              value={formInvoiceType === 'C' ? 0 : item.vat_rate}
+                              value={vistaMode !== 'fiscal' || formInvoiceType === 'C' ? 0 : item.vat_rate}
                               onChange={e => handleItemChange(idx, 'vat_rate', parseFloat(e.target.value))}
-                              disabled={formInvoiceType === 'C'}
+                              disabled={vistaMode !== 'fiscal' || formInvoiceType === 'C'}
                             />
                             <datalist id={`invoice-vat-list-${idx}`}>
                               {VAT_RATES.map(r => (
@@ -940,7 +966,7 @@ export const Invoices: React.FC = () => {
                       disabled={!isFormStep2Valid || saving}
                       onClick={handleCreateInvoice}
                     >
-                      {vistaMode === 'interno' ? 'Crear Comprobante' : 'Crear Factura'}
+                      {vistaMode === 'fiscal' ? 'Crear Factura' : 'Crear Comprobante'}
                     </Button>
                   </div>
                 </div>
@@ -960,12 +986,12 @@ export const Invoices: React.FC = () => {
       ) : filteredInvoices.length === 0 ? (
         <EmptyState
           title={isFiltered
-            ? `No hay ${vistaMode === 'interno' ? 'comprobantes internos' : 'facturas'} con estos filtros`
-            : `No hay ${vistaMode === 'interno' ? 'comprobantes internos' : 'facturas'} registrad${vistaMode === 'interno' ? 'os' : 'as'}`
+            ? `No hay ${vistaMode === 'fiscal' ? 'facturas' : 'comprobantes'} con estos filtros`
+            : `No hay ${vistaMode === 'fiscal' ? 'facturas registradas' : 'comprobantes registrados'}`
           }
-          description={isFiltered ? undefined : vistaMode === 'interno' ? 'Crea el primer comprobante interno para comenzar' : 'Crea la primera factura para comenzar'}
+          description={isFiltered ? undefined : vistaMode === 'fiscal' ? 'Crea la primera factura para comenzar' : 'Crea el primer comprobante para comenzar'}
           variant={isFiltered ? 'filtered' : 'empty'}
-          actionLabel={isFiltered ? 'Limpiar filtros' : vistaMode === 'interno' ? '+ Nuevo Comprobante' : '+ Nueva Factura'}
+          actionLabel={isFiltered ? 'Limpiar filtros' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
           onAction={isFiltered ? clearFilters : openForm}
         />
       ) : (

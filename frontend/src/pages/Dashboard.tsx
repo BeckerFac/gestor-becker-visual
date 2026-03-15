@@ -59,10 +59,19 @@ export const Dashboard: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    const periodToDays: Record<string, number> = {
+      hoy: 1,
+      semana: 7,
+      mes: 30,
+      '3meses': 90,
+      anual: 365,
+      todos: 3650,
+    }
     const loadData = async () => {
       try {
         setLoading(true)
         setError(null)
+        const days = periodToDays[period] || 30
         const [dashRes, salesRes] = await Promise.all([
           api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
@@ -73,7 +82,7 @@ export const Dashboard: React.FC = () => {
               recent_invoices: [], recent_orders: [],
             }
           }),
-          api.getSalesReport(7).catch(() => []),
+          api.getSalesReport(days).catch(() => []),
         ])
         setDashboard(dashRes)
         setSalesData(Array.isArray(salesRes) ? salesRes : [])
@@ -82,7 +91,7 @@ export const Dashboard: React.FC = () => {
       }
     }
     loadData()
-  }, [periodDates])
+  }, [periodDates, period])
 
   // Close search results on click outside
   useEffect(() => {
@@ -127,12 +136,12 @@ export const Dashboard: React.FC = () => {
   }
 
   const hasResults = searchResults && (
-    searchResults.enterprises.length > 0 ||
-    searchResults.customers.length > 0 ||
-    searchResults.orders.length > 0 ||
-    searchResults.purchases.length > 0 ||
-    searchResults.products.length > 0 ||
-    searchResults.invoices.length > 0
+    (searchResults.enterprises?.length || 0) > 0 ||
+    (searchResults.customers?.length || 0) > 0 ||
+    (searchResults.orders?.length || 0) > 0 ||
+    (searchResults.purchases?.length || 0) > 0 ||
+    (searchResults.products?.length || 0) > 0 ||
+    (searchResults.invoices?.length || 0) > 0
   )
 
   const formatShortDate = (dateStr: string) => {
@@ -249,10 +258,10 @@ export const Dashboard: React.FC = () => {
               ) : (
                 <div className="py-2">
                   {/* Enterprises */}
-                  {searchResults!.enterprises.length > 0 && (
+                  {(searchResults!.enterprises?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Empresas</p>
-                      {searchResults!.enterprises.map((e: any) => (
+                      {(searchResults!.enterprises || []).map((e: any) => (
                         <button key={e.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
                           <span className="text-lg">🏢</span>
                           <div>
@@ -265,10 +274,10 @@ export const Dashboard: React.FC = () => {
                   )}
 
                   {/* Orders */}
-                  {searchResults!.orders.length > 0 && (
+                  {(searchResults!.orders?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Pedidos</p>
-                      {searchResults!.orders.map((o: any) => (
+                      {(searchResults!.orders || []).map((o: any) => (
                         <button key={o.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/orders')}>
                           <span className="text-lg">📋</span>
                           <div className="flex-1 min-w-0">
@@ -283,10 +292,10 @@ export const Dashboard: React.FC = () => {
                   )}
 
                   {/* Purchases */}
-                  {searchResults!.purchases.length > 0 && (
+                  {(searchResults!.purchases?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Compras</p>
-                      {searchResults!.purchases.map((p: any) => (
+                      {(searchResults!.purchases || []).map((p: any) => (
                         <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/compras')}>
                           <span className="text-lg">🛒</span>
                           <div>
@@ -301,10 +310,10 @@ export const Dashboard: React.FC = () => {
                   )}
 
                   {/* Products */}
-                  {searchResults!.products.length > 0 && (
+                  {(searchResults!.products?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Productos</p>
-                      {searchResults!.products.map((p: any) => (
+                      {(searchResults!.products || []).map((p: any) => (
                         <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/products')}>
                           <span className="text-lg">📦</span>
                           <div>
@@ -317,10 +326,10 @@ export const Dashboard: React.FC = () => {
                   )}
 
                   {/* Invoices */}
-                  {searchResults!.invoices.length > 0 && (
+                  {(searchResults!.invoices?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Facturas</p>
-                      {searchResults!.invoices.map((inv: any) => (
+                      {(searchResults!.invoices || []).map((inv: any) => (
                         <button key={inv.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/invoices')}>
                           <span className="text-lg">🧾</span>
                           <div>
@@ -335,10 +344,10 @@ export const Dashboard: React.FC = () => {
                   )}
 
                   {/* Customers */}
-                  {searchResults!.customers.length > 0 && (
+                  {(searchResults!.customers?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Contactos</p>
-                      {searchResults!.customers.map((c: any) => (
+                      {(searchResults!.customers || []).map((c: any) => (
                         <button key={c.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
                           <span className="text-lg">👤</span>
                           <div>
@@ -424,7 +433,7 @@ export const Dashboard: React.FC = () => {
           <CardContent>
             {(dashboard?.recent_orders?.length || 0) > 0 ? (
               <div className="space-y-3">
-                {dashboard!.recent_orders.map((order: any) => (
+                {(dashboard!.recent_orders || []).map((order: any) => (
                     <div key={order.id} className="flex items-center justify-between py-2 border-b last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -468,7 +477,7 @@ export const Dashboard: React.FC = () => {
           <CardContent>
             {(dashboard?.recent_invoices?.length || 0) > 0 ? (
               <div className="space-y-3">
-                {dashboard!.recent_invoices.map((inv: any) => (
+                {(dashboard!.recent_invoices || []).map((inv: any) => (
                     <div key={inv.id} className="flex items-center justify-between py-2 border-b last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">

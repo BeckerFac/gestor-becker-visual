@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -172,6 +172,8 @@ export const Orders: React.FC = () => {
   const [filterInvoice, setFilterInvoice] = useState<string[]>([])
   const [filterPayment, setFilterPayment] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const searchRef = useRef(search)
+  searchRef.current = search
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -234,7 +236,7 @@ export const Orders: React.FC = () => {
     setFormTitle('')
   }
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true)
       const [ordersRes, custRes, prodRes, entRes, banksRes] = await Promise.all([
@@ -243,7 +245,7 @@ export const Orders: React.FC = () => {
           product_type: filterType.length === 1 ? filterType[0] : undefined,
           enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
           has_invoice: filterInvoice.length === 1 ? filterInvoice[0] : undefined,
-          search: search || undefined,
+          search: searchRef.current || undefined,
         }).catch((err: any) => {
           setError(`Error cargando pedidos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return { items: [], summary: {} }
@@ -264,9 +266,9 @@ export const Orders: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterStatus, filterType, filterEnterprise, filterInvoice])
 
-  useEffect(() => { loadData() }, [filterStatus, filterType, filterEnterprise, filterInvoice])
+  useEffect(() => { loadData() }, [loadData])
 
   const handleSearch = () => loadData()
 
@@ -461,7 +463,7 @@ export const Orders: React.FC = () => {
 
   // --- Expand / invoicing ---
 
-  const loadInvoicingStatus = async (orderId: string) => {
+  const loadInvoicingStatus = useCallback(async (orderId: string) => {
     setInvoicingLoading(prev => ({ ...prev, [orderId]: true }))
     try {
       const data = await api.getOrderInvoicingStatus(orderId)
@@ -472,15 +474,13 @@ export const Orders: React.FC = () => {
         qtys[item.id] = item.pending_qty
       }
       setInvoiceQtys(prev => ({ ...prev, [orderId]: qtys }))
-      if (!invoiceType[orderId]) {
-        setInvoiceType(prev => ({ ...prev, [orderId]: 'B' }))
-      }
+      setInvoiceType(prev => prev[orderId] ? prev : { ...prev, [orderId]: 'B' })
     } catch {
       // Silently fail - invoicing status not critical
     } finally {
       setInvoicingLoading(prev => ({ ...prev, [orderId]: false }))
     }
-  }
+  }, [])
 
   // Production timer state
   const [timerTick, setTimerTick] = useState(0)
@@ -542,7 +542,7 @@ export const Orders: React.FC = () => {
   // Invoice preview hook
   const invoicePreview = useInvoicePreview({
     onError: (msg) => setError(msg),
-    onDataRefresh: useCallback(async () => { await loadData() }, []),
+    onDataRefresh: useCallback(async () => { await loadData() }, [loadData]),
     loadInvoicingStatus,
   })
 

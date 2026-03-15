@@ -140,10 +140,10 @@ export const CustomerPortal: React.FC = () => {
         api.portalGetInvoices().catch(() => ({ items: [] })),
         api.portalGetQuotes().catch(() => ({ items: [] })),
       ])
-      setSummary(summaryRes)
-      setOrders(ordersRes.items || [])
-      setInvoices(invoicesRes.items || [])
-      setQuotes(quotesRes.items || [])
+      setSummary(summaryRes || {})
+      setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes?.items || [])
+      setInvoices(Array.isArray(invoicesRes) ? invoicesRes : invoicesRes?.items || [])
+      setQuotes(Array.isArray(quotesRes) ? quotesRes : quotesRes?.items || [])
     } catch (e: any) {
       console.error(e)
     } finally {

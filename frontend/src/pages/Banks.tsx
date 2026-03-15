@@ -95,9 +95,9 @@ export const Banks: React.FC = () => {
         api.getBankBreakdown().catch(() => null),
         api.getBankBalances().catch(() => []),
       ])
-      setBanks(banksRes || [])
+      setBanks(Array.isArray(banksRes) ? banksRes : banksRes?.items || [])
       setBreakdown(breakdownRes || null)
-      setBalances(balRes || [])
+      setBalances(Array.isArray(balRes) ? balRes : balRes?.items || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -112,7 +112,7 @@ export const Banks: React.FC = () => {
         date_from: movDateFrom || undefined,
         date_to: movDateTo || undefined,
       })
-      setBankMovements(movements)
+      setBankMovements(Array.isArray(movements) ? movements : movements?.items || [])
     } catch (e) {
       setBankMovements([])
     } finally {
@@ -362,6 +362,7 @@ export const Banks: React.FC = () => {
                   dateTo={movDateTo}
                   onDateFromChange={setMovDateFrom}
                   onDateToChange={setMovDateTo}
+                  onClear={() => { setMovDateFrom(''); setMovDateTo('') }}
                   label="Periodo"
                 />
                 <ExportCSVButton
