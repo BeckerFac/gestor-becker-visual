@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
 import path from 'path';
 import { env } from './config/env';
+import { pool } from './config/db';
 import { authMiddleware, optionalAuth } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
 import { authRouter } from './modules/auth/auth.router';
@@ -69,8 +70,23 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (_req, res) => {
+  try {
+    const dbCheck = await pool.query('SELECT 1 as ok');
+    const dbOk = dbCheck.rows?.[0]?.ok === 1;
+    res.json({
+      status: dbOk ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      database: dbOk ? 'connected' : 'disconnected',
+      uptime: process.uptime(),
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      database: 'disconnected',
+    });
+  }
 });
 
 // API Routes

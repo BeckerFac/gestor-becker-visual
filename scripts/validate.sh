@@ -9,9 +9,9 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "=== BACKEND TESTS (131 tests) ==="
+echo "=== BACKEND TESTS ==="
 cd "$ROOT/backend"
-npx vitest run --reporter=default --exclude 'tests/auth.test.ts'
+npx vitest run --reporter=default
 echo "PASS"
 
 echo ""
@@ -35,7 +35,7 @@ echo "PASS"
 echo ""
 echo "==============================="
 echo "  ALL CHECKS PASSED"
-echo "  131 backend tests OK"
+echo "  All backend tests OK"
 echo "  TypeScript OK (frontend + backend)"
 echo "  Vite build OK"
 echo "  Safe to push to master."

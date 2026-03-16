@@ -40,7 +40,7 @@ Despues de CUALQUIER modificacion a archivos en `backend/src/` o `frontend/src/`
 ```bash
 cd "/home/facu/BECKER/Gestor BeckerVisual" && bash scripts/validate.sh
 ```
-Esto corre: 131 backend tests + tsc backend + tsc frontend + vite build.
+Esto corre: 141 backend tests + tsc backend + tsc frontend + vite build.
 Si ALGO falla, arreglar ANTES de commitear. NUNCA pushear con tests rotos.
 
 ### Regla: Escribir tests para cada feature nueva
@@ -52,7 +52,8 @@ Minimo: happy path + edge case + error case + security case.
 Todos los tests usan mocks de DB (`backend/tests/helpers/setup.ts`).
 Son deterministas, sin network, sin estado externo.
 
-### Test suites existentes (131 tests):
+### Test suites existentes (141 tests):
+- auth.test.ts (10): register, login, me, customerLogin, error cases
 - orders.service.test.ts (22): CRUD, filtros, stock, status transitions
 - invoices.service.test.ts (20): fiscal/no_fiscal/interno, AFIP, items
 - receipts.service.test.ts (12): transacciones, multi-invoice, rollback

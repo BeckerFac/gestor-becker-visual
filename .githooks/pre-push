@@ -1,0 +1,4 @@
+#!/bin/bash
+# Pre-push hook: runs all tests before allowing push
+echo "Running pre-push validation..."
+bash "$(git rev-parse --show-toplevel)/scripts/validate.sh"
