@@ -65,6 +65,11 @@ export class OrdersController {
     const data = await ordersService.getUninvoicedItems(req.user!.company_id, req.params.id);
     res.json(data);
   }
+
+  async checkBOMAvailability(req: AuthRequest, res: Response) {
+    const data = await ordersService.checkBOMAvailability(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
 }
 
 export const ordersController = new OrdersController();

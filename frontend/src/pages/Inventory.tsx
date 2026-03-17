@@ -38,6 +38,8 @@ export const Inventory: React.FC = () => {
   const [search, setSearch] = useState('')
   const [form, setForm] = useState({ product_id: '', movement_type: 'purchase', quantity: '', notes: '' })
   const [adjustForm, setAdjustForm] = useState({ product_id: '', quantity_change: '', reason: '' })
+  const [editingThreshold, setEditingThreshold] = useState<string | null>(null)
+  const [thresholdValue, setThresholdValue] = useState('')
 
   const loadData = async () => {
     try {
@@ -111,6 +113,19 @@ export const Inventory: React.FC = () => {
     return parseFloat(String(product.low_stock_threshold || '0'))
   }
 
+  const handleSaveThreshold = async (productId: string) => {
+    try {
+      await api.updateProduct(productId, { low_stock_threshold: parseFloat(thresholdValue) || 0 })
+      const prodRes = await api.getProducts().catch(() => ({ items: [] }))
+      setProducts(Array.isArray(prodRes) ? prodRes : prodRes.items || [])
+      toast.success('Umbral actualizado')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al actualizar umbral')
+    } finally {
+      setEditingThreshold(null)
+    }
+  }
+
   const filtered = stock.filter(s =>
     s.product?.name?.toLowerCase().includes(search.toLowerCase()) ||
     s.product?.sku?.toLowerCase().includes(search.toLowerCase())
@@ -135,7 +150,37 @@ export const Inventory: React.FC = () => {
         </span>
       )
     }},
-    { key: 'min_level' as const, label: 'Min.', render: (v: any) => v || '0' },
+    { key: 'min_level' as const, label: 'Min.', render: (_: any, row: StockItem) => {
+      const productId = row.product?.id
+      if (editingThreshold === productId) {
+        return (
+          <input
+            type="number"
+            step="0.01"
+            className="w-20 px-1 py-0.5 border border-blue-300 rounded text-sm text-right"
+            value={thresholdValue}
+            onChange={e => setThresholdValue(e.target.value)}
+            onBlur={() => handleSaveThreshold(productId)}
+            onKeyDown={e => e.key === 'Enter' && handleSaveThreshold(productId)}
+            autoFocus
+          />
+        )
+      }
+      const threshold = getProductThreshold(productId)
+      return (
+        <span
+          className="cursor-pointer hover:bg-blue-50 px-1 py-0.5 rounded"
+          onClick={(e) => {
+            e.stopPropagation()
+            setEditingThreshold(productId)
+            setThresholdValue(String(threshold))
+          }}
+          title="Click para editar umbral"
+        >
+          {threshold || '0'}
+        </span>
+      )
+    }},
     { key: 'id' as const, label: 'Usado en', render: (_: any, row: any) => {
       const usedIn = row.used_in_products || []
       if (!usedIn.length) return <span className="text-gray-300 text-xs">-</span>

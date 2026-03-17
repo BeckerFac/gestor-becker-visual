@@ -414,6 +414,18 @@ export const Orders: React.FC = () => {
 
   const handleStatusChange = async (orderId: string, newStatus: string) => {
     try {
+      if (newStatus === 'en_produccion') {
+        try {
+          const bomCheck = await api.checkOrderBOM(orderId)
+          if (!bomCheck.available) {
+            const missing = (Array.isArray(bomCheck.items) ? bomCheck.items : []).filter((i: any) => !i.sufficient)
+              .map((i: any) => `${i.product_name}: necesita ${i.required}, hay ${i.available}`)
+              .join('\n')
+            const proceed = window.confirm(`Atencion: No hay stock suficiente para algunos materiales:\n\n${missing}\n\nDesea continuar de todas formas?`)
+            if (!proceed) return
+          }
+        } catch { /* BOM check failed, proceed anyway */ }
+      }
       await api.updateOrderStatus(orderId, { status: newStatus })
       await loadData()
     } catch (e: any) {
@@ -1040,17 +1052,21 @@ export const Orders: React.FC = () => {
               </div>
 
               {/* Stock deduction */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <div className="space-y-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-sm font-medium text-gray-700">Control de Inventario</p>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={form.deduct_stock}
                     onChange={e => setForm({ ...form, deduct_stock: e.target.checked })}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="rounded border-gray-300"
                   />
-                  <span className="text-sm font-medium text-gray-700">Descontar del inventario</span>
+                  <span className="text-sm text-gray-600">Descontar del inventario al crear pedido</span>
                 </label>
-                <p className="text-xs text-gray-400 mt-1">Si esta activo, se descontara el stock de los productos que controlan inventario</p>
+                <p className="text-xs text-gray-400 ml-6">
+                  Los materiales (BOM) se descuentan automaticamente cuando el pedido entra en produccion.
+                  El producto final se descuenta si esta opcion esta activa.
+                </p>
               </div>
 
               <Button type="submit" variant="success" loading={saving}>{editingOrderId ? 'Guardar Cambios' : 'Crear Pedido'}</Button>

@@ -9,6 +9,7 @@ export class InventoryService {
     try {
       const result = await db.execute(sql`
         SELECT s.id, s.quantity, s.min_level, s.max_level,
+               p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
                json_build_object('id', w.id, 'name', w.name) as warehouse,
                COALESCE((SELECT json_agg(json_build_object('name', pp.name, 'sku', pp.sku))
@@ -117,14 +118,16 @@ export class InventoryService {
   async getLowStock(companyId: string) {
     try {
       const result = await db.execute(sql`
-        SELECT s.id, s.quantity, s.min_level,
+        SELECT s.id, s.quantity, s.min_level, p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
                json_build_object('id', w.id, 'name', w.name) as warehouse
         FROM stock s
         JOIN products p ON s.product_id = p.id
         JOIN warehouses w ON s.warehouse_id = w.id
         WHERE p.company_id = ${companyId}
-          AND CAST(s.quantity AS decimal) <= CAST(s.min_level AS decimal)
+          AND p.controls_stock = true
+          AND CAST(s.quantity AS decimal) <= COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0)
+          AND COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0) > 0
         ORDER BY CAST(s.quantity AS decimal) ASC
       `);
 

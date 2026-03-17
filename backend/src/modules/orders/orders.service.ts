@@ -332,6 +332,57 @@ export class OrdersService {
     }
   }
 
+  async checkBOMAvailability(companyId: string, orderId: string) {
+    try {
+      const itemsResult = await db.execute(sql`
+        SELECT product_id, CAST(quantity AS decimal) as quantity, product_name
+        FROM order_items WHERE order_id = ${orderId} AND product_id IS NOT NULL
+      `);
+      const items = (itemsResult as any).rows || [];
+
+      const checkItems: { product_name: string; required: number; available: number; sufficient: boolean }[] = [];
+
+      for (const item of items) {
+        const compsResult = await db.execute(sql`
+          SELECT pc.component_product_id, CAST(pc.quantity_required AS decimal) as quantity_required, p.name as component_name
+          FROM product_components pc
+          JOIN products p ON pc.component_product_id = p.id
+          WHERE pc.product_id = ${item.product_id} AND pc.company_id = ${companyId}
+        `);
+        const comps = (compsResult as any).rows || [];
+        if (comps.length === 0) continue;
+
+        // Get default warehouse
+        const whResult = await db.execute(sql`SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1`);
+        const warehouseId = ((whResult as any).rows || [])[0]?.id;
+        if (!warehouseId) continue;
+
+        for (const comp of comps) {
+          const needed = parseFloat(comp.quantity_required) * parseFloat(item.quantity);
+          const stockResult = await db.execute(sql`
+            SELECT CAST(quantity AS decimal) as quantity FROM stock
+            WHERE product_id = ${comp.component_product_id} AND warehouse_id = ${warehouseId}
+          `);
+          const stockRows = (stockResult as any).rows || [];
+          const available = stockRows.length > 0 ? parseFloat(stockRows[0].quantity) : 0;
+
+          checkItems.push({
+            product_name: comp.component_name,
+            required: needed,
+            available,
+            sufficient: available >= needed,
+          });
+        }
+      }
+
+      const allAvailable = checkItems.length === 0 || checkItems.every(i => i.sufficient);
+      return { available: allAvailable, items: checkItems };
+    } catch (error) {
+      console.warn('BOM availability check warning:', error);
+      return { available: true, items: [] };
+    }
+  }
+
   private async deductBOMFromStock(companyId: string, orderId: string, userId: string) {
     try {
       const itemsResult = await db.execute(sql`

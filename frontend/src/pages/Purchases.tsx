@@ -95,6 +95,7 @@ export const Purchases: React.FC = () => {
     payment_method: '', bank_id: '', notes: '',
     invoice_type: '', invoice_number: '', invoice_cae: '',
     vat_rate: '21',
+    add_to_inventory: false,
   })
   const [items, setItems] = useState<PurchaseItem[]>([
     { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 },
@@ -142,6 +143,7 @@ export const Purchases: React.FC = () => {
         invoice_number: detail.invoice_number || '',
         invoice_cae: detail.invoice_cae || '',
         vat_rate: '21',
+        add_to_inventory: false,
       })
       setItems(detail.items?.map((i: any) => ({
         product_id: i.product_id || '',
@@ -181,15 +183,26 @@ export const Purchases: React.FC = () => {
           product_id: i.product_id && i.product_id !== 'custom' ? i.product_id : null,
         })),
       }
+      let createdPurchase: any = null
       if (editingId) {
         await api.updatePurchase(editingId, payload)
       } else {
-        await api.createPurchase(payload)
+        createdPurchase = await api.createPurchase(payload)
       }
       toast.success(editingId ? 'Compra actualizada' : 'Compra registrada')
+      if (!editingId && form.add_to_inventory && createdPurchase?.id) {
+        const stockItems = validItems
+          .filter(item => item.product_id && item.product_id !== 'custom')
+          .map(item => ({ product_id: item.product_id!, quantity: parseFloat(String(item.quantity)) || 0 }))
+          .filter(item => item.quantity > 0)
+        if (stockItems.length > 0) {
+          await api.addStockFromPurchase(createdPurchase.id, stockItems).catch(() => {})
+          toast.success('Stock actualizado automaticamente')
+        }
+      }
       setShowForm(false)
       setEditingId(null)
-      setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' })
+      setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false })
       setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }])
       await loadData()
     } catch (e: any) {
@@ -338,7 +351,7 @@ export const Purchases: React.FC = () => {
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <PermissionGate module="purchases" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21' }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
               {showForm ? 'Cancelar' : '+ Nueva Compra'}
             </Button>
           </PermissionGate>
@@ -508,6 +521,21 @@ export const Purchases: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Inventory option */}
+              {!editingId && (
+                <div className="border-t pt-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.add_to_inventory}
+                      onChange={e => setForm({ ...form, add_to_inventory: e.target.checked })}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-600">Agregar al inventario automaticamente</span>
+                  </label>
+                </div>
+              )}
 
               {/* Totals */}
               <div className="border-t pt-4 flex justify-between items-center">
