@@ -46,6 +46,7 @@ export class AfipController {
         total: parseFloat(invoice.total_amount.toString()),
         invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date) : new Date(),
         puntoVenta: req.body.punto_venta || 1,
+        concepto: req.body.concepto || 1,
       }
 
       const authorization = await afipService.authorizeInvoice(companyId, authInput)

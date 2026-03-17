@@ -547,15 +547,20 @@ export class InvoicesService {
 
       // ---- Pre-authorization validations ----
 
-      // (a) Date validation: cannot be future, max 10 days back
+      // Determine concepto: 1=Productos, 2=Servicios, 3=Ambos
+      // Default to 1 (productos) - can be overridden by invoice metadata
+      const concepto: 1 | 2 | 3 = (invoice as any).concepto || 1;
+
+      // (a) Date validation: max 5 days back for productos, 10 for servicios
       const invoiceDate = new Date(invoice.invoice_date || invoice.created_at);
       const now = new Date();
       const diffDays = Math.floor((now.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
       if (invoiceDate > now) {
         throw new ApiError(400, 'La fecha de la factura no puede ser futura');
       }
-      if (diffDays > 10) {
-        throw new ApiError(400, `La fecha de la factura excede el limite permitido por AFIP (${diffDays} dias atras, max 10)`);
+      const maxDays = concepto === 1 ? 5 : 10; // 5 for products, 10 for services/both
+      if (diffDays > maxDays) {
+        throw new ApiError(400, `La fecha de la factura excede el limite permitido por AFIP (${diffDays} dias atras, max ${maxDays} para ${concepto === 1 ? 'productos' : 'servicios'})`);
       }
 
       // (b) Amount consistency: recalculate neto + iva and fix if needed
@@ -574,10 +579,40 @@ export class InvoicesService {
         }
       }
 
+      // (e) Validate invoice type vs IVA condition (backend guard)
+      // Get company tax condition
+      const companyResult = await db.execute(sql`SELECT tax_condition FROM companies WHERE id = ${companyId}`);
+      const companyTaxCondition = ((companyResult as any).rows || [])[0]?.tax_condition || '';
+      const invoiceType = (invoice.invoice_type || 'B') as 'A' | 'B' | 'C';
+
+      if (companyTaxCondition.toLowerCase().includes('monotribut')) {
+        if (invoiceType !== 'C') {
+          throw new ApiError(400, `Monotributistas solo pueden emitir Factura C (seleccionada: ${invoiceType})`);
+        }
+      } else if (companyTaxCondition.toLowerCase().includes('responsable inscripto')) {
+        if (invoiceType === 'C') {
+          throw new ApiError(400, 'Responsables Inscriptos no pueden emitir Factura C');
+        }
+        // Get customer tax condition to validate A vs B
+        if (invoice.customer_id) {
+          const custResult = await db.execute(sql`SELECT tax_condition FROM customers WHERE id = ${invoice.customer_id}`);
+          const custTaxCond = ((custResult as any).rows || [])[0]?.tax_condition || '';
+          const isRI = custTaxCond.toLowerCase().includes('responsable inscripto');
+          const isMono = custTaxCond.toLowerCase().includes('monotribut');
+          if (invoiceType === 'A' && !isRI && !isMono) {
+            throw new ApiError(400, `Factura A solo para Responsables Inscriptos o Monotributistas. El cliente es: ${custTaxCond || 'sin condicion definida'}`);
+          }
+          if (invoiceType === 'B' && (isRI || isMono)) {
+            throw new ApiError(400, `Factura B no corresponde para clientes RI/Monotributistas. Use Factura A.`);
+          }
+        }
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
-        invoiceType: (invoice.invoice_type || 'B') as 'A' | 'B' | 'C',
+        invoiceType: invoiceType,
+        concepto,
         customerCuit,
         subtotal: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? neto : parseFloat(invoice.subtotal?.toString() || '0'),
         vat: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? iva : parseFloat(invoice.vat_amount?.toString() || '0'),

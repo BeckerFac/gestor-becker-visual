@@ -18,6 +18,7 @@ export interface AuthorizeInvoiceInput {
   total: number
   invoiceDate: Date
   puntoVenta: number
+  concepto: 1 | 2 | 3 // 1=Productos, 2=Servicios, 3=Productos y Servicios
   items?: Array<{
     quantity: number
     unitPrice: number
@@ -457,12 +458,12 @@ export class AfipService {
     const lastNumber = lastVoucherResult?.CbteNro || 0
     const cbteNro = lastNumber + 1
 
-    // Determine doc type
+    // Determine doc type - validate CUIT with modulo 11 before assigning DocTipo=80
     let docTipo = 99 // Consumidor Final
     let docNro = 0
     const cleanCuit = input.customerCuit?.replace(/-/g, '') || ''
-    if (cleanCuit.length >= 10) {
-      docTipo = 80 // CUIT
+    if (cleanCuit.length === 11 && /^\d+$/.test(cleanCuit) && AfipService.isValidCuit(cleanCuit)) {
+      docTipo = 80 // CUIT verified
       docNro = parseInt(cleanCuit)
     }
 
@@ -470,6 +471,26 @@ export class AfipService {
     // Factura A/B: se informa IVA desglosado
     const isFacturaC = cbteTipo === 11
     const ivaItems = isFacturaC ? [] : this.buildIvaArray(input)
+
+    // Calculate ImpTotConc (no gravado) and ImpOpEx (exento) from items with IVA 0%
+    let impTotConc = 0
+    let impOpEx = 0
+    let impNetoGravado = 0
+    if (!isFacturaC && input.items) {
+      for (const item of input.items) {
+        const lineTotal = item.quantity * item.unitPrice
+        if (item.vatRate === 0) {
+          // Items with 0% IVA are "no gravado" (ImpTotConc)
+          impTotConc += lineTotal
+        } else {
+          impNetoGravado += lineTotal
+        }
+      }
+    } else if (!isFacturaC) {
+      impNetoGravado = input.subtotal
+    }
+
+    const concepto = input.concepto || 1 // 1=Productos, 2=Servicios, 3=Ambos
 
     // Format date
     const fchDate = this.formatAfipDate(input.invoiceDate)
@@ -480,16 +501,16 @@ export class AfipService {
         CantReg: 1,
         PtoVta: ptoVta,
         CbteTipo: cbteTipo,
-        Concepto: 1, // Products
+        Concepto: concepto,
         DocTipo: docTipo,
         DocNro: docNro,
         CbteDesde: cbteNro,
         CbteHasta: cbteNro,
         CbteFch: fchDate,
         ImpTotal: this.round2(input.total),
-        ImpTotConc: 0,
-        ImpNeto: isFacturaC ? this.round2(input.total) : this.round2(input.subtotal),
-        ImpOpEx: 0,
+        ImpTotConc: this.round2(impTotConc),
+        ImpNeto: isFacturaC ? this.round2(input.total) : this.round2(impNetoGravado),
+        ImpOpEx: this.round2(impOpEx),
         ImpIVA: isFacturaC ? 0 : this.round2(input.vat),
         ImpTrib: 0,
         MonId: 'PES',
