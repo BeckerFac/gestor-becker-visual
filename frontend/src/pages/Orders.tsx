@@ -222,7 +222,7 @@ export const Orders: React.FC = () => {
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
-    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
+    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
     setFormTitle('')
@@ -370,7 +370,7 @@ export const Orders: React.FC = () => {
       setHasDraft(false)
       setFormEnterpriseId('')
       setFormTitle('')
-      setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', deduct_stock: false })
+      setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
       setFormItems([emptyFormItem()])
       await loadData()
     } catch (e: any) {
