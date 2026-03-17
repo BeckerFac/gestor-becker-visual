@@ -135,8 +135,8 @@ export const Invoices: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
-  // Vista mode: fiscal (AFIP), interno (sin AFIP), or no_fiscal (from orders)
-  const [vistaMode, setVistaMode] = useState<'fiscal' | 'interno' | 'no_fiscal'>('fiscal')
+  // Vista mode: fiscal (AFIP) or no_fiscal
+  const [vistaMode, setVistaMode] = useState<'fiscal' | 'no_fiscal'>('fiscal')
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -422,7 +422,7 @@ export const Invoices: React.FC = () => {
     setDateTo('')
   }
 
-  const handleChangeVistaMode = (mode: 'fiscal' | 'interno' | 'no_fiscal') => {
+  const handleChangeVistaMode = (mode: 'fiscal' | 'no_fiscal') => {
     setVistaMode(mode)
     clearFilters()
     setShowForm(false)
@@ -528,16 +528,6 @@ export const Invoices: React.FC = () => {
         </button>
         <button
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            vistaMode === 'interno'
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-          onClick={() => handleChangeVistaMode('interno')}
-        >
-          Comprobantes Internos
-        </button>
-        <button
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             vistaMode === 'no_fiscal'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700'
@@ -552,12 +542,12 @@ export const Invoices: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
-            {vistaMode === 'interno' ? 'Comprobantes Internos' : vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas'}
+            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas'}
           </h1>
           <p className="text-sm text-gray-500 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'interno' ? 'comprobantes_internos' : vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
+          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
               {showForm ? 'Cancelar' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
@@ -670,7 +660,7 @@ export const Invoices: React.FC = () => {
         <Card className="animate-fadeIn">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{vistaMode === 'fiscal' ? 'Nueva Factura' : vistaMode === 'interno' ? 'Nuevo Comprobante Interno' : 'Nuevo Comprobante No Fiscal'}</h3>
+              <h3 className="text-lg font-semibold">{vistaMode === 'fiscal' ? 'Nueva Factura' : 'Nuevo Comprobante No Fiscal'}</h3>
               <div className="flex items-center gap-2">
                 <span className={`text-sm px-3 py-1 rounded-full font-medium ${formStep === 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                   1. Datos
@@ -724,11 +714,6 @@ export const Invoices: React.FC = () => {
                   </div>
                 )}
 
-                {vistaMode === 'interno' && (
-                  <div className="px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
-                    Este comprobante es interno y no se emitira en AFIP. No tiene valor fiscal.
-                  </div>
-                )}
                 {vistaMode === 'no_fiscal' && (
                   <div className="px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
                     Este comprobante no fiscal no se emitira en AFIP.
@@ -781,10 +766,6 @@ export const Invoices: React.FC = () => {
                   {vistaMode === 'fiscal' ? (
                     <span className={`text-xl font-bold px-2 py-0.5 rounded ${TYPE_BADGE_COLORS[formInvoiceType]}`}>
                       {formInvoiceType}
-                    </span>
-                  ) : vistaMode === 'interno' ? (
-                    <span className="text-sm font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-800">
-                      CI
                     </span>
                   ) : (
                     <span className="text-sm font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-800">
@@ -1169,9 +1150,17 @@ export const Invoices: React.FC = () => {
                               <button
                                 onClick={() => handleAuthorize(invoice)}
                                 disabled={authorizing === invoice.id}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors disabled:opacity-60"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                               >
-                                {authorizing === invoice.id ? 'Autorizando...' : 'Autorizar'}
+                                {authorizing === invoice.id ? (
+                                  <>
+                                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                    </svg>
+                                    Autorizando...
+                                  </>
+                                ) : 'Autorizar'}
                               </button>
                             </PermissionGate>
                           )}

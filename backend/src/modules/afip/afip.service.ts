@@ -91,9 +91,43 @@ export class AfipService {
       return await this.authorizeWithAfip(company, input)
     } catch (error: any) {
       console.error('AFIP authorization error:', error.message)
-      // In homologación, fall back to mock if AFIP fails
+
+      // Timeout recovery: check if AFIP actually authorized despite timeout
+      if (this.isTimeoutError(error) && company.afip_cert && company.afip_key) {
+        console.log('AFIP: Timeout detected, attempting recovery via FECompConsultar...')
+        try {
+          const cbteTipo = INVOICE_TYPE_MAP[input.invoiceType] || 6
+          const ptoVta = input.puntoVenta || 1
+          // Get the last authorized number to check
+          const lastNum = await this.getLastVoucherNumber(companyId, ptoVta, input.invoiceType)
+          if (lastNum > 0) {
+            const consultResult = await this.consultarComprobante(companyId, ptoVta, input.invoiceType, lastNum)
+            if (consultResult && consultResult.Resultado === 'A') {
+              console.log('AFIP: Recovery successful, invoice was authorized')
+              const cae = String(consultResult.CodAutorizacion)
+              const caeExpStr = String(consultResult.FchVto)
+              const caeYear = parseInt(caeExpStr.substring(0, 4))
+              const caeMonth = parseInt(caeExpStr.substring(4, 6)) - 1
+              const caeDay = parseInt(caeExpStr.substring(6, 8))
+              const caeExpirationDate = new Date(caeYear, caeMonth, caeDay)
+              return {
+                cae,
+                caeExpirationDate: caeExpirationDate.toISOString().split('T')[0],
+                invoiceNumber: lastNum,
+                invoiceType: input.invoiceType,
+                qrCode: null,
+                afipResponse: { recovered: true, consultResult },
+              }
+            }
+          }
+        } catch (recoveryError: any) {
+          console.error('AFIP: Recovery attempt failed:', recoveryError.message)
+        }
+      }
+
+      // In homologacion, fall back to mock if AFIP fails
       if (company.afip_env !== 'produccion') {
-        console.log('AFIP: Falling back to mock (homologación)')
+        console.log('AFIP: Falling back to mock (homologacion)')
         return this.generateMockAuthorization(input, company.cuit)
       }
       throw new ApiError(500, `Error AFIP: ${error.message}`)
@@ -242,11 +276,34 @@ export class AfipService {
    * Verify CUIT (simple validation, no AFIP call needed)
    */
   async verifyCuit(_companyId: string, cuit: string): Promise<{ valid: boolean; name?: string }> {
-    const cleanCuit = cuit.replace(/-/g, '')
-    if (cleanCuit.length !== 11 || !/^\d+$/.test(cleanCuit)) {
+    const clean = cuit.replace(/-/g, '')
+    if (clean.length !== 11 || !/^\d+$/.test(clean)) {
+      return { valid: false }
+    }
+    // Modulo 11 checksum
+    const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    const digits = clean.split('').map(Number)
+    const sum = weights.reduce((acc, w, i) => acc + w * digits[i], 0)
+    const remainder = sum % 11
+    const expected = remainder === 0 ? 0 : remainder === 1 ? 9 : 11 - remainder
+    if (digits[10] !== expected) {
       return { valid: false }
     }
     return { valid: true }
+  }
+
+  /**
+   * Static CUIT validation with Modulo 11 (no AFIP call needed)
+   */
+  static isValidCuit(cuit: string): boolean {
+    const clean = cuit.replace(/-/g, '')
+    if (clean.length !== 11 || !/^\d+$/.test(clean)) return false
+    const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    const digits = clean.split('').map(Number)
+    const sum = weights.reduce((acc, w, i) => acc + w * digits[i], 0)
+    const remainder = sum % 11
+    const expected = remainder === 0 ? 0 : remainder === 1 ? 9 : 11 - remainder
+    return digits[10] === expected
   }
 
   // ==================== WSAA AUTHENTICATION ====================
@@ -618,6 +675,19 @@ export class AfipService {
   }
 
   // ==================== HELPERS ====================
+
+  private isTimeoutError(error: any): boolean {
+    const code = error?.code || ''
+    const message = error?.message || ''
+    return (
+      code === 'ECONNRESET' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ECONNABORTED' ||
+      message.includes('timeout') ||
+      message.includes('ECONNRESET') ||
+      message.includes('ETIMEDOUT')
+    )
+  }
 
   private async getCompany(companyId: string) {
     const company = await db.query.companies.findFirst({

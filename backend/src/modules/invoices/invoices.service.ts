@@ -3,7 +3,7 @@ import { invoices, invoice_items, customers } from '../../db/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
-import { afipService, AuthorizeInvoiceInput } from '../afip/afip.service';
+import { afipService, AfipService, AuthorizeInvoiceInput } from '../afip/afip.service';
 
 function validateNumeric(value: unknown, fieldName: string, { min = 0, max = Infinity, allowZero = true } = {}): number {
   const num = Number(value);
@@ -545,14 +545,43 @@ export class InvoicesService {
         itemsList.push(...items);
       }
 
+      // ---- Pre-authorization validations ----
+
+      // (a) Date validation: cannot be future, max 10 days back
+      const invoiceDate = new Date(invoice.invoice_date || invoice.created_at);
+      const now = new Date();
+      const diffDays = Math.floor((now.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (invoiceDate > now) {
+        throw new ApiError(400, 'La fecha de la factura no puede ser futura');
+      }
+      if (diffDays > 10) {
+        throw new ApiError(400, `La fecha de la factura excede el limite permitido por AFIP (${diffDays} dias atras, max 10)`);
+      }
+
+      // (b) Amount consistency: recalculate neto + iva and fix if needed
+      const neto = itemsList.reduce((sum: number, i: any) => sum + (Number(i.quantity) * parseFloat(i.unit_price?.toString() || '0')), 0);
+      const iva = itemsList.reduce((sum: number, i: any) => sum + (Number(i.quantity) * parseFloat(i.unit_price?.toString() || '0') * parseFloat((i.vat_rate || '21').toString()) / 100), 0);
+      const calculatedTotal = neto + iva;
+      const invoiceTotal = parseFloat(invoice.total_amount?.toString() || '0');
+      if (Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0) {
+        await db.execute(sql`UPDATE invoices SET subtotal = ${neto.toFixed(2)}, vat_amount = ${iva.toFixed(2)}, total_amount = ${calculatedTotal.toFixed(2)} WHERE id = ${invoice.id}`);
+      }
+
+      // (d) Factura A requires valid CUIT
+      if ((invoice.invoice_type || 'B') === 'A') {
+        if (!customerCuit || !AfipService.isValidCuit(customerCuit)) {
+          throw new ApiError(400, 'Factura A requiere un CUIT valido del cliente (verificacion modulo 11)');
+        }
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
         invoiceType: (invoice.invoice_type || 'B') as 'A' | 'B' | 'C',
         customerCuit,
-        subtotal: parseFloat(invoice.subtotal?.toString() || '0'),
-        vat: parseFloat(invoice.vat_amount?.toString() || '0'),
-        total: parseFloat(invoice.total_amount?.toString() || '0'),
+        subtotal: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? neto : parseFloat(invoice.subtotal?.toString() || '0'),
+        vat: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? iva : parseFloat(invoice.vat_amount?.toString() || '0'),
+        total: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? calculatedTotal : parseFloat(invoice.total_amount?.toString() || '0'),
         invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date) : new Date(),
         puntoVenta,
         items: itemsList.map((i: any) => ({

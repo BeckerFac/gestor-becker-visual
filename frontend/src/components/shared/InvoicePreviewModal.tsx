@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { InvoiceTemplate } from './InvoiceTemplate'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
@@ -16,6 +16,61 @@ const TAX_CONDITION_MAP: Record<string, string> = {
   A: 'Responsable Inscripto',
   B: 'Consumidor Final / Exento',
   C: 'Monotributista',
+}
+
+// --- Helper: CUIT validation with modulo 11 ---
+function validateCuit(cuit: string): { valid: boolean; error?: string } {
+  const clean = cuit.replace(/-/g, '')
+  if (!clean) return { valid: false, error: 'CUIT requerido' }
+  if (clean.length !== 11 || !/^\d+$/.test(clean)) return { valid: false, error: 'CUIT debe tener 11 digitos' }
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+  const digits = clean.split('').map(Number)
+  const sum = weights.reduce((acc, w, i) => acc + w * digits[i], 0)
+  const remainder = sum % 11
+  const expected = remainder === 0 ? 0 : remainder === 1 ? 9 : 11 - remainder
+  if (digits[10] !== expected) return { valid: false, error: 'CUIT invalido (digito verificador incorrecto)' }
+  return { valid: true }
+}
+
+// --- Helper: Allowed invoice types based on IVA conditions ---
+function getAllowedInvoiceTypes(emisorCondicion: string, receptorCondicion: string): string[] {
+  // RI = Responsable Inscripto, MO = Monotributista, CF = Consumidor Final, EX = Exento
+  if (emisorCondicion === 'RI') {
+    if (receptorCondicion === 'RI') return ['A']
+    if (receptorCondicion === 'MO') return ['A']
+    if (receptorCondicion === 'CF' || receptorCondicion === 'EX') return ['B']
+    return ['B'] // default
+  }
+  if (emisorCondicion === 'MO') return ['C']
+  return ['B'] // fallback
+}
+
+// Map tax_condition string to short code
+function taxConditionToCode(condition: string | null | undefined): string | null {
+  if (!condition) return null
+  const lower = condition.toLowerCase()
+  if (lower.includes('responsable inscripto')) return 'RI'
+  if (lower.includes('monotribut')) return 'MO'
+  if (lower.includes('consumidor final')) return 'CF'
+  if (lower.includes('exento')) return 'EX'
+  return null
+}
+
+// --- Helper: Date validation ---
+function validateInvoiceDate(dateStr: string): { valid: boolean; error?: string; warning?: string } {
+  if (!dateStr) return { valid: false, error: 'Fecha requerida' }
+  const date = new Date(dateStr + 'T12:00:00')
+  if (isNaN(date.getTime())) return { valid: false, error: 'Fecha invalida' }
+
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const diffMs = date.getTime() - today.getTime()
+  const diffDays = diffMs / (1000 * 60 * 60 * 24)
+
+  if (diffDays > 1) return { valid: false, error: 'La fecha no puede ser futura' }
+  if (diffDays < -5) return { valid: false, error: 'La fecha no puede tener mas de 5 dias de antiguedad' }
+  if (diffDays < -3) return { valid: true, warning: 'Fecha cercana al limite permitido (max 5 dias)' }
+  return { valid: true }
 }
 
 interface InvoicePreviewModalProps {
@@ -89,10 +144,48 @@ export function InvoicePreviewModal({
     }
   }, [invoice])
 
-  // CUIT validation
+  // --- 1. CUIT real-time validation ---
+  const cuitValidation = useMemo(() => {
+    if (!localCustomerCuit) return null
+    return validateCuit(localCustomerCuit)
+  }, [localCustomerCuit])
+
+  // Legacy CUIT check (for Factura A requirement)
   const isFiscal = !invoice?.fiscal_type || invoice?.fiscal_type === 'fiscal'
   const needsCuit = isFiscal && invoiceType === 'A'
   const missingCuit = needsCuit && !localCustomerCuit
+  const cuitInvalid = needsCuit && localCustomerCuit && cuitValidation && !cuitValidation.valid
+
+  // --- 2. Auto-select invoice type based on IVA conditions ---
+  const emisorCode = taxConditionToCode(invoice?.enterprise?.tax_condition)
+  const receptorCode = taxConditionToCode(invoice?.customer?.tax_condition)
+  const allowedTypes = useMemo(() => {
+    if (emisorCode && receptorCode) return getAllowedInvoiceTypes(emisorCode, receptorCode)
+    return null
+  }, [emisorCode, receptorCode])
+
+  // Auto-select on mount if conditions are known
+  useEffect(() => {
+    if (allowedTypes && allowedTypes.length > 0 && !authorized) {
+      if (!allowedTypes.includes(invoiceType)) {
+        onInvoiceTypeChange(allowedTypes[0])
+      }
+    }
+  }, [allowedTypes, authorized]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const invoiceTypeWarning = useMemo(() => {
+    if (!allowedTypes) return null
+    if (!allowedTypes.includes(invoiceType)) {
+      return `Segun condicion IVA emisor (${emisorCode}) y receptor (${receptorCode}), el tipo deberia ser: Factura ${allowedTypes.join(' o ')}`
+    }
+    return null
+  }, [allowedTypes, invoiceType, emisorCode, receptorCode])
+
+  // --- 4. Date validation ---
+  const dateValidation = useMemo(() => {
+    if (!localInvoiceDate) return { valid: false, error: 'Fecha requerida' }
+    return validateInvoiceDate(localInvoiceDate)
+  }, [localInvoiceDate])
 
   // Focus trap + Escape key
   useEffect(() => {
@@ -114,9 +207,79 @@ export function InvoicePreviewModal({
     onItemsChange(items.map((it, i) => i === idx ? { ...it, [field]: value } : it))
   }
 
+  // --- 5. Amount auto-recalculation ---
   const subtotal = items.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0)
   const vatAmount = items.reduce((sum, i) => sum + (i.quantity * i.unit_price * i.vat_rate / 100), 0)
   const total = subtotal + vatAmount
+
+  // IVA breakdown by rate
+  const vatBreakdown = useMemo(() => {
+    const breakdown: Record<number, number> = {}
+    for (const item of items) {
+      if (item.vat_rate > 0) {
+        const ivaForItem = item.quantity * item.unit_price * item.vat_rate / 100
+        breakdown[item.vat_rate] = (breakdown[item.vat_rate] || 0) + ivaForItem
+      }
+    }
+    return breakdown
+  }, [items])
+
+  const hasMultipleVatRates = Object.keys(vatBreakdown).length > 1
+
+  // Check if stored total differs from calculated
+  const storedTotal = invoice?.total_amount ?? null
+  const totalMismatch = storedTotal !== null && Math.abs(storedTotal - total) > 0.01
+
+  // --- 3. Pre-authorization checklist ---
+  const checklist = useMemo(() => {
+    const hasCustomer = !!localCustomerName
+    const isCFFacturaB = invoiceType === 'B' // DocTipo=99 allowed for CF in Factura B
+    const cuitOk = isCFFacturaB
+      ? true
+      : (localCustomerCuit ? (cuitValidation?.valid ?? false) : false)
+    const itemsWithPrice = items.length > 0 && items.every(i => i.unit_price > 0)
+    const amountsConsistent = Math.abs((subtotal + vatAmount) - total) < 0.01 && total > 0
+    const dateOk = dateValidation.valid
+    const pvConfigured = puntoVenta > 0
+
+    return [
+      {
+        label: 'Cliente asignado',
+        ok: hasCustomer,
+        detail: hasCustomer ? localCustomerName : 'No hay cliente asignado',
+      },
+      {
+        label: isCFFacturaB ? 'CUIT valido (o DocTipo=99 para CF en Factura B)' : 'CUIT valido',
+        ok: cuitOk,
+        detail: isCFFacturaB
+          ? (localCustomerCuit ? (cuitValidation?.valid ? 'CUIT valido' : cuitValidation?.error || 'CUIT invalido') : 'DocTipo=99 (Consumidor Final)')
+          : (localCustomerCuit ? (cuitValidation?.valid ? 'CUIT valido' : cuitValidation?.error || 'CUIT invalido') : 'CUIT no ingresado'),
+      },
+      {
+        label: 'Items con precio > 0',
+        ok: itemsWithPrice,
+        detail: items.length === 0 ? 'No hay items' : (itemsWithPrice ? `${items.length} items OK` : 'Hay items con precio $0'),
+      },
+      {
+        label: 'Importes consistentes (neto + IVA = total)',
+        ok: amountsConsistent,
+        detail: amountsConsistent ? formatCurrency(total) : (total === 0 ? 'Total es $0' : 'Los importes no coinciden'),
+      },
+      {
+        label: 'Fecha dentro del rango permitido',
+        ok: dateOk,
+        detail: dateOk ? (dateValidation.warning || 'Fecha OK') : (dateValidation.error || 'Fecha fuera de rango'),
+        warning: dateValidation.warning,
+      },
+      {
+        label: 'Punto de venta configurado',
+        ok: pvConfigured,
+        detail: pvConfigured ? `PV ${puntoVenta}` : 'Punto de venta no configurado',
+      },
+    ]
+  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta])
+
+  const allChecksPassed = checklist.every(c => c.ok)
 
   // Format date for display in preview
   const displayDate = localInvoiceDate
@@ -195,14 +358,21 @@ export function InvoicePreviewModal({
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-gray-400" htmlFor="inv-type">Tipo</label>
                     {!authorized ? (
-                      <select
-                        id="inv-type"
-                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
-                        value={invoiceType}
-                        onChange={e => onInvoiceTypeChange(e.target.value)}
-                      >
-                        {INVOICE_TYPES.map(t => <option key={t} value={t}>Factura {t}</option>)}
-                      </select>
+                      <>
+                        <select
+                          id="inv-type"
+                          className={`px-2 py-1.5 border rounded-lg text-sm bg-white focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors ${
+                            invoiceTypeWarning ? 'border-amber-400' : 'border-gray-200'
+                          }`}
+                          value={invoiceType}
+                          onChange={e => onInvoiceTypeChange(e.target.value)}
+                        >
+                          {INVOICE_TYPES.map(t => <option key={t} value={t}>Factura {t}</option>)}
+                        </select>
+                        {invoiceTypeWarning && (
+                          <p className="text-xs text-amber-600">{invoiceTypeWarning}</p>
+                        )}
+                      </>
                     ) : (
                       <p className="px-2 py-1.5 text-sm font-semibold text-gray-700">Factura {invoice.invoice_type}</p>
                     )}
@@ -224,13 +394,27 @@ export function InvoicePreviewModal({
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-gray-400" htmlFor="inv-date">Fecha</label>
                     {!authorized ? (
-                      <input
-                        id="inv-date"
-                        type="date"
-                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
-                        value={localInvoiceDate}
-                        onChange={e => setLocalInvoiceDate(e.target.value)}
-                      />
+                      <>
+                        <input
+                          id="inv-date"
+                          type="date"
+                          className={`px-2 py-1.5 border rounded-lg text-sm outline-none transition-colors ${
+                            !dateValidation.valid
+                              ? 'border-red-300 bg-red-50/50 focus:border-red-400 focus:ring-1 focus:ring-red-200'
+                              : dateValidation.warning
+                                ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-1 focus:ring-amber-200'
+                                : 'border-gray-200 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200'
+                          }`}
+                          value={localInvoiceDate}
+                          onChange={e => setLocalInvoiceDate(e.target.value)}
+                        />
+                        {!dateValidation.valid && dateValidation.error && (
+                          <p className="text-xs text-red-500">{dateValidation.error}</p>
+                        )}
+                        {dateValidation.valid && dateValidation.warning && (
+                          <p className="text-xs text-amber-600">{dateValidation.warning}</p>
+                        )}
+                      </>
                     ) : (
                       <p className="px-2 py-1.5 text-sm text-gray-700">{displayDate}</p>
                     )}
@@ -263,23 +447,38 @@ export function InvoicePreviewModal({
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-gray-400" htmlFor="cust-cuit">CUIT Cliente</label>
                     {!authorized ? (
-                      <input
-                        id="cust-cuit"
-                        type="text"
-                        placeholder="XX-XXXXXXXX-X"
-                        className={`px-2 py-1.5 border rounded-lg text-sm outline-none transition-colors ${
-                          missingCuit
-                            ? 'border-red-300 bg-red-50/50 focus:border-red-400 focus:ring-1 focus:ring-red-200'
-                            : 'border-gray-200 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200'
-                        }`}
-                        value={localCustomerCuit}
-                        onChange={e => setLocalCustomerCuit(e.target.value)}
-                      />
+                      <div className="relative">
+                        <input
+                          id="cust-cuit"
+                          type="text"
+                          placeholder="XX-XXXXXXXX-X"
+                          className={`w-full px-2 py-1.5 pr-8 border rounded-lg text-sm outline-none transition-colors ${
+                            missingCuit || cuitInvalid
+                              ? 'border-red-300 bg-red-50/50 focus:border-red-400 focus:ring-1 focus:ring-red-200'
+                              : cuitValidation?.valid
+                                ? 'border-green-300 bg-green-50/30 focus:border-green-400 focus:ring-1 focus:ring-green-200'
+                                : 'border-gray-200 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200'
+                          }`}
+                          value={localCustomerCuit}
+                          onChange={e => setLocalCustomerCuit(e.target.value)}
+                        />
+                        {/* Validation indicator */}
+                        {localCustomerCuit && cuitValidation && (
+                          <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold ${
+                            cuitValidation.valid ? 'text-green-600' : 'text-red-500'
+                          }`}>
+                            {cuitValidation.valid ? '\u2713' : '\u2717'}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <p className="px-2 py-1.5 text-sm text-gray-700">{localCustomerCuit || '-'}</p>
                     )}
                     {missingCuit && (
                       <p className="text-xs text-red-500">Requerido para Factura A</p>
+                    )}
+                    {!missingCuit && localCustomerCuit && cuitValidation && !cuitValidation.valid && (
+                      <p className="text-xs text-red-500">{cuitValidation.error}</p>
                     )}
                   </div>
                 </div>
@@ -373,23 +572,66 @@ export function InvoicePreviewModal({
                   </div>
                 </div>
 
-                {/* Totals */}
+                {/* Totals with IVA breakdown */}
                 <div className="flex justify-end">
                   <div className="w-56 space-y-1 text-sm">
                     <div className="flex justify-between text-gray-500">
                       <span>Neto Gravado</span>
                       <span>{formatCurrency(subtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-gray-500">
-                      <span>IVA</span>
-                      <span>{formatCurrency(vatAmount)}</span>
-                    </div>
+                    {hasMultipleVatRates ? (
+                      <>
+                        {Object.entries(vatBreakdown).map(([rate, amount]) => (
+                          <div key={rate} className="flex justify-between text-gray-500 text-xs pl-2">
+                            <span>IVA {rate}%</span>
+                            <span>{formatCurrency(amount)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-gray-500">
+                          <span>IVA Total</span>
+                          <span>{formatCurrency(vatAmount)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-gray-500">
+                        <span>IVA</span>
+                        <span>{formatCurrency(vatAmount)}</span>
+                      </div>
+                    )}
                     <div className={`flex justify-between text-base font-bold pt-1.5 border-t border-gray-200 ${total === 0 ? 'text-red-500' : 'text-gray-900'}`}>
                       <span>Total</span>
                       <span>{formatCurrency(total)}</span>
                     </div>
+                    {totalMismatch && (
+                      <p className="text-xs text-red-600 font-medium">
+                        El total calculado ({formatCurrency(total)}) difiere del total almacenado ({formatCurrency(storedTotal)})
+                      </p>
+                    )}
                   </div>
                 </div>
+
+                {/* Pre-authorization checklist */}
+                {!authorized && (
+                  <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Checklist pre-autorizacion</p>
+                    {checklist.map((check, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-sm">
+                        <span className={`shrink-0 mt-0.5 text-sm font-bold ${check.ok ? 'text-green-600' : 'text-red-500'}`}>
+                          {check.ok ? '\u2713' : '\u2717'}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className={check.ok ? 'text-gray-700' : 'text-red-700'}>{check.label}</span>
+                          {!check.ok && (
+                            <span className="ml-1 text-xs text-red-500">- {check.detail}</span>
+                          )}
+                          {check.ok && check.warning && (
+                            <span className="ml-1 text-xs text-amber-600">- {check.warning}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Notes */}
                 {!authorized && (
@@ -495,12 +737,12 @@ export function InvoicePreviewModal({
                       {!showConfirmAuthorize ? (
                         <button
                           onClick={() => {
-                            if (missingCuit) return
+                            if (!allChecksPassed) return
                             setShowConfirmAuthorize(true)
                           }}
-                          disabled={authorizing || missingCuit}
-                          className="px-5 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60"
-                          title={missingCuit ? 'El cliente no tiene CUIT cargado' : ''}
+                          disabled={authorizing || !allChecksPassed}
+                          className="inline-flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          title={!allChecksPassed ? 'Hay requisitos pendientes en el checklist' : ''}
                         >
                           {authFailed ? 'Reintentar AFIP' : 'Autorizar con AFIP'}
                         </button>
@@ -508,9 +750,17 @@ export function InvoicePreviewModal({
                         <button
                           onClick={() => { setShowConfirmAuthorize(false); onAuthorize() }}
                           disabled={authorizing}
-                          className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-60 animate-pulse"
+                          className="inline-flex items-center gap-2 px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:animate-none"
                         >
-                          {authorizing ? 'Autorizando...' : 'Confirmar y Autorizar'}
+                          {authorizing ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                              Autorizando...
+                            </>
+                          ) : 'Confirmar y Autorizar'}
                         </button>
                       )}
                       {showConfirmAuthorize && !authorizing && (
