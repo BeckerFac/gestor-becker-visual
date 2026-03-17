@@ -85,20 +85,10 @@ interface InvoicingStatusData {
   }>
 }
 
-const PRODUCT_TYPES = [
-  { value: 'todos', label: 'Todos los tipos' },
-  { value: 'portabanner', label: 'Portabanner' },
-  { value: 'bandera', label: 'Bandera' },
-  { value: 'ploteo', label: 'Ploteo' },
-  { value: 'carteleria', label: 'Carteleria' },
-  { value: 'vinilo', label: 'Vinilo' },
-  { value: 'lona', label: 'Lona' },
-  { value: 'backing', label: 'Backing' },
-  { value: 'senaletica', label: 'Senaletica' },
-  { value: 'vehicular', label: 'Vehicular' },
-  { value: 'textil', label: 'Textil' },
-  { value: 'otro', label: 'Otro' },
-  { value: 'mixto', label: 'Mixto' },
+// Default types as fallback - actual types loaded from DB per company
+const DEFAULT_PRODUCT_TYPES = [
+  'portabanner', 'bandera', 'ploteo', 'carteleria', 'vinilo',
+  'lona', 'backing', 'senaletica', 'vehicular', 'textil', 'otro', 'mixto',
 ]
 
 const STATUS_OPTIONS = [
@@ -148,6 +138,7 @@ export const Orders: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
+  const [productTypes, setProductTypes] = useState<string[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -239,7 +230,7 @@ export const Orders: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [ordersRes, custRes, prodRes, entRes, banksRes] = await Promise.all([
+      const [ordersRes, custRes, prodRes, entRes, banksRes, typesRes] = await Promise.all([
         api.getOrders({
           status: filterStatus.length === 1 ? filterStatus[0] : undefined,
           product_type: filterType.length === 1 ? filterType[0] : undefined,
@@ -254,9 +245,11 @@ export const Orders: React.FC = () => {
         api.getProducts().catch(() => ({ items: [] })),
         api.getEnterprises().catch(() => []),
         api.getBanks().catch(() => []),
+        api.getProductTypes().catch(() => []),
       ])
       setOrders(ordersRes.items || [])
       setSummary(ordersRes.summary || {})
+      setProductTypes(Array.isArray(typesRes) ? typesRes : [])
       setCustomers(custRes.items || custRes || [])
       setProducts(prodRes.items || prodRes || [])
       setEnterprises(entRes || [])
@@ -802,7 +795,7 @@ export const Orders: React.FC = () => {
             />
             <MultiSelectFilter
               label="Tipo"
-              options={PRODUCT_TYPES.filter(t => t.value !== 'todos' && t.value !== 'mixto').map(t => ({ value: t.value, label: t.label }))}
+              options={[...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])].map(t => ({ value: t, label: t }))}
               selected={filterType}
               onChange={setFilterType}
               placeholder="Todos"
@@ -885,15 +878,18 @@ export const Orders: React.FC = () => {
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo</label>
-                          <select
+                          <input
+                            list={`order-type-list-${idx}`}
                             className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.product_type}
                             onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
-                          >
-                            {PRODUCT_TYPES.filter(t => t.value !== 'todos' && t.value !== 'mixto').map(t => (
-                              <option key={t.value} value={t.value}>{t.label}</option>
+                            placeholder="Escribir o elegir..."
+                          />
+                          <datalist id={`order-type-list-${idx}`}>
+                            {[...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])].map(t => (
+                              <option key={t} value={t}>{t}</option>
                             ))}
-                          </select>
+                          </datalist>
                         </div>
                         {/* Product selector */}
                         <div className="md:col-span-2 flex flex-col gap-1">
@@ -1121,7 +1117,7 @@ export const Orders: React.FC = () => {
                           <p className="font-medium text-sm">{order.title}</p>
                           <div className="flex items-center gap-1 flex-wrap mt-0.5">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
-                              {PRODUCT_TYPES.find(t => t.value === order.product_type)?.label || order.product_type}
+                              {order.product_type || 'otro'}
                             </span>
                             {order.quote && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-mono">
