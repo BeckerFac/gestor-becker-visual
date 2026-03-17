@@ -11,8 +11,8 @@ export const env = {
   DATABASE_URL: process.env.DATABASE_URL || 'postgresql://gestor_user:gestor_password_dev@localhost:5432/gestor_becker',
 
   // JWT
-  JWT_SECRET: process.env.JWT_SECRET || 'your_jwt_secret_here',
-  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'your_jwt_refresh_secret_here',
+  JWT_SECRET: process.env.JWT_SECRET || '',
+  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || '',
   JWT_EXPIRATION: process.env.JWT_EXPIRATION || '24h',
   JWT_REFRESH_EXPIRATION: process.env.JWT_REFRESH_EXPIRATION || '7d',
 

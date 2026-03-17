@@ -3,6 +3,11 @@ import { customers } from '../../db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import crypto from 'crypto';
+
+function generateAccessCode(): string {
+  return crypto.randomBytes(8).toString('hex'); // 16 char hex string
+}
 
 export class CustomersService {
   private migrated = false;
@@ -101,6 +106,9 @@ export class CustomersService {
 
       // Handle access_code separately (not in Drizzle schema)
       if (data.access_code !== undefined) {
+        if (data.access_code && data.access_code.length < 8) {
+          throw new ApiError(400, 'El codigo de acceso debe tener al menos 8 caracteres');
+        }
         await db.execute(sql`UPDATE customers SET access_code = ${data.access_code} WHERE id = ${customerId} AND company_id = ${companyId}`);
         delete data.access_code;
       }

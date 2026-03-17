@@ -281,7 +281,17 @@ export class QuotesService {
     }
   }
 
+  private escapeHtml(str: string): string {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   private buildQuoteHtml(company: any, quote: any): string {
+    const esc = (s: string) => this.escapeHtml(s);
     const items = quote.items || [];
     const customer = quote.customer || {};
     const validUntil = quote.valid_until ? new Date(quote.valid_until).toLocaleDateString('es-AR') : 'N/A';
@@ -291,8 +301,8 @@ export class QuotesService {
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">${idx + 1}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
-          <strong style="color:#111827;">${item.product_name}</strong>
-          ${item.description ? `<br><span style="color:#6b7280;font-size:12px;">${item.description}</span>` : ''}
+          <strong style="color:#111827;">${esc(item.product_name)}</strong>
+          ${item.description ? `<br><span style="color:#6b7280;font-size:12px;">${esc(item.description)}</span>` : ''}
         </td>
         <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151;">${Number(item.quantity)}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right;color:#374151;">$ ${Number(item.unit_price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
@@ -332,24 +342,24 @@ export class QuotesService {
     <!-- Emisor -->
     <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">De</div>
-      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${company.name}</div>
-      <div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${company.cuit}</div>
-      ${company.address ? `<div style="font-size:12px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.province ? ` - ${company.province}` : ''}</div>` : ''}
-      ${company.phone ? `<div style="font-size:12px;color:#666;">Tel: ${company.phone}</div>` : ''}
-      ${company.email ? `<div style="font-size:12px;color:#666;">${company.email}</div>` : ''}
+      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(company.name)}</div>
+      <div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${esc(company.cuit)}</div>
+      ${company.address ? `<div style="font-size:12px;color:#666;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
+      ${company.phone ? `<div style="font-size:12px;color:#666;">Tel: ${esc(company.phone)}</div>` : ''}
+      ${company.email ? `<div style="font-size:12px;color:#666;">${esc(company.email)}</div>` : ''}
     </div>
     <!-- Cliente -->
     <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">Para</div>
-      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${customer.name || 'Consumidor Final'}</div>
-      ${customer.cuit ? `<div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${customer.cuit}</div>` : ''}
-      ${customer.address ? `<div style="font-size:12px;color:#666;">${customer.address}</div>` : ''}
-      ${customer.email ? `<div style="font-size:12px;color:#666;">${customer.email}</div>` : ''}
-      ${customer.phone ? `<div style="font-size:12px;color:#666;">Tel: ${customer.phone}</div>` : ''}
+      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(customer.name || 'Consumidor Final')}</div>
+      ${customer.cuit ? `<div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${esc(customer.cuit)}</div>` : ''}
+      ${customer.address ? `<div style="font-size:12px;color:#666;">${esc(customer.address)}</div>` : ''}
+      ${customer.email ? `<div style="font-size:12px;color:#666;">${esc(customer.email)}</div>` : ''}
+      ${customer.phone ? `<div style="font-size:12px;color:#666;">Tel: ${esc(customer.phone)}</div>` : ''}
     </div>
   </div>
 
-  ${quote.title ? `<div style="padding:0 40px 12px;"><div style="font-size:16px;font-weight:600;color:#1a1a2e;">${quote.title}</div></div>` : ''}
+  ${quote.title ? `<div style="padding:0 40px 12px;"><div style="font-size:16px;font-weight:600;color:#1a1a2e;">${esc(quote.title)}</div></div>` : ''}
 
   <!-- ITEMS TABLE -->
   <div style="padding:0 40px;">
@@ -391,7 +401,7 @@ export class QuotesService {
   <div style="padding:12px 40px;">
     <div style="background:#fef9e7;border-left:4px solid #f0c040;padding:10px 14px;">
       <div style="font-size:11px;font-weight:600;color:#8a6d00;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Observaciones</div>
-      <div style="font-size:12px;color:#5a4800;">${quote.notes}</div>
+      <div style="font-size:12px;color:#5a4800;">${esc(quote.notes)}</div>
     </div>
   </div>` : ''}
 
@@ -400,7 +410,7 @@ export class QuotesService {
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#999;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span style="font-weight:700;color:#1a1a2e;font-size:12px;">BECKER<span style="color:#c8102e;">VISUAL</span></span>
-        <span style="color:#666;">${company.name} — Cotización N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
+        <span style="color:#666;">${esc(company.name)} — Cotización N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
       </div>
       <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
       <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>

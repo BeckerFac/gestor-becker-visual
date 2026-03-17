@@ -51,8 +51,12 @@ app.use(helmet({
     },
   },
 }));
+const corsOrigin = process.env.CORS_ORIGIN
+if (!corsOrigin) {
+  console.warn('WARNING: CORS_ORIGIN not set, defaulting to localhost origins')
+}
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: corsOrigin || ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 }));
 
@@ -64,6 +68,16 @@ const limiter = rateLimit({
 });
 
 app.use('/api/', limiter);
+
+// Auth-specific rate limiter (stricter)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per 15 min
+  message: { error: 'Demasiados intentos de autenticacion, intente de nuevo en 15 minutos' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
 
 // Parsers
 app.use(express.json({ limit: '10mb' }));
@@ -90,7 +104,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // API Routes
-app.use('/api/auth', authRouter);
+app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/products', authMiddleware, productsRouter);
 app.use('/api/pricing', authMiddleware, pricingRouter);
 app.use('/api/customers', authMiddleware, customersRouter);

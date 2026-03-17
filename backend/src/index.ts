@@ -4,6 +4,16 @@ import { env } from './config/env';
 
 async function start() {
   try {
+    // Validate critical environment variables
+    if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) {
+      console.error('FATAL: JWT_SECRET must be set and at least 16 characters');
+      process.exit(1);
+    }
+    if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 16) {
+      console.error('FATAL: JWT_REFRESH_SECRET must be set and at least 16 characters');
+      process.exit(1);
+    }
+
     console.log('🚀 Starting Gestor BeckerVisual API...');
     console.log(`📍 Environment: ${env.NODE_ENV}`);
 

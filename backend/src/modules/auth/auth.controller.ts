@@ -12,6 +12,10 @@ export class AuthController {
         throw new ApiError(400, 'Missing required fields');
       }
 
+      if (!password || password.length < 8) {
+        throw new ApiError(400, 'La contrasena debe tener al menos 8 caracteres');
+      }
+
       const result = await authService.register(email, password, name, company_name, cuit);
 
       res.status(201).json({
@@ -89,9 +93,22 @@ export class AuthController {
     }
   }
 
-  logout(req: Request, res: Response) {
-    // JWT is stateless, so logout just returns success
-    res.json({ message: 'Logout successful' });
+  async logout(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user?.id;
+      const refreshToken = req.body?.refreshToken;
+
+      if (userId) {
+        await authService.logout(userId, refreshToken);
+      }
+
+      res.json({ message: 'Logout successful' });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Logout failed' });
+    }
   }
 
   async getMe(req: AuthRequest, res: Response) {

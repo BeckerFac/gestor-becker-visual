@@ -36,6 +36,10 @@ export class UsersController {
         throw new ApiError(400, 'Faltan campos requeridos: email, name, password, role');
       }
 
+      if (!password || password.length < 8) {
+        throw new ApiError(400, 'La contrasena debe tener al menos 8 caracteres');
+      }
+
       const user = await usersService.createUser(req.user!.company_id, { email, name, password, role });
       res.status(201).json({ user });
     } catch (error) {
@@ -91,7 +95,7 @@ export class UsersController {
         throw new ApiError(400, 'Se requiere un objeto de permisos');
       }
 
-      const result = await usersService.setUserPermissions(req.params.id, permissions);
+      const result = await usersService.setUserPermissions(req.user!.company_id, req.params.id, permissions);
       res.json({ permissions: result });
     } catch (error) {
       if (error instanceof ApiError) {
@@ -109,7 +113,7 @@ export class UsersController {
         throw new ApiError(400, 'Se requiere el nombre del template');
       }
 
-      const permissions = await usersService.applyTemplate(req.params.id, template);
+      const permissions = await usersService.applyTemplate(req.user!.company_id, req.params.id, template);
       res.json({ permissions });
     } catch (error) {
       if (error instanceof ApiError) {
@@ -125,6 +129,10 @@ export class UsersController {
 
       if (!password) {
         throw new ApiError(400, 'Se requiere la nueva contrasena');
+      }
+
+      if (password.length < 8) {
+        throw new ApiError(400, 'La contrasena debe tener al menos 8 caracteres');
       }
 
       const result = await usersService.resetPassword(req.user!.company_id, req.params.id, password);

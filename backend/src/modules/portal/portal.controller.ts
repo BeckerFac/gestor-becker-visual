@@ -89,7 +89,16 @@ export class PortalController {
 
   async getQuotePdf(req: AuthRequest, res: Response) {
     try {
+      const customerId = (req.user as any)?.customer_id;
       const companyId = req.user!.company_id;
+      if (!customerId) throw new ApiError(403, 'Access denied');
+
+      // Verify quote belongs to this customer before generating PDF
+      const quote = await quotesService.getQuote(companyId, req.params.id);
+      if ((quote as any).customer_id !== customerId) {
+        throw new ApiError(403, 'Access denied: quote does not belong to this customer');
+      }
+
       const pdf = await quotesService.generateQuotePdf(companyId, req.params.id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=cotizacion-${req.params.id.slice(0, 8)}.pdf`);

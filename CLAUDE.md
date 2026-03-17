@@ -67,3 +67,44 @@ Son deterministas, sin network, sin estado externo.
 - Autonomo, no explicar, ejecutar directo
 - Espanol argentino, codigo en ingles
 - Immutabilidad, archivos pequenos
+
+## Reglas de Seguridad (OBLIGATORIO)
+
+### Nunca hacer
+- NUNCA agregar un endpoint sin chequeo de `company_id` (multi-tenant isolation)
+- NUNCA usar `SELECT *` en queries que devuelven datos al frontend (expone campos sensibles como access_code)
+- NUNCA interpolar user input en HTML sin escapar (XSS en PDFs via Puppeteer)
+- NUNCA hacer `.catch(() => {})` silencioso - siempre logear
+- NUNCA usar fallback para JWT secrets - fail-fast si no estan seteados
+- NUNCA asumir que las migraciones de otro modulo ya corrieron
+
+### Siempre hacer
+- SIEMPRE validar CUIT con modulo 11 antes de enviar a AFIP
+- SIEMPRE verificar company_id en cada endpoint (previene IDOR cross-tenant)
+- SIEMPRE desempaquetar response envelopes en api.ts (data.users, data.user, etc.)
+- SIEMPRE correr `scripts/validate.sh` antes de pushear
+- SIEMPRE escapar HTML en templates de PDF y emails
+
+## Patron de Respuestas API
+El backend envuelve respuestas: `{ users: [...] }`, `{ user: {...} }`, `{ permissions: {...} }`.
+En `frontend/src/services/api.ts`, SIEMPRE extraer la propiedad:
+```typescript
+// CORRECTO
+getUsers: async () => { const { data } = await client.get('/users'); return data.users }
+// INCORRECTO
+getUsers: async () => { const { data } = await client.get('/users'); return data }
+```
+
+## Patron de Migraciones
+Cuando un query JOIN-ea con otra tabla, agregar las dependencias en `ensureMigrations()`:
+```typescript
+// En orders.service.ts, si hacemos LEFT JOIN quotes qt ON o.quote_id = qt.id
+// DEBEMOS asegurar que quote_id existe Y que la tabla quotes tiene las columnas que usamos
+await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS quote_id UUID`).catch(e => console.warn('Migration:', e.message))
+```
+
+## Agentes - Reglas de Delegacion
+- Dar contexto COMPLETO al agente (paths, patrones, que verificar)
+- SIEMPRE pedir que corra tsc/build al final
+- Despues de cada agente, verificar el build yo mismo
+- NO confiar ciegamente en el output del agente - revisar archivos criticos

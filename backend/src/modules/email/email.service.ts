@@ -13,6 +13,15 @@ export interface SendInvoiceEmailInput {
   message?: string
 }
 
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 export class EmailService {
   private transporter: any
 
@@ -136,8 +145,8 @@ export class EmailService {
         subject: `¡Bienvenido a Gestor BeckerVisual! - ${companyName}`,
         html: `
           <h1>¡Bienvenido a Gestor BeckerVisual!</h1>
-          <p>Hola <strong>${name}</strong>,</p>
-          <p>Tu cuenta ha sido creada exitosamente para <strong>${companyName}</strong>.</p>
+          <p>Hola <strong>${escapeHtml(name)}</strong>,</p>
+          <p>Tu cuenta ha sido creada exitosamente para <strong>${escapeHtml(companyName)}</strong>.</p>
           <p>Ahora puedes:</p>
           <ul>
             <li>Gestionar tus productos y precios</li>
@@ -164,16 +173,16 @@ export class EmailService {
     return `
       <html>
       <body style="font-family: Arial, sans-serif; color: #333;">
-        <h2>Factura ${data.invoiceType}${data.invoiceNumber}</h2>
+        <h2>Factura ${escapeHtml(data.invoiceType)}${escapeHtml(data.invoiceNumber)}</h2>
         <p>Estimado cliente,</p>
-        <p>Le adjuntamos la factura por su compra en <strong>${data.companyName}</strong>.</p>
+        <p>Le adjuntamos la factura por su compra en <strong>${escapeHtml(data.companyName)}</strong>.</p>
 
         ${
           data.cae
             ? `
           <div style="background: #f0f0f0; padding: 15px; border-radius: 4px; margin: 20px 0;">
             <p><strong>Estado:</strong> Autorizada por AFIP</p>
-            <p><strong>CAE:</strong> ${data.cae}</p>
+            <p><strong>CAE:</strong> ${escapeHtml(data.cae)}</p>
           </div>
         `
             : ''
@@ -183,7 +192,7 @@ export class EmailService {
           data.message
             ? `
           <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0;">
-            <p>${data.message}</p>
+            <p>${escapeHtml(data.message)}</p>
           </div>
         `
             : ''

@@ -52,7 +52,7 @@ export class UsersService {
 
     // Apply role template permissions if template exists
     if (data.role !== 'admin' && ROLE_TEMPLATES[data.role]) {
-      await this.applyTemplate(id, data.role);
+      await this.applyTemplate(companyId, id, data.role);
     }
 
     return this.getUser(companyId, id);
@@ -131,7 +131,7 @@ export class UsersService {
       await db.execute(sql`UPDATE users SET role = ${data.role} WHERE id = ${userId}`);
       // Re-apply template if role changed and template exists
       if (data.role !== 'admin' && ROLE_TEMPLATES[data.role]) {
-        await this.applyTemplate(userId, data.role);
+        await this.applyTemplate(companyId, userId, data.role);
       }
     }
     if (data.active !== undefined) {
@@ -191,7 +191,16 @@ export class UsersService {
     return perms;
   }
 
-  async setUserPermissions(userId: string, permissions: Record<string, string[]>) {
+  async setUserPermissions(companyId: string, userId: string, permissions: Record<string, string[]>) {
+    // Verify target user belongs to the same company
+    const existing = await db.execute(sql`
+      SELECT id FROM users WHERE id = ${userId} AND company_id = ${companyId}
+    `);
+    const existingRows = (existing as any).rows || existing || [];
+    if (existingRows.length === 0) {
+      throw new ApiError(404, 'Usuario no encontrado en esta empresa');
+    }
+
     // Delete all existing permissions
     await db.execute(sql`DELETE FROM permissions WHERE user_id = ${userId}`);
 
@@ -209,12 +218,21 @@ export class UsersService {
     return this.getUserPermissions(userId);
   }
 
-  async applyTemplate(userId: string, templateName: string) {
+  async applyTemplate(companyId: string, userId: string, templateName: string) {
+    // Verify target user belongs to the same company
+    const existing = await db.execute(sql`
+      SELECT id FROM users WHERE id = ${userId} AND company_id = ${companyId}
+    `);
+    const existingRows = (existing as any).rows || existing || [];
+    if (existingRows.length === 0) {
+      throw new ApiError(404, 'Usuario no encontrado en esta empresa');
+    }
+
     const template = ROLE_TEMPLATES[templateName];
     if (!template) {
       throw new ApiError(400, `Template '${templateName}' no encontrado`);
     }
-    return this.setUserPermissions(userId, template);
+    return this.setUserPermissions(companyId, userId, template);
   }
 
   async resetPassword(companyId: string, userId: string, newPassword: string) {

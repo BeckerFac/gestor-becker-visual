@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { db } from '../../config/db';
 import { users, sessions, companies } from '../../db/schema';
 import { env } from '../../config/env';
-import { eq, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
 export class AuthService {
@@ -67,6 +67,9 @@ export class AuthService {
       // Generate tokens
       const tokens = this.generateTokens(user[0].id, email, company[0].id, user[0].role!);
 
+      // Store refresh token in sessions table
+      await this.storeSession(user[0].id, tokens.refreshToken);
+
       return {
         user: {
           id: user[0].id,
@@ -113,6 +116,9 @@ export class AuthService {
 
       // Generate tokens
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
+
+      // Store refresh token in sessions table
+      await this.storeSession(user.id, tokens.refreshToken);
 
       // Load permissions for non-admin users
       const permissions = user.role === 'admin' ? null : await this.getUserPermissions(user.id);
@@ -174,6 +180,12 @@ export class AuthService {
         id: string;
       };
 
+      // Verify refresh token exists in sessions table
+      const sessionResult = await db.select().from(sessions).where(eq(sessions.refresh_token, refreshToken));
+      if (sessionResult.length === 0) {
+        throw new ApiError(401, 'Refresh token has been revoked');
+      }
+
       const user = await db.query.users.findFirst({
         where: eq(users.id, decoded.id),
       });
@@ -187,6 +199,10 @@ export class AuthService {
       });
 
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
+
+      // Replace old session with new refresh token
+      await db.delete(sessions).where(eq(sessions.refresh_token, refreshToken));
+      await this.storeSession(user.id, tokens.refreshToken);
 
       // Load permissions for non-admin users
       const permissions = user.role === 'admin' ? null : await this.getUserPermissions(user.id);
@@ -277,6 +293,28 @@ export class AuthService {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Customer login failed');
     }
+  }
+
+  private async storeSession(userId: string, refreshToken: string) {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days matching JWT_REFRESH_EXPIRATION
+    await db.insert(sessions).values({
+      user_id: userId,
+      refresh_token: refreshToken,
+      expires_at: expiresAt,
+    });
+  }
+
+  async logout(userId: string, refreshToken: string) {
+    if (refreshToken) {
+      await db.delete(sessions).where(
+        and(eq(sessions.user_id, userId), eq(sessions.refresh_token, refreshToken))
+      );
+    }
+  }
+
+  async logoutAll(userId: string) {
+    await db.delete(sessions).where(eq(sessions.user_id, userId));
   }
 
   private generateTokens(userId: string, email: string, companyId: string, role: string) {
