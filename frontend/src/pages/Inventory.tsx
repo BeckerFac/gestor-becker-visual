@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 
@@ -215,6 +216,33 @@ export const Inventory: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={filtered.map(s => {
+              const qty = parseFloat(s.quantity || '0')
+              const min = parseFloat(s.min_level || '0')
+              const max = parseFloat((s as any).max_level || '0')
+              const threshold = getProductThreshold(s.product?.id)
+              return {
+                producto: s.product?.name || '-',
+                sku: s.product?.sku || '-',
+                deposito: s.warehouse?.name || 'Principal',
+                cantidad: qty,
+                nivel_minimo: min,
+                nivel_maximo: max,
+                estado: qty <= 0 ? 'Sin Stock' : (qty <= min || (threshold > 0 && qty <= threshold)) ? 'Stock Bajo' : 'OK',
+              }
+            })}
+            columns={[
+              { key: 'producto', label: 'Producto' },
+              { key: 'sku', label: 'SKU' },
+              { key: 'deposito', label: 'Deposito' },
+              { key: 'cantidad', label: 'Cantidad' },
+              { key: 'nivel_minimo', label: 'Nivel Minimo' },
+              { key: 'nivel_maximo', label: 'Nivel Maximo' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="inventario"
+          />
+          <ExportExcelButton
             data={filtered.map(s => {
               const qty = parseFloat(s.quantity || '0')
               const min = parseFloat(s.min_level || '0')

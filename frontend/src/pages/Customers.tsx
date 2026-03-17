@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
@@ -185,6 +186,25 @@ export const Customers: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={filtered.map(c => ({
+              nombre: c.name,
+              cuit: c.cuit,
+              empresa: c.contact_name || '-',
+              telefono: c.phone || '-',
+              email: c.email || '-',
+              estado: c.status === 'active' ? 'Activo' : 'Inactivo',
+            }))}
+            columns={[
+              { key: 'nombre', label: 'Nombre' },
+              { key: 'cuit', label: 'CUIT' },
+              { key: 'empresa', label: 'Empresa' },
+              { key: 'telefono', label: 'Telefono' },
+              { key: 'email', label: 'Email' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="clientes"
+          />
+          <ExportExcelButton
             data={filtered.map(c => ({
               nombre: c.name,
               cuit: c.cuit,

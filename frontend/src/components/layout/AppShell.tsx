@@ -11,7 +11,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 dark:text-gray-100">
       {/* Sidebar */}
       <Sidebar />
 

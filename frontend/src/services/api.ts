@@ -763,6 +763,12 @@ export const api = {
     return data
   },
 
+  // Export
+  exportCompanyData: async () => {
+    const { data } = await client.get('/export/company')
+    return data
+  },
+
   // Customer Portal Auth
   customerLogin: async (access_code: string) => {
     const { data } = await client.post('/auth/customer-login', { access_code })

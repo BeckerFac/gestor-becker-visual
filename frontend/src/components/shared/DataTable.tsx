@@ -26,11 +26,11 @@ export function DataTable<T extends { id?: string | number }>({
       <CardContent className="overflow-x-auto">
         <table className="min-w-full border-collapse">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
+            <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
               {columns.map((col) => (
                 <th
                   key={String(col.key)}
-                  className="px-6 py-3 text-left text-sm font-semibold text-gray-900"
+                  className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100"
                 >
                   {col.label}
                 </th>
@@ -42,7 +42,7 @@ export function DataTable<T extends { id?: string | number }>({
               <tr>
                 <td
                   colSpan={columns.length}
-                  className="px-6 py-8 text-center text-gray-500"
+                  className="px-6 py-8 text-center text-gray-500 dark:text-gray-400"
                 >
                   No hay datos
                 </td>
@@ -51,11 +51,11 @@ export function DataTable<T extends { id?: string | number }>({
               data.map((row, idx) => (
                 <tr
                   key={row.id || idx}
-                  className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
+                  className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
                   onClick={() => onRowClick?.(row)}
                 >
                   {columns.map((col) => (
-                    <td key={String(col.key)} className="px-6 py-4 text-sm text-gray-600">
+                    <td key={String(col.key)} className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
                       {col.render
                         ? col.render((row as any)[col.key], row)
                         : String((row as any)[col.key] || '')}

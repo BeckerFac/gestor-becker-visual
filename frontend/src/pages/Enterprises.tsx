@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
@@ -307,6 +308,39 @@ export const Enterprises: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={filteredEnterprises.map(e => ({
+              nombre: e.name,
+              razon_social: e.razon_social || '-',
+              cuit: e.cuit || '-',
+              direccion: e.address || '-',
+              ciudad: e.city || '-',
+              provincia: e.province || '-',
+              codigo_postal: e.postal_code || '-',
+              dir_fiscal: e.fiscal_address || e.address || '-',
+              telefono: e.phone || '-',
+              email: e.email || '-',
+              condicion_iva: e.tax_condition || '-',
+              contactos: e.contact_count,
+              estado: e.status === 'active' ? 'Activa' : 'Inactiva',
+            }))}
+            columns={[
+              { key: 'nombre', label: 'Empresa' },
+              { key: 'razon_social', label: 'Razon Social' },
+              { key: 'cuit', label: 'CUIT' },
+              { key: 'direccion', label: 'Direccion' },
+              { key: 'ciudad', label: 'Ciudad' },
+              { key: 'provincia', label: 'Provincia' },
+              { key: 'codigo_postal', label: 'CP' },
+              { key: 'dir_fiscal', label: 'Dir. Fiscal' },
+              { key: 'telefono', label: 'Telefono' },
+              { key: 'email', label: 'Email' },
+              { key: 'condicion_iva', label: 'Cond. IVA' },
+              { key: 'contactos', label: 'Contactos' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="empresas"
+          />
+          <ExportExcelButton
             data={filteredEnterprises.map(e => ({
               nombre: e.name,
               razon_social: e.razon_social || '-',

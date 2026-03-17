@@ -30,12 +30,12 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       <CardContent>
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <span className="text-4xl mb-3">{variant === 'filtered' ? '🔍' : icon}</span>
-          <h3 className="text-lg font-semibold text-gray-700 mb-1">{title}</h3>
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-1">{title}</h3>
           {description && (
-            <p className="text-sm text-gray-500 max-w-md mb-4">{description}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mb-4">{description}</p>
           )}
           {variant === 'filtered' && (
-            <p className="text-xs text-gray-400 mb-4">Intentá ajustando los filtros o limpiándolos</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">Intentá ajustando los filtros o limpiándolos</p>
           )}
           {actionLabel && onAction && (
             <button

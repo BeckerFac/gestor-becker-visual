@@ -8,6 +8,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
@@ -358,6 +359,7 @@ export const Cobros: React.FC = () => {
           {activeTab === 'cobros' && (
             <>
               <ExportCSVButton data={filteredCobros} columns={csvColumns} filename="cobros" />
+              <ExportExcelButton data={filteredCobros} columns={csvColumns} filename="cobros" />
               <PermissionGate module="cobros" action="create">
                 <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
                   {showForm ? 'Cancelar' : '+ Registrar Cobro'}

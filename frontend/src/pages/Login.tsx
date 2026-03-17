@@ -93,12 +93,12 @@ export const Login: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center px-4">
       <Card className="w-full max-w-md shadow-2xl">
         <CardContent className="pt-8">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">BeckerVisual</h1>
-            <p className="text-gray-600">Gestor Comercial Profesional</p>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">BeckerVisual</h1>
+            <p className="text-gray-600 dark:text-gray-400">Gestor Comercial Profesional</p>
           </div>
 
           {!isRegister ? (
@@ -128,7 +128,7 @@ export const Login: React.FC = () => {
               </Button>
 
               <div className="text-center">
-                <p className="text-gray-600 text-sm">
+                <p className="text-gray-600 dark:text-gray-400 text-sm">
                   ¿No tienes cuenta?{' '}
                   <button
                     type="button"
@@ -185,7 +185,7 @@ export const Login: React.FC = () => {
               </Button>
 
               <div className="text-center">
-                <p className="text-gray-600 text-sm">
+                <p className="text-gray-600 dark:text-gray-400 text-sm">
                   ¿Ya tienes cuenta?{' '}
                   <button
                     type="button"

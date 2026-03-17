@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
@@ -222,6 +223,29 @@ export const Banks: React.FC = () => {
               filename="movimientos_bancos"
             />
           )}
+          {breakdown && breakdown.recent_movements.length > 0 && (
+            <ExportExcelButton
+              data={breakdown.recent_movements.map(m => ({
+                tipo: m.type === 'venta' ? 'Venta' : m.type === 'cobro' ? 'Cobro' : m.type === 'compra' ? 'Compra' : 'Pago',
+                fecha: m.date,
+                detalle: m.detail,
+                empresa: m.enterprise_name,
+                metodo: m.payment_method,
+                banco: m.bank_name,
+                monto: m.amount,
+              }))}
+              columns={[
+                { key: 'tipo', label: 'Tipo' },
+                { key: 'fecha', label: 'Fecha' },
+                { key: 'detalle', label: 'Detalle' },
+                { key: 'empresa', label: 'Empresa' },
+                { key: 'metodo', label: 'Metodo' },
+                { key: 'banco', label: 'Banco' },
+                { key: 'monto', label: 'Monto' },
+              ]}
+              filename="movimientos_bancos"
+            />
+          )}
           <PermissionGate module="banks" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
               {showForm ? 'Cancelar' : '+ Nuevo Banco'}
@@ -366,6 +390,23 @@ export const Banks: React.FC = () => {
                   label="Periodo"
                 />
                 <ExportCSVButton
+                  data={bankMovements.map((m: any) => ({
+                    fecha: formatDate(m.date),
+                    tipo: m.type,
+                    detalle: m.detail || '-',
+                    empresa: m.enterprise_name || '-',
+                    monto: ['cobro', 'venta'].includes(m.type) ? parseFloat(m.amount) : -parseFloat(m.amount),
+                  }))}
+                  columns={[
+                    { key: 'fecha', label: 'Fecha' },
+                    { key: 'tipo', label: 'Tipo' },
+                    { key: 'detalle', label: 'Detalle' },
+                    { key: 'empresa', label: 'Empresa' },
+                    { key: 'monto', label: 'Monto' },
+                  ]}
+                  filename={`extracto_${balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name || 'banco'}`}
+                />
+                <ExportExcelButton
                   data={bankMovements.map((m: any) => ({
                     fecha: formatDate(m.date),
                     tipo: m.type,

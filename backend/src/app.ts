@@ -36,6 +36,7 @@ import { tagsRouter } from './modules/tags/tags.router';
 import { usersRouter } from './modules/users/users.router';
 import { priceListsRouter } from './modules/price-lists/price-lists.router';
 import { receiptsRouter } from './modules/receipts/receipts.router';
+import { exportRouter } from './modules/export/export.router';
 
 export const app = express();
 
@@ -132,6 +133,7 @@ app.use('/api/tags', authMiddleware, tagsRouter);
 app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/price-lists', authMiddleware, priceListsRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
+app.use('/api/export', authMiddleware, exportRouter);
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');

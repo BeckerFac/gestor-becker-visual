@@ -6,6 +6,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
@@ -721,6 +722,7 @@ export const Orders: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename="pedidos" />
+          <ExportExcelButton data={csvData} columns={csvColumns} filename="pedidos" />
           {hasDraft && !showForm && (
             <button onClick={() => { setShowForm(true) }} className="text-sm text-blue-600 hover:underline">
               Continuar borrador

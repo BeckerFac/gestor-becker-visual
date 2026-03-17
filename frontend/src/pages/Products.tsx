@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 
@@ -455,6 +456,29 @@ export const Products: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={filtered.map(p => ({
+              sku: p.sku,
+              nombre: p.name,
+              tipo: p.product_type || '-',
+              costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
+              margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
+              iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
+              precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
+              estado: p.active ? 'Activo' : 'Inactivo',
+            }))}
+            columns={[
+              { key: 'sku', label: 'SKU' },
+              { key: 'nombre', label: 'Producto' },
+              { key: 'tipo', label: 'Tipo' },
+              { key: 'costo', label: 'Costo' },
+              { key: 'margen', label: 'Margen' },
+              { key: 'iva', label: 'IVA' },
+              { key: 'precio_final', label: 'Precio Final' },
+              { key: 'estado', label: 'Estado' },
+            ]}
+            filename="productos"
+          />
+          <ExportExcelButton
             data={filtered.map(p => ({
               sku: p.sku,
               nombre: p.name,

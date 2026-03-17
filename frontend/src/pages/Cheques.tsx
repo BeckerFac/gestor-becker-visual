@@ -10,6 +10,7 @@ import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -317,6 +318,35 @@ export const Cheques: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={cheques.map(c => ({
+              numero: c.number,
+              tipo: CHEQUE_TYPE_LABELS[c.cheque_type] || c.cheque_type || 'Comun',
+              banco: c.bank,
+              librador: c.drawer,
+              cuit_librador: c.drawer_cuit || '-',
+              monto: parseFloat(c.amount || '0'),
+              emision: formatDate(c.issue_date),
+              cobro: formatDate(c.due_date),
+              cliente: c.customer_name || '-',
+              estado: STATUS_LABELS[c.status] || c.status,
+              notas: c.notes || '-',
+            }))}
+            columns={[
+              { key: 'numero', label: 'Numero' },
+              { key: 'tipo', label: 'Tipo' },
+              { key: 'banco', label: 'Banco' },
+              { key: 'librador', label: 'Librador' },
+              { key: 'cuit_librador', label: 'CUIT Librador' },
+              { key: 'monto', label: 'Monto' },
+              { key: 'emision', label: 'Fecha Emision' },
+              { key: 'cobro', label: 'Fecha Cobro' },
+              { key: 'cliente', label: 'Cliente' },
+              { key: 'estado', label: 'Estado' },
+              { key: 'notas', label: 'Notas' },
+            ]}
+            filename="cheques"
+          />
+          <ExportExcelButton
             data={cheques.map(c => ({
               numero: c.number,
               tipo: CHEQUE_TYPE_LABELS[c.cheque_type] || c.cheque_type || 'Comun',

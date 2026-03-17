@@ -10,6 +10,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -548,6 +549,7 @@ export const Invoices: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
+          <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
               {showForm ? 'Cancelar' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}

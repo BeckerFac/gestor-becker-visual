@@ -8,6 +8,7 @@ import { Pagination } from '@/components/shared/Pagination'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
@@ -356,6 +357,7 @@ export const Quotes: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={CSV_COLUMNS} filename="cotizaciones" />
+          <ExportExcelButton data={csvData} columns={CSV_COLUMNS} filename="cotizaciones" />
           <PermissionGate module="quotes" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (!showForm && items.length === 0) addItem() }}>
               {showForm ? 'Cancelar' : '+ Nueva Cotizacion'}

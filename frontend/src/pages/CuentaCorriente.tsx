@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -199,6 +200,31 @@ export const CuentaCorriente: React.FC = () => {
           </p>
         </div>
         <ExportCSVButton
+          data={resumen.map((r) => ({
+            empresa: r.name,
+            cuit: r.cuit || '',
+            ventas: r.total_ventas,
+            cobros: r.total_cobros,
+            a_cobrar: r.a_cobrar,
+            compras: r.total_compras,
+            pagos: r.total_pagos,
+            a_pagar: r.a_pagar,
+            balance: r.saldo,
+          }))}
+          columns={[
+            { key: 'empresa', label: 'Empresa' },
+            { key: 'cuit', label: 'CUIT' },
+            { key: 'ventas', label: 'Ventas' },
+            { key: 'cobros', label: 'Cobros' },
+            { key: 'a_cobrar', label: 'A Cobrar' },
+            { key: 'compras', label: 'Compras' },
+            { key: 'pagos', label: 'Pagos' },
+            { key: 'a_pagar', label: 'A Pagar' },
+            { key: 'balance', label: 'Balance' },
+          ]}
+          filename="cuenta_corriente"
+        />
+        <ExportExcelButton
           data={resumen.map((r) => ({
             empresa: r.name,
             cuit: r.cuit || '',

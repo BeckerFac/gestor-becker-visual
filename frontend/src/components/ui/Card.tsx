@@ -8,8 +8,8 @@ interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, variant = 'default', ...props }, ref) => {
     const variants = {
-      default: 'bg-white border border-gray-200',
-      elevated: 'bg-white shadow-lg',
+      default: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700',
+      elevated: 'bg-white dark:bg-gray-800 shadow-lg',
     }
 
     return (
@@ -26,7 +26,7 @@ Card.displayName = 'Card'
 
 export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('px-6 py-4 border-b border-gray-200', className)} {...props} />
+    <div ref={ref} className={cn('px-6 py-4 border-b border-gray-200 dark:border-gray-700', className)} {...props} />
   )
 )
 CardHeader.displayName = 'CardHeader'
@@ -40,7 +40,7 @@ CardContent.displayName = 'CardContent'
 
 export const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('px-6 py-4 border-t border-gray-200 bg-gray-50', className)} {...props} />
+    <div ref={ref} className={cn('px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50', className)} {...props} />
   )
 )
 CardFooter.displayName = 'CardFooter'

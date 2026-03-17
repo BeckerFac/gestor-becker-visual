@@ -11,11 +11,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'primary', size = 'md', loading, children, ...props }, ref) => {
     const variants = {
       primary: 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800',
-      secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300 active:bg-gray-400',
-      outline: 'border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100',
+      secondary: 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400',
+      outline: 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100',
       danger: 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800',
       success: 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800',
-      ghost: 'text-gray-600 hover:bg-gray-100 active:bg-gray-200',
+      ghost: 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200',
       warning: 'bg-yellow-500 text-white hover:bg-yellow-600 active:bg-yellow-700',
     }
 

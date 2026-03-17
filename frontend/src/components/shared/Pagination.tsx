@@ -52,14 +52,14 @@ export const Pagination: React.FC<PaginationProps> = ({
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-b-lg">
       <div className="flex items-center gap-3">
-        <span className="text-sm text-gray-600">
+        <span className="text-sm text-gray-600 dark:text-gray-400">
           {startItem}-{endItem} de {totalItems}
         </span>
         {onPageSizeChange && (
           <select
-            className="text-xs border border-gray-300 rounded px-1.5 py-1"
+            className="text-xs border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded px-1.5 py-1"
             value={pageSize}
             onChange={e => onPageSizeChange(Number(e.target.value))}
           >
@@ -73,7 +73,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           onClick={() => onPageChange(safePage - 1)}
           disabled={safePage <= 1}
-          className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition-colors"
+          className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 dark:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           ‹
         </button>
@@ -87,7 +87,7 @@ export const Pagination: React.FC<PaginationProps> = ({
               className={`px-2.5 py-1 text-sm rounded border transition-colors ${
                 p === safePage
                   ? 'bg-blue-600 text-white border-blue-600'
-                  : 'border-gray-300 hover:bg-gray-100'
+                  : 'border-gray-300 dark:border-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
             >
               {p}
@@ -97,7 +97,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           onClick={() => onPageChange(safePage + 1)}
           disabled={safePage >= totalPages}
-          className="px-2 py-1 text-sm rounded border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition-colors"
+          className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 dark:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           ›
         </button>

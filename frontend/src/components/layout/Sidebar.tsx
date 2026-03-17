@@ -1,8 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
+import { api } from '@/services/api'
+import { exportMultiSheetExcel } from '@/components/shared/ExportExcel'
 
 /*
  * Estructura basada en principios de psicologia cognitiva:
@@ -85,9 +87,47 @@ export const Sidebar: React.FC = () => {
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
   const setSidebarOpen = useUIStore((state) => state.setSidebarOpen)
 
+  const [exporting, setExporting] = useState(false)
+
   const handleLogout = () => {
     clearAuth()
     window.location.href = '/'
+  }
+
+  const handleExportAll = async () => {
+    try {
+      setExporting(true)
+      const result = await api.exportCompanyData()
+      const d = result.data
+      const dateStr = new Date().toISOString().split('T')[0]
+
+      const genericCols = (rows: Record<string, any>[]) => {
+        if (rows.length === 0) return []
+        return Object.keys(rows[0])
+          .filter(k => k !== 'company_id')
+          .map(k => ({ header: k, key: k, width: 18 }))
+      }
+
+      exportMultiSheetExcel(
+        [
+          { name: 'Pedidos', data: d.pedidos, columns: genericCols(d.pedidos) },
+          { name: 'Clientes', data: d.clientes, columns: genericCols(d.clientes) },
+          { name: 'Empresas', data: d.empresas, columns: genericCols(d.empresas) },
+          { name: 'Productos', data: d.productos, columns: genericCols(d.productos) },
+          { name: 'Facturas', data: d.facturas, columns: genericCols(d.facturas) },
+          { name: 'Cotizaciones', data: d.cotizaciones, columns: genericCols(d.cotizaciones) },
+          { name: 'Cheques', data: d.cheques, columns: genericCols(d.cheques) },
+          { name: 'Cobros', data: d.cobros, columns: genericCols(d.cobros) },
+          { name: 'Inventario', data: d.inventario, columns: genericCols(d.inventario) },
+          { name: 'Compras', data: d.compras, columns: genericCols(d.compras) },
+        ].filter(s => s.data.length > 0),
+        `export_completo_${dateStr}`
+      )
+    } catch (e: any) {
+      alert('Error al exportar: ' + e.message)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleNavClick = () => {
@@ -102,12 +142,12 @@ export const Sidebar: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
     <div className={cn(
-      'bg-gray-900 text-white flex flex-col z-40 transition-transform duration-200',
+      'bg-gray-900 dark:bg-gray-950 text-white flex flex-col z-40 transition-transform duration-200',
       'fixed md:static inset-y-0 left-0 w-64',
       sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
     )}>
       {/* Logo */}
-      <div className="px-6 py-4 border-b border-gray-700">
+      <div className="px-6 py-4 border-b border-gray-700 dark:border-gray-800">
         <h1 className="text-xl font-bold">BeckerVisual</h1>
         <p className="text-xs text-gray-400">Gestor Comercial</p>
       </div>
@@ -157,6 +197,16 @@ export const Sidebar: React.FC = () => {
             Portal Clientes
             <span className="text-xs ml-auto opacity-50">↗</span>
           </a>
+          <button
+            onClick={handleExportAll}
+            disabled={exporting}
+            className="flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors w-full mt-0.5"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            {exporting ? 'Exportando...' : 'Exportar Datos'}
+          </button>
         </div>
       </nav>
 

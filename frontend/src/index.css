@@ -9,7 +9,7 @@
 
   /* Global focus ring for keyboard accessibility */
   *:focus-visible {
-    @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900;
   }
 
   /* Hide focus ring for mouse clicks */

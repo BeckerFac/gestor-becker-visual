@@ -7,6 +7,7 @@ import { PermissionMatrix } from '@/components/users/PermissionMatrix'
 import { toast } from '@/hooks/useToast'
 import { formatDate } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
+import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -225,6 +226,23 @@ export const Users: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
+            data={users.map(u => ({
+              nombre: u.name,
+              email: u.email,
+              rol: ROLE_LABELS[u.role] || u.role,
+              estado: u.active ? 'Activo' : 'Inactivo',
+              ultimo_login: u.last_login ? formatDate(u.last_login) : 'Nunca',
+            }))}
+            columns={[
+              { key: 'nombre', label: 'Nombre' },
+              { key: 'email', label: 'Email' },
+              { key: 'rol', label: 'Rol' },
+              { key: 'estado', label: 'Estado' },
+              { key: 'ultimo_login', label: 'Ultimo Login' },
+            ]}
+            filename="usuarios"
+          />
+          <ExportExcelButton
             data={users.map(u => ({
               nombre: u.name,
               email: u.email,

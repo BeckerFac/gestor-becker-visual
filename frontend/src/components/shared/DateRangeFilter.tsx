@@ -28,11 +28,11 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-500">{label}</label>
+      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</label>
       <div className="flex items-center gap-1">
         <input
           type="date"
-          className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1 min-w-0"
+          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-lg text-sm flex-1 min-w-0"
           value={dateFrom}
           onChange={e => onDateFromChange(e.target.value)}
           placeholder="Desde"
@@ -40,8 +40,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         <span className="text-gray-400 text-xs">—</span>
         <input
           type="date"
-          className={`px-2 py-1.5 border rounded-lg text-sm flex-1 min-w-0 ${
-            isInvalidRange ? 'border-red-400 bg-red-50' : 'border-gray-300'
+          className={`px-2 py-1.5 border rounded-lg text-sm flex-1 min-w-0 dark:bg-gray-700 dark:text-gray-200 ${
+            isInvalidRange ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-gray-300 dark:border-gray-600'
           }`}
           value={dateTo}
           onChange={e => onDateToChange(e.target.value)}
