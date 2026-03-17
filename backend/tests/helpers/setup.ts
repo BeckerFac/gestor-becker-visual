@@ -18,15 +18,19 @@ const mockDeleteWhere = vi.fn()
 // Build chainable select mock
 const mockSelectChain = {
   from: vi.fn(() => ({
-    where: vi.fn(() => []),
+    where: vi.fn(() => [{ id: 'session-id', user_id: 'test-user', refresh_token: 'test-token' }]),
   })),
 }
 
-// Build chainable insert mock
+// Build chainable insert mock - values returns a thenable so it works both with and without .returning()
 const mockInsertChain = {
-  values: vi.fn(() => ({
-    returning: vi.fn(() => [{ id: 'test-id' }]),
-  })),
+  values: vi.fn(() => {
+    const result = {
+      returning: vi.fn(() => [{ id: 'test-id' }]),
+      then: (resolve: any) => resolve([{ id: 'test-id' }]),
+    }
+    return result
+  }),
 }
 
 // Build chainable update mock
@@ -98,6 +102,21 @@ vi.mock('drizzle-orm', () => {
   }
 })
 
+// Mock env config with valid test secrets
+vi.mock('../../src/config/env', () => ({
+  env: {
+    JWT_SECRET: 'test-secret-minimum-16-chars-long',
+    JWT_REFRESH_SECRET: 'test-refresh-secret-min-16-chars',
+    JWT_EXPIRATION: '15m',
+    JWT_REFRESH_EXPIRATION: '7d',
+    DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
+    CORS_ORIGIN: 'http://localhost:5173',
+    PORT: 3000,
+    RATE_LIMIT_WINDOW_MS: 900000,
+    RATE_LIMIT_MAX_REQUESTS: 100,
+  },
+}))
+
 // Mock the schema exports
 vi.mock('../../src/db/schema', () => ({
   invoices: { id: 'invoices.id', company_id: 'invoices.company_id', invoice_id: 'invoices.invoice_id' },
@@ -112,7 +131,7 @@ vi.mock('../../src/db/schema', () => ({
   warehouses: { id: 'warehouses.id', company_id: 'warehouses.company_id' },
   users: { id: 'users.id', email: 'users.email' },
   companies: { id: 'companies.id' },
-  sessions: { id: 'sessions.id' },
+  sessions: { id: 'sessions.id', user_id: 'sessions.user_id', refresh_token: 'sessions.refresh_token' },
 }))
 
 // Mock the ApiError class
