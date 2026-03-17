@@ -252,7 +252,7 @@ export class QuotesService {
     }
   }
 
-  async generateQuotePdf(companyId: string, quoteId: string): Promise<Buffer> {
+  async generateQuotePdf(companyId: string, quoteId: string, template: string = 'clasico', bannerUrl?: string): Promise<Buffer> {
     try {
       // Get quote with items
       const quote = await this.getQuote(companyId, quoteId);
@@ -266,7 +266,7 @@ export class QuotesService {
 
       if (!company) throw new ApiError(404, 'Company not found');
 
-      const html = this.buildQuoteHtml(company, quote);
+      const html = this.buildQuoteHtml(company, quote, template, bannerUrl);
 
       // Use puppeteer to generate PDF
       const puppeteer = require('puppeteer');
@@ -301,7 +301,17 @@ export class QuotesService {
       .replace(/'/g, '&#39;');
   }
 
-  private buildQuoteHtml(company: any, quote: any): string {
+  private buildQuoteHtml(company: any, quote: any, template: string = 'clasico', bannerUrl?: string): string {
+    const bannerHtml = bannerUrl ? `<div style="width:100%;text-align:center;margin-bottom:16px;"><img src="${this.escapeHtml(bannerUrl)}" style="max-width:100%;max-height:120px;object-fit:contain;" /></div>` : '';
+
+    switch (template) {
+      case 'moderno': return this.buildModernoTemplate(quote, company, bannerHtml);
+      case 'ejecutivo': return this.buildEjecutivoTemplate(quote, company, bannerHtml);
+      default: return this.buildClasicoTemplate(quote, company, bannerHtml);
+    }
+  }
+
+  private buildClasicoTemplate(quote: any, company: any, bannerHtml: string): string {
     const esc = (s: string) => this.escapeHtml(s);
     const items = quote.items || [];
     const customer = quote.customer || {};
@@ -331,26 +341,27 @@ export class QuotesService {
 </style></head>
 <body>
 
-  <!-- HEADER: Texto limpio sin banner -->
+  ${bannerHtml}
+
+  <!-- HEADER -->
   <div style="padding:28px 40px 20px;border-bottom:2px solid #1a1a2e;">
     <div style="font-size:24px;font-weight:700;color:#1a1a2e;letter-spacing:1px;">BECKER<span style="color:#c8102e;">VISUAL</span></div>
   </div>
 
-  <!-- COTIZACIÓN HEADER -->
+  <!-- COTIZACION HEADER -->
   <div style="padding:20px 40px 16px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #e0e0e0;">
     <div>
-      <div style="font-size:24px;font-weight:700;color:#1a1a2e;letter-spacing:0.5px;">COTIZACIÓN</div>
+      <div style="font-size:24px;font-weight:700;color:#1a1a2e;letter-spacing:0.5px;">COTIZACION</div>
       <div style="font-size:13px;color:#666;margin-top:2px;">N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
     </div>
     <div style="text-align:right;font-size:12px;color:#555;">
       <div><strong>Fecha:</strong> ${createdAt}</div>
-      <div><strong>Válida hasta:</strong> ${validUntil}</div>
+      <div><strong>Valida hasta:</strong> ${validUntil}</div>
     </div>
   </div>
 
   <!-- EMISOR + CLIENTE -->
   <div style="padding:20px 40px;display:flex;gap:24px;">
-    <!-- Emisor -->
     <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">De</div>
       <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(company.name)}</div>
@@ -359,7 +370,6 @@ export class QuotesService {
       ${company.phone ? `<div style="font-size:12px;color:#666;">Tel: ${esc(company.phone)}</div>` : ''}
       ${company.email ? `<div style="font-size:12px;color:#666;">${esc(company.email)}</div>` : ''}
     </div>
-    <!-- Cliente -->
     <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">Para</div>
       <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(customer.name || 'Consumidor Final')}</div>
@@ -378,7 +388,7 @@ export class QuotesService {
       <thead>
         <tr style="background:#1a1a2e;color:white;">
           <th style="padding:10px 12px;text-align:left;font-weight:600;width:36px;font-size:12px;">#</th>
-          <th style="padding:10px 12px;text-align:left;font-weight:600;font-size:12px;">Descripción</th>
+          <th style="padding:10px 12px;text-align:left;font-weight:600;font-size:12px;">Descripcion</th>
           <th style="padding:10px 12px;text-align:center;font-weight:600;width:70px;font-size:12px;">Cant.</th>
           <th style="padding:10px 12px;text-align:right;font-weight:600;width:110px;font-size:12px;">P. Unitario</th>
           <th style="padding:10px 12px;text-align:right;font-weight:600;width:110px;font-size:12px;">Subtotal</th>
@@ -421,8 +431,272 @@ export class QuotesService {
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#999;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span style="font-weight:700;color:#1a1a2e;font-size:12px;">BECKER<span style="color:#c8102e;">VISUAL</span></span>
-        <span style="color:#666;">${esc(company.name)} — Cotización N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
+        <span style="color:#666;">${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
       </div>
+      <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
+      <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
+    </div>
+  </div>
+
+</body>
+</html>`;
+  }
+
+  private buildModernoTemplate(quote: any, company: any, bannerHtml: string): string {
+    const esc = (s: string) => this.escapeHtml(s);
+    const items = quote.items || [];
+    const customer = quote.customer || {};
+    const validUntil = quote.valid_until ? new Date(quote.valid_until).toLocaleDateString('es-AR') : 'N/A';
+    const createdAt = new Date(quote.created_at).toLocaleDateString('es-AR');
+
+    const itemRows = items.map((item: any, idx: number) => `
+      <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+        <td style="padding:12px 16px;color:#6b7280;font-size:12px;">${idx + 1}</td>
+        <td style="padding:12px 16px;">
+          <div style="color:#111827;font-weight:500;">${esc(item.product_name)}</div>
+          ${item.description ? `<div style="color:#9ca3af;font-size:11px;margin-top:2px;">${esc(item.description)}</div>` : ''}
+        </td>
+        <td style="padding:12px 16px;text-align:center;color:#374151;">${Number(item.quantity)}</td>
+        <td style="padding:12px 16px;text-align:right;color:#374151;">$ ${Number(item.unit_price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+        <td style="padding:12px 16px;text-align:right;font-weight:600;color:#111827;">$ ${Number(item.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+      </tr>
+    `).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; color:#333; line-height:1.6; font-size:14px; }
+  @page { margin: 0; }
+</style></head>
+<body>
+
+  <!-- Accent top border -->
+  <div style="height:4px;background:linear-gradient(90deg,#3b82f6,#2563eb);"></div>
+
+  ${bannerHtml}
+
+  <!-- HEADER -->
+  <div style="padding:32px 48px 24px;background:#f8f9fa;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:28px;font-weight:300;color:#1f2937;letter-spacing:2px;">${esc(company.name)}</div>
+        ${company.cuit ? `<div style="font-size:12px;color:#9ca3af;margin-top:4px;">CUIT: ${esc(company.cuit)}</div>` : ''}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#9ca3af;font-weight:500;">Cotizacion</div>
+        <div style="font-size:28px;font-weight:700;color:#3b82f6;margin-top:2px;">N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dates -->
+  <div style="padding:16px 48px;display:flex;gap:32px;font-size:13px;color:#6b7280;">
+    <div>Fecha: <strong style="color:#374151;">${createdAt}</strong></div>
+    <div>Valida hasta: <strong style="color:#374151;">${validUntil}</strong></div>
+  </div>
+
+  <!-- EMISOR + CLIENTE -->
+  <div style="padding:16px 48px 24px;display:flex;gap:32px;">
+    <div style="flex:1;background:white;border:1px solid #e5e7eb;border-radius:12px;padding:20px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#3b82f6;margin-bottom:8px;font-weight:600;">Emisor</div>
+      <div style="font-size:15px;font-weight:600;color:#1f2937;">${esc(company.name)}</div>
+      ${company.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
+      ${company.phone ? `<div style="font-size:12px;color:#6b7280;">Tel: ${esc(company.phone)}</div>` : ''}
+      ${company.email ? `<div style="font-size:12px;color:#6b7280;">${esc(company.email)}</div>` : ''}
+    </div>
+    <div style="flex:1;background:white;border:1px solid #e5e7eb;border-radius:12px;padding:20px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#3b82f6;margin-bottom:8px;font-weight:600;">Cliente</div>
+      <div style="font-size:15px;font-weight:600;color:#1f2937;">${esc(customer.name || 'Consumidor Final')}</div>
+      ${customer.cuit ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">CUIT: ${esc(customer.cuit)}</div>` : ''}
+      ${customer.address ? `<div style="font-size:12px;color:#6b7280;">${esc(customer.address)}</div>` : ''}
+      ${customer.email ? `<div style="font-size:12px;color:#6b7280;">${esc(customer.email)}</div>` : ''}
+      ${customer.phone ? `<div style="font-size:12px;color:#6b7280;">Tel: ${esc(customer.phone)}</div>` : ''}
+    </div>
+  </div>
+
+  ${quote.title ? `<div style="padding:0 48px 16px;"><div style="font-size:17px;font-weight:500;color:#1f2937;">${esc(quote.title)}</div></div>` : ''}
+
+  <!-- ITEMS TABLE -->
+  <div style="padding:0 48px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;border-radius:12px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f3f4f6;">
+          <th style="padding:12px 16px;text-align:left;font-weight:600;width:36px;font-size:12px;color:#6b7280;">#</th>
+          <th style="padding:12px 16px;text-align:left;font-weight:600;font-size:12px;color:#6b7280;">Descripcion</th>
+          <th style="padding:12px 16px;text-align:center;font-weight:600;width:70px;font-size:12px;color:#6b7280;">Cant.</th>
+          <th style="padding:12px 16px;text-align:right;font-weight:600;width:110px;font-size:12px;color:#6b7280;">P. Unitario</th>
+          <th style="padding:12px 16px;text-align:right;font-weight:600;width:110px;font-size:12px;color:#6b7280;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TOTALS -->
+  <div style="padding:20px 48px;display:flex;justify-content:flex-end;">
+    <div style="width:280px;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+      <div style="display:flex;justify-content:space-between;padding:10px 16px;background:white;">
+        <span style="color:#6b7280;font-size:13px;">Subtotal Neto:</span>
+        <span style="font-weight:500;font-size:13px;color:#374151;">$ ${Number(quote.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:10px 16px;background:white;border-top:1px solid #f3f4f6;">
+        <span style="color:#6b7280;font-size:13px;">IVA (21%):</span>
+        <span style="font-weight:500;font-size:13px;color:#374151;">$ ${Number(quote.vat_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:12px 16px;background:#3b82f6;">
+        <span style="font-size:15px;font-weight:700;color:white;">TOTAL:</span>
+        <span style="font-size:15px;font-weight:700;color:white;">$ ${Number(quote.total_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+    </div>
+  </div>
+
+  ${quote.notes ? `
+  <div style="padding:12px 48px;">
+    <div style="background:#f0f9ff;border-left:3px solid #3b82f6;padding:12px 16px;border-radius:0 8px 8px 0;">
+      <div style="font-size:11px;font-weight:600;color:#1d4ed8;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Observaciones</div>
+      <div style="font-size:12px;color:#1e40af;">${esc(quote.notes)}</div>
+    </div>
+  </div>` : ''}
+
+  <!-- FOOTER -->
+  <div style="position:fixed;bottom:0;left:0;right:0;padding:14px 48px;background:white;border-top:1px solid #e5e7eb;">
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#9ca3af;">
+      <div>${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
+      <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
+      <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
+    </div>
+  </div>
+
+</body>
+</html>`;
+  }
+
+  private buildEjecutivoTemplate(quote: any, company: any, bannerHtml: string): string {
+    const esc = (s: string) => this.escapeHtml(s);
+    const items = quote.items || [];
+    const customer = quote.customer || {};
+    const validUntil = quote.valid_until ? new Date(quote.valid_until).toLocaleDateString('es-AR') : 'N/A';
+    const createdAt = new Date(quote.created_at).toLocaleDateString('es-AR');
+    const accentColor = '#4f46e5';
+    const accentLight = '#eef2ff';
+
+    const itemRows = items.map((item: any, idx: number) => `
+      <tr>
+        <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:12px;">${idx + 1}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;">
+          <strong style="color:#111827;">${esc(item.product_name)}</strong>
+          ${item.description ? `<br><span style="color:#6b7280;font-size:11px;">${esc(item.description)}</span>` : ''}
+        </td>
+        <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151;">${Number(item.quantity)}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right;color:#374151;">$ ${Number(item.unit_price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700;color:#111827;">$ ${Number(item.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+      </tr>
+    `).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; color:#333; line-height:1.5; font-size:13px; }
+  @page { margin: 0; }
+</style></head>
+<body>
+
+  ${bannerHtml}
+
+  <!-- FULL-WIDTH HEADER -->
+  <div style="background:${accentColor};padding:32px 48px;color:white;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:1px;">${esc(company.name)}</div>
+        ${company.cuit ? `<div style="font-size:12px;opacity:0.8;margin-top:4px;">CUIT: ${esc(company.cuit)}</div>` : ''}
+        ${company.phone ? `<div style="font-size:12px;opacity:0.8;">Tel: ${esc(company.phone)}</div>` : ''}
+        ${company.email ? `<div style="font-size:12px;opacity:0.8;">${esc(company.email)}</div>` : ''}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:12px;text-transform:uppercase;letter-spacing:3px;opacity:0.7;font-weight:500;">Cotizacion</div>
+        <div style="font-size:36px;font-weight:800;margin-top:4px;">N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATES BAR -->
+  <div style="background:${accentLight};padding:12px 48px;display:flex;gap:40px;font-size:13px;border-bottom:1px solid #c7d2fe;">
+    <div style="color:#4338ca;">Fecha: <strong>${createdAt}</strong></div>
+    <div style="color:#4338ca;">Valida hasta: <strong>${validUntil}</strong></div>
+    ${quote.title ? `<div style="color:#4338ca;font-weight:600;">${esc(quote.title)}</div>` : ''}
+  </div>
+
+  <!-- TWO-COLUMN INFO -->
+  <div style="padding:24px 48px;display:flex;gap:32px;">
+    <div style="flex:1;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:${accentColor};margin-bottom:8px;font-weight:700;">Datos del Emisor</div>
+      <div style="font-size:14px;font-weight:600;color:#1f2937;">${esc(company.name)}</div>
+      ${company.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
+    </div>
+    <div style="flex:1;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:${accentColor};margin-bottom:8px;font-weight:700;">Datos del Cliente</div>
+      <div style="font-size:14px;font-weight:600;color:#1f2937;">${esc(customer.name || 'Consumidor Final')}</div>
+      ${customer.cuit ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">CUIT: ${esc(customer.cuit)}</div>` : ''}
+      ${customer.address ? `<div style="font-size:12px;color:#6b7280;">${esc(customer.address)}</div>` : ''}
+      ${customer.email ? `<div style="font-size:12px;color:#6b7280;">${esc(customer.email)}</div>` : ''}
+      ${customer.phone ? `<div style="font-size:12px;color:#6b7280;">Tel: ${esc(customer.phone)}</div>` : ''}
+    </div>
+  </div>
+
+  <!-- ITEMS TABLE -->
+  <div style="padding:0 48px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:${accentColor};color:white;">
+          <th style="padding:12px 14px;text-align:left;font-weight:600;width:36px;font-size:12px;">#</th>
+          <th style="padding:12px 14px;text-align:left;font-weight:600;font-size:12px;">Descripcion</th>
+          <th style="padding:12px 14px;text-align:center;font-weight:600;width:70px;font-size:12px;">Cant.</th>
+          <th style="padding:12px 14px;text-align:right;font-weight:600;width:110px;font-size:12px;">P. Unitario</th>
+          <th style="padding:12px 14px;text-align:right;font-weight:600;width:110px;font-size:12px;">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TOTALS -->
+  <div style="padding:20px 48px;display:flex;justify-content:flex-end;">
+    <div style="width:280px;background:${accentLight};border:2px solid ${accentColor};border-radius:8px;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #c7d2fe;">
+        <span style="color:#4338ca;font-size:13px;">Subtotal Neto:</span>
+        <span style="font-weight:600;font-size:13px;color:#312e81;">$ ${Number(quote.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #c7d2fe;">
+        <span style="color:#4338ca;font-size:13px;">IVA (21%):</span>
+        <span style="font-weight:600;font-size:13px;color:#312e81;">$ ${Number(quote.vat_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:14px 16px;background:${accentColor};">
+        <span style="font-size:16px;font-weight:800;color:white;">TOTAL:</span>
+        <span style="font-size:16px;font-weight:800;color:white;">$ ${Number(quote.total_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+      </div>
+    </div>
+  </div>
+
+  ${quote.notes ? `
+  <div style="padding:12px 48px;">
+    <div style="background:${accentLight};border-left:4px solid ${accentColor};padding:12px 16px;">
+      <div style="font-size:11px;font-weight:700;color:${accentColor};margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Observaciones</div>
+      <div style="font-size:12px;color:#312e81;">${esc(quote.notes)}</div>
+    </div>
+  </div>` : ''}
+
+  <!-- FOOTER -->
+  <div style="position:fixed;bottom:0;left:0;right:0;background:${accentColor};padding:12px 48px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:rgba(255,255,255,0.8);">
+      <div style="font-weight:600;color:white;">${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
       <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
       <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
     </div>

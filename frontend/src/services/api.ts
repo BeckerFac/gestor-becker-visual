@@ -574,8 +574,11 @@ export const api = {
     const { data } = await client.get(`/quotes/${id}`)
     return data
   },
-  getQuotePdf: async (id: string): Promise<Blob> => {
-    const response = await client.get(`/quotes/${id}/pdf`, { responseType: 'blob' })
+  getQuotePdf: async (id: string, template?: string, bannerUrl?: string): Promise<Blob> => {
+    const params: Record<string, string> = {}
+    if (template) params.template = template
+    if (bannerUrl) params.banner_url = bannerUrl
+    const response = await client.get(`/quotes/${id}/pdf`, { responseType: 'blob', params })
     return response.data
   },
   updateQuoteStatus: async (id: string, status: string) => {
@@ -627,6 +630,10 @@ export const api = {
       })
     }
     const { data } = await client.get(`/remitos?${params.toString()}`)
+    return data
+  },
+  getRemito: async (id: string) => {
+    const { data } = await client.get(`/remitos/${id}`)
     return data
   },
   createRemito: async (remitoData: any) => {

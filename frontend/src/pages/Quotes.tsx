@@ -113,6 +113,11 @@ export const Quotes: React.FC = () => {
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
 
+  // PDF template modal state
+  const [pdfModalQuoteId, setPdfModalQuoteId] = useState<string | null>(null)
+  const [pdfTemplate, setPdfTemplate] = useState<string>('clasico')
+  const [pdfBannerUrl, setPdfBannerUrl] = useState<string>('')
+
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -279,18 +284,44 @@ export const Quotes: React.FC = () => {
     }
   }
 
-  const handleDownloadPdf = async (quoteId: string) => {
+  const openPdfModal = (quoteId: string) => {
+    setPdfModalQuoteId(quoteId)
+    setPdfTemplate('clasico')
+    setPdfBannerUrl('')
+  }
+
+  const closePdfModal = () => {
+    setPdfModalQuoteId(null)
+  }
+
+  const handleDownloadPdf = async () => {
+    if (!pdfModalQuoteId) return
     try {
-      setDownloadingId(quoteId)
-      const blob = await api.getQuotePdf(quoteId)
+      setDownloadingId(pdfModalQuoteId)
+      const blob = await api.getQuotePdf(pdfModalQuoteId, pdfTemplate, pdfBannerUrl || undefined)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `cotizacion-${quoteId.slice(0, 8)}.pdf`
+      a.download = `cotizacion-${pdfModalQuoteId.slice(0, 8)}.pdf`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      closePdfModal()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  const handlePreviewPdf = async () => {
+    if (!pdfModalQuoteId) return
+    try {
+      setDownloadingId(pdfModalQuoteId)
+      const blob = await api.getQuotePdf(pdfModalQuoteId, pdfTemplate, pdfBannerUrl || undefined)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -674,11 +705,10 @@ export const Quotes: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => handleDownloadPdf(quote.id)}
+                        onClick={() => openPdfModal(quote.id)}
                         className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors"
-                        disabled={downloadingId === quote.id}
                       >
-                        {downloadingId === quote.id ? 'Generando...' : 'PDF'}
+                        PDF
                       </button>
                     </td>
                   </tr>
@@ -694,6 +724,84 @@ export const Quotes: React.FC = () => {
             onPageChange={handlePageChange}
           />
         </Card>
+      )}
+
+      {/* PDF Template Modal */}
+      {pdfModalQuoteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closePdfModal}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-gray-900">Generar PDF</h3>
+              <button onClick={closePdfModal} className="text-gray-400 hover:text-gray-600 text-xl font-bold">x</button>
+            </div>
+
+            {/* Template selector */}
+            <label className="text-sm font-medium text-gray-700 mb-2 block">Plantilla</label>
+            <div className="grid grid-cols-3 gap-4 mb-5">
+              {/* Clasico */}
+              <div
+                onClick={() => setPdfTemplate('clasico')}
+                className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${pdfTemplate === 'clasico' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <div className="h-2 bg-gray-800 rounded mb-2" />
+                <div className="text-sm font-medium">Clasico</div>
+                <div className="text-xs text-gray-500">Formal y profesional</div>
+              </div>
+              {/* Moderno */}
+              <div
+                onClick={() => setPdfTemplate('moderno')}
+                className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${pdfTemplate === 'moderno' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <div className="h-2 bg-gradient-to-r from-blue-400 to-blue-600 rounded mb-2" />
+                <div className="text-sm font-medium">Moderno</div>
+                <div className="text-xs text-gray-500">Minimalista y limpio</div>
+              </div>
+              {/* Ejecutivo */}
+              <div
+                onClick={() => setPdfTemplate('ejecutivo')}
+                className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${pdfTemplate === 'ejecutivo' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <div className="h-2 bg-gradient-to-r from-indigo-600 to-purple-600 rounded mb-2" />
+                <div className="text-sm font-medium">Ejecutivo</div>
+                <div className="text-xs text-gray-500">Corporativo y elegante</div>
+              </div>
+            </div>
+
+            {/* Banner URL */}
+            <label className="text-sm font-medium text-gray-700 mb-1 block">Banner (opcional)</label>
+            <input
+              type="text"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-5"
+              placeholder="URL de la imagen del banner..."
+              value={pdfBannerUrl}
+              onChange={e => setPdfBannerUrl(e.target.value)}
+            />
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closePdfModal}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handlePreviewPdf}
+                disabled={downloadingId === pdfModalQuoteId}
+                className="px-4 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+              >
+                Vista Previa
+              </button>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={downloadingId === pdfModalQuoteId}
+                className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {downloadingId === pdfModalQuoteId ? 'Generando...' : 'Descargar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

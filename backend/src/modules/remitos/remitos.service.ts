@@ -302,6 +302,7 @@ export class RemitosService {
     const customer = remito.customer || {};
     const createdAt = new Date(remito.date || remito.created_at).toLocaleDateString('es-AR');
     const remitoNum = String(remito.remito_number || '').padStart(6, '0');
+    const pvNum = String(company.punto_venta || 3).padStart(5, '0');
 
     const itemRows = items.map((item: any, idx: number) => `
       <tr>
@@ -329,18 +330,32 @@ export class RemitosService {
 </style></head>
 <body>
 
-  <!-- HEADER -->
-  <div style="padding:28px 40px 20px;border-bottom:2px solid #1a1a2e;display:flex;justify-content:space-between;align-items:center;">
-    <div style="font-size:24px;font-weight:700;color:#1a1a2e;letter-spacing:1px;">BECKER<span style="color:#c8102e;">VISUAL</span></div>
-    <div style="text-align:right;">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#999;font-weight:600;">Remito</div>
-      <div style="font-size:22px;font-weight:700;color:#1a1a2e;">N° ${remitoNum}</div>
+  <!-- HEADER with R badge -->
+  <div style="position:relative;padding:20px 40px 16px;border-bottom:2px solid #1a1a2e;display:flex;justify-content:space-between;align-items:flex-start;">
+    <!-- Left: Company info -->
+    <div style="flex:1;padding-right:50px;">
+      <div style="font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:1px;">BECKER<span style="color:#c8102e;">VISUAL</span></div>
+      <div style="font-size:11px;color:#666;margin-top:4px;">${company.name}</div>
+      ${company.address ? `<div style="font-size:11px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.province ? ` - ${company.province}` : ''}</div>` : ''}
+      <div style="font-size:11px;color:#666;">CUIT: ${company.cuit}</div>
+      ${company.iva_condition ? `<div style="font-size:11px;color:#666;">${company.iva_condition}</div>` : ''}
+    </div>
+    <!-- Letter badge R -->
+    <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:60px;height:70px;background:white;border:2px solid #333;text-align:center;z-index:10;">
+      <div style="font-size:28px;font-weight:bold;margin-top:8px;">R</div>
+      <div style="font-size:9px;color:#666;border-top:1px solid #333;padding-top:2px;">COD. 91</div>
+    </div>
+    <!-- Right: Remito number and date -->
+    <div style="flex:1;text-align:right;padding-left:50px;">
+      <div style="font-size:16px;font-weight:700;color:#1a1a2e;letter-spacing:0.5px;">REMITO</div>
+      <div style="font-size:18px;font-weight:700;color:#1a1a2e;margin-top:2px;">${pvNum}-${String(remito.remito_number || '').padStart(8, '0')}</div>
+      <div style="font-size:12px;color:#666;margin-top:4px;"><strong>Fecha:</strong> ${createdAt}</div>
     </div>
   </div>
 
   <!-- DOCUMENT TYPE BANNER -->
   <div style="background:${isRecepcion ? '#065f46' : '#1a1a2e'};padding:12px 40px;display:flex;justify-content:space-between;align-items:center;">
-    <div style="font-size:18px;font-weight:700;color:white;letter-spacing:1px;">${isRecepcion ? 'REMITO DE RECEPCIÓN' : 'REMITO DE ENTREGA'}</div>
+    <div style="font-size:18px;font-weight:700;color:white;letter-spacing:1px;">${isRecepcion ? 'REMITO DE RECEPCION' : 'REMITO DE ENTREGA'}</div>
     <div style="color:rgba(255,255,255,0.8);font-size:13px;"><strong>Fecha:</strong> ${createdAt}</div>
   </div>
 

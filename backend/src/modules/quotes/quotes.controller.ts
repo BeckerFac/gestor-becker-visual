@@ -32,7 +32,9 @@ export class QuotesController {
   }
 
   async downloadPdf(req: AuthRequest, res: Response) {
-    const pdf = await quotesService.generateQuotePdf(req.user!.company_id, req.params.id);
+    const template = (req.query.template as string) || 'clasico';
+    const bannerUrl = (req.query.banner_url as string) || undefined;
+    const pdf = await quotesService.generateQuotePdf(req.user!.company_id, req.params.id, template, bannerUrl);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=cotizacion-${req.params.id.substring(0, 8)}.pdf`);
     res.send(pdf);

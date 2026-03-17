@@ -16,6 +16,7 @@ import { formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { RemitoPreviewModal } from '@/components/shared/RemitoPreviewModal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,11 @@ export const Remitos: React.FC = () => {
   // Confirm dialog for delete
   const [deleteTarget, setDeleteTarget] = useState<Remito | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Preview modal
+  const [previewRemito, setPreviewRemito] = useState<any>(null)
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -399,6 +405,41 @@ export const Remitos: React.FC = () => {
     } catch (e: any) {
       setError(e.message)
     }
+  }
+
+  // ── Preview modal ─────────────────────────────────────────────────────────
+
+  const handlePreviewRemito = async (remitoId: string) => {
+    setPreviewLoading(true)
+    setPreviewRemito(null)
+    setPreviewPdfUrl(null)
+    try {
+      const [detail, blob] = await Promise.all([
+        api.getRemito(remitoId),
+        api.getRemitoPdf(remitoId),
+      ])
+      setPreviewRemito(detail)
+      setPreviewPdfUrl(window.URL.createObjectURL(blob))
+    } catch (e: any) {
+      toast.error(e.message || 'Error al cargar remito')
+      setPreviewLoading(false)
+      return
+    }
+    setPreviewLoading(false)
+  }
+
+  const handleClosePreview = () => {
+    if (previewPdfUrl) {
+      window.URL.revokeObjectURL(previewPdfUrl)
+    }
+    setPreviewRemito(null)
+    setPreviewPdfUrl(null)
+    setPreviewLoading(false)
+  }
+
+  const handlePreviewDownloadPdf = () => {
+    if (!previewRemito) return
+    handleDownloadPdf(previewRemito.id, previewRemito.remito_number)
   }
 
   // ── CSV data ───────────────────────────────────────────────────────────────
@@ -832,6 +873,13 @@ export const Remitos: React.FC = () => {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <button
+                          onClick={() => handlePreviewRemito(remito.id)}
+                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
+                          title="Ver remito"
+                        >
+                          Ver
+                        </button>
+                        <button
                           onClick={() => handleDownloadPdf(remito.id, remito.remito_number)}
                           className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors"
                           title="Descargar PDF"
@@ -895,6 +943,16 @@ export const Remitos: React.FC = () => {
         onConfirm={handleDeleteRemito}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {(previewLoading || previewRemito) && (
+        <RemitoPreviewModal
+          remito={previewRemito}
+          pdfBlobUrl={previewPdfUrl}
+          loading={previewLoading}
+          onClose={handleClosePreview}
+          onDownloadPdf={handlePreviewDownloadPdf}
+        />
+      )}
     </div>
   )
 }
