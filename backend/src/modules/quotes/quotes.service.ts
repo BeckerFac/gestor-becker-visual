@@ -9,7 +9,18 @@ export class QuotesService {
   async ensureMigrations() {
     if (this.migrationsRun) return;
     try {
-      await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
+      await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(e => console.warn('Migration:', e.message));
+      await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_number INTEGER DEFAULT 0`).catch(e => console.warn('Migration:', e.message));
+      // Fix existing quotes with quote_number = 0 or NULL - assign sequential numbers by company
+      await db.execute(sql`
+        WITH numbered AS (
+          SELECT id, ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY created_at) as rn
+          FROM quotes
+          WHERE quote_number IS NULL OR quote_number = 0
+        )
+        UPDATE quotes SET quote_number = numbered.rn
+        FROM numbered WHERE quotes.id = numbered.id
+      `).catch(e => console.warn('Migration fix quote_numbers:', e.message));
       this.migrationsRun = true;
     } catch (error) {
       console.error('Quotes migrations error:', error);

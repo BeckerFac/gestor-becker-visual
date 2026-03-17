@@ -34,7 +34,7 @@ export class OrdersService {
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS bank_id UUID`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_invoice BOOLEAN DEFAULT false`).catch(() => {});
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`).catch(() => {});
-      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`).catch(() => {});
+      await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT false`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`).catch(() => {});
       // Ensure quotes table has quote_number column (may not exist if quotes module hasn't run)
@@ -267,8 +267,8 @@ export class OrdersService {
         for (const item of data.items) {
           const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
           await db.execute(sql`
-            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type)
-            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'})
+            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock)
+            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false})
           `);
         }
       }
@@ -279,10 +279,12 @@ export class OrdersService {
         VALUES (${uuid()}, ${orderId}, 'pendiente', 'Pedido creado', ${userId})
       `);
 
-      // Deduct stock if requested
-      if (data.deduct_stock && data.items && Array.isArray(data.items)) {
-        await db.execute(sql`UPDATE orders SET deduct_stock = true WHERE id = ${orderId}`);
-        await this.deductStockForOrder(companyId, orderId, userId, data.items);
+      // Deduct stock for items where deduct_stock is true
+      if (data.items && Array.isArray(data.items)) {
+        const itemsToDeduct = data.items.filter((i: any) => i.deduct_stock);
+        if (itemsToDeduct.length > 0) {
+          await this.deductStockForOrder(companyId, orderId, userId, itemsToDeduct);
+        }
       }
 
       return { id: orderId, status: 'pendiente' };
@@ -536,8 +538,8 @@ export class OrdersService {
           subtotal += itemSubtotal;
           const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
           await db.execute(sql`
-            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type)
-            VALUES (${uuid()}, ${orderId}, ${productId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${(item.unit_price || 0).toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'})
+            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock)
+            VALUES (${uuid()}, ${orderId}, ${productId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${(item.unit_price || 0).toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false})
           `);
         }
 

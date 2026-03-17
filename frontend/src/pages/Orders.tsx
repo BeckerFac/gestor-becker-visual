@@ -61,6 +61,7 @@ interface FormItem {
   unit_price: number
   cost: number
   product_type: string
+  deduct_stock: boolean
 }
 
 interface InvoicingStatusData {
@@ -127,6 +128,7 @@ const emptyFormItem = (): FormItem => ({
   unit_price: 0,
   cost: 0,
   product_type: 'otro',
+  deduct_stock: false,
 })
 
 const ORDER_DRAFT_KEY = 'bv_order_draft'
@@ -178,7 +180,6 @@ export const Orders: React.FC = () => {
     description: '', customer_id: '',
     vat_rate: '21', estimated_delivery: '',
     priority: 'normal', notes: '', payment_method: '', bank_id: '',
-    deduct_stock: false,
   })
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
   const [hasDraft, setHasDraft] = useState(false)
@@ -345,7 +346,6 @@ export const Orders: React.FC = () => {
         priority: form.priority,
         payment_method: form.payment_method || null,
         notes: form.notes || null,
-        deduct_stock: form.deduct_stock,
         items: formItems.map(item => ({
           product_id: item.product_id && item.product_id !== 'custom' ? item.product_id : null,
           product_name: item.product_name,
@@ -354,6 +354,7 @@ export const Orders: React.FC = () => {
           unit_price: item.unit_price,
           cost: item.cost || 0,
           product_type: item.product_type || 'otro',
+          deduct_stock: item.deduct_stock || false,
         })),
       }
       if (editingOrderId) {
@@ -390,6 +391,7 @@ export const Orders: React.FC = () => {
       unit_price: parseFloat(item.unit_price?.toString() || '0'),
       cost: parseFloat(item.cost?.toString() || '0'),
       product_type: item.product_type || 'otro',
+      deduct_stock: item.deduct_stock || false,
     }))
 
     setEditingOrderId(order.id)
@@ -403,7 +405,6 @@ export const Orders: React.FC = () => {
       notes: order.notes || '',
       payment_method: order.payment_method || '',
       bank_id: order.bank?.id || '',
-      deduct_stock: (order as any).deduct_stock || false,
     })
     setFormEnterpriseId(order.enterprise?.id || '')
     setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
@@ -973,14 +974,29 @@ export const Orders: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      {/* Description */}
-                      <div className="mt-2">
+                      {/* Description + stock checkbox */}
+                      <div className="mt-2 flex items-center gap-4">
                         <input
-                          className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           placeholder="Descripcion adicional del item (opcional)"
                           value={item.description}
                           onChange={e => updateFormItem(idx, 'description', e.target.value)}
                         />
+                        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={item.deduct_stock}
+                            onChange={e => {
+                              setFormItems(prev => {
+                                const updated = [...prev]
+                                updated[idx] = { ...updated[idx], deduct_stock: e.target.checked }
+                                return updated
+                              })
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-xs text-gray-500">Descontar stock</span>
+                        </label>
                       </div>
                     </div>
                   ))}
@@ -1051,23 +1067,6 @@ export const Orders: React.FC = () => {
                 <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
 
-              {/* Stock deduction */}
-              <div className="space-y-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="text-sm font-medium text-gray-700">Control de Inventario</p>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.deduct_stock}
-                    onChange={e => setForm({ ...form, deduct_stock: e.target.checked })}
-                    className="rounded border-gray-300"
-                  />
-                  <span className="text-sm text-gray-600">Descontar del inventario al crear pedido</span>
-                </label>
-                <p className="text-xs text-gray-400 ml-6">
-                  Los materiales (BOM) se descuentan automaticamente cuando el pedido entra en produccion.
-                  El producto final se descuenta si esta opcion esta activa.
-                </p>
-              </div>
 
               <Button type="submit" variant="success" loading={saving}>{editingOrderId ? 'Guardar Cambios' : 'Crear Pedido'}</Button>
             </form>
