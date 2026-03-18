@@ -376,31 +376,111 @@ export class ReportsService {
       } catch (e) { console.error('Insights low_stock error:', e); }
     }
 
-    // Cheques about to expire (next 7 days)
+    // Cheques pending to collect
     if (canView(userPermissions, 'cheques')) {
       try {
-        const chequesExpiringResult = await db.execute(sql`
+        // Overdue cheques (deposit_date already passed)
+        const chequesOverdueResult = await db.execute(sql`
           SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
           FROM cheques
           WHERE company_id = ${companyId}
             AND status = 'a_cobrar'
-            AND deposit_date <= NOW() + INTERVAL '7 days'
-            AND deposit_date >= NOW()
+            AND deposit_date < NOW()
         `);
-        const chequesRows = (chequesExpiringResult as any).rows || chequesExpiringResult || [];
-        const chequesCount = parseInt(chequesRows[0]?.count || '0');
-        const chequesTotal = parseFloat(chequesRows[0]?.total || '0');
-        if (chequesCount > 0) {
+        const overdueRows = (chequesOverdueResult as any).rows || chequesOverdueResult || [];
+        const overdueCount = parseInt(overdueRows[0]?.count || '0');
+        const overdueTotal = parseFloat(overdueRows[0]?.total || '0');
+        if (overdueCount > 0) {
           actions.push({
-            type: 'cheques_expiring',
-            severity: 'info',
-            title: `${chequesCount} cheque${chequesCount > 1 ? 's' : ''} por vencer`,
-            description: 'En los proximos 7 dias',
+            type: 'cheques_overdue',
+            severity: 'critical',
+            title: `${overdueCount} cheque${overdueCount > 1 ? 's' : ''} vencido${overdueCount > 1 ? 's' : ''} sin cobrar`,
+            description: 'Fecha de deposito ya paso',
             link: '/cheques',
-            value: `$${chequesTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
+            value: `$${overdueTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
+          });
+        }
+
+        // Cheques coming up (next 7 days)
+        const chequesUpcomingResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM cheques
+          WHERE company_id = ${companyId}
+            AND status = 'a_cobrar'
+            AND deposit_date >= NOW()
+            AND deposit_date <= NOW() + INTERVAL '7 days'
+        `);
+        const upcomingRows = (chequesUpcomingResult as any).rows || chequesUpcomingResult || [];
+        const upcomingCount = parseInt(upcomingRows[0]?.count || '0');
+        const upcomingTotal = parseFloat(upcomingRows[0]?.total || '0');
+        if (upcomingCount > 0) {
+          actions.push({
+            type: 'cheques_upcoming',
+            severity: 'info',
+            title: `${upcomingCount} cheque${upcomingCount > 1 ? 's' : ''} a cobrar esta semana`,
+            description: 'Proximos 7 dias',
+            link: '/cheques',
+            value: `$${upcomingTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
           });
         }
       } catch (e) { console.error('Insights cheques error:', e); }
+    }
+
+    // Invoices authorized but unpaid for 30+ days
+    if (canView(userPermissions, 'invoices')) {
+      try {
+        const overdueInvResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(
+            CAST(i.total_amount AS decimal) - COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+          ), 0) as total
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date < NOW() - INTERVAL '30 days'
+            AND CAST(i.total_amount AS decimal) > COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+        `);
+        const invRows = (overdueInvResult as any).rows || overdueInvResult || [];
+        const invCount = parseInt(invRows[0]?.count || '0');
+        const invTotal = parseFloat(invRows[0]?.total || '0');
+        if (invCount > 0) {
+          actions.push({
+            type: 'overdue_invoices',
+            severity: 'critical',
+            title: `${invCount} factura${invCount > 1 ? 's' : ''} impaga${invCount > 1 ? 's' : ''} hace +30 dias`,
+            description: 'Cobranza vencida',
+            link: '/cobros',
+            value: `$${invTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
+          });
+        }
+      } catch (e) { console.error('Insights overdue_invoices error:', e); }
+    }
+
+    // Orders delivered but not invoiced
+    if (canView(userPermissions, 'orders') && canView(userPermissions, 'invoices')) {
+      try {
+        const deliveredResult = await db.execute(sql`
+          SELECT COUNT(*) as count
+          FROM orders
+          WHERE company_id = ${companyId}
+            AND status = 'entregado'
+            AND invoice_id IS NULL
+        `);
+        const deliveredRows = (deliveredResult as any).rows || deliveredResult || [];
+        const deliveredCount = parseInt(deliveredRows[0]?.count || '0');
+        if (deliveredCount > 0) {
+          actions.push({
+            type: 'delivered_not_invoiced',
+            severity: 'warning',
+            title: `${deliveredCount} pedido${deliveredCount > 1 ? 's' : ''} entregado${deliveredCount > 1 ? 's' : ''} sin facturar`,
+            description: 'Entregados pero sin factura emitida',
+            link: '/orders',
+          });
+        }
+      } catch (e) { console.error('Insights delivered_not_invoiced error:', e); }
     }
 
     // Sort actions: critical first, then warning, then info
