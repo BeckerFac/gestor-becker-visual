@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -31,7 +31,15 @@ interface Pago {
 }
 
 interface Enterprise { id: string; name: string }
-interface Purchase { id: string; purchase_number: number; total_amount: string; enterprise_name: string | null; enterprise_id?: string }
+interface Purchase {
+  id: string
+  purchase_number: number
+  total_amount: string
+  enterprise_name: string | null
+  enterprise_id?: string
+  payment_status?: string
+  date?: string
+}
 interface Bank { id: string; bank_name: string }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -40,6 +48,27 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   transferencia: 'Transferencia',
   cheque: 'Cheque',
   tarjeta: 'Tarjeta',
+}
+
+const DISMISSED_PENDING_KEY = 'gestia_dismissed_pending_pagos'
+
+function getDismissedPending(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_PENDING_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function dismissPending(purchaseId: string) {
+  const dismissed = getDismissedPending()
+  if (!dismissed.includes(purchaseId)) {
+    localStorage.setItem(DISMISSED_PENDING_KEY, JSON.stringify([...dismissed, purchaseId]))
+  }
+}
+
+function restorePending() {
+  localStorage.removeItem(DISMISSED_PENDING_KEY)
 }
 
 export const Pagos: React.FC = () => {
@@ -59,6 +88,8 @@ export const Pagos: React.FC = () => {
   const [pageSize, setPageSize] = useState(25)
   const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [dismissedPending, setDismissedPending] = useState<string[]>(getDismissedPending())
+  const [pendingCollapsed, setPendingCollapsed] = useState(false)
 
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
@@ -91,6 +122,59 @@ export const Pagos: React.FC = () => {
 
   useEffect(() => { loadData() }, [filterEnterprise])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
+
+  // Calculate paid amounts per purchase from pagos data
+  const paidByPurchase = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const pago of pagos) {
+      if (pago.purchase_id) {
+        const current = map.get(pago.purchase_id) || 0
+        map.set(pago.purchase_id, current + Number(pago.amount || 0))
+      }
+    }
+    return map
+  }, [pagos])
+
+  // Pending purchases (pendiente or parcial, not dismissed)
+  const pendingPurchases = useMemo(() => {
+    const allPurchases = Array.isArray(purchases) ? purchases : []
+    return allPurchases
+      .filter(p => p.payment_status === 'pendiente' || p.payment_status === 'parcial')
+      .filter(p => !dismissedPending.includes(p.id))
+      .map(p => {
+        const total = parseFloat(p.total_amount || '0')
+        const paid = paidByPurchase.get(p.id) || 0
+        const remaining = Math.max(0, total - paid)
+        return { ...p, paid, remaining }
+      })
+  }, [purchases, paidByPurchase, dismissedPending])
+
+  const totalPendingAmount = pendingPurchases.reduce((sum, p) => sum + p.remaining, 0)
+  const hasDismissedPending = dismissedPending.length > 0
+
+  const handleDismissPending = (purchaseId: string) => {
+    dismissPending(purchaseId)
+    setDismissedPending([...dismissedPending, purchaseId])
+  }
+
+  const handleRestorePending = () => {
+    restorePending()
+    setDismissedPending([])
+  }
+
+  const handlePayFromPurchase = useCallback((purchase: typeof pendingPurchases[0]) => {
+    setForm({
+      enterprise_id: purchase.enterprise_id || '',
+      purchase_id: purchase.id,
+      amount: purchase.remaining.toFixed(2),
+      payment_method: 'transferencia',
+      bank_id: '',
+      reference: '',
+      payment_date: new Date().toISOString().split('T')[0],
+      notes: `Pago compra #${String(purchase.purchase_number).padStart(4, '0')}`,
+    })
+    setShowForm(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -202,7 +286,7 @@ export const Pagos: React.FC = () => {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border border-red-200 bg-red-50">
           <CardContent className="pt-3 pb-2">
             <p className="text-xs text-red-700">Total Pagado</p>
@@ -221,12 +305,119 @@ export const Pagos: React.FC = () => {
             <p className="text-xl font-bold text-purple-800">{new Set(filteredPagos.map(p => p.enterprise_id).filter(Boolean)).size}</p>
           </CardContent>
         </Card>
+        <Card className="border border-yellow-200 bg-yellow-50">
+          <CardContent className="pt-3 pb-2">
+            <p className="text-xs text-yellow-700">Deuda Pendiente</p>
+            <p className="text-xl font-bold text-yellow-800">{fmt(totalPendingAmount)}</p>
+          </CardContent>
+        </Card>
       </div>
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg animate-fadeIn">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
         </div>
+      )}
+
+      {/* Pendientes de Pago Section */}
+      {!loading && pendingPurchases.length > 0 && (
+        <Card className="border border-yellow-300 bg-yellow-50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-yellow-900">
+                  Pendientes de Pago
+                </h3>
+                <span className="text-xs font-medium bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full">
+                  {pendingPurchases.length}
+                </span>
+              </div>
+              <button
+                onClick={() => setPendingCollapsed(!pendingCollapsed)}
+                className="text-yellow-700 hover:text-yellow-900 text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                {pendingCollapsed ? 'Expandir' : 'Colapsar'}
+                <span className="text-xs">{pendingCollapsed ? '▼' : '▲'}</span>
+              </button>
+            </div>
+          </CardHeader>
+          {!pendingCollapsed && (
+            <CardContent className="pt-0">
+              <div className="space-y-2">
+                {pendingPurchases.map(purchase => (
+                  <div
+                    key={purchase.id}
+                    className="bg-white border border-yellow-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
+                  >
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <span className="font-mono font-bold text-orange-700 text-sm whitespace-nowrap">
+                        #{String(purchase.purchase_number).padStart(4, '0')}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {purchase.enterprise_name || 'Sin empresa'}
+                        </p>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                          <span>Total: {fmt(purchase.total_amount)}</span>
+                          {purchase.paid > 0 && (
+                            <span className="text-green-600">Pagado: {fmt(purchase.paid)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <p className="text-sm font-bold text-red-700">{fmt(purchase.remaining)}</p>
+                        <p className="text-xs text-gray-400">restante</p>
+                      </div>
+                      <span className={`text-xs font-medium rounded-full px-2 py-0.5 whitespace-nowrap ${
+                        purchase.payment_status === 'parcial'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {purchase.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <PermissionGate module="pagos" action="create">
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => handlePayFromPurchase(purchase)}
+                        >
+                          Pagar
+                        </Button>
+                      </PermissionGate>
+                      <button
+                        onClick={() => handleDismissPending(purchase.id)}
+                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                        title="Ocultar temporalmente"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {hasDismissedPending && (
+                <button
+                  onClick={handleRestorePending}
+                  className="text-xs text-gray-400 hover:text-yellow-600 transition-colors mt-3"
+                >
+                  Mostrar ocultos ({dismissedPending.length})
+                </button>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Restore dismissed when all are hidden */}
+      {!loading && pendingPurchases.length === 0 && hasDismissedPending && (
+        <button
+          onClick={handleRestorePending}
+          className="text-xs text-gray-400 hover:text-yellow-600 transition-colors"
+        >
+          Mostrar compras pendientes ocultas ({dismissedPending.length})
+        </button>
       )}
 
       {showForm && (
@@ -250,7 +441,7 @@ export const Pagos: React.FC = () => {
               </div>
               <Input label="Monto *" type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Método de Pago *</label>
+                <label className="text-sm font-medium text-gray-700">Metodo de Pago *</label>
                 <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                   <option value="efectivo">Efectivo</option>
                   <option value="mercado_pago">Mercado Pago</option>
@@ -294,7 +485,7 @@ export const Pagos: React.FC = () => {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Método de Pago</label>
+              <label className="text-xs font-medium text-gray-500">Metodo de Pago</label>
               <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterMethod} onChange={e => setFilterMethod(e.target.value)}>
                 <option value="">Todos</option>
                 <option value="efectivo">Efectivo</option>
@@ -317,7 +508,7 @@ export const Pagos: React.FC = () => {
       ) : filteredPagos.length === 0 ? (
         <EmptyState
           title={isFiltered ? 'No hay pagos con estos filtros' : 'No hay pagos registrados'}
-          description={isFiltered ? undefined : 'Registrá el primer pago para empezar a llevar el control'}
+          description={isFiltered ? undefined : 'Registra el primer pago para empezar a llevar el control'}
           variant={isFiltered ? 'filtered' : 'empty'}
           actionLabel={isFiltered ? 'Limpiar filtros' : '+ Registrar Pago'}
           onAction={isFiltered ? clearFilters : () => setShowForm(true)}
@@ -332,7 +523,7 @@ export const Pagos: React.FC = () => {
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Compra</th>
                   <th className="px-4 py-3 text-right">Monto</th>
-                  <th className="px-4 py-3">Método</th>
+                  <th className="px-4 py-3">Metodo</th>
                   <th className="px-4 py-3">Banco</th>
                   <th className="px-4 py-3">Referencia</th>
                   <th className="px-4 py-3"></th>
