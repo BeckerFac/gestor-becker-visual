@@ -56,7 +56,9 @@ export const MultiSelectFilter: React.FC<MultiSelectFilterProps> = ({
         <span className={selected.length === 0 ? 'text-gray-400' : 'text-gray-800 dark:text-gray-200 truncate'}>
           {displayText}
         </span>
-        <span className="text-gray-400 ml-1">{open ? '^' : 'v'}</span>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
       </button>
       {open && (
         <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">

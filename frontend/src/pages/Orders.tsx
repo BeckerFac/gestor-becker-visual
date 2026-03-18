@@ -653,8 +653,14 @@ export const Orders: React.FC = () => {
     if (filterPayment.length > 0) {
       result = result.filter(o => filterPayment.includes(o.payment_status))
     }
-    if (dateFrom) result = result.filter(o => o.created_at >= dateFrom)
-    if (dateTo) result = result.filter(o => o.created_at <= dateTo + 'T23:59:59')
+    if (dateFrom) result = result.filter(o => {
+      const d = o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : ''
+      return d >= dateFrom
+    })
+    if (dateTo) result = result.filter(o => {
+      const d = o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : ''
+      return d <= dateTo
+    })
     return result
   }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, filterPayment, dateFrom, dateTo])
 

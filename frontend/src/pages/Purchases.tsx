@@ -313,8 +313,14 @@ export const Purchases: React.FC = () => {
 
   const filteredPurchases = useMemo(() => {
     let result = purchases
-    if (dateFrom) result = result.filter(p => p.date >= dateFrom)
-    if (dateTo) result = result.filter(p => p.date <= dateTo + 'T23:59:59')
+    if (dateFrom) result = result.filter(p => {
+      const d = p.date ? new Date(p.date).toISOString().split('T')[0] : ''
+      return d >= dateFrom
+    })
+    if (dateTo) result = result.filter(p => {
+      const d = p.date ? new Date(p.date).toISOString().split('T')[0] : ''
+      return d <= dateTo
+    })
     return result
   }, [purchases, dateFrom, dateTo])
 

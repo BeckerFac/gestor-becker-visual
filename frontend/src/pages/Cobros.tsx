@@ -315,8 +315,14 @@ export const Cobros: React.FC = () => {
   const filteredCobros = useMemo(() => {
     let result = cobros
     if (filterMethod) result = result.filter(c => c.payment_method === filterMethod)
-    if (dateFrom) result = result.filter(c => c.payment_date >= dateFrom)
-    if (dateTo) result = result.filter(c => c.payment_date <= dateTo + 'T23:59:59')
+    if (dateFrom) result = result.filter(c => {
+      const d = c.payment_date ? new Date(c.payment_date).toISOString().split('T')[0] : ''
+      return d >= dateFrom
+    })
+    if (dateTo) result = result.filter(c => {
+      const d = c.payment_date ? new Date(c.payment_date).toISOString().split('T')[0] : ''
+      return d <= dateTo
+    })
     return result
   }, [cobros, filterMethod, dateFrom, dateTo])
 
