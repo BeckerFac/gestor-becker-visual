@@ -31,6 +31,10 @@ export class ReceiptsService {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
       `);
+      // Add new columns for simple receipts (without invoices)
+      await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
+      await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`);
+      await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS reference VARCHAR(255)`);
       this.migrationsRun = true;
     } catch (error) {
       console.error('Receipts migrations error:', error);
@@ -42,6 +46,8 @@ export class ReceiptsService {
     try {
       const result = await db.execute(sql`
         SELECT r.*,
+          ent.name as enterprise_name,
+          b.bank_name,
           COALESCE(
             (SELECT json_agg(json_build_object(
               'id', ri.id,
@@ -62,6 +68,8 @@ export class ReceiptsService {
             '[]'::json
           ) as items
         FROM receipts r
+        LEFT JOIN enterprises ent ON r.enterprise_id = ent.id
+        LEFT JOIN banks b ON r.bank_id = b.id
         WHERE r.company_id = ${companyId}
         ORDER BY r.created_at DESC
       `);
@@ -75,16 +83,21 @@ export class ReceiptsService {
   async createReceipt(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
     try {
-      const { receipt_date, payment_method, notes, items } = data;
+      const { receipt_date, payment_method, notes, items, enterprise_id, amount, bank_id, reference } = data;
 
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        throw new ApiError(400, 'El recibo debe tener al menos un item');
-      }
+      const hasItems = Array.isArray(items) && items.length > 0;
 
-      // Validate all items have invoice_id and amount > 0
-      for (const item of items) {
-        if (!item.invoice_id) throw new ApiError(400, 'Cada item debe tener una factura asociada');
-        if (!item.amount || parseFloat(item.amount) <= 0) throw new ApiError(400, 'Cada item debe tener un monto mayor a 0');
+      // Validate: either items with invoices OR a direct amount
+      if (!hasItems) {
+        if (!amount || parseFloat(amount) <= 0) {
+          throw new ApiError(400, 'El recibo debe tener un monto mayor a 0');
+        }
+      } else {
+        // Validate all items have invoice_id and amount > 0
+        for (const item of items) {
+          if (!item.invoice_id) throw new ApiError(400, 'Cada item debe tener una factura asociada');
+          if (!item.amount || parseFloat(item.amount) <= 0) throw new ApiError(400, 'Cada item debe tener un monto mayor a 0');
+        }
       }
 
       // Auto-generate receipt_number
@@ -95,8 +108,10 @@ export class ReceiptsService {
       const rows = (maxResult as any).rows || maxResult || [];
       const receiptNumber = parseInt(rows[0]?.next_number || '1');
 
-      // Calculate total from items
-      const totalAmount = items.reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0);
+      // Calculate total: from items if present, otherwise from direct amount
+      const totalAmount = hasItems
+        ? items.reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0)
+        : parseFloat(amount);
 
       const receiptId = uuid();
 
@@ -104,28 +119,38 @@ export class ReceiptsService {
       await db.execute(sql`BEGIN`);
       try {
         await db.execute(sql`
-          INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, created_by, created_at)
-          VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${userId}, NOW())
+          INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, enterprise_id, bank_id, reference, created_by, created_at)
+          VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${enterprise_id || null}, ${bank_id || null}, ${reference || null}, ${userId}, NOW())
         `);
 
-        for (const item of items) {
-          const itemId = uuid();
-          await db.execute(sql`
-            INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
-            VALUES (${itemId}, ${receiptId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, NOW())
-          `);
+        if (hasItems) {
+          // Receipt with invoice items
+          for (const item of items) {
+            const itemId = uuid();
+            await db.execute(sql`
+              INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
+              VALUES (${itemId}, ${receiptId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, NOW())
+            `);
 
+            const cobroId = uuid();
+            const invResult = await db.execute(sql`
+              SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
+            `);
+            const invRows = (invResult as any).rows || invResult || [];
+            const invEnterpriseId = invRows[0]?.enterprise_id || null;
+            const orderId = invRows[0]?.order_id || null;
+
+            await db.execute(sql`
+              INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
+              VALUES (${cobroId}, ${companyId}, ${invEnterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
+            `);
+          }
+        } else {
+          // Simple receipt without invoices - create a single cobro
           const cobroId = uuid();
-          const invResult = await db.execute(sql`
-            SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
-          `);
-          const invRows = (invResult as any).rows || invResult || [];
-          const enterpriseId = invRows[0]?.enterprise_id || null;
-          const orderId = invRows[0]?.order_id || null;
-
           await db.execute(sql`
-            INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
-            VALUES (${cobroId}, ${companyId}, ${enterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
+            INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
+            VALUES (${cobroId}, ${companyId}, ${enterprise_id || null}, ${totalAmount.toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${reference || `Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
           `);
         }
 
@@ -155,10 +180,16 @@ export class ReceiptsService {
 
       const receiptNumber = checkRows[0].receipt_number;
 
-      // Delete associated cobros (those with reference matching the receipt)
+      // Delete associated cobros: those linked via receipt_items (invoice-based)
       await db.execute(sql`
         DELETE FROM cobros WHERE company_id = ${companyId} AND reference = ${`Recibo #${receiptNumber}`}
           AND invoice_id IN (SELECT invoice_id FROM receipt_items WHERE receipt_id = ${receiptId})
+      `);
+
+      // Also delete cobros for simple receipts (no invoice_id, matched by reference)
+      await db.execute(sql`
+        DELETE FROM cobros WHERE company_id = ${companyId} AND reference = ${`Recibo #${receiptNumber}`}
+          AND invoice_id IS NULL
       `);
 
       // Delete receipt items (cascade should handle it, but be explicit)
