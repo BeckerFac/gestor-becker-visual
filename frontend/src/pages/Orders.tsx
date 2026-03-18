@@ -1499,10 +1499,11 @@ export const Orders: React.FC = () => {
                                                       </button>
                                                       <button
                                                         onClick={() => invoicePreview.downloadPdf(inv.id, inv)}
-                                                        className="text-xs bg-indigo-600 text-white px-1.5 py-0.5 rounded hover:bg-indigo-700 transition-colors"
+                                                        disabled={invoicePreview.downloadingPdf}
+                                                        className="text-xs bg-indigo-600 text-white px-1.5 py-0.5 rounded hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                                         title="Descargar PDF"
                                                       >
-                                                        PDF
+                                                        {invoicePreview.downloadingPdf ? '...' : 'PDF'}
                                                       </button>
                                                     </>
                                                   )}
@@ -1664,6 +1665,7 @@ export const Orders: React.FC = () => {
           onAuthorize={invoicePreview.saveAndAuthorize}
           onDeleteDraft={invoicePreview.deleteDraft}
           onDownloadPdf={invoicePreview.downloadPdf}
+          downloadingPdf={invoicePreview.downloadingPdf}
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
         />
       )}

@@ -139,6 +139,7 @@ export const Remitos: React.FC = () => {
   // Confirm dialog for delete
   const [deleteTarget, setDeleteTarget] = useState<Remito | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null)
 
   // Preview modal
   const [previewRemito, setPreviewRemito] = useState<any>(null)
@@ -339,6 +340,7 @@ export const Remitos: React.FC = () => {
 
   const handleDownloadPdf = async (remitoId: string, remitoNumber: number) => {
     try {
+      setDownloadingPdfId(remitoId)
       const blob = await api.getRemitoPdf(remitoId)
       const url  = window.URL.createObjectURL(blob)
       const a    = document.createElement('a')
@@ -350,6 +352,8 @@ export const Remitos: React.FC = () => {
       window.URL.revokeObjectURL(url)
     } catch (e: any) {
       setError(e.message)
+    } finally {
+      setDownloadingPdfId(null)
     }
   }
 
@@ -874,17 +878,19 @@ export const Remitos: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handlePreviewRemito(remito.id)}
-                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
+                          disabled={previewLoading}
+                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           title="Ver remito"
                         >
                           Ver
                         </button>
                         <button
                           onClick={() => handleDownloadPdf(remito.id, remito.remito_number)}
-                          className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors"
+                          disabled={downloadingPdfId === remito.id}
+                          className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           title="Descargar PDF"
                         >
-                          PDF
+                          {downloadingPdfId === remito.id ? 'Generando...' : 'PDF'}
                         </button>
                         <label
                           className="px-2 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors cursor-pointer"

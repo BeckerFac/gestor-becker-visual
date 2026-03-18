@@ -111,6 +111,9 @@ export class PdfService {
     const domicilio = [company.companyAddress, company.companyCity, company.companyProvince]
       .filter(Boolean).join(', ')
 
+    // Invoice type letter: fallback to 'NF' for non-fiscal invoices
+    const invoiceTypeLetter = invoice.invoice_type || 'NF'
+
     // Condición IVA según tipo de factura
     const condicionIvaEmisor: Record<string, string> = {
       'A': 'IVA Responsable Inscripto',
@@ -125,7 +128,7 @@ export class PdfService {
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Factura ${invoice.invoice_type} ${comprobanteNum}</title>
+  <title>Factura ${invoiceTypeLetter} ${comprobanteNum}</title>
   <style>
     @page { size: A4; margin: 10mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -237,14 +240,14 @@ export class PdfService {
   <div class="header-wrapper">
     <div class="header-divider"></div>
     <div class="letter-box">
-      <div class="letter">${invoice.invoice_type}</div>
+      <div class="letter">${invoiceTypeLetter}</div>
       <div class="cod">COD. ${String(cbteTipo).padStart(2, '0')}</div>
     </div>
 
     <div class="header-left">
       <div class="razonsocial">${company.companyName}</div>
       ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${domicilio}</div>` : ''}
-      <div class="header-row"><span class="header-label">Condición frente al IVA:</span> <span class="header-value">${condicionIvaEmisor[invoice.invoice_type] || 'Monotributo'}</span></div>
+      <div class="header-row"><span class="header-label">Condición frente al IVA:</span> <span class="header-value">${condicionIvaEmisor[invoiceTypeLetter] || 'Monotributo'}</span></div>
     </div>
 
     <div class="header-right" style="padding-left: 50px;">

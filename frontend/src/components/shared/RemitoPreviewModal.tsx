@@ -28,6 +28,7 @@ interface RemitoPreviewModalProps {
   remito: RemitoData | null
   pdfBlobUrl: string | null
   loading: boolean
+  downloadingPdf?: boolean
   onClose: () => void
   onDownloadPdf: () => void
 }
@@ -51,6 +52,7 @@ export function RemitoPreviewModal({
   remito,
   pdfBlobUrl,
   loading,
+  downloadingPdf,
   onClose,
   onDownloadPdf,
 }: RemitoPreviewModalProps) {
@@ -271,9 +273,10 @@ export function RemitoPreviewModal({
               </button>
               <button
                 onClick={onDownloadPdf}
-                className="px-5 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors"
+                disabled={downloadingPdf}
+                className="px-5 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Descargar PDF
+                {downloadingPdf ? 'Generando...' : 'Descargar PDF'}
               </button>
             </div>
           </>

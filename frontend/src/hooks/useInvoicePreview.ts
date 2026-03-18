@@ -30,6 +30,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
   const [authFailed, setAuthFailed] = useState(false)
   const [authErrorMsg, setAuthErrorMsg] = useState('')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   const openPreview = useCallback(async (invoiceId: string, orderId: string) => {
     setPreviewLoading(true)
@@ -134,19 +135,22 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
 
   const downloadPdf = useCallback(async (invoiceId: string, invoice: any) => {
     try {
+      setDownloadingPdf(true)
       const blob = await api.downloadInvoicePdf(invoiceId)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       const pv = invoice.punto_venta ? String(invoice.punto_venta).padStart(5, '0') : '00000'
       const nro = String(invoice.invoice_number).padStart(8, '0')
       a.href = url
-      a.download = `Factura_${invoice.invoice_type}_${pv}-${nro}.pdf`
+      a.download = `Factura_${invoice.invoice_type || 'NF'}_${pv}-${nro}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
     } catch (e: any) {
       onError(e.message)
+    } finally {
+      setDownloadingPdf(false)
     }
   }, [onError])
 
@@ -170,6 +174,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     saveAndAuthorize,
     deleteDraft,
     downloadPdf,
+    downloadingPdf,
     pdfBlobUrl,
   }
 }

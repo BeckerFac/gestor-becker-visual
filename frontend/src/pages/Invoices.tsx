@@ -131,6 +131,7 @@ export const Invoices: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [authorizing, setAuthorizing] = useState<string | null>(null)
   const [linkingInvoice, setLinkingInvoice] = useState<string | null>(null)
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null)
 
   // UI
   const [showForm, setShowForm] = useState(false)
@@ -364,6 +365,7 @@ export const Invoices: React.FC = () => {
 
   const handleDownloadPdf = async (invoice: Invoice) => {
     try {
+      setDownloadingPdfId(invoice.id)
       const blob = await api.downloadInvoicePdf(invoice.id)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -372,13 +374,15 @@ export const Invoices: React.FC = () => {
       a.href = url
       a.download = invoice.fiscal_type === 'interno'
         ? `Comprobante_Interno_CI-${nro}.pdf`
-        : `Factura_${invoice.invoice_type}_${pv}-${nro}.pdf`
+        : `Factura_${invoice.invoice_type || 'NF'}_${pv}-${nro}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
     } catch (e: any) {
       setError(e.message)
+    } finally {
+      setDownloadingPdfId(null)
     }
   }
 
@@ -1169,14 +1173,27 @@ export const Invoices: React.FC = () => {
                           {(invoice.status === 'authorized' || invoice.status === 'emitido') && (
                             <button
                               onClick={() => handleDownloadPdf(invoice)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors"
+                              disabled={downloadingPdfId === invoice.id}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                              </svg>
-                              PDF
+                              {downloadingPdfId === invoice.id ? (
+                                <>
+                                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                  </svg>
+                                  Generando...
+                                </>
+                              ) : (
+                                <>
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                  </svg>
+                                  PDF
+                                </>
+                              )}
                             </button>
                           )}
                         </div>
@@ -1229,6 +1246,7 @@ export const Invoices: React.FC = () => {
           onAuthorize={invoicePreview.saveAndAuthorize}
           onDeleteDraft={invoicePreview.deleteDraft}
           onDownloadPdf={invoicePreview.downloadPdf}
+          downloadingPdf={invoicePreview.downloadingPdf}
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
         />
       )}

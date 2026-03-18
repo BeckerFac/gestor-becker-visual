@@ -18,6 +18,39 @@ const TAX_CONDITION_MAP: Record<string, string> = {
   C: 'Monotributista',
 }
 
+// AFIP RG 5616 - CondicionIVAReceptorId values
+const CONDICION_IVA_RECEPTOR_OPTIONS = [
+  { value: 1, label: '1 - IVA Resp. Inscripto' },
+  { value: 4, label: '4 - IVA Sujeto Exento' },
+  { value: 5, label: '5 - Consumidor Final' },
+  { value: 6, label: '6 - Resp. Monotributo' },
+  { value: 7, label: '7 - Sujeto No Categorizado' },
+  { value: 8, label: '8 - Proveedor del Exterior' },
+  { value: 9, label: '9 - Cliente del Exterior' },
+  { value: 10, label: '10 - IVA Liberado Ley 19.640' },
+  { value: 13, label: '13 - Monotributista Social' },
+  { value: 15, label: '15 - IVA No Alcanzado' },
+  { value: 16, label: '16 - Monotributo Trab. Indep. Promovido' },
+]
+
+// Derive default CondicionIVAReceptorId from context
+function deriveCondicionIva(
+  customerCondicionIva: number | null | undefined,
+  invoiceType: string,
+  customerCuit: string | null | undefined,
+  receptorCode: string | null
+): number {
+  if (customerCondicionIva) return customerCondicionIva
+  if (!customerCuit || customerCuit.replace(/-/g, '').length !== 11) return 5
+  if (invoiceType === 'A') {
+    if (receptorCode === 'MO') return 6
+    return 1
+  }
+  if (invoiceType === 'C') return 5
+  if (receptorCode === 'EX') return 4
+  return 5
+}
+
 // --- Helper: CUIT validation with modulo 11 ---
 function validateCuit(cuit: string): { valid: boolean; error?: string } {
   const clean = cuit.replace(/-/g, '')
@@ -92,6 +125,7 @@ interface InvoicePreviewModalProps {
   onAuthorize: () => void
   onDeleteDraft: (invoiceId: string, orderId: string) => void
   onDownloadPdf: (invoiceId: string, invoice: any) => void
+  downloadingPdf?: boolean
   pdfBlobUrl?: string | null
 }
 
@@ -114,6 +148,7 @@ export function InvoicePreviewModal({
   onAuthorize,
   onDeleteDraft,
   onDownloadPdf,
+  downloadingPdf,
   pdfBlobUrl,
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -124,6 +159,7 @@ export function InvoicePreviewModal({
   const [localCustomerCuit, setLocalCustomerCuit] = useState('')
   const [localInvoiceDate, setLocalInvoiceDate] = useState('')
   const [localNotes, setLocalNotes] = useState('')
+  const [localCondicionIva, setLocalCondicionIva] = useState<number>(5)
 
   // Initialize local state from invoice data
   useEffect(() => {
@@ -141,6 +177,10 @@ export function InvoicePreviewModal({
         }
       }
       setLocalNotes(invoice.notes || '')
+      // Initialize CondicionIVAReceptorId from customer data or derive default
+      const custCondIva = invoice.customer?.condicion_iva
+      const recCode = taxConditionToCode(invoice.customer?.tax_condition)
+      setLocalCondicionIva(deriveCondicionIva(custCondIva, invoice.invoice_type || 'B', invoice.customer?.cuit, recCode))
     }
   }, [invoice])
 
@@ -276,8 +316,13 @@ export function InvoicePreviewModal({
         ok: pvConfigured,
         detail: pvConfigured ? `PV ${puntoVenta}` : 'Punto de venta no configurado',
       },
+      {
+        label: 'Cond. IVA Receptor (RG 5616)',
+        ok: !!localCondicionIva && CONDICION_IVA_RECEPTOR_OPTIONS.some(o => o.value === localCondicionIva),
+        detail: CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || 'No configurado',
+      },
     ]
-  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta])
+  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta, localCondicionIva])
 
   const allChecksPassed = checklist.every(c => c.ok)
 
@@ -480,6 +525,30 @@ export function InvoicePreviewModal({
                     {!missingCuit && localCustomerCuit && cuitValidation && !cuitValidation.valid && (
                       <p className="text-xs text-red-500">{cuitValidation.error}</p>
                     )}
+                  </div>
+                </div>
+
+                {/* CondicionIVAReceptorId (AFIP RG 5616) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-400" htmlFor="cond-iva">Cond. IVA Receptor (AFIP RG 5616)</label>
+                    {!authorized ? (
+                      <select
+                        id="cond-iva"
+                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
+                        value={localCondicionIva}
+                        onChange={e => setLocalCondicionIva(parseInt(e.target.value))}
+                      >
+                        {CONDICION_IVA_RECEPTOR_OPTIONS.map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="px-2 py-1.5 text-sm text-gray-700">
+                        {CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || localCondicionIva}
+                      </p>
+                    )}
+                    <p className="text-xs text-amber-600">Obligatorio desde 01/04/2026. Se envia a AFIP en FECAESolicitar.</p>
                   </div>
                 </div>
 
@@ -689,6 +758,7 @@ export function InvoicePreviewModal({
                   <div><span className="text-gray-400">Items:</span> {items.length}</div>
                   <div><span className="text-gray-400">Subtotal:</span> {formatCurrency(subtotal)}</div>
                   <div><span className="text-gray-400">IVA:</span> {formatCurrency(vatAmount)}</div>
+                  <div><span className="text-gray-400">Cond. IVA Receptor:</span> {CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || localCondicionIva}</div>
                   <div className="col-span-2 sm:col-span-4 text-sm font-bold text-gray-900 pt-1 border-t border-amber-200 mt-1">
                     Total: {formatCurrency(total)}
                   </div>
@@ -774,9 +844,10 @@ export function InvoicePreviewModal({
                       {authFailed && (
                         <button
                           onClick={() => onDownloadPdf(invoice.id, invoice)}
-                          className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors"
+                          disabled={downloadingPdf}
+                          className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          Descargar PDF (borrador)
+                          {downloadingPdf ? 'Generando...' : 'Descargar PDF (borrador)'}
                         </button>
                       )}
                     </div>
@@ -791,9 +862,10 @@ export function InvoicePreviewModal({
                     </button>
                     <button
                       onClick={() => onDownloadPdf(invoice.id, invoice)}
-                      className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                      disabled={downloadingPdf}
+                      className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      Descargar PDF
+                      {downloadingPdf ? 'Generando...' : 'Descargar PDF'}
                     </button>
                   </>
                 )}
