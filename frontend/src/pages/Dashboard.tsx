@@ -398,55 +398,67 @@ export const Dashboard: React.FC = () => {
 
       {/* Action Items - only show if there are visible actions */}
       {visibleActions.length > 0 && (
-        <Card className="border-l-4 border-l-amber-400">
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-700">Requiere tu atencion</h3>
-                <span className="text-xs font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-                  {visibleActions.length}
-                </span>
+        <div className="rounded-xl bg-gradient-to-r from-indigo-50 via-white to-purple-50 dark:from-indigo-950/30 dark:via-gray-900 dark:to-purple-950/30 border border-indigo-100 dark:border-indigo-900/50 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 flex items-center justify-between border-b border-indigo-100/60 dark:border-indigo-900/30">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                </svg>
               </div>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Atencion</span>
+              <span className="text-xs font-bold bg-indigo-600 text-white w-5 h-5 rounded-full flex items-center justify-center">
+                {visibleActions.length}
+              </span>
             </div>
-            <div className="space-y-1">
-              {visibleActions.map((action) => (
-                <div
-                  key={action.type}
-                  onClick={() => navigate(action.link)}
-                  className="group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                    action.severity === 'critical' ? 'bg-red-500' :
-                    action.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-400'
-                  }`} />
-                  <p className="text-sm text-gray-800 flex-1">{action.title}</p>
-                  {action.value && (
-                    <span className="text-sm font-semibold text-gray-600">{action.value}</span>
-                  )}
-                  <button
-                    onClick={(e) => handleDismiss(action.type, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all"
-                    title="Ocultar"
-                  >
-                    <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                  <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
+          </div>
+          <div className="divide-y divide-indigo-50 dark:divide-indigo-900/20">
+            {visibleActions.map((action) => (
+              <div
+                key={action.type}
+                onClick={() => navigate(action.link)}
+                className="group flex items-center gap-4 px-5 py-3.5 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 cursor-pointer transition-all"
+              >
+                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ring-4 ${
+                  action.severity === 'critical'
+                    ? 'bg-red-500 ring-red-100 dark:ring-red-950'
+                    : action.severity === 'warning'
+                    ? 'bg-amber-500 ring-amber-100 dark:ring-amber-950'
+                    : 'bg-blue-500 ring-blue-100 dark:ring-blue-950'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{action.title}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{action.description}</p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                {action.value && (
+                  <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${
+                    action.severity === 'critical' ? 'text-red-600 dark:text-red-400' :
+                    action.severity === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
+                  }`}>{action.value}</span>
+                )}
+                <button
+                  onClick={(e) => handleDismiss(action.type, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-all shadow-none hover:shadow-sm"
+                  title="Ocultar"
+                >
+                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                <svg className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Restore dismissed - subtle link */}
       {hasDismissed && visibleActions.length === 0 && (
         <button
           onClick={handleRestoreAll}
-          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
         >
           Mostrar notificaciones ocultas ({dismissed.length})
         </button>
