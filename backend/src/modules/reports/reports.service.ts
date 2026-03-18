@@ -301,40 +301,13 @@ export class ReportsService {
     companyId: string,
     userPermissions?: Map<string, Set<string>>,
   ) {
-    try {
-      const actions: Array<{ type: string; severity: 'critical' | 'warning' | 'info'; title: string; description: string; link: string; value?: string }> = [];
+    const actions: Array<{ type: string; severity: 'critical' | 'warning' | 'info'; title: string; description: string; link: string; value?: string }> = [];
 
-      // Overdue invoices (authorized but unpaid, older than 30 days)
-      if (canView(userPermissions, 'invoices')) {
-        const overdueResult = await db.execute(sql`
-          SELECT COUNT(*) as count, COALESCE(SUM(
-            CAST(i.total_amount AS decimal) - COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-            )
-          ), 0) as total
-          FROM invoices i
-          WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
-            AND i.invoice_date < NOW() - INTERVAL '30 days'
-            AND CAST(i.total_amount AS decimal) > COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-            )
-        `);
-        const overdueRows = (overdueResult as any).rows || overdueResult || [];
-        const overdueCount = parseInt(overdueRows[0]?.count || '0');
-        const overdueTotal = parseFloat(overdueRows[0]?.total || '0');
-        if (overdueCount > 0) {
-          actions.push({
-            type: 'overdue_invoices',
-            severity: 'critical',
-            title: `${overdueCount} factura${overdueCount > 1 ? 's' : ''} vencida${overdueCount > 1 ? 's' : ''}`,
-            description: `Facturas sin cobrar hace mas de 30 dias`,
-            link: '/invoices',
-            value: `$${overdueTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
-          });
-        }
+    // Each query wrapped independently so one failure doesn't break all
 
-        // Draft invoices pending authorization
+    // Draft invoices pending authorization
+    if (canView(userPermissions, 'invoices')) {
+      try {
         const draftsResult = await db.execute(sql`
           SELECT COUNT(*) as count
           FROM invoices
@@ -351,12 +324,14 @@ export class ReportsService {
             link: '/invoices',
           });
         }
-      }
+      } catch (e) { console.error('Insights draft_invoices error:', e); }
+    }
 
-      // Orders pending delivery
-      if (canView(userPermissions, 'orders')) {
+    // Orders pending
+    if (canView(userPermissions, 'orders')) {
+      try {
         const pendingOrdersResult = await db.execute(sql`
-          SELECT COUNT(*) as count, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
+          SELECT COUNT(*) as count
           FROM orders
           WHERE company_id = ${companyId} AND status = 'pendiente'
         `);
@@ -371,10 +346,12 @@ export class ReportsService {
             link: '/orders',
           });
         }
-      }
+      } catch (e) { console.error('Insights pending_orders error:', e); }
+    }
 
-      // Low stock products
-      if (canView(userPermissions, 'products')) {
+    // Low stock products
+    if (canView(userPermissions, 'products')) {
+      try {
         const lowStockResult = await db.execute(sql`
           SELECT COUNT(*) as count
           FROM products p
@@ -396,10 +373,12 @@ export class ReportsService {
             link: '/products',
           });
         }
-      }
+      } catch (e) { console.error('Insights low_stock error:', e); }
+    }
 
-      // Cheques about to expire (next 7 days)
-      if (canView(userPermissions, 'cheques')) {
+    // Cheques about to expire (next 7 days)
+    if (canView(userPermissions, 'cheques')) {
+      try {
         const chequesExpiringResult = await db.execute(sql`
           SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
           FROM cheques
@@ -421,42 +400,14 @@ export class ReportsService {
             value: `$${chequesTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
           });
         }
-      }
-
-      // Top 5 customers by revenue
-      let topCustomers: Array<{ name: string; revenue: number; order_count: number }> = [];
-      if (canView(userPermissions, 'invoices')) {
-        const topCustomersResult = await db.execute(sql`
-          SELECT
-            c.name,
-            COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as revenue,
-            COUNT(i.id) as order_count
-          FROM invoices i
-          JOIN customers c ON i.customer_id = c.id
-          WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
-          GROUP BY c.id, c.name
-          ORDER BY revenue DESC
-          LIMIT 5
-        `);
-        const custRows = (topCustomersResult as any).rows || topCustomersResult || [];
-        topCustomers = custRows.map((r: any) => ({
-          name: r.name || 'Sin nombre',
-          revenue: parseFloat(r.revenue || '0'),
-          order_count: parseInt(r.order_count || '0'),
-        }));
-      }
-
-      // Sort actions: critical first, then warning, then info
-      const severityOrder = { critical: 0, warning: 1, info: 2 };
-      actions.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-
-      return { actions, top_customers: topCustomers };
-    } catch (error) {
-      console.error('Insights error:', error);
-      if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to generate insights');
+      } catch (e) { console.error('Insights cheques error:', e); }
     }
+
+    // Sort actions: critical first, then warning, then info
+    const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+    actions.sort((a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2));
+
+    return { actions };
   }
 }
 
