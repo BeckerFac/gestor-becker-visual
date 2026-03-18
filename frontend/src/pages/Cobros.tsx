@@ -34,7 +34,7 @@ interface Cobro {
 }
 
 interface Enterprise { id: string; name: string }
-interface Order { id: string; order_number: number; title: string; total_amount: string; customer?: { enterprise_id?: string } }
+interface Order { id: string; order_number: number; title: string; total_amount: string; payment_status?: string; enterprise_id?: string; enterprise?: { id: string; name: string } | null; customer?: { id?: string; name?: string; enterprise_id?: string } }
 interface Bank { id: string; bank_name: string }
 
 interface Receipt {
@@ -77,6 +77,27 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   tarjeta: 'Tarjeta',
 }
 
+const DISMISSED_PENDING_COBROS_KEY = 'gestia_dismissed_pending_cobros'
+
+function getDismissedPendingCobros(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_PENDING_COBROS_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function dismissPendingCobro(orderId: string) {
+  const dismissed = getDismissedPendingCobros()
+  if (!dismissed.includes(orderId)) {
+    localStorage.setItem(DISMISSED_PENDING_COBROS_KEY, JSON.stringify([...dismissed, orderId]))
+  }
+}
+
+function restorePendingCobros() {
+  localStorage.removeItem(DISMISSED_PENDING_COBROS_KEY)
+}
+
 export const Cobros: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'cobros' | 'recibos'>('cobros')
   const [cobros, setCobros] = useState<Cobro[]>([])
@@ -95,6 +116,8 @@ export const Cobros: React.FC = () => {
   const [pageSize, setPageSize] = useState(25)
   const [deleteTarget, setDeleteTarget] = useState<Cobro | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [dismissedPendingCobros, setDismissedPendingCobros] = useState<string[]>(getDismissedPendingCobros())
+  const [pendingCollapsed, setPendingCollapsed] = useState(false)
 
   // Recibos state
   const [receipts, setReceipts] = useState<Receipt[]>([])
@@ -156,7 +179,7 @@ export const Cobros: React.FC = () => {
           return []
         }),
         api.getEnterprises().catch(() => []),
-        api.getOrders().catch(() => ({ items: [] })),
+        api.getOrders({ limit: 200 }).catch(() => ({ items: [] })),
         api.getBanks().catch(() => []),
       ])
       setCobros(cobrosRes || [])
@@ -251,6 +274,63 @@ export const Cobros: React.FC = () => {
   useEffect(() => { loadData() }, [filterEnterprise])
   useEffect(() => { if (activeTab === 'recibos') loadReceipts() }, [activeTab, loadReceipts])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
+
+  // Calculate paid amounts per order from cobros data
+  const paidByOrder = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const cobro of cobros) {
+      if (cobro.order_id) {
+        const current = map.get(cobro.order_id) || 0
+        map.set(cobro.order_id, current + Number(cobro.amount || 0))
+      }
+    }
+    return map
+  }, [cobros])
+
+  // Pending orders (pendiente or parcial payment_status, not dismissed, not cancelled)
+  const pendingOrders = useMemo(() => {
+    const allOrders = Array.isArray(orders) ? orders : []
+    return allOrders
+      .filter((o: any) => o.payment_status === 'pendiente' || o.payment_status === 'parcial')
+      .filter((o: any) => o.status !== 'cancelado')
+      .filter(o => !dismissedPendingCobros.includes(o.id))
+      .map(o => {
+        const total = parseFloat(o.total_amount || '0')
+        const paid = paidByOrder.get(o.id) || 0
+        const remaining = Math.max(0, total - paid)
+        const enterpriseName = (o as any).enterprise?.name || (o as any).customer?.name || 'Sin empresa'
+        const enterpriseId = (o as any).enterprise?.id || (o as any).enterprise_id || (o as any).customer?.enterprise_id || ''
+        return { ...o, paid, remaining, enterprise_name: enterpriseName, resolved_enterprise_id: enterpriseId }
+      })
+  }, [orders, paidByOrder, dismissedPendingCobros])
+
+  const totalPendingCobros = pendingOrders.reduce((sum, o) => sum + o.remaining, 0)
+  const hasDismissedPendingCobros = dismissedPendingCobros.length > 0
+
+  const handleDismissPendingCobro = (orderId: string) => {
+    dismissPendingCobro(orderId)
+    setDismissedPendingCobros([...dismissedPendingCobros, orderId])
+  }
+
+  const handleRestorePendingCobros = () => {
+    restorePendingCobros()
+    setDismissedPendingCobros([])
+  }
+
+  const handleCollectFromOrder = useCallback((order: typeof pendingOrders[0]) => {
+    setForm({
+      enterprise_id: order.resolved_enterprise_id,
+      order_id: order.id,
+      amount: order.remaining.toFixed(2),
+      payment_method: 'transferencia',
+      bank_id: '',
+      reference: '',
+      payment_date: new Date().toISOString().split('T')[0],
+      notes: `Cobro pedido #${String(order.order_number).padStart(4, '0')}`,
+    })
+    loadOrderItems(order.id)
+    setShowForm(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -401,7 +481,7 @@ export const Cobros: React.FC = () => {
 
       {activeTab === 'cobros' && (<>
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border border-green-200 bg-green-50">
           <CardContent className="pt-3 pb-2">
             <p className="text-xs text-green-700">Total Cobrado</p>
@@ -420,7 +500,114 @@ export const Cobros: React.FC = () => {
             <p className="text-xl font-bold text-purple-800">{new Set(filteredCobros.map(c => c.enterprise_id).filter(Boolean)).size}</p>
           </CardContent>
         </Card>
+        <Card className="border border-orange-200 bg-orange-50">
+          <CardContent className="pt-3 pb-2">
+            <p className="text-xs text-orange-700">Pendiente de Cobro</p>
+            <p className="text-xl font-bold text-orange-800">{fmt(totalPendingCobros)}</p>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Pedidos por Cobrar Section */}
+      {!loading && pendingOrders.length > 0 && (
+        <Card className="border border-orange-300 bg-gradient-to-r from-orange-50 to-yellow-50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-orange-900">
+                  Pedidos por Cobrar
+                </h3>
+                <span className="text-xs font-medium bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full">
+                  {pendingOrders.length}
+                </span>
+              </div>
+              <button
+                onClick={() => setPendingCollapsed(!pendingCollapsed)}
+                className="text-orange-700 hover:text-orange-900 text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                {pendingCollapsed ? 'Expandir' : 'Colapsar'}
+                <span className="text-xs">{pendingCollapsed ? '\u25BC' : '\u25B2'}</span>
+              </button>
+            </div>
+          </CardHeader>
+          {!pendingCollapsed && (
+            <CardContent className="pt-0">
+              <div className="space-y-2">
+                {pendingOrders.map(order => (
+                  <div
+                    key={order.id}
+                    className="bg-white border border-orange-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
+                  >
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <span className="font-mono font-bold text-orange-700 text-sm whitespace-nowrap">
+                        #{String(order.order_number).padStart(4, '0')}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {order.enterprise_name}
+                        </p>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                          <span>Total: {fmt(order.total_amount)}</span>
+                          {order.paid > 0 && (
+                            <span className="text-green-600">Cobrado: {fmt(order.paid)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <p className="text-sm font-bold text-orange-700">{fmt(order.remaining)}</p>
+                        <p className="text-xs text-gray-400">restante</p>
+                      </div>
+                      <span className={`text-xs font-medium rounded-full px-2 py-0.5 whitespace-nowrap ${
+                        order.payment_status === 'parcial'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {order.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <PermissionGate module="cobros" action="create">
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => handleCollectFromOrder(order)}
+                        >
+                          Cobrar
+                        </Button>
+                      </PermissionGate>
+                      <button
+                        onClick={() => handleDismissPendingCobro(order.id)}
+                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                        title="Ocultar temporalmente"
+                      >
+                        x
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {hasDismissedPendingCobros && (
+                <button
+                  onClick={handleRestorePendingCobros}
+                  className="text-xs text-gray-400 hover:text-orange-600 transition-colors mt-3"
+                >
+                  Mostrar ocultos ({dismissedPendingCobros.length})
+                </button>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Restore dismissed when all are hidden */}
+      {!loading && pendingOrders.length === 0 && hasDismissedPendingCobros && (
+        <button
+          onClick={handleRestorePendingCobros}
+          className="text-xs text-gray-400 hover:text-orange-600 transition-colors"
+        >
+          Mostrar pedidos por cobrar ocultos ({dismissedPendingCobros.length})
+        </button>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg animate-fadeIn">
