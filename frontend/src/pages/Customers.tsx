@@ -24,6 +24,7 @@ interface Customer {
   phone: string | null
   email: string | null
   tax_condition: string | null
+  condicion_iva: number | null
   credit_limit: string | null
   payment_terms: number | null
   notes: string | null
@@ -32,9 +33,25 @@ interface Customer {
   tags: { id: string; name: string; color: string }[]
 }
 
+const CONDICION_IVA_OPTIONS = [
+  { value: '', label: '-- Seleccionar --' },
+  { value: '1', label: '1 - IVA Responsable Inscripto' },
+  { value: '4', label: '4 - IVA Sujeto Exento' },
+  { value: '5', label: '5 - Consumidor Final' },
+  { value: '6', label: '6 - Responsable Monotributo' },
+  { value: '7', label: '7 - Sujeto No Categorizado' },
+  { value: '8', label: '8 - Proveedor del Exterior' },
+  { value: '9', label: '9 - Cliente del Exterior' },
+  { value: '10', label: '10 - IVA Liberado Ley 19.640' },
+  { value: '13', label: '13 - Monotributista Social' },
+  { value: '15', label: '15 - IVA No Alcanzado' },
+  { value: '16', label: '16 - Monotributo Trab. Indep. Promovido' },
+]
+
 const emptyForm = {
   cuit: '', name: '', contact_name: '', address: '', city: '', province: '',
-  phone: '', email: '', tax_condition: 'Responsable Inscripto', credit_limit: '', payment_terms: '30', notes: '',
+  phone: '', email: '', tax_condition: 'Responsable Inscripto', condicion_iva: '',
+  credit_limit: '', payment_terms: '30', notes: '',
 }
 
 export const Customers: React.FC = () => {
@@ -79,6 +96,7 @@ export const Customers: React.FC = () => {
     try {
       const payload = {
         ...form,
+        condicion_iva: form.condicion_iva ? parseInt(form.condicion_iva) : null,
         credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
         payment_terms: form.payment_terms ? parseInt(form.payment_terms) : null,
       }
@@ -107,6 +125,7 @@ export const Customers: React.FC = () => {
       address: customer.address || '', city: customer.city || '', province: customer.province || '',
       phone: customer.phone || '', email: customer.email || '',
       tax_condition: customer.tax_condition || 'Responsable Inscripto',
+      condicion_iva: customer.condicion_iva?.toString() || '',
       credit_limit: customer.credit_limit || '', payment_terms: customer.payment_terms?.toString() || '30',
       notes: customer.notes || '',
     })
@@ -254,6 +273,13 @@ export const Customers: React.FC = () => {
                   <option>Exento</option>
                   <option>Consumidor Final</option>
                 </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Cond. IVA AFIP (RG 5616)</label>
+                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.condicion_iva} onChange={e => setForm({ ...form, condicion_iva: e.target.value })}>
+                  {CONDICION_IVA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400">Obligatorio desde 01/04/2026 para facturacion AFIP</p>
               </div>
               <Input label="Dirección" placeholder="Av. Ejemplo 1234" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
               <Input label="Ciudad" placeholder="Buenos Aires" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />

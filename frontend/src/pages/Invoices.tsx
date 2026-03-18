@@ -1248,6 +1248,8 @@ export const Invoices: React.FC = () => {
           onDownloadPdf={invoicePreview.downloadPdf}
           downloadingPdf={invoicePreview.downloadingPdf}
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
+          condicionIva={invoicePreview.previewCondicionIva}
+          onCondicionIvaChange={invoicePreview.setPreviewCondicionIva}
         />
       )}
     </div>

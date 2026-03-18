@@ -31,6 +31,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
   const [authErrorMsg, setAuthErrorMsg] = useState('')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [previewCondicionIva, setPreviewCondicionIva] = useState<number>(5)
 
   const openPreview = useCallback(async (invoiceId: string, orderId: string) => {
     setPreviewLoading(true)
@@ -101,7 +102,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
       })
 
       setAuthorizeProgress('Autorizando con AFIP...')
-      const authorized = await api.authorizeInvoice(previewInvoice.id, previewPuntoVenta)
+      const authorized = await api.authorizeInvoice(previewInvoice.id, previewPuntoVenta, previewCondicionIva)
       setPreviewInvoice(authorized)
       setInvoiceAuthorized(true)
       setAuthorizeProgress('Factura autorizada exitosamente')
@@ -119,7 +120,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     } finally {
       setAuthorizingInvoice(false)
     }
-  }, [previewInvoice, authorizingInvoice, previewInvoiceType, previewItems, previewPuntoVenta, previewOrderId, onError, onDataRefresh, loadInvoicingStatus])
+  }, [previewInvoice, authorizingInvoice, previewInvoiceType, previewItems, previewPuntoVenta, previewCondicionIva, previewOrderId, onError, onDataRefresh, loadInvoicingStatus])
 
   const deleteDraft = useCallback(async (invoiceId: string, orderId: string) => {
     if (!confirm('Eliminar este borrador de factura?')) return
@@ -176,5 +177,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     downloadPdf,
     downloadingPdf,
     pdfBlobUrl,
+    previewCondicionIva,
+    setPreviewCondicionIva,
   }
 }

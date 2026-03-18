@@ -17,6 +17,7 @@ export class CustomersService {
     await db.execute(sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS notes TEXT`).catch(() => {});
     await db.execute(sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(() => {});
     await db.execute(sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS role VARCHAR(100)`).catch(() => {});
+    await db.execute(sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condicion_iva INTEGER`).catch(() => {});
     this.migrated = true;
   }
 
@@ -41,6 +42,7 @@ export class CustomersService {
         email: data.email,
         phone: data.phone,
         tax_condition: data.tax_condition,
+        condicion_iva: data.condicion_iva ?? null,
         credit_limit: data.credit_limit,
         payment_terms: data.payment_terms,
       }).returning();

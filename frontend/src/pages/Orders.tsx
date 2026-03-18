@@ -1667,6 +1667,8 @@ export const Orders: React.FC = () => {
           onDownloadPdf={invoicePreview.downloadPdf}
           downloadingPdf={invoicePreview.downloadingPdf}
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
+          condicionIva={invoicePreview.previewCondicionIva}
+          onCondicionIvaChange={invoicePreview.setPreviewCondicionIva}
         />
       )}
 

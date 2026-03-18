@@ -297,7 +297,7 @@ export class InvoicesService {
       const result = await db.execute(sql`
         SELECT i.*,
           CASE WHEN c.id IS NOT NULL THEN
-            json_build_object('id', c.id, 'name', c.name, 'cuit', c.cuit, 'email', c.email, 'phone', c.phone, 'address', c.address)
+            json_build_object('id', c.id, 'name', c.name, 'cuit', c.cuit, 'email', c.email, 'phone', c.phone, 'address', c.address, 'tax_condition', c.tax_condition, 'condicion_iva', c.condicion_iva)
           ELSE NULL END as customer,
           CASE WHEN e.id IS NOT NULL THEN
             json_build_object('id', e.id, 'name', e.name, 'cuit', e.cuit)
@@ -508,7 +508,7 @@ export class InvoicesService {
     }
   }
 
-  async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1) {
+  async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1, overrideCondicionIva?: number) {
     try {
       // Block internal vouchers from AFIP authorization
       const ftCheck = await db.execute(sql`SELECT fiscal_type FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}`);
@@ -527,13 +527,16 @@ export class InvoicesService {
         throw new ApiError(400, 'La factura no tiene importe. Verifique que los items tengan precios.');
       }
 
-      // Get customer CUIT
+      // Get customer CUIT and condicion_iva
       let customerCuit = '';
+      let customerCondicionIva: number | null = null;
       if (invoice.customer_id) {
-        const customer = await db.query.customers.findFirst({
-          where: eq(customers.id, invoice.customer_id),
-        });
-        if (customer) customerCuit = customer.cuit || '';
+        const custRow = await db.execute(sql`SELECT cuit, condicion_iva, tax_condition FROM customers WHERE id = ${invoice.customer_id}`);
+        const custData = ((custRow as any).rows || [])[0];
+        if (custData) {
+          customerCuit = custData.cuit || '';
+          customerCondicionIva = custData.condicion_iva ? parseInt(custData.condicion_iva) : null;
+        }
       }
 
       // Get invoice items for IVA breakdown
@@ -608,12 +611,30 @@ export class InvoicesService {
         }
       }
 
+      // Resolve CondicionIVAReceptorId: explicit override > customer setting > derive from context
+      let condicionIvaReceptorId: number | undefined = overrideCondicionIva ?? customerCondicionIva ?? undefined;
+      if (!condicionIvaReceptorId) {
+        // Default logic based on invoice type and customer document
+        const cleanCustCuit = customerCuit?.replace(/-/g, '') || '';
+        const isConsumidorFinal = !cleanCustCuit || cleanCustCuit.length !== 11;
+        if (isConsumidorFinal) {
+          condicionIvaReceptorId = 5; // Consumidor Final
+        } else if (invoiceType === 'A') {
+          condicionIvaReceptorId = 1; // RI (default for Factura A)
+        } else if (invoiceType === 'C') {
+          condicionIvaReceptorId = 5; // CF (default for Factura C)
+        } else {
+          condicionIvaReceptorId = 5; // CF (default for Factura B)
+        }
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
         invoiceType: invoiceType,
         concepto,
         customerCuit,
+        condicionIvaReceptorId,
         subtotal: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? neto : parseFloat(invoice.subtotal?.toString() || '0'),
         vat: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? iva : parseFloat(invoice.vat_amount?.toString() || '0'),
         total: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? calculatedTotal : parseFloat(invoice.total_amount?.toString() || '0'),

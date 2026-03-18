@@ -127,6 +127,8 @@ interface InvoicePreviewModalProps {
   onDownloadPdf: (invoiceId: string, invoice: any) => void
   downloadingPdf?: boolean
   pdfBlobUrl?: string | null
+  condicionIva?: number
+  onCondicionIvaChange?: (v: number) => void
 }
 
 export function InvoicePreviewModal({
@@ -150,6 +152,8 @@ export function InvoicePreviewModal({
   onDownloadPdf,
   downloadingPdf,
   pdfBlobUrl,
+  condicionIva: externalCondicionIva,
+  onCondicionIvaChange,
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const [showConfirmAuthorize, setShowConfirmAuthorize] = useState(false)
@@ -159,7 +163,11 @@ export function InvoicePreviewModal({
   const [localCustomerCuit, setLocalCustomerCuit] = useState('')
   const [localInvoiceDate, setLocalInvoiceDate] = useState('')
   const [localNotes, setLocalNotes] = useState('')
-  const [localCondicionIva, setLocalCondicionIva] = useState<number>(5)
+  const [localCondicionIva, setLocalCondicionIvaState] = useState<number>(externalCondicionIva ?? 5)
+  const setLocalCondicionIva = (v: number) => {
+    setLocalCondicionIvaState(v)
+    onCondicionIvaChange?.(v)
+  }
 
   // Initialize local state from invoice data
   useEffect(() => {

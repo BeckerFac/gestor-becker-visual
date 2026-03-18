@@ -152,6 +152,7 @@ export const customers = pgTable('customers', {
   phone: varchar('phone', { length: 20 }),
   email: varchar('email', { length: 100 }),
   tax_condition: varchar('tax_condition', { length: 50 }), // IVA, Monotributo, etc
+  condicion_iva: integer('condicion_iva'), // AFIP CondicionIVAReceptorId (RG 5616)
   credit_limit: decimal('credit_limit', { precision: 12, scale: 2 }),
   payment_terms: integer('payment_terms'), // días
   status: varchar('status', { length: 50 }).default('active'), // active, inactive, suspended

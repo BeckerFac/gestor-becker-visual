@@ -346,8 +346,11 @@ export const api = {
     const { data } = await client.delete(`/invoices/${id}`)
     return data
   },
-  authorizeInvoice: async (id: string, puntoVenta: number = 3) => {
-    const { data } = await client.post(`/invoices/${id}/authorize`, { punto_venta: puntoVenta })
+  authorizeInvoice: async (id: string, puntoVenta: number = 3, condicionIvaReceptorId?: number) => {
+    const { data } = await client.post(`/invoices/${id}/authorize`, {
+      punto_venta: puntoVenta,
+      condicion_iva_receptor_id: condicionIvaReceptorId,
+    })
     return data
   },
   downloadInvoicePdf: async (invoiceId: string): Promise<Blob> => {

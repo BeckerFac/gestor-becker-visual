@@ -110,7 +110,9 @@ export class InvoicesController {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
       const rawPv = parseInt(req.body.punto_venta);
       const puntoVenta = Number.isFinite(rawPv) && rawPv >= 1 && rawPv <= 99999 ? rawPv : 3;
-      const invoice = await invoicesService.authorizeInvoice(req.user.company_id, req.params.id, puntoVenta);
+      const rawCondIva = parseInt(req.body.condicion_iva_receptor_id);
+      const condicionIvaReceptorId = Number.isFinite(rawCondIva) ? rawCondIva : undefined;
+      const invoice = await invoicesService.authorizeInvoice(req.user.company_id, req.params.id, puntoVenta, condicionIvaReceptorId);
       res.json(invoice);
     } catch (error) {
       if (error instanceof ApiError) {

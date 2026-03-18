@@ -19,6 +19,7 @@ export interface AuthorizeInvoiceInput {
   invoiceDate: Date
   puntoVenta: number
   concepto: 1 | 2 | 3 // 1=Productos, 2=Servicios, 3=Productos y Servicios
+  condicionIvaReceptorId?: number // AFIP RG 5616 - mandatory from 01/04/2026
   items?: Array<{
     quantity: number
     unitPrice: number
@@ -495,6 +496,24 @@ export class AfipService {
     // Format date
     const fchDate = this.formatAfipDate(input.invoiceDate)
 
+    // Resolve CondicionIVAReceptorId (AFIP RG 5616 - mandatory from 01/04/2026)
+    let condicionIvaReceptorId = input.condicionIvaReceptorId
+    if (!condicionIvaReceptorId) {
+      // Default logic based on invoice type and document type
+      if (docTipo === 99) {
+        condicionIvaReceptorId = 5 // Consumidor Final
+      } else if (cbteTipo === 1) {
+        // Factura A -> RI by default
+        condicionIvaReceptorId = 1
+      } else if (cbteTipo === 11) {
+        // Factura C -> Consumidor Final by default
+        condicionIvaReceptorId = 5
+      } else {
+        // Factura B -> Consumidor Final by default
+        condicionIvaReceptorId = 5
+      }
+    }
+
     // Build FECAESolicitar request
     const soapBody = this.buildFECAESolicitarRequest(
       token, sign, company.cuit, {
@@ -516,6 +535,7 @@ export class AfipService {
         MonId: 'PES',
         MonCotiz: 1,
         Iva: ivaItems,
+        CondicionIVAReceptorId: condicionIvaReceptorId,
       }
     )
 
@@ -652,6 +672,7 @@ export class AfipService {
             <ImpOpEx>${data.ImpOpEx}</ImpOpEx>
             <ImpIVA>${data.ImpIVA}</ImpIVA>
             <ImpTrib>${data.ImpTrib}</ImpTrib>
+            <CondicionIVAReceptorId>${data.CondicionIVAReceptorId || 5}</CondicionIVAReceptorId>
             <MonId>${data.MonId}</MonId>
             <MonCotiz>${data.MonCotiz}</MonCotiz>
             ${ivaXml}
