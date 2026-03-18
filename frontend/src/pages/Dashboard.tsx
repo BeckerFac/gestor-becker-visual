@@ -6,12 +6,7 @@ import { useCanAny } from '@/components/shared/PermissionGate'
 import { api } from '@/services/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SkeletonPage } from '@/components/ui/Skeleton'
-import { EmptyState } from '@/components/shared/EmptyState'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Cell,
-} from 'recharts'
 import { useNavigate } from 'react-router-dom'
 
 interface DashboardData {
@@ -48,14 +43,34 @@ interface SearchResults {
   invoices: any[]
 }
 
+const DISMISSED_KEY = 'gestia_dismissed_actions'
+
+function getDismissed(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+function dismissAction(type: string) {
+  const dismissed = getDismissed()
+  if (!dismissed.includes(type)) {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...dismissed, type]))
+  }
+}
+
+function restoreActions() {
+  localStorage.removeItem(DISMISSED_KEY)
+}
+
 
 export const Dashboard: React.FC = () => {
   const company = useAuthStore((state) => state.company)
   const navigate = useNavigate()
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
-  const [salesData, setSalesData] = useState<any[]>([])
   const [insights, setInsights] = useState<InsightsData | null>(null)
-  const [topProducts, setTopProducts] = useState<any[]>([])
+  const [dismissed, setDismissed] = useState<string[]>(getDismissed())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState('mes')
@@ -76,20 +91,11 @@ export const Dashboard: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    const periodToDays: Record<string, number> = {
-      hoy: 1,
-      semana: 7,
-      mes: 30,
-      '3meses': 90,
-      anual: 365,
-      todos: 3650,
-    }
     const loadData = async () => {
       try {
         setLoading(true)
         setError(null)
-        const days = periodToDays[period] || 30
-        const [dashRes, salesRes, insightsRes, topProdsRes] = await Promise.all([
+        const [dashRes, insightsRes] = await Promise.all([
           api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
             return {
@@ -99,14 +105,10 @@ export const Dashboard: React.FC = () => {
               recent_invoices: [], recent_orders: [],
             }
           }),
-          api.getSalesReport(days).catch(() => []),
           api.getInsights().catch(() => ({ actions: [], top_customers: [] })),
-          api.getTopProducts().catch(() => []),
         ])
         setDashboard(dashRes)
-        setSalesData(Array.isArray(salesRes) ? salesRes : [])
         setInsights(insightsRes)
-        setTopProducts(Array.isArray(topProdsRes) ? topProdsRes : [])
       } finally {
         setLoading(false)
       }
@@ -156,6 +158,17 @@ export const Dashboard: React.FC = () => {
     navigate(path)
   }
 
+  const handleDismiss = (type: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    dismissAction(type)
+    setDismissed([...dismissed, type])
+  }
+
+  const handleRestoreAll = () => {
+    restoreActions()
+    setDismissed([])
+  }
+
   const hasResults = searchResults && (
     (searchResults.enterprises?.length || 0) > 0 ||
     (searchResults.customers?.length || 0) > 0 ||
@@ -164,11 +177,6 @@ export const Dashboard: React.FC = () => {
     (searchResults.products?.length || 0) > 0 ||
     (searchResults.invoices?.length || 0) > 0
   )
-
-  const formatShortDate = (dateStr: string) => {
-    const d = new Date(dateStr)
-    return `${d.getDate()}/${d.getMonth() + 1}`
-  }
 
   const periodLabels: Record<string, string> = {
     hoy: 'Hoy',
@@ -179,16 +187,6 @@ export const Dashboard: React.FC = () => {
     todos: 'Total Historico',
   }
   const periodLabel = periodLabels[period] || 'este Mes'
-
-  const chartTitleLabels: Record<string, string> = {
-    hoy: 'Hoy',
-    semana: 'Esta Semana',
-    mes: 'Este Mes',
-    '3meses': 'Ultimos 3 Meses',
-    anual: 'Este Ano',
-    todos: 'Historico',
-  }
-  const chartTitle = `Ventas - ${chartTitleLabels[period] || 'Ultimos 7 Dias'}`
 
   if (loading) {
     return <SkeletonPage />
@@ -234,6 +232,10 @@ export const Dashboard: React.FC = () => {
   ]
   const kpis = allKpis.filter(k => k.visible)
 
+  // Filter out dismissed actions
+  const visibleActions = (insights?.actions || []).filter(a => !dismissed.includes(a.type))
+  const hasDismissed = dismissed.length > 0
+
   return (
     <div className="space-y-6">
       {error && (
@@ -244,8 +246,8 @@ export const Dashboard: React.FC = () => {
       {/* Header with Search */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">
             {company ? `${company.name} — CUIT: ${company.cuit}` : 'Cargando...'}
           </p>
         </div>
@@ -278,7 +280,6 @@ export const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="py-2">
-                  {/* Enterprises */}
                   {(searchResults!.enterprises?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Empresas</p>
@@ -293,8 +294,6 @@ export const Dashboard: React.FC = () => {
                       ))}
                     </div>
                   )}
-
-                  {/* Orders */}
                   {(searchResults!.orders?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Pedidos</p>
@@ -311,8 +310,6 @@ export const Dashboard: React.FC = () => {
                       ))}
                     </div>
                   )}
-
-                  {/* Purchases */}
                   {(searchResults!.purchases?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Compras</p>
@@ -329,8 +326,6 @@ export const Dashboard: React.FC = () => {
                       ))}
                     </div>
                   )}
-
-                  {/* Products */}
                   {(searchResults!.products?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Productos</p>
@@ -345,8 +340,6 @@ export const Dashboard: React.FC = () => {
                       ))}
                     </div>
                   )}
-
-                  {/* Invoices */}
                   {(searchResults!.invoices?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Facturas</p>
@@ -363,8 +356,6 @@ export const Dashboard: React.FC = () => {
                       ))}
                     </div>
                   )}
-
-                  {/* Customers */}
                   {(searchResults!.customers?.length || 0) > 0 && (
                     <div>
                       <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Contactos</p>
@@ -405,177 +396,61 @@ export const Dashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Insights + Top Products Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Action Items / Insights */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Acciones Pendientes</h3>
-              {(insights?.actions?.length || 0) > 0 && (
-                <span className="text-xs font-medium bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                  {insights!.actions.length}
+      {/* Action Items - only show if there are visible actions */}
+      {visibleActions.length > 0 && (
+        <Card className="border-l-4 border-l-amber-400">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-gray-700">Requiere tu atencion</h3>
+                <span className="text-xs font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                  {visibleActions.length}
                 </span>
-              )}
+              </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            {(insights?.actions?.length || 0) > 0 ? (
-              <div className="space-y-3">
-                {insights!.actions.map((action, idx) => (
+            <div className="space-y-1">
+              {visibleActions.map((action) => (
+                <div
+                  key={action.type}
+                  onClick={() => navigate(action.link)}
+                  className="group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    action.severity === 'critical' ? 'bg-red-500' :
+                    action.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-400'
+                  }`} />
+                  <p className="text-sm text-gray-800 flex-1">{action.title}</p>
+                  {action.value && (
+                    <span className="text-sm font-semibold text-gray-600">{action.value}</span>
+                  )}
                   <button
-                    key={idx}
-                    onClick={() => navigate(action.link)}
-                    className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left border border-gray-100"
+                    onClick={(e) => handleDismiss(action.type, e)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all"
+                    title="Ocultar"
                   >
-                    <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
-                      action.severity === 'critical' ? 'bg-red-500' :
-                      action.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
-                    }`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium text-gray-900 truncate">{action.title}</p>
-                        {action.value && (
-                          <span className={`text-sm font-bold flex-shrink-0 ${
-                            action.severity === 'critical' ? 'text-red-600' :
-                            action.severity === 'warning' ? 'text-amber-600' : 'text-blue-600'
-                          }`}>{action.value}</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-0.5">{action.description}</p>
-                    </div>
-                    <svg className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="text-3xl mb-2">&#10003;</div>
-                <p className="text-sm font-medium text-gray-700">Todo al dia</p>
-                <p className="text-xs text-gray-500 mt-1">No hay acciones pendientes</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Top Products */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Top Productos</h3>
-              <button
-                onClick={() => navigate('/products')}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Ver todos
-              </button>
+                  <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              ))}
             </div>
-          </CardHeader>
-          <CardContent>
-            {topProducts.length > 0 ? (
-              <div className="space-y-4">
-                {topProducts.map((product, idx) => {
-                  const maxRevenue = topProducts[0]?.revenue || 1;
-                  const percentage = (product.revenue / maxRevenue) * 100;
-                  const colors = ['#3b82f6', '#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd'];
-                  return (
-                    <div key={idx}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm text-gray-700 truncate max-w-[60%]">{product.name}</span>
-                        <span className="text-sm font-semibold text-gray-900">{formatCurrency(product.revenue)}</span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-2">
-                        <div
-                          className="h-2 rounded-full transition-all duration-500"
-                          style={{ width: `${percentage}%`, backgroundColor: colors[idx] || colors[4] }}
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 mt-0.5">{product.sold_qty} unidades vendidas</p>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <EmptyState title="Sin datos de productos" description="Las ventas por producto apareceran aca" />
-            )}
           </CardContent>
         </Card>
-      </div>
+      )}
 
-      {/* Top Customers + Sales Chart Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Customers */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Top Clientes</h3>
-              <button
-                onClick={() => navigate('/empresas')}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Ver todos
-              </button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {(insights?.top_customers?.length || 0) > 0 ? (
-              <div className="space-y-3">
-                {insights!.top_customers.map((customer, idx) => (
-                  <div key={idx} className="flex items-center gap-3 py-2 border-b last:border-0">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
-                      <span className="text-white text-xs font-bold">{idx + 1}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{customer.name}</p>
-                      <p className="text-xs text-gray-500">{customer.order_count} factura{customer.order_count !== 1 ? 's' : ''}</p>
-                    </div>
-                    <span className="text-sm font-bold text-gray-900">{formatCurrency(customer.revenue)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState title="Sin datos de clientes" description="Los clientes top apareceran aca" />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Sales Chart (kept but improved) */}
-        <Card>
-          <CardHeader><h3 className="text-lg font-semibold">{chartTitle}</h3></CardHeader>
-          <CardContent>
-            {salesData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={salesData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={formatShortDate}
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                    tick={{ fill: '#6b7280', fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    formatter={(value: any) => [formatCurrency(Number(value)), 'Ventas']}
-                    labelFormatter={(label: any) => formatShortDate(String(label))}
-                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '13px' }}
-                  />
-                  <Bar dataKey="total" fill="#6366f1" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState title="Sin datos de ventas" description="Las ventas del periodo apareceran aca" />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* Restore dismissed - subtle link */}
+      {hasDismissed && visibleActions.length === 0 && (
+        <button
+          onClick={handleRestoreAll}
+          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          Mostrar notificaciones ocultas ({dismissed.length})
+        </button>
+      )}
 
       {/* Two tables side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -583,7 +458,7 @@ export const Dashboard: React.FC = () => {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Últimos Pedidos</h3>
+              <h3 className="text-lg font-semibold">Ultimos Pedidos</h3>
               <button
                 onClick={() => navigate('/orders')}
                 className="text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -618,7 +493,7 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-center py-6 text-gray-400">No hay pedidos aún</p>
+              <p className="text-center py-6 text-gray-400">No hay pedidos aun</p>
             )}
           </CardContent>
         </Card>
@@ -627,7 +502,7 @@ export const Dashboard: React.FC = () => {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Últimas Facturas</h3>
+              <h3 className="text-lg font-semibold">Ultimas Facturas</h3>
               <button
                 onClick={() => navigate('/invoices')}
                 className="text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -657,7 +532,7 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-center py-6 text-gray-400">No hay facturas aún</p>
+              <p className="text-center py-6 text-gray-400">No hay facturas aun</p>
             )}
           </CardContent>
         </Card>
