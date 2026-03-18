@@ -380,6 +380,10 @@ export const api = {
     const { data } = await client.get('/reports/top-products')
     return data
   },
+  getInsights: async () => {
+    const { data } = await client.get('/reports/insights')
+    return data
+  },
   globalSearch: async (query: string) => {
     const { data } = await client.get(`/reports/search?q=${encodeURIComponent(query)}`)
     return data

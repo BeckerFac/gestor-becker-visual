@@ -296,6 +296,168 @@ export class ReportsService {
       throw new ApiError(500, 'Failed to perform search');
     }
   }
+
+  async getInsights(
+    companyId: string,
+    userPermissions?: Map<string, Set<string>>,
+  ) {
+    try {
+      const actions: Array<{ type: string; severity: 'critical' | 'warning' | 'info'; title: string; description: string; link: string; value?: string }> = [];
+
+      // Overdue invoices (authorized but unpaid, older than 30 days)
+      if (canView(userPermissions, 'invoices')) {
+        const overdueResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(
+            CAST(i.total_amount AS decimal) - COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+          ), 0) as total
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date < NOW() - INTERVAL '30 days'
+            AND CAST(i.total_amount AS decimal) > COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+        `);
+        const overdueRows = (overdueResult as any).rows || overdueResult || [];
+        const overdueCount = parseInt(overdueRows[0]?.count || '0');
+        const overdueTotal = parseFloat(overdueRows[0]?.total || '0');
+        if (overdueCount > 0) {
+          actions.push({
+            type: 'overdue_invoices',
+            severity: 'critical',
+            title: `${overdueCount} factura${overdueCount > 1 ? 's' : ''} vencida${overdueCount > 1 ? 's' : ''}`,
+            description: `Facturas sin cobrar hace mas de 30 dias`,
+            link: '/invoices',
+            value: `$${overdueTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
+          });
+        }
+
+        // Draft invoices pending authorization
+        const draftsResult = await db.execute(sql`
+          SELECT COUNT(*) as count
+          FROM invoices
+          WHERE company_id = ${companyId} AND status = 'draft'
+        `);
+        const draftRows = (draftsResult as any).rows || draftsResult || [];
+        const draftCount = parseInt(draftRows[0]?.count || '0');
+        if (draftCount > 0) {
+          actions.push({
+            type: 'draft_invoices',
+            severity: 'warning',
+            title: `${draftCount} factura${draftCount > 1 ? 's' : ''} en borrador`,
+            description: 'Pendientes de enviar a AFIP',
+            link: '/invoices',
+          });
+        }
+      }
+
+      // Orders pending delivery
+      if (canView(userPermissions, 'orders')) {
+        const pendingOrdersResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
+          FROM orders
+          WHERE company_id = ${companyId} AND status = 'pendiente'
+        `);
+        const pendingRows = (pendingOrdersResult as any).rows || pendingOrdersResult || [];
+        const pendingCount = parseInt(pendingRows[0]?.count || '0');
+        if (pendingCount > 0) {
+          actions.push({
+            type: 'pending_orders',
+            severity: 'warning',
+            title: `${pendingCount} pedido${pendingCount > 1 ? 's' : ''} pendiente${pendingCount > 1 ? 's' : ''}`,
+            description: 'Esperando ser procesados',
+            link: '/orders',
+          });
+        }
+      }
+
+      // Low stock products
+      if (canView(userPermissions, 'products')) {
+        const lowStockResult = await db.execute(sql`
+          SELECT COUNT(*) as count
+          FROM products p
+          LEFT JOIN stock s ON p.id = s.product_id
+          WHERE p.company_id = ${companyId}
+            AND p.controls_stock = true
+            AND p.low_stock_threshold IS NOT NULL
+            AND p.low_stock_threshold > 0
+            AND COALESCE(s.quantity, 0) <= p.low_stock_threshold
+        `);
+        const lowStockRows = (lowStockResult as any).rows || lowStockResult || [];
+        const lowStockCount = parseInt(lowStockRows[0]?.count || '0');
+        if (lowStockCount > 0) {
+          actions.push({
+            type: 'low_stock',
+            severity: lowStockCount > 3 ? 'critical' : 'warning',
+            title: `${lowStockCount} producto${lowStockCount > 1 ? 's' : ''} con stock bajo`,
+            description: 'Por debajo del minimo configurado',
+            link: '/products',
+          });
+        }
+      }
+
+      // Cheques about to expire (next 7 days)
+      if (canView(userPermissions, 'cheques')) {
+        const chequesExpiringResult = await db.execute(sql`
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM cheques
+          WHERE company_id = ${companyId}
+            AND status = 'a_cobrar'
+            AND deposit_date <= NOW() + INTERVAL '7 days'
+            AND deposit_date >= NOW()
+        `);
+        const chequesRows = (chequesExpiringResult as any).rows || chequesExpiringResult || [];
+        const chequesCount = parseInt(chequesRows[0]?.count || '0');
+        const chequesTotal = parseFloat(chequesRows[0]?.total || '0');
+        if (chequesCount > 0) {
+          actions.push({
+            type: 'cheques_expiring',
+            severity: 'info',
+            title: `${chequesCount} cheque${chequesCount > 1 ? 's' : ''} por vencer`,
+            description: 'En los proximos 7 dias',
+            link: '/cheques',
+            value: `$${chequesTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
+          });
+        }
+      }
+
+      // Top 5 customers by revenue
+      let topCustomers: Array<{ name: string; revenue: number; order_count: number }> = [];
+      if (canView(userPermissions, 'invoices')) {
+        const topCustomersResult = await db.execute(sql`
+          SELECT
+            c.name,
+            COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as revenue,
+            COUNT(i.id) as order_count
+          FROM invoices i
+          JOIN customers c ON i.customer_id = c.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+          GROUP BY c.id, c.name
+          ORDER BY revenue DESC
+          LIMIT 5
+        `);
+        const custRows = (topCustomersResult as any).rows || topCustomersResult || [];
+        topCustomers = custRows.map((r: any) => ({
+          name: r.name || 'Sin nombre',
+          revenue: parseFloat(r.revenue || '0'),
+          order_count: parseInt(r.order_count || '0'),
+        }));
+      }
+
+      // Sort actions: critical first, then warning, then info
+      const severityOrder = { critical: 0, warning: 1, info: 2 };
+      actions.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+      return { actions, top_customers: topCustomers };
+    } catch (error) {
+      console.error('Insights error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to generate insights');
+    }
+  }
 }
 
 export const reportsService = new ReportsService();

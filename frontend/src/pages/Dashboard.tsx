@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Cell,
 } from 'recharts'
 import { useNavigate } from 'react-router-dom'
 
@@ -22,6 +23,20 @@ interface DashboardData {
   orders_unpaid_amount: number
   recent_invoices: any[]
   recent_orders: any[]
+}
+
+interface InsightAction {
+  type: string
+  severity: 'critical' | 'warning' | 'info'
+  title: string
+  description: string
+  link: string
+  value?: string
+}
+
+interface InsightsData {
+  actions: InsightAction[]
+  top_customers: Array<{ name: string; revenue: number; order_count: number }>
 }
 
 interface SearchResults {
@@ -39,6 +54,8 @@ export const Dashboard: React.FC = () => {
   const navigate = useNavigate()
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [salesData, setSalesData] = useState<any[]>([])
+  const [insights, setInsights] = useState<InsightsData | null>(null)
+  const [topProducts, setTopProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState('mes')
@@ -72,7 +89,7 @@ export const Dashboard: React.FC = () => {
         setLoading(true)
         setError(null)
         const days = periodToDays[period] || 30
-        const [dashRes, salesRes] = await Promise.all([
+        const [dashRes, salesRes, insightsRes, topProdsRes] = await Promise.all([
           api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
             return {
@@ -83,9 +100,13 @@ export const Dashboard: React.FC = () => {
             }
           }),
           api.getSalesReport(days).catch(() => []),
+          api.getInsights().catch(() => ({ actions: [], top_customers: [] })),
+          api.getTopProducts().catch(() => []),
         ])
         setDashboard(dashRes)
         setSalesData(Array.isArray(salesRes) ? salesRes : [])
+        setInsights(insightsRes)
+        setTopProducts(Array.isArray(topProdsRes) ? topProdsRes : [])
       } finally {
         setLoading(false)
       }
@@ -384,36 +405,177 @@ export const Dashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Sales Chart */}
-      <Card>
-        <CardHeader><h3 className="text-lg font-semibold">{chartTitle}</h3></CardHeader>
-        <CardContent>
-          {salesData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={salesData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={formatShortDate}
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                />
-                <YAxis
-                  tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                />
-                <Tooltip
-                  formatter={(value: any) => [formatCurrency(Number(value)), 'Ventas']}
-                  labelFormatter={(label: any) => formatShortDate(String(label))}
-                  contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                />
-                <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState title="Sin datos de ventas" description="Las ventas del periodo aparecerán acá" />
-          )}
-        </CardContent>
-      </Card>
+      {/* Insights + Top Products Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Action Items / Insights */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Acciones Pendientes</h3>
+              {(insights?.actions?.length || 0) > 0 && (
+                <span className="text-xs font-medium bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                  {insights!.actions.length}
+                </span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {(insights?.actions?.length || 0) > 0 ? (
+              <div className="space-y-3">
+                {insights!.actions.map((action, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => navigate(action.link)}
+                    className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left border border-gray-100"
+                  >
+                    <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                      action.severity === 'critical' ? 'bg-red-500' :
+                      action.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">{action.title}</p>
+                        {action.value && (
+                          <span className={`text-sm font-bold flex-shrink-0 ${
+                            action.severity === 'critical' ? 'text-red-600' :
+                            action.severity === 'warning' ? 'text-amber-600' : 'text-blue-600'
+                          }`}>{action.value}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{action.description}</p>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="text-3xl mb-2">&#10003;</div>
+                <p className="text-sm font-medium text-gray-700">Todo al dia</p>
+                <p className="text-xs text-gray-500 mt-1">No hay acciones pendientes</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top Products */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Top Productos</h3>
+              <button
+                onClick={() => navigate('/products')}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Ver todos
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {topProducts.length > 0 ? (
+              <div className="space-y-4">
+                {topProducts.map((product, idx) => {
+                  const maxRevenue = topProducts[0]?.revenue || 1;
+                  const percentage = (product.revenue / maxRevenue) * 100;
+                  const colors = ['#3b82f6', '#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd'];
+                  return (
+                    <div key={idx}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-gray-700 truncate max-w-[60%]">{product.name}</span>
+                        <span className="text-sm font-semibold text-gray-900">{formatCurrency(product.revenue)}</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${percentage}%`, backgroundColor: colors[idx] || colors[4] }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{product.sold_qty} unidades vendidas</p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptyState title="Sin datos de productos" description="Las ventas por producto apareceran aca" />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top Customers + Sales Chart Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Top Customers */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Top Clientes</h3>
+              <button
+                onClick={() => navigate('/empresas')}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Ver todos
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {(insights?.top_customers?.length || 0) > 0 ? (
+              <div className="space-y-3">
+                {insights!.top_customers.map((customer, idx) => (
+                  <div key={idx} className="flex items-center gap-3 py-2 border-b last:border-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-xs font-bold">{idx + 1}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{customer.name}</p>
+                      <p className="text-xs text-gray-500">{customer.order_count} factura{customer.order_count !== 1 ? 's' : ''}</p>
+                    </div>
+                    <span className="text-sm font-bold text-gray-900">{formatCurrency(customer.revenue)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Sin datos de clientes" description="Los clientes top apareceran aca" />
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Sales Chart (kept but improved) */}
+        <Card>
+          <CardHeader><h3 className="text-lg font-semibold">{chartTitle}</h3></CardHeader>
+          <CardContent>
+            {salesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={salesData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={formatShortDate}
+                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    formatter={(value: any) => [formatCurrency(Number(value)), 'Ventas']}
+                    labelFormatter={(label: any) => formatShortDate(String(label))}
+                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '13px' }}
+                  />
+                  <Bar dataKey="total" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState title="Sin datos de ventas" description="Las ventas del periodo apareceran aca" />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Two tables side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

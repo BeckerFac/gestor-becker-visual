@@ -22,6 +22,12 @@ export class ReportsController {
     const data = await reportsService.getTopProducts(req.user!.company_id, limit);
     res.json(data);
   }
+  async getInsights(req: AuthRequest, res: Response) {
+    const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
+    const data = await reportsService.getInsights(req.user!.company_id, userPermissions);
+    res.json(data);
+  }
+
   async globalSearch(req: AuthRequest, res: Response) {
     const query = (req.query.q as string) || '';
     const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
