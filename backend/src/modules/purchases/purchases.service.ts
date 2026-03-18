@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { inventoryService } from '../inventory/inventory.service';
 
 export class PurchasesService {
   private tablesEnsured = false;
@@ -147,7 +148,38 @@ export class PurchasesService {
         }
       }
 
-      return await this.getPurchase(companyId, purchaseId);
+      const result = await this.getPurchase(companyId, purchaseId);
+
+      // Auto-add stock if requested
+      if (data.add_to_inventory) {
+        const stockItems = (data.items || [])
+          .filter((item: any) => item.product_id && item.product_id !== 'custom' && item.add_to_stock !== false)
+          .map((item: any) => ({
+            product_id: item.product_id,
+            quantity: parseFloat(item.quantity) || 0,
+          }))
+          .filter((item: any) => item.quantity > 0);
+
+        if (stockItems.length > 0) {
+          try {
+            const purchaseLabel = `Compra #${String(purchaseNumber).padStart(4, '0')}`;
+            await inventoryService.addStockFromPurchase(
+              companyId,
+              userId,
+              purchaseId,
+              stockItems,
+              purchaseLabel
+            );
+            (result as any).stock_updated = true;
+          } catch (stockError) {
+            console.error('Auto stock update on purchase create failed:', stockError);
+            (result as any).stock_updated = false;
+            (result as any).stock_error = 'No se pudo actualizar el stock automaticamente';
+          }
+        }
+      }
+
+      return result;
     } catch (error) {
       console.error('Create purchase error:', error);
       if (error instanceof ApiError) throw error;
@@ -174,13 +206,22 @@ export class PurchasesService {
     }
   }
 
-  async updatePurchase(companyId: string, purchaseId: string, data: any) {
+  async updatePurchase(companyId: string, purchaseId: string, userId: string, data: any) {
     await this.ensureTables();
     try {
       // Verify ownership
-      const check = await db.execute(sql`SELECT id FROM purchases WHERE id = ${purchaseId} AND company_id = ${companyId}`);
+      const check = await db.execute(sql`SELECT id, purchase_number FROM purchases WHERE id = ${purchaseId} AND company_id = ${companyId}`);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Purchase not found');
+
+      // Fetch old items BEFORE replacing (needed for stock delta calculation)
+      let oldItems: any[] = [];
+      if (data.add_to_inventory && data.items && Array.isArray(data.items)) {
+        const oldItemsResult = await db.execute(sql`
+          SELECT product_id, quantity FROM purchase_items WHERE purchase_id = ${purchaseId}
+        `);
+        oldItems = (oldItemsResult as any).rows || oldItemsResult || [];
+      }
 
       // Recalculate totals from items if provided
       let subtotal = parseFloat(data.subtotal) || 0;
@@ -223,10 +264,75 @@ export class PurchasesService {
         }
       }
 
-      return await this.getPurchase(companyId, purchaseId);
+      const result = await this.getPurchase(companyId, purchaseId);
+
+      // Adjust stock if requested during edit
+      if (data.add_to_inventory && data.items && Array.isArray(data.items)) {
+        try {
+          await this.adjustStockForPurchaseEdit(companyId, userId, purchaseId, rows[0].purchase_number, oldItems, data.items);
+          (result as any).stock_updated = true;
+        } catch (stockError) {
+          console.error('Stock adjustment on purchase edit failed:', stockError);
+          (result as any).stock_updated = false;
+          (result as any).stock_error = 'No se pudo ajustar el stock automaticamente';
+        }
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update purchase');
+    }
+  }
+
+  private async adjustStockForPurchaseEdit(
+    companyId: string,
+    userId: string,
+    purchaseId: string,
+    purchaseNumber: number,
+    oldItems: any[],
+    newItems: any[]
+  ) {
+    // Build quantity maps: product_id -> total quantity
+    const oldQtyMap = new Map<string, number>();
+    for (const item of oldItems) {
+      if (!item.product_id) continue;
+      const current = oldQtyMap.get(item.product_id) || 0;
+      oldQtyMap.set(item.product_id, current + (parseFloat(item.quantity) || 0));
+    }
+
+    const newQtyMap = new Map<string, number>();
+    for (const item of newItems) {
+      if (!item.product_id || item.product_id === 'custom' || item.add_to_stock === false) continue;
+      const current = newQtyMap.get(item.product_id) || 0;
+      newQtyMap.set(item.product_id, current + (parseFloat(item.quantity) || 0));
+    }
+
+    // Calculate deltas
+    const allProductIds = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]);
+    const deltas: { product_id: string; quantity_change: number }[] = [];
+
+    for (const productId of allProductIds) {
+      const oldQty = oldQtyMap.get(productId) || 0;
+      const newQty = newQtyMap.get(productId) || 0;
+      const delta = newQty - oldQty;
+      if (delta !== 0) {
+        deltas.push({ product_id: productId, quantity_change: delta });
+      }
+    }
+
+    // Apply deltas using inventory service
+    const purchaseLabel = `Compra #${String(purchaseNumber).padStart(4, '0')}`;
+    for (const delta of deltas) {
+      try {
+        await inventoryService.adjustStock(companyId, userId, {
+          product_id: delta.product_id,
+          quantity_change: delta.quantity_change,
+          reason: `Ajuste por edicion de ${purchaseLabel}`,
+        });
+      } catch (err) {
+        console.error(`Stock adjust failed for product ${delta.product_id}:`, err);
+      }
     }
   }
 

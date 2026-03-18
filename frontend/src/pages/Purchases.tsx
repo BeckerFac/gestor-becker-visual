@@ -51,6 +51,7 @@ interface PurchaseItem {
   quantity: number | string
   unit_price: number | string
   subtotal?: number | string
+  add_to_stock?: boolean
 }
 
 interface ProductOption { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string } }
@@ -99,7 +100,7 @@ export const Purchases: React.FC = () => {
     add_to_inventory: false,
   })
   const [items, setItems] = useState<PurchaseItem[]>([
-    { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 },
+    { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true },
   ])
 
   const loadData = async () => {
@@ -152,7 +153,8 @@ export const Purchases: React.FC = () => {
         description: i.description || '',
         quantity: i.quantity?.toString() || '1',
         unit_price: i.unit_price?.toString() || '0',
-      })) || [{ product_id: '', product_name: '', description: '', quantity: '1', unit_price: '0' }])
+        add_to_stock: true,
+      })) || [{ product_id: '', product_name: '', description: '', quantity: '1', unit_price: '0', add_to_stock: true }])
       setEditingId(purchase.id)
       setShowForm(true)
     } catch (e: any) {
@@ -179,32 +181,29 @@ export const Purchases: React.FC = () => {
         subtotal: calcSubtotal(),
         vat_amount: calcVat(),
         total_amount: calcTotal(),
+        add_to_inventory: form.add_to_inventory,
         items: validItems.map(i => ({
           ...i,
           product_id: i.product_id && i.product_id !== 'custom' ? i.product_id : null,
+          add_to_stock: i.add_to_stock !== false,
         })),
       }
-      let createdPurchase: any = null
+      let result: any = null
       if (editingId) {
-        await api.updatePurchase(editingId, payload)
+        result = await api.updatePurchase(editingId, payload)
       } else {
-        createdPurchase = await api.createPurchase(payload)
+        result = await api.createPurchase(payload)
       }
       toast.success(editingId ? 'Compra actualizada' : 'Compra registrada')
-      if (!editingId && form.add_to_inventory && createdPurchase?.id) {
-        const stockItems = validItems
-          .filter(item => item.product_id && item.product_id !== 'custom')
-          .map(item => ({ product_id: item.product_id!, quantity: parseFloat(String(item.quantity)) || 0 }))
-          .filter(item => item.quantity > 0)
-        if (stockItems.length > 0) {
-          await api.addStockFromPurchase(createdPurchase.id, stockItems).catch(() => {})
-          toast.success('Stock actualizado automaticamente')
-        }
+      if (form.add_to_inventory && result?.stock_updated) {
+        toast.success('Stock actualizado automaticamente')
+      } else if (form.add_to_inventory && result?.stock_error) {
+        toast.error(result.stock_error)
       }
       setShowForm(false)
       setEditingId(null)
       setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false })
-      setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }])
+      setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }])
       await loadData()
     } catch (e: any) {
       toast.error(e.message)
@@ -284,7 +283,7 @@ export const Purchases: React.FC = () => {
     }
   }
 
-  const addItem = () => setItems([...items, { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }])
+  const addItem = () => setItems([...items, { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }])
   const removeItem = (idx: number) => { if (items.length > 1) setItems(items.filter((_, i) => i !== idx)) }
   const updateItem = (idx: number, field: keyof PurchaseItem, value: any) => {
     const newItems = [...items]
@@ -359,7 +358,7 @@ export const Purchases: React.FC = () => {
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <ExportExcelButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <PermissionGate module="purchases" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0 }]) } }}>
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }]) } }}>
               {showForm ? 'Cancelar' : '+ Nueva Compra'}
             </Button>
           </PermissionGate>
@@ -531,19 +530,45 @@ export const Purchases: React.FC = () => {
               </div>
 
               {/* Inventory option */}
-              {!editingId && (
-                <div className="border-t pt-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.add_to_inventory}
-                      onChange={e => setForm({ ...form, add_to_inventory: e.target.checked })}
-                      className="rounded border-gray-300"
-                    />
-                    <span className="text-sm text-gray-600">Agregar al inventario automaticamente</span>
-                  </label>
-                </div>
-              )}
+              <div className="border-t pt-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.add_to_inventory}
+                    onChange={e => setForm({ ...form, add_to_inventory: e.target.checked })}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm text-gray-700 font-medium">
+                    {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}
+                  </span>
+                </label>
+                {form.add_to_inventory && items.some(i => i.product_id && i.product_id !== 'custom') && (
+                  <div className="mt-2 ml-6 space-y-1">
+                    <p className="text-xs text-gray-500 mb-1">
+                      {editingId
+                        ? 'Se ajustara el stock segun las diferencias de cantidad para los items marcados:'
+                        : 'Se sumara stock para los items marcados (solo productos con control de stock):'}
+                    </p>
+                    {items.map((item, idx) => {
+                      if (!item.product_id || item.product_id === 'custom') return null
+                      const prod = availableProducts.find(p => p.id === item.product_id)
+                      return (
+                        <label key={idx} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={item.add_to_stock !== false}
+                            onChange={e => updateItem(idx, 'add_to_stock', e.target.checked)}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-xs text-gray-600">
+                            {prod?.name || item.product_name} - {item.quantity} unid.
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Totals */}
               <div className="border-t pt-4 flex justify-between items-center">

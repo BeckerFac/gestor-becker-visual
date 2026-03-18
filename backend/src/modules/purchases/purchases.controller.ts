@@ -23,7 +23,7 @@ export class PurchasesController {
 
   async updatePurchase(req: AuthRequest, res: Response) {
     try {
-      const result = await purchasesService.updatePurchase(req.user!.company_id, req.params.id, req.body);
+      const result = await purchasesService.updatePurchase(req.user!.company_id, req.params.id, req.user!.id, req.body);
       res.json(result);
     } catch (error: any) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });

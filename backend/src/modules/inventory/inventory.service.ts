@@ -210,7 +210,7 @@ export class InventoryService {
     }
   }
 
-  async addStockFromPurchase(companyId: string, userId: string, purchaseId: string, items: { product_id: string; quantity: number }[]) {
+  async addStockFromPurchase(companyId: string, userId: string, purchaseId: string, items: { product_id: string; quantity: number }[], customNote?: string) {
     try {
       // Get or create default warehouse
       let warehouseResult = await db.execute(sql`
@@ -248,7 +248,7 @@ export class InventoryService {
         const movementId = uuid();
         await db.execute(sql`
           INSERT INTO stock_movements (id, product_id, warehouse_id, movement_type, quantity, reference_type, reference_id, notes, created_by)
-          VALUES (${movementId}, ${item.product_id}, ${warehouseId}, 'purchase', ${quantity.toString()}, 'purchase', ${purchaseId}, 'Ingreso por compra', ${userId})
+          VALUES (${movementId}, ${item.product_id}, ${warehouseId}, 'purchase', ${quantity.toString()}, 'purchase', ${purchaseId}, ${customNote || 'Ingreso por compra'}, ${userId})
         `);
 
         // Upsert stock
