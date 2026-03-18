@@ -5,34 +5,98 @@ interface ExcelColumn {
   header: string
   key: string
   width?: number
+  type?: 'text' | 'date' | 'currency' | 'number'
 }
 
 interface ExportExcelProps {
   data: Record<string, any>[]
-  columns: { key: string; label: string }[]
+  columns: { key: string; label: string; type?: 'text' | 'date' | 'currency' | 'number' }[]
   filename?: string
+  sheetName?: string
+}
+
+function formatCellValue(value: any, type?: string): any {
+  if (value == null || value === '') return ''
+
+  if (type === 'date') {
+    const d = new Date(value)
+    if (isNaN(d.getTime())) return String(value)
+    const day = String(d.getDate()).padStart(2, '0')
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const year = d.getFullYear()
+    return `${day}/${month}/${year}`
+  }
+
+  if (type === 'currency' || type === 'number') {
+    const num = typeof value === 'string' ? parseFloat(value) : value
+    if (isNaN(num)) return value
+    return num
+  }
+
+  return String(value)
+}
+
+function autoFitColumns(data: Record<string, any>[], columns: ExcelColumn[]): number[] {
+  return columns.map(col => {
+    const headerLen = col.header.length
+    const maxDataLen = data.reduce((max, row) => {
+      const val = String(row[col.key] ?? '')
+      return Math.max(max, val.length)
+    }, 0)
+    const computed = Math.max(headerLen, maxDataLen) + 3
+    return Math.min(Math.max(computed, 10), 40)
+  })
 }
 
 export function exportToExcel(
   data: Record<string, any>[],
   columns: ExcelColumn[],
-  filename: string
+  filename: string,
+  sheetName: string = 'Datos'
 ) {
   if (data.length === 0) return
 
   const mapped = data.map(row => {
     const obj: Record<string, any> = {}
     columns.forEach(col => {
-      obj[col.header] = row[col.key] ?? ''
+      obj[col.header] = formatCellValue(row[col.key], col.type)
     })
     return obj
   })
 
   const ws = XLSX.utils.json_to_sheet(mapped)
-  ws['!cols'] = columns.map(col => ({ wch: col.width || 15 }))
+
+  // Auto-fit column widths
+  const widths = autoFitColumns(data, columns)
+  ws['!cols'] = widths.map(w => ({ wch: w }))
+
+  // Freeze header row
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+
+  // Number format for currency columns
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+  columns.forEach((col, colIdx) => {
+    if (col.type === 'currency') {
+      for (let row = range.s.r + 1; row <= range.e.r; row++) {
+        const cellRef = XLSX.utils.encode_cell({ r: row, c: colIdx })
+        const cell = ws[cellRef]
+        if (cell && typeof cell.v === 'number') {
+          cell.t = 'n'
+          cell.z = '#,##0.00'
+        }
+      }
+    }
+  })
 
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Datos')
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.substring(0, 31))
+
+  // Set sheet view to show freeze panes
+  if (!wb.Workbook) wb.Workbook = {}
+  if (!wb.Workbook.Views) wb.Workbook.Views = [{}]
+  if (!wb.Workbook.Sheets) wb.Workbook.Sheets = []
+  wb.Workbook.Sheets.push({ freeze: { xSplit: 0, ySplit: 1 } } as any)
+
   XLSX.writeFile(wb, `${filename}.xlsx`)
 }
 
@@ -46,14 +110,14 @@ export function exportMultiSheetExcel(
     const mapped = sheet.data.map(row => {
       const obj: Record<string, any> = {}
       sheet.columns.forEach(col => {
-        obj[col.header] = row[col.key] ?? ''
+        obj[col.header] = formatCellValue(row[col.key], col.type)
       })
       return obj
     })
 
     const ws = XLSX.utils.json_to_sheet(mapped)
-    ws['!cols'] = sheet.columns.map(col => ({ wch: col.width || 15 }))
-    // Excel sheet name max 31 chars
+    const widths = autoFitColumns(sheet.data, sheet.columns)
+    ws['!cols'] = widths.map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, ws, sheet.name.substring(0, 31))
   })
 
@@ -68,6 +132,7 @@ export const ExportExcelButton: React.FC<ExportExcelProps> = ({
   data,
   columns,
   filename = 'export',
+  sheetName = 'Datos',
 }) => {
   const disabled = data.length === 0
 
@@ -76,9 +141,10 @@ export const ExportExcelButton: React.FC<ExportExcelProps> = ({
       header: c.label,
       key: c.key,
       width: 18,
+      type: c.type,
     }))
     const dateStr = new Date().toISOString().split('T')[0]
-    exportToExcel(data, excelColumns, `${filename}_${dateStr}`)
+    exportToExcel(data, excelColumns, `${filename}_${dateStr}`, sheetName)
   }
 
   return (

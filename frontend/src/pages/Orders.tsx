@@ -692,9 +692,10 @@ export const Orders: React.FC = () => {
 
   const csvColumns = [
     { key: 'order_number', label: 'N Pedido' },
-    { key: 'created_at', label: 'Fecha' },
+    { key: 'created_at', label: 'Fecha', type: 'date' as const },
+    { key: 'enterprise_name', label: 'Empresa' },
     { key: 'title', label: 'Producto' },
-    { key: 'total_amount', label: 'Total' },
+    { key: 'total_amount', label: 'Total', type: 'currency' as const },
     { key: 'payment_status', label: 'Estado Pago' },
     { key: 'status', label: 'Estado' },
     { key: 'payment_method', label: 'Metodo Pago' },
@@ -702,8 +703,8 @@ export const Orders: React.FC = () => {
   const csvData = filteredOrders.map(o => ({
     ...o,
     order_number: `#${String(o.order_number).padStart(4, '0')}`,
-    total_amount: o.total_amount,
-    enterprise_name: o.enterprise?.name || '',
+    total_amount: parseFloat(o.total_amount?.toString() || '0'),
+    enterprise_name: o.enterprise?.name || o.customer?.name || '',
   }))
 
   const clearFilters = () => {
