@@ -176,6 +176,7 @@ export interface CobranzasReportData {
   summary: CobranzasSummary
   aging: AgingBucket[]
   morosos: MorosoRow[]
+  _warnings?: string[]
 }
 
 export interface StockItem {

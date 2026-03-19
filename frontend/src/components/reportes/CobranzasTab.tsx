@@ -31,7 +31,7 @@ export const CobranzasTab: React.FC<Props> = ({ data }) => {
     )
   }
 
-  const { summary, aging, morosos } = data
+  const { summary, aging, morosos, _warnings } = data
 
   const dsoColor = (): 'green' | 'orange' | 'red' => {
     if (summary.dso_promedio <= 30) return 'green'
@@ -97,6 +97,15 @@ export const CobranzasTab: React.FC<Props> = ({ data }) => {
 
   return (
     <>
+      {_warnings && _warnings.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 px-4 py-3 rounded-lg text-sm">
+          <p className="font-medium mb-1">Advertencias del reporte:</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            {_warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </div>
+      )}
+
       <AIReportNarrative reportType="cobranzas" reportData={data} />
 
       <TabActionBar

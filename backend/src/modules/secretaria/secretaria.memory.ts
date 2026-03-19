@@ -299,7 +299,27 @@ class SecretariaMemoryService {
     );
 
     if (existing.rows.length > 0 && existing.rows[0].company_id !== companyId) {
-      throw new Error('Este telefono ya esta vinculado a otra empresa');
+      // SECURITY: Log the attempted cross-company linking
+      console.error(`[SECURITY] Cross-company linking attempt: phone=${phoneNumber} attempted by company=${companyId} user=${userId}, belongs to company=${existing.rows[0].company_id}`);
+
+      // Log to audit_log if table exists (wrapped defensively for tests)
+      try {
+        await pool.query(
+          `INSERT INTO audit_log (company_id, user_id, action, entity_type, details, ip_address, created_at)
+           VALUES ($1, $2, 'security_alert', 'secretaria', $3, $4, NOW())`,
+          [companyId, userId, JSON.stringify({ alert: 'cross_company_linking_attempt', phone_last_4: phoneNumber.slice(-4), target_company_id: existing.rows[0].company_id }), 'unknown'],
+        );
+      } catch { /* audit log is best-effort */ }
+
+      try {
+        await pool.query(
+          `INSERT INTO audit_log (company_id, user_id, action, entity_type, details, created_at)
+           VALUES ($1, NULL, 'security_alert', 'secretaria', $2, NOW())`,
+          [existing.rows[0].company_id, JSON.stringify({ alert: 'someone_tried_to_link_your_phone', phone_last_4: phoneNumber.slice(-4), from_company_id: companyId })],
+        );
+      } catch { /* audit log is best-effort */ }
+
+      throw new Error('Este telefono ya esta vinculado a otra empresa. Este intento fue registrado.');
     }
 
     // Generate cryptographically random 6-digit code
