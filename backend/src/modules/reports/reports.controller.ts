@@ -37,9 +37,9 @@ export class ReportsController {
   }
   async getLibroIVAVentas(req: AuthRequest, res: Response) {
     try {
-      const dateFrom = req.query.date_from as string;
-      const dateTo = req.query.date_to as string;
-      const data = await accountingService.getLibroIVAVentas(req.user!.company_id, dateFrom, dateTo);
+      const dateFrom = (req.query.date_from as string) || undefined;
+      const dateTo = (req.query.date_to as string) || undefined;
+      const data = await accountingService.getLibroIVAVentas(req.user!.company_id, dateFrom as any, dateTo as any);
       res.json(data);
     } catch (error) {
       console.error('Controller getLibroIVAVentas error:', error);
@@ -51,9 +51,9 @@ export class ReportsController {
 
   async getLibroIVACompras(req: AuthRequest, res: Response) {
     try {
-      const dateFrom = req.query.date_from as string;
-      const dateTo = req.query.date_to as string;
-      const data = await accountingService.getLibroIVACompras(req.user!.company_id, dateFrom, dateTo);
+      const dateFrom = (req.query.date_from as string) || undefined;
+      const dateTo = (req.query.date_to as string) || undefined;
+      const data = await accountingService.getLibroIVACompras(req.user!.company_id, dateFrom as any, dateTo as any);
       res.json(data);
     } catch (error) {
       console.error('Controller getLibroIVACompras error:', error);
@@ -65,9 +65,9 @@ export class ReportsController {
 
   async getPosicionIVA(req: AuthRequest, res: Response) {
     try {
-      const dateFrom = req.query.date_from as string;
-      const dateTo = req.query.date_to as string;
-      const data = await accountingService.getPosicionIVA(req.user!.company_id, dateFrom, dateTo);
+      const dateFrom = (req.query.date_from as string) || undefined;
+      const dateTo = (req.query.date_to as string) || undefined;
+      const data = await accountingService.getPosicionIVA(req.user!.company_id, dateFrom as any, dateTo as any);
       res.json(data);
     } catch (error) {
       console.error('Controller getPosicionIVA error:', error);
@@ -79,9 +79,9 @@ export class ReportsController {
 
   async getFlujoCaja(req: AuthRequest, res: Response) {
     try {
-      const dateFrom = req.query.date_from as string;
-      const dateTo = req.query.date_to as string;
-      const data = await accountingService.getFlujoCaja(req.user!.company_id, dateFrom, dateTo);
+      const dateFrom = (req.query.date_from as string) || undefined;
+      const dateTo = (req.query.date_to as string) || undefined;
+      const data = await accountingService.getFlujoCaja(req.user!.company_id, dateFrom as any, dateTo as any);
       res.json(data);
     } catch (error) {
       console.error('Controller getFlujoCaja error:', error);
