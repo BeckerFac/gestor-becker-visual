@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import type { Category } from './types'
@@ -28,12 +28,45 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
   stockStatusFilter,
   onStockStatusChange,
 }) => {
+  // Debounced search: local state for the input, debounce before calling parent
+  const [localSearch, setLocalSearch] = useState(search)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Sync local state when parent search changes (e.g. from clear filters)
+  useEffect(() => {
+    setLocalSearch(search)
+  }, [search])
+
+  const handleSearchInput = (value: string) => {
+    setLocalSearch(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      onSearchChange(value)
+    }, 350)
+  }
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
+
+  const hasActiveFilters = search || filterCategory || stockStatusFilter !== 'all'
+
+  const handleClearFilters = () => {
+    setLocalSearch('')
+    onSearchChange('')
+    onFilterCategoryChange('')
+    onStockStatusChange('all')
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Input
         placeholder="Buscar por nombre, SKU o codigo de barras..."
-        value={search}
-        onChange={e => onSearchChange(e.target.value)}
+        value={localSearch}
+        onChange={e => handleSearchInput(e.target.value)}
         className="flex-1 min-w-[200px]"
       />
       {categories.length > 0 && (
@@ -64,6 +97,14 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
           <option value="low">Stock bajo</option>
           <option value="out">Sin stock</option>
         </select>
+      )}
+      {hasActiveFilters && (
+        <button
+          onClick={handleClearFilters}
+          className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+        >
+          Limpiar filtros
+        </button>
       )}
       {selectedCount > 0 && (
         <Button variant="secondary" onClick={onBulkPrice}>

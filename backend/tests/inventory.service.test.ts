@@ -322,4 +322,56 @@ describe('InventoryService', () => {
       expect(result.items).toHaveLength(1)
     })
   })
+
+  describe('getStockMovements', () => {
+    it('returns movements with pagination', async () => {
+      // count query
+      mockDbRows([{ total: '5' }])
+      // main query
+      mockDbRows([
+        { id: 'm1', product_id: 'p1', movement_type: 'purchase', quantity: '10', product: { id: 'p1', name: 'Widget', sku: 'W-001' }, warehouse: { id: 'wh-1', name: 'Principal' } },
+        { id: 'm2', product_id: 'p1', movement_type: 'sale', quantity: '-3', product: { id: 'p1', name: 'Widget', sku: 'W-001' }, warehouse: { id: 'wh-1', name: 'Principal' } },
+      ])
+
+      const result = await service.getStockMovements('company-1', { skip: 0, limit: 50 })
+
+      expect(result.items).toHaveLength(2)
+      expect(result.total).toBe(5)
+      expect(result.skip).toBe(0)
+      expect(result.limit).toBe(50)
+    })
+
+    it('paginates correctly - page 2', async () => {
+      mockDbRows([{ total: '75' }])
+      mockDbRows(Array(25).fill({ id: 'm', movement_type: 'purchase', quantity: '1' }))
+
+      const result = await service.getStockMovements('company-1', { skip: 50, limit: 50 })
+
+      expect(result.skip).toBe(50)
+      expect(result.total).toBe(75)
+      expect(result.items).toHaveLength(25)
+    })
+
+    it('filters by product_id', async () => {
+      mockDbRows([{ total: '2' }])
+      mockDbRows([
+        { id: 'm1', product_id: 'p1', movement_type: 'purchase', quantity: '10' },
+        { id: 'm2', product_id: 'p1', movement_type: 'adjustment', quantity: '5' },
+      ])
+
+      const result = await service.getStockMovements('company-1', { product_id: 'p1' })
+
+      expect(result.items).toHaveLength(2)
+    })
+
+    it('returns empty items when no movements exist', async () => {
+      mockDbRows([{ total: '0' }])
+      mockDbRows([])
+
+      const result = await service.getStockMovements('company-1')
+
+      expect(result.items).toHaveLength(0)
+      expect(result.total).toBe(0)
+    })
+  })
 })

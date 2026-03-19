@@ -202,7 +202,7 @@ export const Products: React.FC = () => {
 
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'productos', label: 'Productos', show: true },
-    { key: 'movimientos', label: 'Stock / Movimientos', show: hasStockProducts },
+    { key: 'movimientos', label: 'Stock / Movimientos', show: true },
     { key: 'tipos', label: 'Tipos', show: true },
     { key: 'categorias', label: 'Categorias', show: true },
     { key: 'listas', label: 'Listas de Precios', show: true },
@@ -328,7 +328,7 @@ export const Products: React.FC = () => {
       )}
 
       {/* Stock / Movimientos tab */}
-      {activeTab === 'movimientos' && hasStockProducts && (
+      {activeTab === 'movimientos' && (
         <StockMovements
           products={products}
           onDataChanged={() => { loadProducts(); loadMetadata() }}

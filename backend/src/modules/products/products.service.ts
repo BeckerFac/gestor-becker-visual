@@ -90,18 +90,26 @@ export class ProductsService {
   async getProducts(companyId: string, { skip = 0, limit = 50, search = '', stock_status = 'all', category_id = '', product_type = '', active = '' } = {}) {
     await this.ensureMigrations();
     try {
-      // Build WHERE conditions
-      const conditions: string[] = [`p.company_id = '${companyId.replace(/'/g, "''")}'`];
+      // Build WHERE conditions with parameterized queries to prevent SQL injection
+      const conditions: string[] = ['p.company_id = $1'];
+      const params: any[] = [companyId];
+      let paramIdx = 2;
 
       if (search) {
-        const s = search.replace(/'/g, "''");
-        conditions.push(`(p.name ILIKE '%${s}%' OR p.sku ILIKE '%${s}%' OR p.barcode ILIKE '%${s}%')`);
+        const searchPattern = `%${search}%`;
+        conditions.push(`(p.name ILIKE $${paramIdx} OR p.sku ILIKE $${paramIdx} OR p.barcode ILIKE $${paramIdx})`);
+        params.push(searchPattern);
+        paramIdx++;
       }
       if (category_id) {
-        conditions.push(`p.category_id = '${category_id.replace(/'/g, "''")}'`);
+        conditions.push(`p.category_id = $${paramIdx}`);
+        params.push(category_id);
+        paramIdx++;
       }
       if (product_type) {
-        conditions.push(`p.product_type = '${product_type.replace(/'/g, "''")}'`);
+        conditions.push(`p.product_type = $${paramIdx}`);
+        params.push(product_type);
+        paramIdx++;
       }
       if (active === 'true') {
         conditions.push(`p.active = true`);
@@ -121,13 +129,17 @@ export class ProductsService {
 
       const whereClause = conditions.join(' AND ');
 
+      // Ensure limit and skip are valid integers
+      const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50;
+      const safeSkip = Number.isFinite(skip) && skip >= 0 ? skip : 0;
+
       // Count total for pagination
       const countResult = await pool.query(`
         SELECT COUNT(*) as total
         FROM products p
         LEFT JOIN stock s ON s.product_id = p.id
         WHERE ${whereClause} ${stockHaving}
-      `);
+      `, params);
       const total = parseInt(countResult.rows?.[0]?.total || '0', 10);
 
       // Check if any product in company has controls_stock = true
@@ -136,7 +148,8 @@ export class ProductsService {
       `, [companyId]);
       const has_stock_products = hasStockResult.rows?.[0]?.has_stock || false;
 
-      // Main query with stock data
+      // Main query with stock data - limit/offset appended as separate params
+      const mainParams = [...params, safeLimit, safeSkip];
       const result = await pool.query(`
         SELECT p.*,
           CASE WHEN pp.id IS NOT NULL THEN
@@ -154,16 +167,16 @@ export class ProductsService {
         LEFT JOIN stock s ON s.product_id = p.id
         WHERE ${whereClause} ${stockHaving}
         ORDER BY p.name ASC
-        LIMIT ${limit} OFFSET ${skip}
-      `);
+        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+      `, mainParams);
 
       const items = result.rows || [];
 
       return {
         items,
         total,
-        skip,
-        limit,
+        skip: safeSkip,
+        limit: safeLimit,
         has_stock_products,
       };
     } catch (error) {
