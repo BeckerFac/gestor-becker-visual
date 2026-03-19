@@ -25,7 +25,37 @@ export interface Category {
   id: string
   name: string
   parent_id: string | null
+  description: string | null
   product_count: number
+  child_product_count?: number
+  default_vat_rate: string | null
+  default_margin_percent: string | null
+  default_supplier_id: string | null
+  sort_order: number
+  color: string | null
+}
+
+export interface PriceListRule {
+  id: string
+  price_list_id: string
+  product_id: string | null
+  category_id: string | null
+  rule_type: 'percentage' | 'fixed' | 'formula'
+  value: string
+  min_quantity: number
+  priority: number
+  active: boolean
+  product_name?: string
+  product_sku?: string
+  category_name?: string
+}
+
+export interface PriceResolution {
+  resolved_price: number
+  base_price: number
+  discount_percent: number
+  rule_applied: string | null
+  price_list_name: string | null
 }
 
 export interface StockMovement {

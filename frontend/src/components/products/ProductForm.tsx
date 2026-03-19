@@ -6,7 +6,7 @@ import { HelpTip } from '@/components/shared/HelpTip'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
 import { api } from '@/services/api'
-import type { Product, ProductType, ProductForm as ProductFormType } from './types'
+import type { Product, ProductType, Category, ProductForm as ProductFormType } from './types'
 import { VAT_OPTIONS, DEFAULT_TYPES, emptyForm } from './types'
 
 interface ProductFormProps {
@@ -14,6 +14,7 @@ interface ProductFormProps {
   initialForm?: ProductFormType
   productTypes: ProductType[]
   products: Product[]
+  categories?: Category[]
   onSaved: () => void
   onCancel: () => void
 }
@@ -23,6 +24,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   initialForm,
   productTypes,
   products,
+  categories = [],
   onSaved,
   onCancel,
 }) => {
@@ -30,6 +32,8 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastEdited, setLastEdited] = useState<string>('')
+  const [categoryId, setCategoryId] = useState<string>((initialForm as any)?.category_id || '')
+  const [categoryDefaultApplied, setCategoryDefaultApplied] = useState<string | null>(null)
 
   // BOM state
   const [bomComponents, setBomComponents] = useState<any[]>([])
@@ -92,6 +96,48 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     setForm(prev => recalcFrom(field, value, prev))
   }
 
+  const handleCategoryChange = async (newCategoryId: string) => {
+    setCategoryId(newCategoryId)
+    // Only auto-fill defaults for NEW products (not editing)
+    if (!editingId && newCategoryId) {
+      try {
+        const defaults = await api.getCategoryDefaults(newCategoryId)
+        if (defaults) {
+          const updates: Partial<ProductFormType> = {}
+          let applyHint = ''
+          if (defaults.vat_rate !== undefined && defaults.vat_rate !== null) {
+            updates.vat_rate = String(defaults.vat_rate)
+            applyHint += `IVA: ${defaults.vat_rate}%`
+          }
+          if (defaults.margin_percent !== undefined && defaults.margin_percent !== null) {
+            updates.margin_percent = String(defaults.margin_percent)
+            if (applyHint) applyHint += ', '
+            applyHint += `Margen: ${defaults.margin_percent}%`
+          }
+          if (Object.keys(updates).length > 0) {
+            setForm(prev => {
+              let updated = { ...prev, ...updates }
+              // Recalc final price if cost exists
+              if (prev.cost) {
+                const cost = parseFloat(prev.cost) || 0
+                const margin = parseFloat(updates.margin_percent || prev.margin_percent) || 0
+                const vat = parseFloat(updates.vat_rate || prev.vat_rate) || 0
+                const newFinal = cost * (1 + margin / 100) * (1 + vat / 100)
+                updated = { ...updated, final_price: isFinite(newFinal) ? newFinal.toFixed(2) : '0' }
+              }
+              return updated
+            })
+            setCategoryDefaultApplied(applyHint)
+          } else {
+            setCategoryDefaultApplied(null)
+          }
+        }
+      } catch { /* ignore */ }
+    } else {
+      setCategoryDefaultApplied(null)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
@@ -108,6 +154,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         description: form.description || null,
         barcode: form.barcode || null,
         product_type: form.product_type || 'otro',
+        category_id: categoryId || null,
         cost: cost,
         margin_percent: margin,
         vat_rate: vat,
@@ -189,7 +236,37 @@ export const ProductForm: React.FC<ProductFormProps> = ({
               </datalist>
             </div>
           </div>
-          <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            {categories.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Categoria
+                  <HelpTip text="Asigna una categoria al producto. Los defaults de IVA y margen de la categoria se aplican automaticamente al crear." />
+                </label>
+                <select
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={categoryId}
+                  onChange={e => handleCategoryChange(e.target.value)}
+                >
+                  <option value="">Sin categoria</option>
+                  {categories.filter(c => !c.parent_id).map(c => (
+                    <React.Fragment key={c.id}>
+                      <option value={c.id}>{c.name}</option>
+                      {categories.filter(sub => sub.parent_id === c.id).map(sub => (
+                        <option key={sub.id} value={sub.id}>{'  -- '}{sub.name}</option>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </select>
+                {categoryDefaultApplied && (
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    Defaults de categoria aplicados: {categoryDefaultApplied}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Stock control */}
           <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">

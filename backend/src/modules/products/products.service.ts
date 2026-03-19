@@ -13,6 +13,12 @@ export class ProductsService {
     try {
       await db.execute(sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS controls_stock BOOLEAN DEFAULT false`);
       await db.execute(sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12,2) DEFAULT 0`);
+      // Category defaults
+      await db.execute(sql`ALTER TABLE categories ADD COLUMN IF NOT EXISTS default_vat_rate DECIMAL(5,2)`);
+      await db.execute(sql`ALTER TABLE categories ADD COLUMN IF NOT EXISTS default_margin_percent DECIMAL(5,2)`);
+      await db.execute(sql`ALTER TABLE categories ADD COLUMN IF NOT EXISTS default_supplier_id UUID`);
+      await db.execute(sql`ALTER TABLE categories ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`);
+      await db.execute(sql`ALTER TABLE categories ADD COLUMN IF NOT EXISTS color VARCHAR(7)`);
       this.migrationsRun = true;
     } catch (error) {
       console.error('Products migrations error:', error);
@@ -464,12 +470,22 @@ export class ProductsService {
   }
 
   async getCategories(companyId: string) {
+    await this.ensureMigrations();
     try {
       const result = await db.execute(sql`
-        SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) as product_count
+        SELECT c.*,
+          c.default_vat_rate,
+          c.default_margin_percent,
+          c.default_supplier_id,
+          c.sort_order,
+          c.color,
+          (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) as product_count,
+          (SELECT COUNT(*) FROM products p WHERE p.category_id IN (
+            SELECT sc.id FROM categories sc WHERE sc.parent_id = c.id
+          )) as child_product_count
         FROM categories c
         WHERE c.company_id = ${companyId} AND c.active = true
-        ORDER BY c.parent_id NULLS FIRST, c.name ASC
+        ORDER BY c.sort_order ASC, c.parent_id NULLS FIRST, c.name ASC
       `);
       return (result as any).rows || result || [];
     } catch {
@@ -477,9 +493,81 @@ export class ProductsService {
     }
   }
 
-  async createCategory(companyId: string, data: { name: string; description?: string; parent_id?: string }) {
+  async getCategoryDefaults(companyId: string, categoryId: string) {
+    await this.ensureMigrations();
     try {
+      // Walk up the category tree to find defaults
+      const defaults: { vat_rate?: number; margin_percent?: number; supplier_id?: string } = {};
+      let currentCatId: string | null = categoryId;
+      let depth = 0;
+
+      while (currentCatId && depth < 5) {
+        const catResult: any = await db.execute(sql`
+          SELECT default_vat_rate, default_margin_percent, default_supplier_id, parent_id
+          FROM categories WHERE id = ${currentCatId} AND company_id = ${companyId}
+        `);
+        const catRows: any[] = catResult.rows || catResult || [];
+        if (catRows.length === 0) break;
+
+        const cat: any = catRows[0];
+        if (defaults.vat_rate === undefined && cat.default_vat_rate !== null) {
+          defaults.vat_rate = parseFloat(cat.default_vat_rate);
+        }
+        if (defaults.margin_percent === undefined && cat.default_margin_percent !== null) {
+          defaults.margin_percent = parseFloat(cat.default_margin_percent);
+        }
+        if (defaults.supplier_id === undefined && cat.default_supplier_id !== null) {
+          defaults.supplier_id = cat.default_supplier_id;
+        }
+
+        currentCatId = cat.parent_id;
+        depth++;
+      }
+
+      return defaults;
+    } catch (error) {
+      console.error('Get category defaults error:', error);
+      return {};
+    }
+  }
+
+  async createCategory(companyId: string, data: {
+    name: string;
+    description?: string;
+    parent_id?: string;
+    default_vat_rate?: number;
+    default_margin_percent?: number;
+    color?: string;
+  }) {
+    await this.ensureMigrations();
+    try {
+      // Enforce max 3 levels deep
+      if (data.parent_id) {
+        const parentResult = await db.execute(sql`
+          SELECT parent_id FROM categories WHERE id = ${data.parent_id} AND company_id = ${companyId}
+        `);
+        const parentRows = (parentResult as any).rows || parentResult || [];
+        if (parentRows.length > 0 && parentRows[0].parent_id) {
+          // Check grandparent
+          const gpResult = await db.execute(sql`
+            SELECT parent_id FROM categories WHERE id = ${parentRows[0].parent_id}
+          `);
+          const gpRows = (gpResult as any).rows || gpResult || [];
+          if (gpRows.length > 0 && gpRows[0].parent_id) {
+            throw new ApiError(400, 'Maximo 3 niveles de profundidad en categorias');
+          }
+        }
+      }
+
       const id = uuid();
+
+      // Get max sort_order
+      const maxOrderResult = await db.execute(sql`
+        SELECT COALESCE(MAX(sort_order), -1) as max_order FROM categories
+        WHERE company_id = ${companyId} AND COALESCE(parent_id, '00000000-0000-0000-0000-000000000000') = COALESCE(${data.parent_id || null}, '00000000-0000-0000-0000-000000000000')
+      `);
+      const maxOrder = (((maxOrderResult as any).rows?.[0]?.max_order) ?? -1) + 1;
+
       await db.insert(categories).values({
         id,
         company_id: companyId,
@@ -487,18 +575,137 @@ export class ProductsService {
         description: data.description || null,
         parent_id: data.parent_id || null,
       });
-      return { id, name: data.name };
+
+      // Update extra fields via raw SQL
+      await pool.query(
+        `UPDATE categories SET sort_order = $1, default_vat_rate = $2, default_margin_percent = $3, color = $4 WHERE id = $5`,
+        [maxOrder, data.default_vat_rate || null, data.default_margin_percent || null, data.color || null, id]
+      );
+
+      return { id, name: data.name, parent_id: data.parent_id || null };
     } catch (error) {
+      if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create category');
+    }
+  }
+
+  async updateCategory(companyId: string, categoryId: string, data: {
+    name?: string;
+    description?: string;
+    parent_id?: string | null;
+    default_vat_rate?: number | null;
+    default_margin_percent?: number | null;
+    color?: string | null;
+    sort_order?: number;
+  }) {
+    await this.ensureMigrations();
+    try {
+      const check = await db.execute(sql`
+        SELECT id FROM categories WHERE id = ${categoryId} AND company_id = ${companyId}
+      `);
+      const rows = (check as any).rows || check || [];
+      if (rows.length === 0) throw new ApiError(404, 'Category not found');
+
+      const sets: string[] = [];
+      const params: any[] = [];
+      let paramIdx = 1;
+
+      if (data.name !== undefined) {
+        sets.push(`name = $${paramIdx}`);
+        params.push(data.name);
+        paramIdx++;
+      }
+      if (data.description !== undefined) {
+        sets.push(`description = $${paramIdx}`);
+        params.push(data.description);
+        paramIdx++;
+      }
+      if (data.parent_id !== undefined) {
+        sets.push(`parent_id = $${paramIdx}`);
+        params.push(data.parent_id);
+        paramIdx++;
+      }
+      if (data.default_vat_rate !== undefined) {
+        sets.push(`default_vat_rate = $${paramIdx}`);
+        params.push(data.default_vat_rate);
+        paramIdx++;
+      }
+      if (data.default_margin_percent !== undefined) {
+        sets.push(`default_margin_percent = $${paramIdx}`);
+        params.push(data.default_margin_percent);
+        paramIdx++;
+      }
+      if (data.color !== undefined) {
+        sets.push(`color = $${paramIdx}`);
+        params.push(data.color);
+        paramIdx++;
+      }
+      if (data.sort_order !== undefined) {
+        sets.push(`sort_order = $${paramIdx}`);
+        params.push(data.sort_order);
+        paramIdx++;
+      }
+
+      sets.push('updated_at = NOW()');
+
+      if (sets.length > 1) {
+        params.push(categoryId, companyId);
+        await pool.query(
+          `UPDATE categories SET ${sets.join(', ')} WHERE id = $${paramIdx} AND company_id = $${paramIdx + 1}`,
+          params
+        );
+      }
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to update category');
+    }
+  }
+
+  async reorderCategories(companyId: string, orderedIds: string[]) {
+    await this.ensureMigrations();
+    try {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await pool.query(
+          'UPDATE categories SET sort_order = $1 WHERE id = $2 AND company_id = $3',
+          [i, orderedIds[i], companyId]
+        );
+      }
+      return { success: true };
+    } catch (error) {
+      throw new ApiError(500, 'Error al reordenar categorias');
     }
   }
 
   async deleteCategory(companyId: string, categoryId: string) {
     try {
-      // Unlink products
-      await db.update(products).set({ category_id: null }).where(eq(products.category_id, categoryId));
-      // Delete children
-      await db.execute(sql`UPDATE categories SET parent_id = NULL WHERE parent_id = ${categoryId}`);
+      // Check if products use this category
+      const usageResult = await db.execute(sql`
+        SELECT COUNT(*) as count FROM products WHERE category_id = ${categoryId} AND company_id = ${companyId}
+      `);
+      const count = parseInt(((usageResult as any).rows?.[0]?.count ?? '0'), 10);
+
+      // Also check child categories
+      const childResult = await db.execute(sql`
+        SELECT COUNT(*) as count FROM categories WHERE parent_id = ${categoryId} AND company_id = ${companyId} AND active = true
+      `);
+      const childCount = parseInt(((childResult as any).rows?.[0]?.count ?? '0'), 10);
+
+      if (count > 0) {
+        // Unlink products instead of blocking
+        await db.update(products).set({ category_id: null }).where(eq(products.category_id, categoryId));
+      }
+
+      if (childCount > 0) {
+        // Move children to parent of this category or to root
+        const parentResult = await db.execute(sql`
+          SELECT parent_id FROM categories WHERE id = ${categoryId}
+        `);
+        const parentId = ((parentResult as any).rows?.[0]?.parent_id) || null;
+        await db.execute(sql`UPDATE categories SET parent_id = ${parentId} WHERE parent_id = ${categoryId}`);
+      }
+
       await db.execute(sql`DELETE FROM categories WHERE id = ${categoryId} AND company_id = ${companyId}`);
       return { success: true };
     } catch (error) {

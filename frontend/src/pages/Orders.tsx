@@ -279,6 +279,25 @@ export const Orders: React.FC = () => {
     setFormItems(prev => [...prev, emptyFormItem()])
   }
 
+  // Track price resolution info per item
+  const [priceResolutions, setPriceResolutions] = useState<Record<number, { base_price: number; resolved_price: number; discount_percent: number; rule_applied: string | null; price_list_name: string | null }>>({})
+
+  const resolveProductPrice = async (productId: string, quantity: number, idx: number) => {
+    if (!formEnterpriseId || !productId) return null
+    try {
+      const resolution = await api.resolvePrice({
+        enterprise_id: formEnterpriseId,
+        product_id: productId,
+        quantity: quantity,
+      })
+      if (resolution && resolution.price_list_name) {
+        setPriceResolutions(prev => ({ ...prev, [idx]: resolution }))
+        return resolution
+      }
+    } catch { /* ignore */ }
+    return null
+  }
+
   const updateFormItem = (idx: number, field: keyof FormItem, value: string | number) => {
     setFormItems(prev => {
       const updated = [...prev]
@@ -294,14 +313,49 @@ export const Orders: React.FC = () => {
             item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).product_type || 'otro'
+            // Try to resolve price from enterprise's price list
+            resolveProductPrice(productId, item.quantity || 1, idx).then(resolution => {
+              if (resolution && resolution.resolved_price > 0) {
+                setFormItems(prevItems => {
+                  const newItems = [...prevItems]
+                  newItems[idx] = { ...newItems[idx], unit_price: resolution.resolved_price }
+                  return newItems
+                })
+              }
+            })
           }
         } else if (productId === 'custom') {
           item.product_name = ''
           item.unit_price = 0
           item.cost = 0
         }
-      } else if (field === 'quantity' || field === 'unit_price' || field === 'cost') {
+      } else if (field === 'quantity') {
+        const newQty = typeof value === 'string' ? parseFloat(value) || 0 : value
+        item.quantity = newQty
+        // Re-resolve price when quantity changes (quantity breaks)
+        if (item.product_id && item.product_id !== 'custom') {
+          resolveProductPrice(item.product_id, newQty, idx).then(resolution => {
+            if (resolution && resolution.resolved_price > 0) {
+              setFormItems(prevItems => {
+                const newItems = [...prevItems]
+                newItems[idx] = { ...newItems[idx], unit_price: resolution.resolved_price }
+                return newItems
+              })
+            }
+          })
+        }
+      } else if (field === 'unit_price' || field === 'cost') {
         (item as any)[field] = typeof value === 'string' ? parseFloat(value) || 0 : value
+        // If user manually overrides unit_price, mark it
+        if (field === 'unit_price') {
+          setPriceResolutions(prev => {
+            const existing = prev[idx]
+            if (existing) {
+              return { ...prev, [idx]: { ...existing, rule_applied: 'Precio modificado manualmente' } }
+            }
+            return prev
+          })
+        }
       } else {
         (item as any)[field] = value
       }
@@ -968,12 +1022,20 @@ export const Orders: React.FC = () => {
                           <label className="text-xs font-medium text-gray-500">Precio Unitario</label>
                           <input
                             type="number" step="0.01" min="0"
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className={`px-2 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${priceResolutions[idx]?.price_list_name ? 'border-blue-400 dark:border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}
                             placeholder="0.00"
                             value={item.unit_price || ''}
                             onChange={e => updateFormItem(idx, 'unit_price', e.target.value)}
                             required
                           />
+                          {priceResolutions[idx]?.price_list_name && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                              {priceResolutions[idx].discount_percent !== 0
+                                ? `Base: ${formatCurrency(priceResolutions[idx].base_price)} -> ${priceResolutions[idx].price_list_name}: ${formatCurrency(priceResolutions[idx].resolved_price)} (${priceResolutions[idx].discount_percent > 0 ? '-' : '+'}${Math.abs(priceResolutions[idx].discount_percent).toFixed(1)}%)`
+                                : `${priceResolutions[idx].price_list_name}`}
+                              {priceResolutions[idx].rule_applied === 'Precio modificado manualmente' && <span className="text-orange-500 dark:text-orange-400"> *manual</span>}
+                            </p>
+                          )}
                         </div>
                         {/* Cost tracked internally from product pricing, not shown to user */}
                         {/* Subtotal + remove */}

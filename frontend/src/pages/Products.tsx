@@ -253,6 +253,7 @@ export const Products: React.FC = () => {
           initialForm={editingForm}
           productTypes={productTypes}
           products={products}
+          categories={categories}
           onSaved={() => { setShowForm(false); setEditingId(null); loadProducts(); loadMetadata() }}
           onCancel={() => { setShowForm(false); setEditingId(null) }}
         />
@@ -356,6 +357,7 @@ export const Products: React.FC = () => {
         <PriceListsManager
           priceLists={priceLists}
           products={products}
+          categories={categories}
           onReload={loadMetadata}
         />
       )}

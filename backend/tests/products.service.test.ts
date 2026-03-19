@@ -463,9 +463,18 @@ describe('ProductsService', () => {
 
   describe('getCategories', () => {
     it('returns hierarchical structure ordered by parent_id', async () => {
+      // ensureMigrations: controls_stock + low_stock_threshold + 5 category ALTER TABLEs
+      mockDbVoid() // controls_stock
+      mockDbVoid() // low_stock_threshold
+      mockDbVoid() // default_vat_rate
+      mockDbVoid() // default_margin_percent
+      mockDbVoid() // default_supplier_id
+      mockDbVoid() // sort_order
+      mockDbVoid() // color
+
       mockDbRows([
-        { id: 'cat-1', name: 'Electronics', parent_id: null, product_count: '5' },
-        { id: 'cat-2', name: 'Phones', parent_id: 'cat-1', product_count: '3' },
+        { id: 'cat-1', name: 'Electronics', parent_id: null, product_count: '5', child_product_count: '3', default_vat_rate: null, default_margin_percent: null, default_supplier_id: null, sort_order: 0, color: null },
+        { id: 'cat-2', name: 'Phones', parent_id: 'cat-1', product_count: '3', child_product_count: '0', default_vat_rate: null, default_margin_percent: null, default_supplier_id: null, sort_order: 0, color: null },
       ])
 
       const result = await service.getCategories('company-1')
@@ -476,6 +485,15 @@ describe('ProductsService', () => {
     })
 
     it('returns empty array on error', async () => {
+      // ensureMigrations: all ALTER TABLE calls
+      mockDbVoid()
+      mockDbVoid()
+      mockDbVoid()
+      mockDbVoid()
+      mockDbVoid()
+      mockDbVoid()
+      mockDbVoid()
+
       mockDbExecute.mockRejectedValueOnce(new Error('DB error'))
 
       const result = await service.getCategories('company-1')

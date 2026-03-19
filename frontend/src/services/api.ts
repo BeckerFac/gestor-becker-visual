@@ -298,8 +298,20 @@ export const api = {
     const { data } = await client.get('/products/categories')
     return data
   },
-  createCategory: async (catData: { name: string; description?: string; parent_id?: string }) => {
+  createCategory: async (catData: { name: string; description?: string; parent_id?: string; default_vat_rate?: number; default_margin_percent?: number; color?: string }) => {
     const { data } = await client.post('/products/categories', catData)
+    return data
+  },
+  updateCategory: async (id: string, catData: any) => {
+    const { data } = await client.put(`/products/categories/${id}`, catData)
+    return data
+  },
+  reorderCategories: async (orderedIds: string[]) => {
+    const { data } = await client.post('/products/categories/reorder', { ordered_ids: orderedIds })
+    return data
+  },
+  getCategoryDefaults: async (id: string) => {
+    const { data } = await client.get(`/products/categories/${id}/defaults`)
     return data
   },
   deleteCategory: async (id: string) => {
@@ -324,6 +336,31 @@ export const api = {
   setPriceListItems: async (id: string, items: any[]) => { const { data } = await client.put(`/price-lists/${id}/items`, { items }); return data },
   getEnterprisePriceForProduct: async (enterpriseId: string, productId: string) => { const { data } = await client.get(`/price-lists/enterprise-price/${enterpriseId}/${productId}`); return data },
   linkEnterpriseToPriceList: async (enterpriseId: string, priceListId: string) => { const { data } = await client.put(`/price-lists/link-enterprise/${enterpriseId}`, { price_list_id: priceListId }); return data },
+
+  // Price List Rules
+  getPriceListRules: async (id: string) => { const { data } = await client.get(`/price-lists/${id}/rules`); return data },
+  addPriceListRule: async (id: string, ruleData: any) => { const { data } = await client.post(`/price-lists/${id}/rules`, ruleData); return data },
+  updatePriceListRule: async (id: string, ruleId: string, ruleData: any) => { const { data } = await client.put(`/price-lists/${id}/rules/${ruleId}`, ruleData); return data },
+  deletePriceListRule: async (id: string, ruleId: string) => { const { data } = await client.delete(`/price-lists/${id}/rules/${ruleId}`); return data },
+
+  // Price Resolution
+  resolvePrice: async (params: { enterprise_id?: string; product_id: string; quantity?: number; price_list_id?: string }) => {
+    const qs = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') qs.append(k, String(v)) })
+    const { data } = await client.get(`/price-lists/resolve?${qs.toString()}`)
+    return data
+  },
+  resolveAllPrices: async (id: string, quantity?: number) => {
+    const qs = quantity ? `?quantity=${quantity}` : ''
+    const { data } = await client.get(`/price-lists/${id}/resolved-prices${qs}`)
+    return data
+  },
+
+  // Bulk operations on price lists
+  bulkUpdatePriceListRules: async (id: string, operation: any) => {
+    const { data } = await client.post(`/price-lists/${id}/bulk`, operation)
+    return data
+  },
 
   // Product Components (BOM)
   getProductComponents: async (productId: string) => {

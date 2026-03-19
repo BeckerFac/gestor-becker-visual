@@ -105,6 +105,41 @@ export class ProductsController {
     }
   }
 
+  async updateCategory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const result = await productsService.updateCategory(req.user.company_id, req.params.id, req.body);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update category' });
+    }
+  }
+
+  async reorderCategories(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { ordered_ids } = req.body;
+      if (!Array.isArray(ordered_ids)) throw new ApiError(400, 'ordered_ids array required');
+      const result = await productsService.reorderCategories(req.user.company_id, ordered_ids);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to reorder categories' });
+    }
+  }
+
+  async getCategoryDefaults(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const defaults = await productsService.getCategoryDefaults(req.user.company_id, req.params.id);
+      res.json(defaults);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get category defaults' });
+    }
+  }
+
   async deleteCategory(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
