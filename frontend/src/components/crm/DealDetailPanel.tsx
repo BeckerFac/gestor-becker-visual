@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Deal } from './DealCard'
 import { ActivityTimeline } from './ActivityTimeline'
+import { CrmStage } from './StageConfigurator'
 import { Button } from '@/components/ui/Button'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
@@ -8,30 +10,46 @@ import { toast } from '@/hooks/useToast'
 
 interface DealDetailPanelProps {
   deal: Deal
+  stages: CrmStage[]
   onClose: () => void
   onDealUpdated: () => void
 }
 
-const STAGE_ORDER = ['contacto', 'cotizacion', 'negociacion', 'pedido', 'entregado', 'cobrado']
-
-const STAGE_LABELS: Record<string, string> = {
-  contacto: 'Contacto',
-  cotizacion: 'Cotizacion',
-  negociacion: 'Negociacion',
-  pedido: 'Pedido',
-  entregado: 'Entregado',
-  cobrado: 'Cobrado',
-  perdido: 'Perdido',
+interface DealDocument {
+  id: string
+  type: 'quote' | 'order' | 'invoice' | 'cobro'
+  number: string
+  amount: number
+  status: string
+  date: string
 }
 
-const STAGE_COLORS: Record<string, string> = {
-  contacto: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  cotizacion: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
-  negociacion: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  pedido: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-  entregado: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
-  cobrado: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  perdido: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+const DOC_ICONS: Record<string, string> = {
+  quote: '$',
+  order: 'P',
+  invoice: 'F',
+  cobro: 'C',
+}
+
+const DOC_LABELS: Record<string, string> = {
+  quote: 'Cotizacion',
+  order: 'Pedido',
+  invoice: 'Factura',
+  cobro: 'Cobro',
+}
+
+const DOC_ROUTES: Record<string, string> = {
+  quote: '/quotes',
+  order: '/orders',
+  invoice: '/invoices',
+  cobro: '/cobros',
+}
+
+const DOC_ICON_COLORS: Record<string, string> = {
+  quote: 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300',
+  order: 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300',
+  invoice: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
+  cobro: 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300',
 }
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -52,11 +70,15 @@ const LOST_REASONS = [
 
 export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
   deal,
+  stages,
   onClose,
   onDealUpdated,
 }) => {
+  const navigate = useNavigate()
   const [activities, setActivities] = useState<any[]>([])
+  const [documents, setDocuments] = useState<DealDocument[]>([])
   const [loadingActivities, setLoadingActivities] = useState(true)
+  const [loadingDocs, setLoadingDocs] = useState(true)
   const [showLostForm, setShowLostForm] = useState(false)
   const [lostReason, setLostReason] = useState('')
   const [closing, setClosing] = useState(false)
@@ -70,6 +92,31 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Active (non-loss) stages for the pipeline progress bar
+  const activeStages = stages
+    .filter(s => !s.is_loss_stage)
+    .sort((a, b) => a.order - b.order)
+
+  const lossStages = stages.filter(s => s.is_loss_stage)
+
+  const isLostDeal = lossStages.some(s =>
+    s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase()
+  ) || deal.stage === 'perdido'
+
+  const currentStageIndex = activeStages.findIndex(s =>
+    s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase()
+  )
+
+  const currentStageName = (() => {
+    const found = stages.find(s => s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase())
+    return found?.name || deal.stage
+  })()
+
+  const currentStageColor = (() => {
+    const found = stages.find(s => s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase())
+    return found?.color || '#6B7280'
+  })()
+
   const loadActivities = async () => {
     try {
       setLoadingActivities(true)
@@ -82,14 +129,29 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
     }
   }
 
+  const loadDocuments = async () => {
+    try {
+      setLoadingDocs(true)
+      const data = await api.getCrmDealDocuments(deal.id)
+      setDocuments(Array.isArray(data) ? data : [])
+    } catch {
+      // Documents endpoint might not exist yet, fail silently
+      setDocuments([])
+    } finally {
+      setLoadingDocs(false)
+    }
+  }
+
   useEffect(() => {
     loadActivities()
+    loadDocuments()
   }, [deal.id])
 
-  const handleMoveStage = async (newStage: string) => {
+  const handleMoveStage = async (stageIdOrName: string) => {
     try {
-      await api.moveCrmDealStage(deal.id, newStage)
-      toast.success(`Movido a ${STAGE_LABELS[newStage]}`)
+      await api.moveCrmDealStage(deal.id, stageIdOrName)
+      const targetStage = stages.find(s => s.id === stageIdOrName || s.name.toLowerCase() === stageIdOrName)
+      toast.success(`Movido a ${targetStage?.name || stageIdOrName}`)
       onDealUpdated()
     } catch (err: any) {
       toast.error(err.message)
@@ -115,9 +177,11 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
   }
 
   const handleReopen = async () => {
+    const firstStage = activeStages[0]
+    if (!firstStage) return
     try {
-      await api.moveCrmDealStage(deal.id, 'contacto')
-      toast.success('Deal reabierto en Contacto')
+      await api.moveCrmDealStage(deal.id, firstStage.id || firstStage.name.toLowerCase())
+      toast.success(`Deal reabierto en ${firstStage.name}`)
       onDealUpdated()
     } catch (err: any) {
       toast.error(err.message)
@@ -158,7 +222,16 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
     }
   }
 
-  const currentStageIndex = STAGE_ORDER.indexOf(deal.stage)
+  const handleDocClick = (doc: DealDocument) => {
+    const route = DOC_ROUTES[doc.type]
+    if (route) navigate(route)
+  }
+
+  // Stage badge style
+  const stageBadgeStyle = {
+    backgroundColor: `${currentStageColor}20`,
+    color: currentStageColor,
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -170,8 +243,11 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
         {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-5 py-4 z-10">
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STAGE_COLORS[deal.stage]}`}>
-              {STAGE_LABELS[deal.stage] || deal.stage}
+            <span
+              className="text-xs font-medium px-2 py-0.5 rounded-full"
+              style={stageBadgeStyle}
+            >
+              {currentStageName}
             </span>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
           </div>
@@ -274,42 +350,92 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
             </div>
           )}
 
-          {/* Stage progress */}
-          {deal.stage !== 'perdido' && (
+          {/* Stage progress (dynamic from stages prop) */}
+          {!isLostDeal && activeStages.length > 0 && (
             <div>
               <span className="text-xs text-gray-500 dark:text-gray-400 block mb-2">Pipeline</span>
               <div className="flex gap-0.5">
-                {STAGE_ORDER.map((stage, i) => (
+                {activeStages.map((stage, i) => (
                   <button
-                    key={stage}
-                    onClick={() => handleMoveStage(stage)}
+                    key={stage.id}
+                    onClick={() => handleMoveStage(stage.id || stage.name.toLowerCase())}
                     className={`flex-1 h-2 rounded-sm transition-colors cursor-pointer ${
-                      i <= currentStageIndex
-                        ? 'bg-blue-500 dark:bg-blue-400'
-                        : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      i > currentStageIndex ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600' : ''
                     }`}
-                    title={`Mover a ${STAGE_LABELS[stage]}`}
+                    style={i <= currentStageIndex ? { backgroundColor: stage.color } : undefined}
+                    title={`Mover a ${stage.name}`}
                   />
                 ))}
               </div>
               <div className="flex justify-between mt-1">
-                {STAGE_ORDER.map(stage => (
-                  <span key={stage} className="text-[9px] text-gray-400 dark:text-gray-500">{STAGE_LABELS[stage]?.slice(0, 3)}</span>
+                {activeStages.map(stage => (
+                  <span key={stage.id} className="text-[9px] text-gray-400 dark:text-gray-500">{stage.name.slice(0, 3)}</span>
                 ))}
               </div>
             </div>
           )}
 
+          {/* Stage selector dropdown */}
+          {!isLostDeal && (
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Mover a etapa</label>
+              <select
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={deal.stage}
+                onChange={e => handleMoveStage(e.target.value)}
+              >
+                {activeStages.map(s => (
+                  <option key={s.id} value={s.id || s.name.toLowerCase()}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Linked documents */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Documentos vinculados</h4>
+            {loadingDocs ? (
+              <p className="text-xs text-gray-400 text-center py-2">Cargando...</p>
+            ) : documents.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-3">Sin documentos vinculados</p>
+            ) : (
+              <div className="space-y-1.5">
+                {documents.map(doc => (
+                  <button
+                    key={`${doc.type}-${doc.id}`}
+                    onClick={() => handleDocClick(doc)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
+                  >
+                    <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${DOC_ICON_COLORS[doc.type] || 'bg-gray-200 text-gray-700'}`}>
+                      {DOC_ICONS[doc.type] || '?'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {DOC_LABELS[doc.type]} #{doc.number}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                        {formatCurrency(doc.amount)}
+                      </span>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Actions */}
           <div className="flex flex-wrap gap-2">
-            {deal.stage !== 'perdido' && (
+            {!isLostDeal && (
               <>
                 {!editing && (
                   <Button size="xs" variant="outline" onClick={() => setEditing(true)}>Editar</Button>
                 )}
-                {currentStageIndex >= 0 && currentStageIndex < STAGE_ORDER.length - 1 && (
-                  <Button size="xs" variant="primary" onClick={() => handleMoveStage(STAGE_ORDER[currentStageIndex + 1])}>
-                    Mover a {STAGE_LABELS[STAGE_ORDER[currentStageIndex + 1]]}
+                {currentStageIndex >= 0 && currentStageIndex < activeStages.length - 1 && (
+                  <Button size="xs" variant="primary" onClick={() => handleMoveStage(activeStages[currentStageIndex + 1].id || activeStages[currentStageIndex + 1].name.toLowerCase())}>
+                    Mover a {activeStages[currentStageIndex + 1].name}
                   </Button>
                 )}
                 <Button size="xs" variant="danger" onClick={() => setShowLostForm(!showLostForm)}>
@@ -317,7 +443,7 @@ export const DealDetailPanel: React.FC<DealDetailPanelProps> = ({
                 </Button>
               </>
             )}
-            {deal.stage === 'perdido' && (
+            {isLostDeal && (
               <Button size="xs" variant="warning" onClick={handleReopen}>
                 Reabrir deal
               </Button>

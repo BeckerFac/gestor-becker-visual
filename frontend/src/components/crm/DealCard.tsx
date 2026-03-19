@@ -1,5 +1,6 @@
 import React from 'react'
 import { formatCurrency } from '@/lib/utils'
+import { getStageBorderColor } from './PipelineKanban'
 
 export interface Deal {
   id: string
@@ -9,6 +10,7 @@ export interface Deal {
   title: string
   value: number | string
   stage: string
+  stage_id?: string | null
   priority: string
   expected_close_date: string | null
   lost_reason: string | null
@@ -20,26 +22,16 @@ export interface Deal {
   enterprise_cuit: string | null
   customer_name: string | null
   days_in_stage: number
+  document_count?: number
 }
 
 interface DealCardProps {
   deal: Deal
+  stageColor?: string
   onSelect: (deal: Deal) => void
   onMoveForward?: (deal: Deal) => void
   onMoveBackward?: (deal: Deal) => void
   showStageActions?: boolean
-}
-
-const STAGE_ORDER = ['contacto', 'cotizacion', 'negociacion', 'pedido', 'entregado', 'cobrado']
-
-const STAGE_BORDER_COLORS: Record<string, string> = {
-  contacto: 'border-l-blue-500',
-  cotizacion: 'border-l-purple-500',
-  negociacion: 'border-l-amber-500',
-  pedido: 'border-l-orange-500',
-  entregado: 'border-l-teal-500',
-  cobrado: 'border-l-green-500',
-  perdido: 'border-l-red-500',
 }
 
 const PRIORITY_DOTS: Record<string, string> = {
@@ -57,18 +49,17 @@ function getDaysColor(days: number): string {
 
 export const DealCard: React.FC<DealCardProps> = ({
   deal,
+  stageColor,
   onSelect,
   onMoveForward,
   onMoveBackward,
   showStageActions = true,
 }) => {
-  const currentIndex = STAGE_ORDER.indexOf(deal.stage)
-  const canMoveForward = currentIndex >= 0 && currentIndex < STAGE_ORDER.length - 1
-  const canMoveBackward = currentIndex > 0
+  const borderClass = stageColor ? getStageBorderColor(stageColor) : 'border-l-gray-400'
 
   return (
     <div
-      className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${STAGE_BORDER_COLORS[deal.stage] || 'border-l-gray-400'} rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group`}
+      className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${borderClass} rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group`}
       onClick={() => onSelect(deal)}
     >
       {/* Header row */}
@@ -91,26 +82,35 @@ export const DealCard: React.FC<DealCardProps> = ({
 
       {/* Footer */}
       <div className="flex items-center justify-between">
-        <span className={`text-xs ${getDaysColor(deal.days_in_stage || 0)}`}>
-          {deal.days_in_stage || 0}d en etapa
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs ${getDaysColor(deal.days_in_stage || 0)}`}>
+            {deal.days_in_stage || 0}d en etapa
+          </span>
+          {/* Document count badge */}
+          {(deal.document_count ?? 0) > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full" title="Documentos vinculados">
+              <svg className="w-3 h-3 inline mr-0.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              {deal.document_count}
+            </span>
+          )}
+        </div>
 
-        {showStageActions && deal.stage !== 'perdido' && (
+        {showStageActions && (
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-            {canMoveBackward && onMoveBackward && (
+            {onMoveBackward && (
               <button
                 onClick={() => onMoveBackward(deal)}
                 className="px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                title={`Mover a ${STAGE_ORDER[currentIndex - 1]}`}
+                title="Mover atras"
               >
                 &lt;
               </button>
             )}
-            {canMoveForward && onMoveForward && (
+            {onMoveForward && (
               <button
                 onClick={() => onMoveForward(deal)}
                 className="px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 bg-blue-50 dark:bg-blue-900/40 rounded hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors"
-                title={`Mover a ${STAGE_ORDER[currentIndex + 1]}`}
+                title="Mover adelante"
               >
                 &gt;
               </button>

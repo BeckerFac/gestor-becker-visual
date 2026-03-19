@@ -24,6 +24,7 @@ import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { Users } from '@/pages/Users'
 import { Global } from '@/pages/Global'
 import { Reportes } from '@/pages/Reportes'
+import { Oportunidades } from '@/pages/Oportunidades'
 import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
 import { PWAUpdatePrompt } from '@/components/shared/PWAUpdatePrompt'
@@ -160,6 +161,7 @@ function App() {
         <Route path="/cheques" element={<ProtectedRoute module="cheques"><Cheques /></ProtectedRoute>} />
         <Route path="/reportes" element={<ProtectedRoute module="reports"><Reportes /></ProtectedRoute>} />
         <Route path="/remitos" element={<ProtectedRoute module="remitos"><Remitos /></ProtectedRoute>} />
+        <Route path="/oportunidades" element={<ProtectedRoute module="crm"><Oportunidades /></ProtectedRoute>} />
         <Route path="/bancos" element={<ProtectedRoute module="banks"><Banks /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute module="users"><Users /></ProtectedRoute>} />

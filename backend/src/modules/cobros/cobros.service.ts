@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { crmSyncService } from '../crm/crm-sync.service';
 
 export class CobrosService {
   private tablesEnsured = false;
@@ -112,7 +113,61 @@ export class CobrosService {
         WHERE c.id = ${cobroId}
       `);
       const rows = (result as any).rows || result || [];
-      return rows[0];
+      const cobro = rows[0];
+
+      // CRM Pipeline sync: check if fully paid, then trigger payment_received
+      try {
+        // Check if the linked order/invoice is now fully paid
+        let isFullyPaid = false;
+        if (data.order_id) {
+          const orderPayStatus = await db.execute(sql`
+            SELECT payment_status FROM orders WHERE id = ${data.order_id}
+          `);
+          const ps = ((orderPayStatus as any).rows || [])[0]?.payment_status;
+          isFullyPaid = ps === 'pagado';
+        }
+
+        if (isFullyPaid) {
+          // If order has an invoice, also link cobro to deal via invoice
+          if (data.order_id) {
+            const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, data.order_id, 'order');
+            if (existingDeal) {
+              await crmSyncService.linkDocumentToDeal(existingDeal.id, 'cobro', cobroId);
+            }
+          }
+          if (data.invoice_id) {
+            const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, data.invoice_id, 'invoice');
+            if (existingDeal) {
+              await crmSyncService.linkDocumentToDeal(existingDeal.id, 'cobro', cobroId);
+            }
+          }
+
+          await crmSyncService.handleEvent({
+            companyId,
+            event: 'payment_received',
+            enterpriseId: data.enterprise_id || undefined,
+            documentId: cobroId,
+            documentType: 'cobro',
+            metadata: { amount: parseFloat(data.amount || '0') },
+          });
+        } else {
+          // Partial payment: still link cobro to deal but don't trigger stage move
+          if (data.order_id) {
+            const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, data.order_id, 'order');
+            if (existingDeal) {
+              await crmSyncService.linkDocumentToDeal(existingDeal.id, 'cobro', cobroId);
+            }
+          }
+          if (data.invoice_id) {
+            const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, data.invoice_id, 'invoice');
+            if (existingDeal) {
+              await crmSyncService.linkDocumentToDeal(existingDeal.id, 'cobro', cobroId);
+            }
+          }
+        }
+      } catch (e) { console.error('CRM sync error (cobro_created):', e); }
+
+      return cobro;
     } catch (error) {
       console.error('Create cobro error:', error);
       if (error instanceof ApiError) throw error;

@@ -880,6 +880,34 @@ export const api = {
     return data
   },
 
+  // CRM Stages
+  getCrmStages: async () => {
+    const { data } = await client.get('/crm/stages')
+    return data
+  },
+  createCrmStage: async (stage: any) => {
+    const { data } = await client.post('/crm/stages', stage)
+    return data
+  },
+  updateCrmStage: async (id: string, stage: any) => {
+    const { data } = await client.put(`/crm/stages/${id}`, stage)
+    return data
+  },
+  deleteCrmStage: async (id: string) => {
+    const { data } = await client.delete(`/crm/stages/${id}`)
+    return data
+  },
+  reorderCrmStages: async (stages: { id: string; order: number }[]) => {
+    const { data } = await client.put('/crm/stages/reorder', { stages })
+    return data
+  },
+
+  // CRM Deal Documents
+  getCrmDealDocuments: async (dealId: string) => {
+    const { data } = await client.get(`/crm/deals/${dealId}/documents`)
+    return data
+  },
+
   // Export
   exportCompanyData: async () => {
     const { data } = await client.get('/export/company')

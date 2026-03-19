@@ -1,5 +1,6 @@
 import React from 'react'
 import { formatCurrency } from '@/lib/utils'
+import { CrmStage } from './StageConfigurator'
 
 interface StageSummary {
   count: number
@@ -14,21 +15,44 @@ interface PipelineSummaryBarProps {
     won_value: number
     lost_count: number
   }
+  dynamicStages?: CrmStage[]
 }
 
-const STAGE_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
-  contacto: { label: 'Contacto', color: 'text-blue-700 dark:text-blue-300', bgColor: 'bg-blue-100 dark:bg-blue-900/40' },
-  cotizacion: { label: 'Cotizacion', color: 'text-purple-700 dark:text-purple-300', bgColor: 'bg-purple-100 dark:bg-purple-900/40' },
-  negociacion: { label: 'Negociacion', color: 'text-amber-700 dark:text-amber-300', bgColor: 'bg-amber-100 dark:bg-amber-900/40' },
-  pedido: { label: 'Pedido', color: 'text-orange-700 dark:text-orange-300', bgColor: 'bg-orange-100 dark:bg-orange-900/40' },
-  entregado: { label: 'Entregado', color: 'text-teal-700 dark:text-teal-300', bgColor: 'bg-teal-100 dark:bg-teal-900/40' },
-  cobrado: { label: 'Cobrado', color: 'text-green-700 dark:text-green-300', bgColor: 'bg-green-100 dark:bg-green-900/40' },
+// Fallback stage config for when no dynamic stages are provided
+const FALLBACK_STAGES = ['contacto', 'cotizacion', 'negociacion', 'pedido', 'entregado', 'cobrado']
+
+// Map hex colors to Tailwind classes for summary bar
+function getBarColors(hex: string): { color: string; bgColor: string } {
+  const map: Record<string, { color: string; bgColor: string }> = {
+    '#3B82F6': { color: 'text-blue-700 dark:text-blue-300', bgColor: 'bg-blue-100 dark:bg-blue-900/40' },
+    '#8B5CF6': { color: 'text-purple-700 dark:text-purple-300', bgColor: 'bg-purple-100 dark:bg-purple-900/40' },
+    '#EAB308': { color: 'text-amber-700 dark:text-amber-300', bgColor: 'bg-amber-100 dark:bg-amber-900/40' },
+    '#F97316': { color: 'text-orange-700 dark:text-orange-300', bgColor: 'bg-orange-100 dark:bg-orange-900/40' },
+    '#06B6D4': { color: 'text-cyan-700 dark:text-cyan-300', bgColor: 'bg-cyan-100 dark:bg-cyan-900/40' },
+    '#22C55E': { color: 'text-green-700 dark:text-green-300', bgColor: 'bg-green-100 dark:bg-green-900/40' },
+    '#EF4444': { color: 'text-red-700 dark:text-red-300', bgColor: 'bg-red-100 dark:bg-red-900/40' },
+    '#EC4899': { color: 'text-pink-700 dark:text-pink-300', bgColor: 'bg-pink-100 dark:bg-pink-900/40' },
+    '#6B7280': { color: 'text-gray-700 dark:text-gray-300', bgColor: 'bg-gray-100 dark:bg-gray-900/40' },
+  }
+  return map[hex] || map['#6B7280']
 }
 
-const ACTIVE_STAGES = ['contacto', 'cotizacion', 'negociacion', 'pedido', 'entregado', 'cobrado']
+export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({ stages: stageData, totals, dynamicStages }) => {
+  // Build the list of stages to render
+  const stageList = dynamicStages
+    ? dynamicStages.filter(s => !s.is_loss_stage).sort((a, b) => a.order - b.order)
+    : FALLBACK_STAGES.map(name => ({ id: name, name, color: '#6B7280', order: 0, trigger_event: null, is_loss_stage: false }))
 
-export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({ stages, totals }) => {
-  const maxCount = Math.max(...ACTIVE_STAGES.map(s => stages[s]?.count || 0), 1)
+  const getStageCount = (stage: { id: string; name: string }) => {
+    // Try matching by lowercase name first, then by id
+    return stageData[stage.name.toLowerCase()]?.count || stageData[stage.id]?.count || 0
+  }
+
+  const getStageValue = (stage: { id: string; name: string }) => {
+    return stageData[stage.name.toLowerCase()]?.total_value || stageData[stage.id]?.total_value || 0
+  }
+
+  const maxCount = Math.max(...stageList.map(s => getStageCount(s)), 1)
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -62,18 +86,19 @@ export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({ stages, 
 
       {/* Funnel bar */}
       <div className="flex gap-1 items-end h-8">
-        {ACTIVE_STAGES.map(stage => {
-          const config = STAGE_CONFIG[stage]
-          const stageData = stages[stage] || { count: 0, total_value: 0 }
-          const width = Math.max((stageData.count / maxCount) * 100, stageData.count > 0 ? 15 : 5)
+        {stageList.map(stage => {
+          const colors = getBarColors(stage.color)
+          const count = getStageCount(stage)
+          const value = getStageValue(stage)
+          const width = Math.max((count / maxCount) * 100, count > 0 ? 15 : 5)
 
           return (
-            <div key={stage} className="flex-1 flex flex-col items-center gap-0.5" title={`${config.label}: ${stageData.count} deals - ${formatCurrency(stageData.total_value)}`}>
+            <div key={stage.id} className="flex-1 flex flex-col items-center gap-0.5" title={`${stage.name}: ${count} deals - ${formatCurrency(value)}`}>
               <div
-                className={`w-full rounded-sm ${config.bgColor} transition-all`}
+                className={`w-full rounded-sm ${colors.bgColor} transition-all`}
                 style={{ height: `${Math.max(width * 0.32, 4)}px` }}
               />
-              <span className={`text-[10px] font-medium ${config.color} truncate`}>{stageData.count}</span>
+              <span className={`text-[10px] font-medium ${colors.color} truncate`}>{count}</span>
             </div>
           )
         })}

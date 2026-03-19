@@ -3,10 +3,37 @@ import { AuthRequest } from '../../middlewares/auth';
 import { crmService } from './crm.service';
 
 export class CrmController {
+  // Stages
+  async getStages(req: AuthRequest, res: Response) {
+    const data = await crmService.getStages(req.user!.company_id);
+    res.json(data);
+  }
+
+  async createStage(req: AuthRequest, res: Response) {
+    const data = await crmService.createStage(req.user!.company_id, req.body);
+    res.status(201).json(data);
+  }
+
+  async updateStage(req: AuthRequest, res: Response) {
+    const data = await crmService.updateStage(req.user!.company_id, req.params.id, req.body);
+    res.json(data);
+  }
+
+  async deleteStage(req: AuthRequest, res: Response) {
+    const data = await crmService.deleteStage(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
+
+  async reorderStages(req: AuthRequest, res: Response) {
+    const data = await crmService.reorderStages(req.user!.company_id, req.body.stages || req.body);
+    res.json(data);
+  }
+
   // Deals
   async getDeals(req: AuthRequest, res: Response) {
     const filters = {
       stage: req.query.stage as string | undefined,
+      stage_id: req.query.stage_id as string | undefined,
       enterprise_id: req.query.enterprise_id as string | undefined,
       priority: req.query.priority as string | undefined,
       search: req.query.search as string | undefined,
@@ -31,8 +58,9 @@ export class CrmController {
   }
 
   async moveDealStage(req: AuthRequest, res: Response) {
-    const { stage } = req.body;
-    const data = await crmService.moveDealStage(req.user!.company_id, req.params.id, stage, req.user!.id);
+    // Accept stage_id or legacy stage name
+    const stageOrId = req.body.stage_id || req.body.stage;
+    const data = await crmService.moveDealStage(req.user!.company_id, req.params.id, stageOrId, req.user!.id);
     res.json(data);
   }
 
@@ -44,6 +72,18 @@ export class CrmController {
 
   async deleteDeal(req: AuthRequest, res: Response) {
     const data = await crmService.deleteDeal(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
+
+  // Deal stage history
+  async getDealStageHistory(req: AuthRequest, res: Response) {
+    const data = await crmService.getDealStageHistory(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
+
+  // Deal documents
+  async getDealDocuments(req: AuthRequest, res: Response) {
+    const data = await crmService.getDealDocuments(req.user!.company_id, req.params.id);
     res.json(data);
   }
 

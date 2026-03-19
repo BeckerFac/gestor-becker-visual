@@ -44,6 +44,7 @@ const navSections: NavSection[] = [
       { href: '/quotes', label: 'Cotizaciones', icon: '📄', module: 'quotes' },
       { href: '/invoices', label: 'Facturas', icon: '🧾', module: 'invoices' },
       { href: '/remitos', label: 'Remitos', icon: '🚚', module: 'remitos' },
+      { href: '/oportunidades', label: 'Oportunidades', icon: '🎯', module: 'crm' },
     ],
   },
   {

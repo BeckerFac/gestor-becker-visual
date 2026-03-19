@@ -39,7 +39,7 @@ interface AuthStore {
   isModuleEnabled: (moduleKey: string) => boolean
 }
 
-const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports']
+const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports','crm']
 
 // Demo credentials for single-company mode
 const DEMO_USER: User = {

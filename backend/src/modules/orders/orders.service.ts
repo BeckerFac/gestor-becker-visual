@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { crmSyncService } from '../crm/crm-sync.service';
 
 export class OrdersService {
   private migrationsRun = false;
@@ -287,6 +288,26 @@ export class OrdersService {
         }
       }
 
+      // CRM Pipeline sync: order_created
+      try {
+        // If order has a quote_id, link both to same deal
+        if (data.quote_id) {
+          const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, data.quote_id, 'quote');
+          if (existingDeal) {
+            await crmSyncService.linkDocumentToDeal(existingDeal.id, 'order', orderId);
+          }
+        }
+        await crmSyncService.handleEvent({
+          companyId,
+          event: 'order_created',
+          enterpriseId: enterpriseId || undefined,
+          customerId: data.customer_id || undefined,
+          documentId: orderId,
+          documentType: 'order',
+          metadata: { title: `Pedido #${orderNumber}`, amount: totalWithVat },
+        });
+      } catch (e) { console.error('CRM sync error (order_created):', e); }
+
       return { id: orderId, status: 'pendiente' };
     } catch (error) {
       console.error('Create order error:', error);
@@ -326,6 +347,32 @@ export class OrdersService {
       if (newStatus === 'cancelado' && oldStatus === 'en_produccion') {
         await this.reverseBOMStockDeduction(companyId, orderId, userId);
       }
+
+      // CRM Pipeline sync: order status changes
+      try {
+        const orderData = await db.execute(sql`
+          SELECT enterprise_id, customer_id, order_number, total_amount FROM orders WHERE id = ${orderId}
+        `);
+        const od = ((orderData as any).rows || [])[0];
+        if (od) {
+          let crmEvent: string | null = null;
+          if (newStatus === 'en_produccion') crmEvent = 'order_in_production';
+          else if (newStatus === 'entregado') crmEvent = 'order_delivered';
+          else if (newStatus === 'cancelado') crmEvent = 'order_cancelled';
+
+          if (crmEvent) {
+            await crmSyncService.handleEvent({
+              companyId,
+              event: crmEvent,
+              enterpriseId: od.enterprise_id || undefined,
+              customerId: od.customer_id || undefined,
+              documentId: orderId,
+              documentType: 'order',
+              metadata: { title: `Pedido #${od.order_number || ''}`, amount: parseFloat(od.total_amount || '0') },
+            });
+          }
+        }
+      } catch (e) { console.error('CRM sync error (order_status):', e); }
 
       return { id: orderId, old_status: oldStatus, new_status: newStatus };
     } catch (error) {

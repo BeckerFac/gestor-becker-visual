@@ -4,6 +4,7 @@ import { eq, and, sql, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { afipService, AfipService, AuthorizeInvoiceInput } from '../afip/afip.service';
+import { crmSyncService } from '../crm/crm-sync.service';
 
 function validateNumeric(value: unknown, fieldName: string, { min = 0, max = Infinity, allowZero = true } = {}): number {
   const num = Number(value);
@@ -656,6 +657,32 @@ export class InvoicesService {
 
       // Return updated invoice
       const updated = await this.getInvoice(companyId, invoiceId);
+
+      // CRM Pipeline sync: invoice_authorized
+      try {
+        // If invoice has order_id, link to same deal as that order
+        if (invoice.order_id) {
+          const existingDeal = await crmSyncService.findDealByRelatedDocument(companyId, invoice.order_id, 'order');
+          if (existingDeal) {
+            await crmSyncService.linkDocumentToDeal(existingDeal.id, 'invoice', invoiceId);
+          }
+        }
+
+        const invEnterpriseId = updated.enterprise_id || (updated.enterprise ? updated.enterprise.id : null);
+        await crmSyncService.handleEvent({
+          companyId,
+          event: 'invoice_authorized',
+          enterpriseId: invEnterpriseId || undefined,
+          customerId: invoice.customer_id || undefined,
+          documentId: invoiceId,
+          documentType: 'invoice',
+          metadata: {
+            title: `Factura #${invoice.invoice_number || ''}`,
+            amount: parseFloat(updated.total_amount?.toString() || '0'),
+          },
+        });
+      } catch (e) { console.error('CRM sync error (invoice_authorized):', e); }
+
       return updated;
     } catch (error) {
       if (error instanceof ApiError) throw error;

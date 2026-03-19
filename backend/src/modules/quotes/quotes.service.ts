@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { crmSyncService } from '../crm/crm-sync.service';
 
 export class QuotesService {
   private migrationsRun = false;
@@ -150,6 +151,39 @@ export class QuotesService {
         }
       }
 
+      // CRM Pipeline sync: quote status changes
+      try {
+        if (newStatus === 'accepted') {
+          // Resolve enterprise_id for the quote
+          const quoteData = await db.execute(sql`SELECT enterprise_id, customer_id, total_amount, quote_number FROM quotes WHERE id = ${quoteId}`);
+          const qd = ((quoteData as any).rows || [])[0];
+          if (qd) {
+            await crmSyncService.handleEvent({
+              companyId,
+              event: 'quote_accepted',
+              enterpriseId: qd.enterprise_id || undefined,
+              customerId: qd.customer_id || undefined,
+              documentId: quoteId,
+              documentType: 'quote',
+              metadata: { title: `Cotizacion #${qd.quote_number || ''}`, amount: parseFloat(qd.total_amount || '0') },
+            });
+          }
+        } else if (newStatus === 'rejected') {
+          const quoteData = await db.execute(sql`SELECT enterprise_id, customer_id, quote_number FROM quotes WHERE id = ${quoteId}`);
+          const qd = ((quoteData as any).rows || [])[0];
+          if (qd) {
+            await crmSyncService.handleEvent({
+              companyId,
+              event: 'quote_rejected',
+              enterpriseId: qd.enterprise_id || undefined,
+              customerId: qd.customer_id || undefined,
+              documentId: quoteId,
+              documentType: 'quote',
+            });
+          }
+        }
+      } catch (e) { console.error('CRM sync error (quote_status):', e); }
+
       return { quote_id: quoteId, status: newStatus, order };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -243,6 +277,22 @@ export class QuotesService {
           `);
         }
       }
+
+      // CRM Pipeline sync: quote_created
+      try {
+        // Fetch quote_number for metadata title
+        const qnResult = await db.execute(sql`SELECT quote_number FROM quotes WHERE id = ${quoteId}`);
+        const quoteNumber = ((qnResult as any).rows || [])[0]?.quote_number || '';
+        await crmSyncService.handleEvent({
+          companyId,
+          event: 'quote_created',
+          enterpriseId: enterpriseId || undefined,
+          customerId: data.customer_id || undefined,
+          documentId: quoteId,
+          documentType: 'quote',
+          metadata: { title: `Cotizacion #${quoteNumber}`, amount: totalAmount },
+        });
+      } catch (e) { console.error('CRM sync error (quote_created):', e); }
 
       return { id: quoteId, total_amount: totalAmount };
     } catch (error) {

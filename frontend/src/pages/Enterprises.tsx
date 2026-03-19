@@ -13,8 +13,6 @@ import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
-import { PipelineKanban } from '@/components/crm/PipelineKanban'
-import { CustomerHealth } from '@/components/crm/CustomerHealth'
 
 interface Enterprise {
   id: string
@@ -66,16 +64,7 @@ const emptyContactForm = {
   notes: '', role: '', enterprise_id: '',
 }
 
-type TabKey = 'empresas' | 'pipeline' | 'salud'
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'empresas', label: 'Empresas' },
-  { key: 'pipeline', label: 'Pipeline CRM' },
-  { key: 'salud', label: 'Salud Clientes' },
-]
-
 export const Enterprises: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabKey>('empresas')
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
@@ -337,7 +326,6 @@ export const Enterprises: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Empresas</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{enterprises.length} empresa{enterprises.length !== 1 ? 's' : ''} · {contacts.length} contacto{contacts.length !== 1 ? 's' : ''}</p>
         </div>
-        {activeTab === 'empresas' && (
         <div className="flex items-center gap-2">
           <ExportCSVButton
             data={filteredEnterprises.map(e => ({
@@ -411,26 +399,6 @@ export const Enterprises: React.FC = () => {
             </Button>
           </PermissionGate>
         </div>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="flex gap-0 -mb-px">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
       </div>
 
       {error && (
@@ -440,15 +408,7 @@ export const Enterprises: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'pipeline' && (
-        <PipelineKanban enterprises={enterprises.map(e => ({ id: e.id, name: e.name }))} />
-      )}
-
-      {activeTab === 'salud' && (
-        <CustomerHealth />
-      )}
-
-      {activeTab === 'empresas' && <>
+      <>
       {/* Enterprise Form */}
       {showEnterpriseForm && (
         <Card>
@@ -756,7 +716,7 @@ export const Enterprises: React.FC = () => {
         </div>
       )}
 
-      </>}
+      </>
 
       <ConfirmDialog
         open={!!deleteTarget}
