@@ -39,7 +39,7 @@ interface AuthStore {
   isModuleEnabled: (moduleKey: string) => boolean
 }
 
-const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos']
+const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports']
 
 // Demo credentials for single-company mode
 const DEMO_USER: User = {
@@ -143,6 +143,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
   isModuleEnabled: (moduleKey) => {
     const state = get()
+    // If no modules configured (legacy company), show everything
+    if (!state.enabledModules || state.enabledModules.length === 0) return true
     return state.enabledModules.includes(moduleKey)
   },
 }))
