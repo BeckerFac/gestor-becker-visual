@@ -362,6 +362,41 @@ export const api = {
     return data
   },
 
+  // Price History
+  getPriceHistory: async (productId: string, limit?: number, offset?: number) => {
+    const qs = new URLSearchParams()
+    if (limit) qs.append('limit', String(limit))
+    if (offset) qs.append('offset', String(offset))
+    const { data } = await client.get(`/price-lists/price-history/${productId}?${qs.toString()}`)
+    return data
+  },
+
+  // Quantity tiers
+  getQuantityTiers: async (priceListId: string, productId: string) => {
+    const { data } = await client.get(`/price-lists/quantity-tiers?price_list_id=${priceListId}&product_id=${productId}`)
+    return data
+  },
+
+  // Bulk operations with history
+  bulkUpdatePriceWithHistory: async (productIds: string[], percent: number) => {
+    const { data } = await client.post('/price-lists/bulk-update-with-history', { product_ids: productIds, percent })
+    return data
+  },
+  getRecentBulkOperations: async () => {
+    const { data } = await client.get('/price-lists/bulk-operations')
+    return data
+  },
+  undoBulkOperation: async (operationId: string) => {
+    const { data } = await client.post(`/price-lists/bulk-operations/${operationId}/undo`)
+    return data
+  },
+
+  // Import supplier prices
+  importSupplierPrices: async (items: { sku: string; new_cost: number }[]) => {
+    const { data } = await client.post('/price-lists/import-supplier-prices', { items })
+    return data
+  },
+
   // Product Components (BOM)
   getProductComponents: async (productId: string) => {
     const { data } = await client.get(`/products/${productId}/components`)

@@ -52,7 +52,7 @@ interface Order {
 
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
 interface Product { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string }
-interface Enterprise { id: string; name: string; cuit?: string | null }
+interface Enterprise { id: string; name: string; cuit?: string | null; price_list_id?: string | null }
 interface Bank { id: string; bank_name: string }
 
 interface FormItem {
@@ -282,6 +282,25 @@ export const Orders: React.FC = () => {
   // Track price resolution info per item
   const [priceResolutions, setPriceResolutions] = useState<Record<number, { base_price: number; resolved_price: number; discount_percent: number; rule_applied: string | null; price_list_name: string | null }>>({})
 
+  // Quantity tiers per item
+  const [quantityTiers, setQuantityTiers] = useState<Record<number, { min_quantity: number; price: number; discount_percent: number }[]>>({})
+  const [manualPriceOverride, setManualPriceOverride] = useState<Record<number, boolean>>({})
+
+  const loadQuantityTiers = async (productId: string, idx: number, enterpriseId: string) => {
+    if (!enterpriseId || !productId) return
+    try {
+      // Use enterprise from state to get price_list_id
+      const ent = enterprises.find(e => e.id === enterpriseId)
+      if (!ent?.price_list_id) return
+      const tiers = await api.getQuantityTiers(ent.price_list_id, productId)
+      if (Array.isArray(tiers) && tiers.length > 0) {
+        setQuantityTiers(prev => ({ ...prev, [idx]: tiers }))
+      } else {
+        setQuantityTiers(prev => { const next = { ...prev }; delete next[idx]; return next })
+      }
+    } catch { /* ignore - tiers not available */ }
+  }
+
   const resolveProductPrice = async (productId: string, quantity: number, idx: number) => {
     if (!formEnterpriseId || !productId) return null
     try {
@@ -313,6 +332,7 @@ export const Orders: React.FC = () => {
             item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).product_type || 'otro'
+            setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
             // Try to resolve price from enterprise's price list
             resolveProductPrice(productId, item.quantity || 1, idx).then(resolution => {
               if (resolution && resolution.resolved_price > 0) {
@@ -323,17 +343,20 @@ export const Orders: React.FC = () => {
                 })
               }
             })
+            // Load quantity tiers
+            loadQuantityTiers(productId, idx, formEnterpriseId)
           }
         } else if (productId === 'custom') {
           item.product_name = ''
           item.unit_price = 0
           item.cost = 0
+          setQuantityTiers(prev => { const next = { ...prev }; delete next[idx]; return next })
         }
       } else if (field === 'quantity') {
         const newQty = typeof value === 'string' ? parseFloat(value) || 0 : value
         item.quantity = newQty
-        // Re-resolve price when quantity changes (quantity breaks)
-        if (item.product_id && item.product_id !== 'custom') {
+        // Re-resolve price when quantity changes (quantity breaks) - only if not manually overridden
+        if (item.product_id && item.product_id !== 'custom' && !manualPriceOverride[idx]) {
           resolveProductPrice(item.product_id, newQty, idx).then(resolution => {
             if (resolution && resolution.resolved_price > 0) {
               setFormItems(prevItems => {
@@ -348,6 +371,7 @@ export const Orders: React.FC = () => {
         (item as any)[field] = typeof value === 'string' ? parseFloat(value) || 0 : value
         // If user manually overrides unit_price, mark it
         if (field === 'unit_price') {
+          setManualPriceOverride(prev => ({ ...prev, [idx]: true }))
           setPriceResolutions(prev => {
             const existing = prev[idx]
             if (existing) {
@@ -1035,6 +1059,32 @@ export const Orders: React.FC = () => {
                                 : `${priceResolutions[idx].price_list_name}`}
                               {priceResolutions[idx].rule_applied === 'Precio modificado manualmente' && <span className="text-orange-500 dark:text-orange-400"> *manual</span>}
                             </p>
+                          )}
+                          {/* Quantity tiers display */}
+                          {quantityTiers[idx] && quantityTiers[idx].length > 1 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {quantityTiers[idx].map((tier, tIdx) => {
+                                const nextTier = quantityTiers[idx][tIdx + 1]
+                                const rangeLabel = nextTier
+                                  ? `${tier.min_quantity}-${nextTier.min_quantity - 1}`
+                                  : `${tier.min_quantity}+`
+                                const isActive = nextTier
+                                  ? item.quantity >= tier.min_quantity && item.quantity < nextTier.min_quantity
+                                  : item.quantity >= tier.min_quantity
+                                return (
+                                  <span
+                                    key={tIdx}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${isActive ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300 font-bold' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}
+                                  >
+                                    {rangeLabel}: {formatCurrency(tier.price)}
+                                    {tier.discount_percent !== 0 && ` (${tier.discount_percent > 0 ? '-' : '+'}${Math.abs(tier.discount_percent).toFixed(0)}%)`}
+                                  </span>
+                                )
+                              })}
+                              {manualPriceOverride[idx] && (
+                                <span className="text-[10px] text-orange-500 dark:text-orange-400 px-1">Precio manual - tiers no aplicados</span>
+                              )}
+                            </div>
                           )}
                         </div>
                         {/* Cost tracked internally from product pricing, not shown to user */}

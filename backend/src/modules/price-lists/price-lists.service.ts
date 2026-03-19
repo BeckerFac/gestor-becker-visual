@@ -37,6 +37,46 @@ export class PriceListsService {
         CREATE INDEX IF NOT EXISTS idx_plr_lookup ON price_list_rules(price_list_id, product_id, category_id, min_quantity)
       `).catch(() => {});
 
+      // Price change history table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS price_change_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_id UUID NOT NULL REFERENCES companies(id),
+          product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+          field_changed VARCHAR(50) NOT NULL,
+          old_value DECIMAL(12,2),
+          new_value DECIMAL(12,2),
+          change_source VARCHAR(50) NOT NULL,
+          batch_id UUID,
+          changed_by UUID REFERENCES users(id),
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `).catch(() => {});
+
+      await db.execute(sql`
+        CREATE INDEX IF NOT EXISTS idx_pch_product ON price_change_history(product_id, created_at DESC)
+      `).catch(() => {});
+
+      await db.execute(sql`
+        CREATE INDEX IF NOT EXISTS idx_pch_batch ON price_change_history(batch_id) WHERE batch_id IS NOT NULL
+      `).catch(() => {});
+
+      // Bulk operations log table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS bulk_price_operations (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_id UUID NOT NULL REFERENCES companies(id),
+          operation_type VARCHAR(50) NOT NULL,
+          parameters JSONB NOT NULL DEFAULT '{}',
+          affected_products INTEGER NOT NULL DEFAULT 0,
+          rollback_data JSONB,
+          rolled_back BOOLEAN DEFAULT false,
+          rolled_back_at TIMESTAMP,
+          performed_by UUID REFERENCES users(id),
+          performed_at TIMESTAMP DEFAULT NOW()
+        )
+      `).catch(() => {});
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Price lists migration error:', error);
@@ -92,7 +132,7 @@ export class PriceListsService {
         LEFT JOIN products p ON p.id = plr.product_id
         LEFT JOIN categories c ON c.id = plr.category_id
         WHERE plr.price_list_id = ${priceListId}
-        ORDER BY plr.priority DESC, plr.min_quantity DESC
+        ORDER BY plr.priority DESC, plr.min_quantity DESC, plr.created_at ASC, plr.id ASC
       `);
       const rules = (rulesResult as any).rows || rulesResult || [];
 
@@ -261,7 +301,7 @@ export class PriceListsService {
         LEFT JOIN products p ON p.id = plr.product_id
         LEFT JOIN categories c ON c.id = plr.category_id
         WHERE plr.price_list_id = ${priceListId}
-        ORDER BY plr.priority DESC, plr.min_quantity DESC
+        ORDER BY plr.priority DESC, plr.min_quantity DESC, plr.created_at ASC, plr.id ASC
       `);
       return (result as any).rows || result || [];
     } catch (error) {
@@ -300,8 +340,8 @@ export class PriceListsService {
           ${data.category_id || null},
           ${data.rule_type},
           ${data.value.toString()},
-          ${data.min_quantity || 1},
-          ${data.priority || 0}
+          ${data.min_quantity !== undefined && data.min_quantity !== null ? data.min_quantity : 1},
+          ${data.priority !== undefined && data.priority !== null ? data.priority : 0}
         )
       `);
 
@@ -339,8 +379,8 @@ export class PriceListsService {
           category_id = ${data.category_id || null},
           rule_type = ${data.rule_type || 'percentage'},
           value = ${(data.value !== undefined ? data.value : 0).toString()},
-          min_quantity = ${data.min_quantity || 1},
-          priority = ${data.priority || 0},
+          min_quantity = ${data.min_quantity !== undefined && data.min_quantity !== null ? data.min_quantity : 1},
+          priority = ${data.priority !== undefined && data.priority !== null ? data.priority : 0},
           active = ${data.active !== undefined ? data.active : true},
           updated_at = NOW()
         WHERE id = ${ruleId}
@@ -444,7 +484,7 @@ export class PriceListsService {
         WHERE plr.price_list_id = ${priceListId}
           AND plr.active = true
           AND plr.min_quantity <= ${quantity}
-        ORDER BY plr.priority DESC, plr.min_quantity DESC
+        ORDER BY plr.priority DESC, plr.min_quantity DESC, plr.created_at ASC, plr.id ASC
       `);
       const rules = (rulesResult as any).rows || rulesResult || [];
 
@@ -460,12 +500,40 @@ export class PriceListsService {
 
       // Find best matching rule by specificity:
       // 1. Exact product match
-      // 2. Category match
+      // 2. Category match (direct category, then parent categories up the tree)
       // 3. Global rule (no product_id and no category_id)
       const productRules = rules.filter((r: any) => r.product_id === productId);
-      const categoryRules = product.category_id
-        ? rules.filter((r: any) => !r.product_id && r.category_id === product.category_id)
-        : [];
+
+      // Collect ancestor category IDs for subcategory rule inheritance
+      const categoryIds: string[] = [];
+      if (product.category_id) {
+        categoryIds.push(product.category_id);
+        try {
+          let parentCatId: string | null = product.category_id;
+          let depth = 0;
+          while (parentCatId && depth < 5) {
+            const parentResult = await db.execute(sql`
+              SELECT parent_id FROM categories WHERE id = ${parentCatId}
+            `);
+            const parentRows = (parentResult as any).rows || parentResult || [];
+            if (parentRows.length === 0 || !parentRows[0].parent_id) break;
+            parentCatId = parentRows[0].parent_id as string;
+            categoryIds.push(parentCatId);
+            depth++;
+          }
+        } catch { /* ignore lookup errors */ }
+      }
+
+      // Match category rules: direct category first, then parent categories in order
+      let categoryRules: any[] = [];
+      for (const catId of categoryIds) {
+        const rulesForCat = rules.filter((r: any) => !r.product_id && r.category_id === catId);
+        if (rulesForCat.length > 0) {
+          categoryRules = rulesForCat;
+          break; // most specific category match wins
+        }
+      }
+
       const globalRules = rules.filter((r: any) => !r.product_id && !r.category_id);
 
       const matchingRules = productRules.length > 0 ? productRules
@@ -596,7 +664,7 @@ export class PriceListsService {
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Price list not found');
 
-      if (operation.type === 'increase_percent' && operation.percent) {
+      if (operation.type === 'increase_percent' && operation.percent !== undefined && operation.percent !== null) {
         // Update all fixed-price rules by the percentage
         const pct = operation.percent;
         const multiplier = 1 + pct / 100;
@@ -725,6 +793,477 @@ export class PriceListsService {
       if (error instanceof ApiError) throw error;
       console.error('Link enterprise to list error:', error);
       throw new ApiError(500, 'Failed to link enterprise to price list');
+    }
+  }
+
+  // =============================================
+  // PRICE HISTORY
+  // =============================================
+
+  async logPriceChange(companyId: string, productId: string, fieldChanged: string, oldValue: number | null, newValue: number | null, changeSource: string, changedBy?: string, batchId?: string) {
+    await this.ensureMigrations();
+    try {
+      const id = uuid();
+      await db.execute(sql`
+        INSERT INTO price_change_history (id, company_id, product_id, field_changed, old_value, new_value, change_source, batch_id, changed_by)
+        VALUES (
+          ${id},
+          ${companyId},
+          ${productId},
+          ${fieldChanged},
+          ${oldValue !== null && oldValue !== undefined ? oldValue.toString() : null},
+          ${newValue !== null && newValue !== undefined ? newValue.toString() : null},
+          ${changeSource},
+          ${batchId || null},
+          ${changedBy || null}
+        )
+      `);
+      return id;
+    } catch (error) {
+      console.error('Log price change error:', error);
+      // Non-critical: don't throw, just log
+      return null;
+    }
+  }
+
+  async getPriceHistory(companyId: string, productId: string, limit: number = 20, offset: number = 0) {
+    await this.ensureMigrations();
+    try {
+      const safeLimit = Math.min(Math.max(1, limit), 100);
+      const safeOffset = Math.max(0, offset);
+
+      const result = await db.execute(sql`
+        SELECT pch.*,
+          u.name as changed_by_name
+        FROM price_change_history pch
+        LEFT JOIN users u ON u.id = pch.changed_by
+        WHERE pch.company_id = ${companyId} AND pch.product_id = ${productId}
+        ORDER BY pch.created_at DESC
+        LIMIT ${safeLimit} OFFSET ${safeOffset}
+      `);
+
+      const countResult = await db.execute(sql`
+        SELECT COUNT(*) as total FROM price_change_history
+        WHERE company_id = ${companyId} AND product_id = ${productId}
+      `);
+      const total = parseInt(((countResult as any).rows?.[0]?.total ?? '0'), 10);
+
+      return {
+        items: (result as any).rows || result || [],
+        total,
+      };
+    } catch (error) {
+      console.error('Get price history error:', error);
+      return { items: [], total: 0 };
+    }
+  }
+
+  // =============================================
+  // QUANTITY TIERS
+  // =============================================
+
+  async getQuantityTiers(companyId: string, priceListId: string, productId: string) {
+    await this.ensureMigrations();
+    try {
+      // Get base price
+      const productResult = await db.execute(sql`
+        SELECT p.id, p.category_id, pp.cost, pp.vat_rate, pp.final_price
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        WHERE p.id = ${productId} AND p.company_id = ${companyId}
+      `);
+      const productRows = (productResult as any).rows || productResult || [];
+      if (productRows.length === 0) return [];
+      const product = productRows[0];
+      const basePrice = parseFloat(product.final_price || '0');
+      const cost = parseFloat(product.cost || '0');
+
+      // Get all active rules for this product in the list, sorted by min_quantity
+      const rulesResult = await db.execute(sql`
+        SELECT plr.*, c.name as category_name
+        FROM price_list_rules plr
+        LEFT JOIN categories c ON c.id = plr.category_id
+        WHERE plr.price_list_id = ${priceListId}
+          AND plr.active = true
+        ORDER BY plr.min_quantity ASC, plr.priority DESC, plr.created_at ASC, plr.id ASC
+      `);
+      const allRules = (rulesResult as any).rows || rulesResult || [];
+
+      if (allRules.length === 0) return [];
+
+      // Find rules that match this product (by specificity order)
+      const productRules = allRules.filter((r: any) => r.product_id === productId);
+
+      // Collect ancestor category IDs for subcategory rule inheritance
+      const tierCategoryIds: string[] = [];
+      if (product.category_id) {
+        tierCategoryIds.push(product.category_id);
+        try {
+          let parentCatId: string | null = product.category_id;
+          let depth = 0;
+          while (parentCatId && depth < 5) {
+            const parentResult = await db.execute(sql`
+              SELECT parent_id FROM categories WHERE id = ${parentCatId}
+            `);
+            const parentRows = (parentResult as any).rows || parentResult || [];
+            if (parentRows.length === 0 || !parentRows[0].parent_id) break;
+            parentCatId = parentRows[0].parent_id as string;
+            tierCategoryIds.push(parentCatId);
+            depth++;
+          }
+        } catch { /* ignore lookup errors */ }
+      }
+
+      let categoryRules: any[] = [];
+      for (const catId of tierCategoryIds) {
+        const rulesForCat = allRules.filter((r: any) => !r.product_id && r.category_id === catId);
+        if (rulesForCat.length > 0) {
+          categoryRules = rulesForCat;
+          break;
+        }
+      }
+
+      const globalRules = allRules.filter((r: any) => !r.product_id && !r.category_id);
+
+      const matchingRules = productRules.length > 0 ? productRules
+        : categoryRules.length > 0 ? categoryRules
+        : globalRules;
+
+      if (matchingRules.length === 0) return [];
+
+      // Group by distinct min_quantity values
+      const qtyMap = new Map<number, any>();
+      for (const rule of matchingRules) {
+        const minQty = parseInt(rule.min_quantity || '1', 10);
+        // Keep highest priority / most specific for each qty threshold
+        if (!qtyMap.has(minQty) || (rule.priority || 0) > (qtyMap.get(minQty)?.priority || 0)) {
+          qtyMap.set(minQty, rule);
+        }
+      }
+
+      // Compute price for each tier
+      const tiers: { min_quantity: number; price: number; discount_percent: number }[] = [];
+      for (const [minQty, rule] of Array.from(qtyMap.entries()).sort((a, b) => a[0] - b[0])) {
+        let price = basePrice;
+        switch (rule.rule_type) {
+          case 'fixed':
+            price = parseFloat(rule.value || '0');
+            break;
+          case 'percentage': {
+            const pct = parseFloat(rule.value || '0');
+            price = basePrice * (1 + pct / 100);
+            break;
+          }
+          case 'formula': {
+            const coefficient = parseFloat(rule.value || '1');
+            price = cost * coefficient;
+            const vatRate = parseFloat(product.vat_rate || '21');
+            price = price * (1 + vatRate / 100);
+            break;
+          }
+        }
+        price = Math.round(price * 100) / 100;
+        const discountPct = basePrice > 0 ? Math.round(((basePrice - price) / basePrice) * 10000) / 100 : 0;
+        tiers.push({ min_quantity: minQty, price, discount_percent: discountPct });
+      }
+
+      return tiers;
+    } catch (error) {
+      console.error('Get quantity tiers error:', error);
+      return [];
+    }
+  }
+
+  // =============================================
+  // BULK OPERATIONS WITH HISTORY + UNDO
+  // =============================================
+
+  async bulkUpdatePriceWithHistory(companyId: string, productIds: string[], percentIncrease: number, userId?: string) {
+    await this.ensureMigrations();
+    try {
+      if (productIds.length === 0) throw new ApiError(400, 'No products selected');
+      if (percentIncrease === 0) throw new ApiError(400, 'Percentage must be non-zero');
+
+      const batchId = uuid();
+      const multiplier = 1 + percentIncrease / 100;
+
+      // Get current prices for rollback data
+      const placeholders = productIds.map((_, i) => `$${i + 1}`).join(',');
+      const rollbackResult = await pool.query(`
+        SELECT pp.product_id, pp.cost, pp.margin_percent, pp.vat_rate, pp.final_price
+        FROM product_pricing pp
+        JOIN products p ON p.id = pp.product_id
+        WHERE pp.product_id IN (${placeholders}) AND p.company_id = $${productIds.length + 1}
+      `, [...productIds, companyId]);
+      const rollbackData = rollbackResult.rows || [];
+
+      // Log each product's price changes
+      for (const row of rollbackData) {
+        const oldCost = parseFloat(row.cost || '0');
+        const oldFinal = parseFloat(row.final_price || '0');
+        const newCost = Math.round(oldCost * multiplier * 100) / 100;
+        const margin = parseFloat(row.margin_percent || '0');
+        const vat = parseFloat(row.vat_rate || '0');
+        const newFinal = Math.round(newCost * (1 + margin / 100) * (1 + vat / 100) * 100) / 100;
+
+        await this.logPriceChange(companyId, row.product_id, 'cost', oldCost, newCost, 'bulk_update', userId, batchId);
+        await this.logPriceChange(companyId, row.product_id, 'final_price', oldFinal, newFinal, 'bulk_update', userId, batchId);
+      }
+
+      // Apply the update
+      for (const pid of productIds) {
+        await db.execute(sql`
+          UPDATE product_pricing SET
+            cost = ROUND(CAST(cost AS decimal) * ${multiplier.toString()}, 2),
+            final_price = ROUND(
+              ROUND(CAST(cost AS decimal) * ${multiplier.toString()}, 2) *
+              (1 + CAST(margin_percent AS decimal) / 100) *
+              (1 + CAST(vat_rate AS decimal) / 100),
+            2),
+            updated_at = NOW()
+          WHERE product_id = ${pid}
+        `);
+      }
+
+      // Log the bulk operation for undo
+      const opId = uuid();
+      await db.execute(sql`
+        INSERT INTO bulk_price_operations (id, company_id, operation_type, parameters, affected_products, rollback_data, performed_by)
+        VALUES (
+          ${opId},
+          ${companyId},
+          ${'percentage_increase'},
+          ${JSON.stringify({ percent: percentIncrease, product_ids: productIds })},
+          ${rollbackData.length},
+          ${JSON.stringify(rollbackData)},
+          ${userId || null}
+        )
+      `);
+
+      return { updated: rollbackData.length, batch_id: batchId, operation_id: opId };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Bulk update with history error:', error);
+      throw new ApiError(500, 'Failed to bulk update prices');
+    }
+  }
+
+  async undoBulkOperation(companyId: string, operationId: string, userId?: string) {
+    await this.ensureMigrations();
+    try {
+      // Get the operation
+      const opResult = await db.execute(sql`
+        SELECT * FROM bulk_price_operations
+        WHERE id = ${operationId} AND company_id = ${companyId} AND rolled_back = false
+      `);
+      const opRows = (opResult as any).rows || opResult || [];
+      if (opRows.length === 0) throw new ApiError(404, 'Operacion no encontrada o ya fue revertida');
+
+      const op = opRows[0];
+      const performedAt = new Date(op.performed_at).getTime();
+      const fiveMinutesMs = 5 * 60 * 1000;
+      if (Date.now() - performedAt > fiveMinutesMs) {
+        throw new ApiError(400, 'La ventana de 5 minutos para deshacer ya expiro');
+      }
+
+      const rollbackData = typeof op.rollback_data === 'string' ? JSON.parse(op.rollback_data) : op.rollback_data;
+      if (!Array.isArray(rollbackData) || rollbackData.length === 0) {
+        throw new ApiError(400, 'No hay datos de rollback disponibles');
+      }
+
+      const undoBatchId = uuid();
+      let restored = 0;
+
+      for (const row of rollbackData) {
+        // Check product still exists
+        const existsResult = await db.execute(sql`
+          SELECT pp.product_id FROM product_pricing pp
+          JOIN products p ON p.id = pp.product_id
+          WHERE pp.product_id = ${row.product_id} AND p.company_id = ${companyId}
+        `);
+        const existsRows = (existsResult as any).rows || existsResult || [];
+        if (existsRows.length === 0) continue; // Skip deleted products
+
+        // Get current values for history
+        const currentResult = await db.execute(sql`
+          SELECT cost, final_price FROM product_pricing WHERE product_id = ${row.product_id}
+        `);
+        const currentRows = (currentResult as any).rows || currentResult || [];
+        if (currentRows.length > 0) {
+          const curr = currentRows[0];
+          await this.logPriceChange(companyId, row.product_id, 'cost', parseFloat(curr.cost || '0'), parseFloat(row.cost || '0'), 'undo_bulk', userId, undoBatchId);
+          await this.logPriceChange(companyId, row.product_id, 'final_price', parseFloat(curr.final_price || '0'), parseFloat(row.final_price || '0'), 'undo_bulk', userId, undoBatchId);
+        }
+
+        // Restore old prices
+        await db.execute(sql`
+          UPDATE product_pricing SET
+            cost = ${row.cost},
+            margin_percent = ${row.margin_percent},
+            vat_rate = ${row.vat_rate},
+            final_price = ${row.final_price},
+            updated_at = NOW()
+          WHERE product_id = ${row.product_id}
+        `);
+        restored++;
+      }
+
+      // Mark operation as rolled back
+      await db.execute(sql`
+        UPDATE bulk_price_operations SET rolled_back = true, rolled_back_at = NOW()
+        WHERE id = ${operationId}
+      `);
+
+      return { success: true, restored };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Undo bulk operation error:', error);
+      throw new ApiError(500, 'Error al deshacer operacion');
+    }
+  }
+
+  async getRecentBulkOperations(companyId: string, limit: number = 10) {
+    await this.ensureMigrations();
+    try {
+      const result = await db.execute(sql`
+        SELECT bpo.*, u.name as performed_by_name
+        FROM bulk_price_operations bpo
+        LEFT JOIN users u ON u.id = bpo.performed_by
+        WHERE bpo.company_id = ${companyId}
+        ORDER BY bpo.performed_at DESC
+        LIMIT ${Math.min(limit, 50)}
+      `);
+      return (result as any).rows || result || [];
+    } catch (error) {
+      console.error('Get recent bulk operations error:', error);
+      return [];
+    }
+  }
+
+  // =============================================
+  // SUPPLIER IMPORT
+  // =============================================
+
+  async importSupplierPrices(companyId: string, items: { sku: string; new_cost: number }[], userId?: string) {
+    await this.ensureMigrations();
+    try {
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new ApiError(400, 'No items provided');
+      }
+
+      // Validate no negative costs
+      const negativeCosts = items.filter(i => i.new_cost < 0);
+      if (negativeCosts.length > 0) {
+        throw new ApiError(400, `Se encontraron ${negativeCosts.length} costos negativos. Los costos deben ser >= 0.`);
+      }
+
+      const batchId = uuid();
+      const results: { sku: string; status: string; product_name?: string; old_cost?: number; new_cost?: number; new_final_price?: number }[] = [];
+      const rollbackData: any[] = [];
+
+      for (const item of items) {
+        if (!item.sku || item.new_cost === undefined || item.new_cost === null) {
+          results.push({ sku: item.sku || '(vacio)', status: 'error', product_name: 'SKU o costo invalido' });
+          continue;
+        }
+
+        // Find product by SKU
+        const productResult = await pool.query(
+          `SELECT p.id, p.name, p.sku, pp.cost, pp.margin_percent, pp.vat_rate, pp.final_price
+           FROM products p
+           LEFT JOIN product_pricing pp ON pp.product_id = p.id
+           WHERE p.company_id = $1 AND LOWER(p.sku) = LOWER($2)`,
+          [companyId, item.sku.trim()]
+        );
+
+        if (!productResult.rows || productResult.rows.length === 0) {
+          results.push({ sku: item.sku, status: 'not_found' });
+          continue;
+        }
+
+        const product = productResult.rows[0];
+        const oldCost = parseFloat(product.cost || '0');
+        const margin = parseFloat(product.margin_percent || '30');
+        const vat = parseFloat(product.vat_rate || '21');
+        const oldFinal = parseFloat(product.final_price || '0');
+        const newCost = Math.round(item.new_cost * 100) / 100;
+        const newFinal = Math.round(newCost * (1 + margin / 100) * (1 + vat / 100) * 100) / 100;
+
+        // Store rollback data
+        rollbackData.push({
+          product_id: product.id,
+          cost: product.cost,
+          margin_percent: product.margin_percent,
+          vat_rate: product.vat_rate,
+          final_price: product.final_price,
+        });
+
+        // Log changes
+        await this.logPriceChange(companyId, product.id, 'cost', oldCost, newCost, 'supplier_import', userId, batchId);
+        await this.logPriceChange(companyId, product.id, 'final_price', oldFinal, newFinal, 'supplier_import', userId, batchId);
+
+        // Update pricing
+        await db.execute(sql`
+          UPDATE product_pricing SET
+            cost = ${newCost.toFixed(2)},
+            final_price = ${newFinal.toFixed(2)},
+            updated_at = NOW()
+          WHERE product_id = ${product.id}
+        `);
+
+        results.push({
+          sku: product.sku,
+          status: 'updated',
+          product_name: product.name,
+          old_cost: oldCost,
+          new_cost: newCost,
+          new_final_price: newFinal,
+        });
+      }
+
+      // Log the bulk operation
+      const updatedCount = results.filter(r => r.status === 'updated').length;
+      if (updatedCount > 0) {
+        const opId = uuid();
+        await db.execute(sql`
+          INSERT INTO bulk_price_operations (id, company_id, operation_type, parameters, affected_products, rollback_data, performed_by)
+          VALUES (
+            ${opId},
+            ${companyId},
+            ${'supplier_import'},
+            ${JSON.stringify({ item_count: items.length })},
+            ${updatedCount},
+            ${JSON.stringify(rollbackData)},
+            ${userId || null}
+          )
+        `);
+
+        return {
+          results,
+          summary: {
+            total: items.length,
+            updated: updatedCount,
+            not_found: results.filter(r => r.status === 'not_found').length,
+            errors: results.filter(r => r.status === 'error').length,
+          },
+          operation_id: opId,
+        };
+      }
+
+      return {
+        results,
+        summary: {
+          total: items.length,
+          updated: 0,
+          not_found: results.filter(r => r.status === 'not_found').length,
+          errors: results.filter(r => r.status === 'error').length,
+        },
+        operation_id: null,
+      };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Import supplier prices error:', error);
+      throw new ApiError(500, 'Error al importar precios de proveedor');
     }
   }
 }

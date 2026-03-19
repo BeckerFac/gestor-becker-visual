@@ -213,6 +213,109 @@ export class PriceListsController {
       res.status(500).json({ error: 'Failed to link enterprise to price list' });
     }
   }
+
+  // Price History
+  async getPriceHistory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { limit = '20', offset = '0' } = req.query;
+      const data = await priceListsService.getPriceHistory(
+        req.user.company_id,
+        req.params.productId,
+        parseInt(limit as string) || 20,
+        parseInt(offset as string) || 0
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get price history' });
+    }
+  }
+
+  // Quantity tiers
+  async getQuantityTiers(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { price_list_id, product_id } = req.query;
+      if (!price_list_id || !product_id) throw new ApiError(400, 'price_list_id and product_id are required');
+      const data = await priceListsService.getQuantityTiers(
+        req.user.company_id,
+        price_list_id as string,
+        product_id as string
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get quantity tiers' });
+    }
+  }
+
+  // Bulk update with history
+  async bulkUpdatePriceWithHistory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { product_ids, percent } = req.body;
+      if (!Array.isArray(product_ids) || typeof percent !== 'number') {
+        throw new ApiError(400, 'product_ids (array) and percent (number) required');
+      }
+      const data = await priceListsService.bulkUpdatePriceWithHistory(
+        req.user.company_id,
+        product_ids,
+        percent,
+        req.user.id
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to bulk update prices' });
+    }
+  }
+
+  // Undo bulk operation
+  async undoBulkOperation(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const data = await priceListsService.undoBulkOperation(
+        req.user.company_id,
+        req.params.operationId,
+        req.user.id
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to undo bulk operation' });
+    }
+  }
+
+  // Recent bulk operations
+  async getRecentBulkOperations(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const data = await priceListsService.getRecentBulkOperations(req.user.company_id);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get bulk operations' });
+    }
+  }
+
+  // Import supplier prices
+  async importSupplierPrices(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { items } = req.body;
+      if (!Array.isArray(items)) throw new ApiError(400, 'items array is required');
+      const data = await priceListsService.importSupplierPrices(
+        req.user.company_id,
+        items,
+        req.user.id
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to import supplier prices' });
+    }
+  }
 }
 
 export const priceListsController = new PriceListsController();

@@ -4,6 +4,7 @@ import { products, categories, brands, product_pricing } from '../../db/schema';
 import { eq, and, ilike, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { priceListsService } from '../price-lists/price-lists.service';
 
 export class ProductsService {
   private migrationsRun = false;
@@ -240,7 +241,28 @@ export class ProductsService {
         const existingPricing = await db.select().from(product_pricing)
           .where(eq(product_pricing.product_id, productId));
 
+        // Log price changes to history
         if (existingPricing.length > 0) {
+          const oldCost = parseFloat(existingPricing[0].cost?.toString() || '0');
+          const oldMargin = parseFloat(existingPricing[0].margin_percent?.toString() || '0');
+          const oldVat = parseFloat(existingPricing[0].vat_rate?.toString() || '0');
+          const oldFinal = parseFloat(existingPricing[0].final_price?.toString() || '0');
+          const newCost = Number(data.cost);
+          const newFinal = final_price;
+
+          if (Math.abs(oldCost - newCost) > 0.001) {
+            priceListsService.logPriceChange(companyId, productId, 'cost', oldCost, newCost, 'manual', data._userId).catch(() => {});
+          }
+          if (Math.abs(oldMargin - Number(margin)) > 0.001) {
+            priceListsService.logPriceChange(companyId, productId, 'margin', oldMargin, Number(margin), 'manual', data._userId).catch(() => {});
+          }
+          if (Math.abs(oldVat - Number(vat_rate)) > 0.001) {
+            priceListsService.logPriceChange(companyId, productId, 'vat_rate', oldVat, Number(vat_rate), 'manual', data._userId).catch(() => {});
+          }
+          if (Math.abs(oldFinal - newFinal) > 0.01) {
+            priceListsService.logPriceChange(companyId, productId, 'final_price', oldFinal, newFinal, 'manual', data._userId).catch(() => {});
+          }
+
           await db.update(product_pricing)
             .set({
               cost: data.cost.toString(),

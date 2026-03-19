@@ -63,6 +63,12 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
   // Price lists for this product
   const [productPriceLists, setProductPriceLists] = useState<any[]>([])
 
+  // Price history
+  const [priceHistory, setPriceHistory] = useState<any[]>([])
+  const [priceHistoryTotal, setPriceHistoryTotal] = useState(0)
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false)
+  const [priceHistoryLimit, setPriceHistoryLimit] = useState(20)
+
   // Load stock movements
   const loadMovements = useCallback(async () => {
     setMovementsLoading(true)
@@ -105,11 +111,25 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
     } catch { setProductPriceLists([]) }
   }, [product.id])
 
+  // Load price history
+  const loadPriceHistory = useCallback(async (limit: number = 20) => {
+    setPriceHistoryLoading(true)
+    try {
+      const res = await api.getPriceHistory(product.id, limit)
+      setPriceHistory(res.items || [])
+      setPriceHistoryTotal(res.total || 0)
+    } catch { setPriceHistory([]); setPriceHistoryTotal(0) }
+    finally { setPriceHistoryLoading(false) }
+  }, [product.id])
+
   useEffect(() => {
     if (activeTab === 'stock') loadMovements()
     if (activeTab === 'composicion') loadBOM()
-    if (activeTab === 'precios') loadPriceLists()
-  }, [activeTab, loadMovements, loadBOM, loadPriceLists])
+    if (activeTab === 'precios') {
+      loadPriceLists()
+      loadPriceHistory(10)
+    }
+  }, [activeTab, loadMovements, loadBOM, loadPriceLists, loadPriceHistory])
 
   // Close on Escape
   useEffect(() => {
@@ -394,6 +414,86 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Price History Timeline */}
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Historial de precios</h4>
+                  {priceHistory.length === 0 && !priceHistoryLoading && (
+                    <button
+                      onClick={() => loadPriceHistory(10)}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Cargar historial
+                    </button>
+                  )}
+                </div>
+                {priceHistoryLoading ? (
+                  <p className="text-xs text-gray-400">Cargando historial...</p>
+                ) : priceHistory.length === 0 ? (
+                  <p className="text-xs text-gray-400">Sin cambios de precio registrados</p>
+                ) : (
+                  <div className="space-y-0">
+                    {priceHistory.slice(0, priceHistoryLimit > 10 ? priceHistoryLimit : 10).map((entry: any, idx: number) => {
+                      const oldVal = parseFloat(entry.old_value || '0')
+                      const newVal = parseFloat(entry.new_value || '0')
+                      const pctChange = oldVal > 0 ? ((newVal - oldVal) / oldVal * 100) : 0
+                      const isIncrease = newVal > oldVal
+                      const fieldLabels: Record<string, string> = {
+                        cost: 'Costo',
+                        final_price: 'Precio final',
+                        margin: 'Margen',
+                        vat_rate: 'IVA',
+                      }
+                      const sourceLabels: Record<string, string> = {
+                        manual: 'Manual',
+                        bulk_update: 'Masivo',
+                        supplier_import: 'Import. proveedor',
+                        undo_bulk: 'Deshacer masivo',
+                      }
+                      return (
+                        <div key={entry.id || idx} className="flex items-start gap-3 py-2 border-l-2 border-gray-200 dark:border-gray-700 pl-3 relative">
+                          <div className="absolute -left-[5px] top-3 w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                {fieldLabels[entry.field_changed] || entry.field_changed}
+                              </span>
+                              <span className="text-xs text-gray-400">
+                                {formatCurrency(oldVal)} {'→'} {formatCurrency(newVal)}
+                              </span>
+                              {pctChange !== 0 && (
+                                <span className={`text-xs font-medium ${isIncrease ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                  {isIncrease ? '+' : ''}{pctChange.toFixed(1)}%
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-gray-400">
+                                {new Date(entry.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                                {sourceLabels[entry.change_source] || entry.change_source}
+                              </span>
+                              {entry.changed_by_name && (
+                                <span className="text-[10px] text-gray-400">{entry.changed_by_name}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {priceHistoryTotal > 10 && priceHistoryLimit <= 10 && (
+                      <button
+                        onClick={() => { setPriceHistoryLimit(50); loadPriceHistory(50) }}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 pl-3"
+                      >
+                        Ver mas ({priceHistoryTotal - 10} restantes)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
