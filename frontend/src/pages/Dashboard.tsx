@@ -56,7 +56,7 @@ interface SearchResults {
   invoices: any[]
 }
 
-const DISMISSED_KEY = 'gestia_dismissed_actions'
+const DISMISSED_KEY = 'gestia_dismissed_dashboard_alerts'
 
 function getDismissed(): string[] {
   try {
@@ -508,8 +508,8 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Action Items - only show if there are visible actions */}
-      {visibleActions.length > 0 && (
+      {/* Action Items - show if there are actions (visible or dismissed) */}
+      {(insights?.actions || []).length > 0 && (
         <div className="rounded-xl bg-gradient-to-r from-indigo-50 via-white to-purple-50 dark:from-indigo-950/30 dark:via-gray-900 dark:to-purple-950/30 border border-indigo-100 dark:border-indigo-900/50 shadow-sm overflow-hidden">
           <div className="px-5 py-3 flex items-center justify-between border-b border-indigo-100/60 dark:border-indigo-900/30">
             <div className="flex items-center gap-3">
@@ -519,61 +519,77 @@ export const Dashboard: React.FC = () => {
                 </svg>
               </div>
               <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Atencion</span>
-              <span className="text-xs font-bold bg-indigo-600 text-white w-5 h-5 rounded-full flex items-center justify-center">
-                {visibleActions.length}
-              </span>
+              {visibleActions.length > 0 && (
+                <span className="text-xs font-bold bg-indigo-600 text-white w-5 h-5 rounded-full flex items-center justify-center">
+                  {visibleActions.length}
+                </span>
+              )}
             </div>
           </div>
-          <div className="divide-y divide-indigo-50 dark:divide-indigo-900/20">
-            {visibleActions.map((action) => (
-              <div
-                key={action.type}
-                onClick={() => navigate(action.link)}
-                className="group flex items-center gap-4 px-5 py-3.5 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 cursor-pointer transition-all"
-              >
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ring-4 ${
-                  action.severity === 'critical'
-                    ? 'bg-red-500 ring-red-100 dark:ring-red-950'
-                    : action.severity === 'warning'
-                    ? 'bg-amber-500 ring-amber-100 dark:ring-amber-950'
-                    : 'bg-blue-500 ring-blue-100 dark:ring-blue-950'
-                }`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{action.title}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{action.description}</p>
-                </div>
-                {action.value && (
-                  <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${
-                    action.severity === 'critical' ? 'text-red-600 dark:text-red-400' :
-                    action.severity === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
-                  }`}>{action.value}</span>
-                )}
-                <button
-                  onClick={(e) => handleDismiss(action.type, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-all shadow-none hover:shadow-sm"
-                  title="Ocultar"
+
+          {visibleActions.length > 0 ? (
+            <div className="divide-y divide-indigo-50 dark:divide-indigo-900/20">
+              {visibleActions.map((action) => (
+                <div
+                  key={action.type}
+                  onClick={() => navigate(action.link)}
+                  className="group flex items-center gap-4 px-5 py-3.5 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 cursor-pointer transition-all"
                 >
-                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ring-4 ${
+                    action.severity === 'critical'
+                      ? 'bg-red-500 ring-red-100 dark:ring-red-950'
+                      : action.severity === 'warning'
+                      ? 'bg-amber-500 ring-amber-100 dark:ring-amber-950'
+                      : 'bg-blue-500 ring-blue-100 dark:ring-blue-950'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{action.title}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{action.description}</p>
+                  </div>
+                  {action.value && (
+                    <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${
+                      action.severity === 'critical' ? 'text-red-600 dark:text-red-400' :
+                      action.severity === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
+                    }`}>{action.value}</span>
+                  )}
+                  <button
+                    onClick={(e) => handleDismiss(action.type, e)}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-all shadow-none hover:shadow-sm"
+                    title="Ocultar"
+                  >
+                    <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <svg className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
-                </button>
-                <svg className="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-5 py-4 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+              <p className="text-sm font-semibold text-green-700 dark:text-green-300">Todo al dia</p>
+            </div>
+          )}
 
-      {/* Restore dismissed - subtle link */}
-      {hasDismissed && visibleActions.length === 0 && (
-        <button
-          onClick={handleRestoreAll}
-          className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
-        >
-          Mostrar notificaciones ocultas ({dismissed.length})
-        </button>
+          {/* Restore dismissed link at bottom of widget */}
+          {hasDismissed && (
+            <div className="px-5 py-2 border-t border-indigo-100/60 dark:border-indigo-900/30">
+              <button
+                onClick={handleRestoreAll}
+                className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+              >
+                Mostrar ocultos ({dismissed.length})
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Two tables side by side */}
