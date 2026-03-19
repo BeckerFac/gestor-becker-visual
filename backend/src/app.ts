@@ -57,6 +57,7 @@ import { invitationsRouter } from './modules/invitations/invitations.router';
 import { accountRouter } from './modules/account/account.router';
 import { aiRouter } from './modules/ai/ai.router';
 import { apiKeysRouter } from './modules/apikeys/apikeys.router';
+import { secretariaRouter } from './modules/secretaria/secretaria.router';
 
 export const app = express();
 
@@ -143,6 +144,14 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
+// Capture raw body for SecretarIA webhook signature validation (must be before json parser)
+app.use('/api/secretaria/webhook', express.json({
+  limit: '1mb',
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
+
 // Parsers with size limits
 app.use(express.json({ limit: env.REQUEST_BODY_LIMIT }));
 app.use(express.urlencoded({ limit: env.REQUEST_BODY_LIMIT, extended: true }));
@@ -200,6 +209,7 @@ app.use('/api/invitations', invitationsRouter); // Mixed auth: validate/accept a
 app.use('/api/account', authMiddleware, accountRouter); // Data export & deletion (Ley 25.326)
 app.use('/api/ai', authMiddleware, aiRouter); // AI features (Premium)
 app.use('/api/apikeys', authMiddleware, apiKeysRouter); // API key management
+app.use('/api/secretaria', secretariaRouter); // SecretarIA WhatsApp assistant (mixed auth: webhooks are public)
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');

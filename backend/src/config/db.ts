@@ -509,6 +509,93 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_security_events_date ON security_events(created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(ip_address)`);
 
+    // ===== SecretarIA: WhatsApp AI assistant tables =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_config (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        enabled BOOLEAN DEFAULT false,
+        morning_brief_enabled BOOLEAN DEFAULT false,
+        morning_brief_time VARCHAR(5) DEFAULT '08:00',
+        timezone VARCHAR(100) DEFAULT 'America/Argentina/Buenos_Aires',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_linked_phones (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        phone_number VARCHAR(20) NOT NULL,
+        linking_code VARCHAR(10),
+        linking_code_expires TIMESTAMP WITH TIME ZONE,
+        verified BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, phone_number)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_linked_phones_company ON secretaria_linked_phones(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_linked_phones_phone ON secretaria_linked_phones(phone_number)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_conversations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        phone_number VARCHAR(20) NOT NULL,
+        role VARCHAR(10) NOT NULL,
+        content TEXT NOT NULL,
+        message_type VARCHAR(20) DEFAULT 'text',
+        whatsapp_message_id VARCHAR(255),
+        intent VARCHAR(50),
+        tokens_used INTEGER DEFAULT 0,
+        response_time_ms INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_company ON secretaria_conversations(company_id, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_phone ON secretaria_conversations(phone_number, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_wa_id ON secretaria_conversations(whatsapp_message_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_memory (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        memory_type VARCHAR(50) NOT NULL,
+        key VARCHAR(255) NOT NULL,
+        value TEXT NOT NULL,
+        confidence DECIMAL(3,2) DEFAULT 1.00,
+        source VARCHAR(50),
+        times_used INTEGER DEFAULT 0,
+        last_used TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, user_id, memory_type, key)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_memory_company ON secretaria_memory(company_id, user_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_memory_type ON secretaria_memory(company_id, memory_type)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_usage (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        messages_received INTEGER DEFAULT 0,
+        messages_sent INTEGER DEFAULT 0,
+        llm_tokens_input INTEGER DEFAULT 0,
+        llm_tokens_output INTEGER DEFAULT 0,
+        stt_minutes DECIMAL(10,2) DEFAULT 0,
+        estimated_cost_usd DECIMAL(10,4) DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, month)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_usage_company_month ON secretaria_usage(company_id, month)`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -559,6 +646,11 @@ async function applyRowLevelSecurity() {
     'crm_deals',
     'crm_activities',
     'crm_stages',
+    'secretaria_config',
+    'secretaria_linked_phones',
+    'secretaria_conversations',
+    'secretaria_memory',
+    'secretaria_usage',
   ];
 
   for (const table of tablesWithCompanyId) {

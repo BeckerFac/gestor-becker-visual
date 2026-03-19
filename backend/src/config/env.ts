@@ -48,6 +48,16 @@ export const env = {
   // AI (optional - features degrade gracefully if not set)
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
 
+  // SecretarIA — WhatsApp integration (optional)
+  WHATSAPP_VERIFY_TOKEN: process.env.WHATSAPP_VERIFY_TOKEN || '',
+  WHATSAPP_ACCESS_TOKEN: process.env.WHATSAPP_ACCESS_TOKEN || '',
+  WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+  WHATSAPP_APP_SECRET: process.env.WHATSAPP_APP_SECRET || '',
+
+  // SecretarIA — LLM & STT providers (optional)
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+  DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || '',
+
   // Security
   BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
   MAX_LOGIN_ATTEMPTS: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10),
