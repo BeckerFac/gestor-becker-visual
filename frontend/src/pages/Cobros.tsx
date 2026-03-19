@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -163,6 +164,9 @@ function restorePendingCobros() {
 }
 
 export const Cobros: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const invoiceParamProcessed = useRef(false)
+
   // Data state
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [orders, setOrders] = useState<Order[]>([])
@@ -251,6 +255,54 @@ export const Cobros: React.FC = () => {
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
+
+  // Pre-fill form from invoice query params (coming from Invoices page)
+  useEffect(() => {
+    if (invoiceParamProcessed.current || loading) return
+    const invoiceId = searchParams.get('invoice_id')
+    const amount = searchParams.get('amount')
+    if (!invoiceId) return
+
+    invoiceParamProcessed.current = true
+    // Clear query params from URL without triggering navigation
+    setSearchParams({}, { replace: true })
+
+    // Open form and pre-fill
+    const prefillFromInvoice = async () => {
+      try {
+        const res = await api.getInvoices({ fiscal_type: 'all', limit: 200 })
+        const allInvoices: InvoiceForReceipt[] = (res.items || []).filter((inv: any) =>
+          (inv.status === 'authorized' || inv.status === 'emitido') &&
+          (inv.payment_status !== 'pagado')
+        )
+        setInvoicesForReceipt(allInvoices)
+
+        const targetInvoice = allInvoices.find((inv: InvoiceForReceipt) => inv.id === invoiceId)
+        const enterpriseId = targetInvoice
+          ? enterprises.find(e => e.name === (targetInvoice.enterprise?.name || ''))?.id || ''
+          : ''
+
+        const remaining = amount || '0'
+
+        setForm({
+          enterprise_id: enterpriseId,
+          amount: '',
+          payment_method: 'transferencia',
+          bank_id: '',
+          reference: '',
+          receipt_date: new Date().toISOString().split('T')[0],
+          notes: '',
+        })
+        setInvoiceItems({ [invoiceId]: remaining })
+        setShowInvoiceSection(true)
+        setShowForm(true)
+      } catch (e: any) {
+        console.warn('Could not prefill from invoice params:', e.message)
+        setShowForm(true)
+      }
+    }
+    prefillFromInvoice()
+  }, [searchParams, loading, enterprises, setSearchParams])
 
   // Calculate paid amounts per order from cobros data
   const paidByOrder = useMemo(() => {

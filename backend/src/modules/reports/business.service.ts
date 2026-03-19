@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
@@ -61,6 +61,25 @@ function extractRows(result: any): any[] {
 }
 
 export class BusinessService {
+  /**
+   * Check if a table exists in the current database.
+   * Used to make reports defensive when migrations may not have run.
+   */
+  private async tableExists(tableName: string): Promise<boolean> {
+    try {
+      const result = await db.execute(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = ${tableName}
+        ) as exists
+      `);
+      const row = extractRows(result)[0];
+      return row?.exists === true || row?.exists === 't' || row?.exists === 'true';
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Ventas Report: revenue, orders count, AOV, sales by month, top products, sales by day of week
    */
@@ -469,15 +488,27 @@ export class BusinessService {
   }
 
   /**
-   * Cobranzas Report: aging, DSO, total pending, top delinquent clients
+   * Cobranzas Report: aging, DSO, total pending, top delinquent clients.
+   *
+   * Defensive: if the `cobros` table does not exist yet (migration may not
+   * have run), the subqueries that reference it are wrapped so we fall back
+   * to zero instead of crashing.
    */
   async getCobranzasReport(companyId: string, dateFrom?: string, dateTo?: string) {
     try {
       const dates = validateDateRange(dateFrom, dateTo);
       const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
 
-      // Aging report based on orders with payment_status = 'pendiente'
-      const agingResult = await db.execute(sql`
+      // Check whether the cobros table exists to decide query strategy
+      const cobrosExists = await this.tableExists('cobros');
+
+      // --- Aging report based on orders with payment_status = 'pendiente' ---
+      // When cobros table is missing, treat paid amount as 0.
+      const cobrosSubquery = cobrosExists
+        ? `COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id), 0)`
+        : `0`;
+
+      const agingResult = await pool.query(`
         SELECT
           CASE
             WHEN CURRENT_DATE - o.created_at::date <= 0 THEN 'al_dia'
@@ -488,17 +519,13 @@ export class BusinessService {
           END as bucket,
           COUNT(*) as cantidad,
           COALESCE(SUM(
-            CAST(o.total_amount AS decimal) - COALESCE((
-              SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id
-            ), 0)
+            CAST(o.total_amount AS decimal) - ${cobrosSubquery}
           ), 0) as monto
         FROM orders o
-        WHERE o.company_id = ${companyId}
+        WHERE o.company_id = $1
           AND o.payment_status = 'pendiente'
           AND o.status NOT IN ('cancelado', 'cancelled')
-          AND CAST(o.total_amount AS decimal) > COALESCE((
-            SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id
-          ), 0)
+          AND CAST(o.total_amount AS decimal) > ${cobrosSubquery}
         GROUP BY bucket
         ORDER BY
           CASE bucket
@@ -508,7 +535,7 @@ export class BusinessService {
             WHEN '61_90' THEN 3
             WHEN '90_plus' THEN 4
           END
-      `);
+      `, [companyId]);
 
       const bucketLabels: Record<string, string> = {
         'al_dia': 'Al dia',
@@ -551,76 +578,80 @@ export class BusinessService {
         .filter(a => ['31_60', '61_90', '90_plus'].includes(a.bucket))
         .reduce((s, a) => s + a.monto, 0);
 
-      // DSO: average days between order creation and cobro payment_date
-      const dsoResult = await db.execute(sql`
-        SELECT AVG(
-          EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
-        ) as dso_promedio
-        FROM cobros cb
-        JOIN orders o ON cb.order_id = o.id
-        WHERE o.company_id = ${companyId}
-          AND cb.payment_date::date >= ${dates.dateFrom}::date
-          AND cb.payment_date::date <= ${dates.dateTo}::date
-      `);
-      const dsoPromedio = round2(parseFloat(extractRows(dsoResult)[0]?.dso_promedio) || 0);
+      // DSO & collections: only query if cobros table exists
+      let dsoPromedio = 0;
+      let prevDsoPromedio = 0;
+      let cobranzasPeriodo = 0;
+      let prevCobranzasPeriodo = 0;
 
-      // Previous DSO
-      const prevDsoResult = await db.execute(sql`
-        SELECT AVG(
-          EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
-        ) as dso_promedio
-        FROM cobros cb
-        JOIN orders o ON cb.order_id = o.id
-        WHERE o.company_id = ${companyId}
-          AND cb.payment_date::date >= ${prev.dateFrom}::date
-          AND cb.payment_date::date <= ${prev.dateTo}::date
-      `);
-      const prevDsoPromedio = round2(parseFloat(extractRows(prevDsoResult)[0]?.dso_promedio) || 0);
+      if (cobrosExists) {
+        // DSO: average days between order creation and cobro payment_date
+        const dsoResult = await db.execute(sql`
+          SELECT AVG(
+            EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
+          ) as dso_promedio
+          FROM cobros cb
+          JOIN orders o ON cb.order_id = o.id
+          WHERE o.company_id = ${companyId}
+            AND cb.payment_date::date >= ${dates.dateFrom}::date
+            AND cb.payment_date::date <= ${dates.dateTo}::date
+        `);
+        dsoPromedio = round2(parseFloat(extractRows(dsoResult)[0]?.dso_promedio) || 0);
 
-      // Collections in period
-      const cobrosResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-        FROM cobros
-        WHERE company_id = ${companyId}
-          AND COALESCE(payment_date, created_at)::date >= ${dates.dateFrom}::date
-          AND COALESCE(payment_date, created_at)::date <= ${dates.dateTo}::date
-      `);
-      const cobranzasPeriodo = parseFloat(extractRows(cobrosResult)[0]?.total) || 0;
+        // Previous DSO
+        const prevDsoResult = await db.execute(sql`
+          SELECT AVG(
+            EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
+          ) as dso_promedio
+          FROM cobros cb
+          JOIN orders o ON cb.order_id = o.id
+          WHERE o.company_id = ${companyId}
+            AND cb.payment_date::date >= ${prev.dateFrom}::date
+            AND cb.payment_date::date <= ${prev.dateTo}::date
+        `);
+        prevDsoPromedio = round2(parseFloat(extractRows(prevDsoResult)[0]?.dso_promedio) || 0);
 
-      const prevCobrosResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-        FROM cobros
-        WHERE company_id = ${companyId}
-          AND COALESCE(payment_date, created_at)::date >= ${prev.dateFrom}::date
-          AND COALESCE(payment_date, created_at)::date <= ${prev.dateTo}::date
-      `);
-      const prevCobranzasPeriodo = parseFloat(extractRows(prevCobrosResult)[0]?.total) || 0;
+        // Collections in period
+        const cobrosResult = await db.execute(sql`
+          SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM cobros
+          WHERE company_id = ${companyId}
+            AND COALESCE(payment_date, created_at)::date >= ${dates.dateFrom}::date
+            AND COALESCE(payment_date, created_at)::date <= ${dates.dateTo}::date
+        `);
+        cobranzasPeriodo = parseFloat(extractRows(cobrosResult)[0]?.total) || 0;
+
+        const prevCobrosResult = await db.execute(sql`
+          SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM cobros
+          WHERE company_id = ${companyId}
+            AND COALESCE(payment_date, created_at)::date >= ${prev.dateFrom}::date
+            AND COALESCE(payment_date, created_at)::date <= ${prev.dateTo}::date
+        `);
+        prevCobranzasPeriodo = parseFloat(extractRows(prevCobrosResult)[0]?.total) || 0;
+      }
 
       // Top 5 delinquent clients
-      const morososResult = await db.execute(sql`
+      const morososResult = await pool.query(`
         SELECT
           COALESCE(e.name, c.name, 'Sin cliente') as nombre,
           SUM(
-            CAST(o.total_amount AS decimal) - COALESCE((
-              SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id
-            ), 0)
+            CAST(o.total_amount AS decimal) - ${cobrosSubquery}
           ) as monto_pendiente,
           COUNT(*) as pedidos_pendientes,
           MAX(CURRENT_DATE - o.created_at::date) as dias_max_atraso
         FROM orders o
         LEFT JOIN enterprises e ON o.enterprise_id = e.id
         LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = ${companyId}
+        WHERE o.company_id = $1
           AND o.payment_status = 'pendiente'
           AND o.status NOT IN ('cancelado', 'cancelled')
-          AND CAST(o.total_amount AS decimal) > COALESCE((
-            SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id
-          ), 0)
+          AND CAST(o.total_amount AS decimal) > ${cobrosSubquery}
           AND (o.enterprise_id IS NOT NULL OR o.customer_id IS NOT NULL)
         GROUP BY COALESCE(e.name, c.name, 'Sin cliente')
         ORDER BY monto_pendiente DESC
         LIMIT 5
-      `);
+      `, [companyId]);
 
       const morosos = extractRows(morososResult).map((r: any) => ({
         nombre: r.nombre,

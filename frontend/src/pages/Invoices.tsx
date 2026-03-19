@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
@@ -120,6 +121,8 @@ function calcItemSubtotal(unit_price: number, quantity: number): number {
 // ---- Component ----
 
 export const Invoices: React.FC = () => {
+  const navigate = useNavigate()
+
   // Data
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
@@ -1125,11 +1128,24 @@ export const Invoices: React.FC = () => {
                         {(() => {
                           const ps = invoice.payment_status || 'pendiente'
                           const meta = PAYMENT_STATUS_MAP[ps]
-                          return meta ? (
+                          if (!meta) return <span className="text-gray-400">-</span>
+                          const isPaid = ps === 'pagado'
+                          const totalAmount = parseFloat(invoice.total_amount || '0')
+                          const totalCobrado = parseFloat(invoice.total_cobrado || '0')
+                          const remaining = Math.max(0, totalAmount - totalCobrado)
+                          return isPaid ? (
                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${meta.color}`}>
                               {meta.label}
                             </span>
-                          ) : <span className="text-gray-400">-</span>
+                          ) : (
+                            <button
+                              onClick={() => navigate(`/cobros?invoice_id=${invoice.id}&amount=${remaining.toFixed(2)}`)}
+                              title="Click para registrar cobro"
+                              className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 hover:scale-105 ${meta.color}`}
+                            >
+                              {meta.label}
+                            </button>
+                          )
                         })()}
                       </td>
 

@@ -75,6 +75,7 @@ interface InvoicingStatusData {
     status: string
     punto_venta?: number
     cae?: string
+    fiscal_type?: string
     total_amount: string
   }>
   items: Array<{
@@ -1433,7 +1434,7 @@ export const Orders: React.FC = () => {
 
                                   {/* Invoicing section */}
                                   <div className="pt-1 border-t border-blue-200">
-                                    <p className="text-xs text-gray-500 mb-1.5">Facturacion AFIP</p>
+                                    <p className="text-xs text-gray-500 mb-1.5">Facturacion</p>
                                     {invoicingLoading[order.id] ? (
                                       <p className="text-xs text-gray-400 italic">Cargando estado...</p>
                                     ) : (() => {
@@ -1466,11 +1467,37 @@ export const Orders: React.FC = () => {
                                               <p className="text-xs text-yellow-700 font-medium">Parcialmente facturado</p>
                                             </div>
                                           )}
-                                          {status.invoicing_status === 'facturado' && (
-                                            <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
-                                              Facturado
-                                            </span>
-                                          )}
+                                          {status.invoicing_status === 'facturado' && (() => {
+                                            const allNoFiscal = (status.invoices || []).length > 0 && status.invoices.every(inv => inv.fiscal_type === 'no_fiscal')
+                                            const allInterno = (status.invoices || []).length > 0 && status.invoices.every(inv => inv.fiscal_type === 'interno')
+                                            const hasAfip = (status.invoices || []).some(inv => inv.cae)
+                                            if (allNoFiscal) {
+                                              return (
+                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-semibold">
+                                                  Comprobante No Fiscal
+                                                </span>
+                                              )
+                                            }
+                                            if (allInterno) {
+                                              return (
+                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-semibold">
+                                                  Comprobante Interno
+                                                </span>
+                                              )
+                                            }
+                                            if (hasAfip) {
+                                              return (
+                                                <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                                  Facturado AFIP
+                                                </span>
+                                              )
+                                            }
+                                            return (
+                                              <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                                Facturado
+                                              </span>
+                                            )
+                                          })()}
 
                                           {/* List of existing invoices */}
                                           {(status.invoices || []).length > 0 && (
@@ -1478,7 +1505,12 @@ export const Orders: React.FC = () => {
                                               {status.invoices.map(inv => (
                                                 <div key={inv.id} className="flex items-center gap-2 bg-white border border-indigo-200 rounded px-2 py-1.5">
                                                   <span className="font-mono text-xs font-semibold text-indigo-800">
-                                                    {inv.invoice_type} {inv.punto_venta ? `${String(inv.punto_venta).padStart(5, '0')}-` : ''}{String(inv.invoice_number).padStart(8, '0')}
+                                                    {inv.fiscal_type === 'no_fiscal'
+                                                      ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
+                                                      : inv.fiscal_type === 'interno'
+                                                        ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
+                                                        : `${inv.invoice_type || ''} ${inv.punto_venta ? `${String(inv.punto_venta).padStart(5, '0')}-` : ''}${String(inv.invoice_number).padStart(8, '0')}`
+                                                    }
                                                   </span>
                                                   <span className="text-xs text-gray-500">{formatCurrency(parseFloat(inv.total_amount || '0'))}</span>
                                                   {inv.status === 'draft' ? (
@@ -1500,8 +1532,17 @@ export const Orders: React.FC = () => {
                                                     </>
                                                   ) : (
                                                     <>
-                                                      <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-800 rounded font-medium">
-                                                        {inv.cae ? 'AFIP' : 'Autorizada'}
+                                                      <span
+                                                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                                          inv.fiscal_type === 'no_fiscal' || inv.fiscal_type === 'interno'
+                                                            ? 'bg-gray-100 text-gray-600'
+                                                            : 'bg-green-100 text-green-800'
+                                                        }`}
+                                                        title={inv.cae ? `CAE: ${inv.cae}` : undefined}
+                                                      >
+                                                        {inv.fiscal_type === 'no_fiscal' ? 'No Fiscal'
+                                                          : inv.fiscal_type === 'interno' ? 'Interno'
+                                                          : inv.cae ? 'AFIP' : 'Autorizada'}
                                                       </span>
                                                       <button
                                                         onClick={() => invoicePreview.openPreview(inv.id, order.id)}

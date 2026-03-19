@@ -688,6 +688,7 @@ export class OrdersService {
       // Get linked invoices
       const invoicesResult = await db.execute(sql`
         SELECT i.id, i.invoice_number, i.invoice_type, i.status, i.total_amount, i.cae,
+          i.fiscal_type,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta
         FROM invoices i
         WHERE i.order_id = ${orderId} AND i.company_id = ${companyId}
