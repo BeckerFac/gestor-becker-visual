@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SkeletonPage } from '@/components/ui/Skeleton'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { useNavigate } from 'react-router-dom'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface DashboardData {
   sales_month: number
@@ -426,7 +427,7 @@ export const Dashboard: React.FC = () => {
                 </svg>
               </div>
               <div>
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Antiguedad de Saldos</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Antiguedad de Saldos<HelpTip text="Muestra cuanto te deben tus clientes agrupado por antiguedad. Verde = al dia, Rojo = vencido hace mas de 90 dias." /></span>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Total vencido: <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(aging.summary.total_overdue)}</span>
                   {aging.avg_dso > 0 && <span className="ml-3">DSO promedio: <span className="font-bold">{aging.avg_dso} dias</span></span>}

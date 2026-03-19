@@ -126,6 +126,52 @@ export class ProductsController {
     }
   }
 
+  async createProductType(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const result = await productsService.createProductType(req.user.company_id, req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to create product type' });
+    }
+  }
+
+  async updateProductType(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const result = await productsService.updateProductType(req.user.company_id, req.params.id, req.body);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update product type' });
+    }
+  }
+
+  async deleteProductType(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const result = await productsService.deleteProductType(req.user.company_id, req.params.id);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to delete product type' });
+    }
+  }
+
+  async reorderProductTypes(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { ordered_ids } = req.body;
+      if (!Array.isArray(ordered_ids)) throw new ApiError(400, 'ordered_ids array required');
+      const result = await productsService.reorderProductTypes(req.user.company_id, ordered_ids);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to reorder product types' });
+    }
+  }
+
   async deleteProduct(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');

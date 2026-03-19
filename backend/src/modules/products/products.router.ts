@@ -7,6 +7,10 @@ export const productsRouter = Router();
 
 productsRouter.get('/', authorize('products', 'view'), (req, res) => productsController.getProducts(req, res));
 productsRouter.get('/types', authorize('products', 'view'), (req, res) => productsController.getProductTypes(req, res));
+productsRouter.post('/types', authorize('products', 'create'), (req, res) => productsController.createProductType(req, res));
+productsRouter.post('/types/reorder', authorize('products', 'edit'), (req, res) => productsController.reorderProductTypes(req, res));
+productsRouter.put('/types/:id', authorize('products', 'edit'), (req, res) => productsController.updateProductType(req, res));
+productsRouter.delete('/types/:id', authorize('products', 'delete'), (req, res) => productsController.deleteProductType(req, res));
 productsRouter.get('/categories', authorize('products', 'view'), (req, res) => productsController.getCategories(req, res));
 productsRouter.post('/categories', authorize('products', 'create'), (req, res) => productsController.createCategory(req, res));
 productsRouter.delete('/categories/:id', authorize('products', 'delete'), (req, res) => productsController.deleteCategory(req, res));

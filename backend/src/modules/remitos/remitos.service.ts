@@ -186,6 +186,54 @@ export class RemitosService {
     }
   }
 
+  async updateRemito(companyId: string, remitoId: string, data: any) {
+    await this.ensureTables();
+    try {
+      // Verify remito belongs to company
+      const existing = await this.getRemito(companyId, remitoId);
+      if (!existing) throw new ApiError(404, 'Remito not found');
+
+      // Resolve enterprise_id from customer if not provided
+      let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
+      if (!enterpriseId && data.customer_id) {
+        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
+        const custRows = (custResult as any).rows || custResult || [];
+        if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
+      }
+
+      // Update remito record
+      await db.execute(sql`
+        UPDATE remitos SET
+          customer_id = ${data.customer_id || existing.customer_id || null},
+          enterprise_id = ${enterpriseId},
+          delivery_address = ${data.delivery_address !== undefined ? data.delivery_address : existing.delivery_address},
+          receiver_name = ${data.receiver_name !== undefined ? data.receiver_name : existing.receiver_name},
+          transport = ${data.transport !== undefined ? data.transport : existing.transport},
+          notes = ${data.notes !== undefined ? data.notes : existing.notes},
+          date = ${data.date || existing.date},
+          updated_at = NOW()
+        WHERE id = ${remitoId} AND company_id = ${companyId}
+      `);
+
+      // Replace items if provided
+      if (data.items && Array.isArray(data.items)) {
+        await db.execute(sql`DELETE FROM remito_items WHERE remito_id = ${remitoId}`);
+        for (const item of data.items) {
+          await db.execute(sql`
+            INSERT INTO remito_items (id, remito_id, product_name, description, quantity, unit)
+            VALUES (${uuid()}, ${remitoId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit || 'unidades'})
+          `);
+        }
+      }
+
+      return { id: remitoId };
+    } catch (error) {
+      console.error('Update remito error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to update remito');
+    }
+  }
+
   async updateRemitoStatus(companyId: string, remitoId: string, status: string) {
     await this.ensureTables();
     try {

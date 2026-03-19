@@ -13,6 +13,7 @@ import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Enterprise {
   id: string
@@ -417,14 +418,20 @@ export const Enterprises: React.FC = () => {
             <form onSubmit={handleEnterpriseSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input label="Nombre Comercial *" placeholder="Nombre de la empresa" value={enterpriseForm.name} onChange={e => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })} required />
-                <Input label="Razon Social" placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} />
-                <Input label="CUIT" placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Razon Social<HelpTip text="Nombre legal de la empresa como figura en AFIP." /></label>
+                  <Input placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">CUIT<HelpTip text="CUIT de 11 digitos. Se valida automaticamente." /></label>
+                  <Input placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input label="Telefono" placeholder="+54 11 1234-5678" value={enterpriseForm.phone} onChange={e => setEnterpriseForm({ ...enterpriseForm, phone: e.target.value })} />
                 <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Condicion IVA</label>
+                  <label className="text-sm font-medium text-gray-700">Condicion IVA<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
                     <option>Responsable Inscripto</option>
                     <option>Monotributo</option>
@@ -455,7 +462,7 @@ export const Enterprises: React.FC = () => {
               {/* Direccion fiscal */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-blue-700">Direccion Fiscal</h4>
+                  <h4 className="text-sm font-semibold text-blue-700">Direccion Fiscal<HelpTip text="Domicilio fiscal registrado en AFIP." /></h4>
                   <label className="flex items-center gap-2 text-sm text-blue-600 cursor-pointer">
                     <input
                       type="checkbox"

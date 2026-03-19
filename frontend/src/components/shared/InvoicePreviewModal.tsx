@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { InvoiceTemplate } from './InvoiceTemplate'
+import { HelpTip } from '@/components/shared/HelpTip'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
 
 const INVOICE_TYPES = ['A', 'B', 'C']
@@ -431,7 +432,7 @@ export function InvoicePreviewModal({
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-400" htmlFor="inv-pv">Punto de Venta</label>
+                    <label className="text-xs font-medium text-gray-400" htmlFor="inv-pv">Punto de Venta<HelpTip text="Numero de punto de venta configurado en AFIP. Debe coincidir con el registrado." /></label>
                     {!authorized ? (
                       <input
                         id="inv-pv"
@@ -498,7 +499,7 @@ export function InvoicePreviewModal({
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-400" htmlFor="cust-cuit">CUIT Cliente</label>
+                    <label className="text-xs font-medium text-gray-400" htmlFor="cust-cuit">CUIT Cliente<HelpTip text="El CUIT debe tener 11 digitos y ser valido. Para Factura A es obligatorio." /></label>
                     {!authorized ? (
                       <div className="relative">
                         <input
@@ -539,7 +540,7 @@ export function InvoicePreviewModal({
                 {/* CondicionIVAReceptorId (AFIP RG 5616) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-gray-400" htmlFor="cond-iva">Cond. IVA Receptor (AFIP RG 5616)</label>
+                    <label className="text-xs font-medium text-gray-400" htmlFor="cond-iva">Cond. IVA Receptor (AFIP RG 5616)<HelpTip text="Determina el tipo de factura a emitir (A, B o C)." /></label>
                     {!authorized ? (
                       <select
                         id="cond-iva"

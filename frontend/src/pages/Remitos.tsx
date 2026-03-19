@@ -142,9 +142,7 @@ export const Remitos: React.FC = () => {
   const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null)
 
   // Preview modal
-  const [previewRemito, setPreviewRemito] = useState<any>(null)
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewRemitoId, setPreviewRemitoId] = useState<string | null>(null)
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -413,37 +411,16 @@ export const Remitos: React.FC = () => {
 
   // ── Preview modal ─────────────────────────────────────────────────────────
 
-  const handlePreviewRemito = async (remitoId: string) => {
-    setPreviewLoading(true)
-    setPreviewRemito(null)
-    setPreviewPdfUrl(null)
-    try {
-      const [detail, blob] = await Promise.all([
-        api.getRemito(remitoId),
-        api.getRemitoPdf(remitoId),
-      ])
-      setPreviewRemito(detail)
-      setPreviewPdfUrl(window.URL.createObjectURL(blob))
-    } catch (e: any) {
-      toast.error(e.message || 'Error al cargar remito')
-      setPreviewLoading(false)
-      return
-    }
-    setPreviewLoading(false)
+  const handlePreviewRemito = (remitoId: string) => {
+    setPreviewRemitoId(remitoId)
   }
 
   const handleClosePreview = () => {
-    if (previewPdfUrl) {
-      window.URL.revokeObjectURL(previewPdfUrl)
-    }
-    setPreviewRemito(null)
-    setPreviewPdfUrl(null)
-    setPreviewLoading(false)
+    setPreviewRemitoId(null)
   }
 
-  const handlePreviewDownloadPdf = () => {
-    if (!previewRemito) return
-    handleDownloadPdf(previewRemito.id, previewRemito.remito_number)
+  const handlePreviewSaved = () => {
+    loadRemitos(currentPage)
   }
 
   // ── CSV data ───────────────────────────────────────────────────────────────
@@ -878,8 +855,7 @@ export const Remitos: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handlePreviewRemito(remito.id)}
-                          disabled={previewLoading}
-                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
                           title="Ver remito"
                         >
                           Ver
@@ -950,13 +926,13 @@ export const Remitos: React.FC = () => {
         onCancel={() => setDeleteTarget(null)}
       />
 
-      {(previewLoading || previewRemito) && (
+      {previewRemitoId && (
         <RemitoPreviewModal
-          remito={previewRemito}
-          pdfBlobUrl={previewPdfUrl}
-          loading={previewLoading}
+          remitoId={previewRemitoId}
+          customers={customers}
+          enterprises={enterprises}
           onClose={handleClosePreview}
-          onDownloadPdf={handlePreviewDownloadPdf}
+          onSaved={handlePreviewSaved}
         />
       )}
     </div>

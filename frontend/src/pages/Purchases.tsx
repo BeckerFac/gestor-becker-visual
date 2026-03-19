@@ -14,6 +14,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Purchase {
   id: string
@@ -539,7 +540,7 @@ export const Purchases: React.FC = () => {
                     className="rounded border-gray-300"
                   />
                   <span className="text-sm text-gray-700 font-medium">
-                    {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}
+                    {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}<HelpTip text="Si esta activo, los items de esta compra se suman automaticamente al stock." />
                   </span>
                 </label>
                 {form.add_to_inventory && items.some(i => i.product_id && i.product_id !== 'custom') && (

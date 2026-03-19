@@ -302,12 +302,80 @@ export class QuotesService {
     }
   }
 
+  async updateQuote(companyId: string, quoteId: string, data: any) {
+    await this.ensureMigrations();
+    try {
+      // Verify quote belongs to company
+      const existing = await this.getQuote(companyId, quoteId);
+      if (!existing) throw new ApiError(404, 'Quote not found');
+
+      // Resolve enterprise_id from customer if not provided
+      let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
+      if (!enterpriseId && data.customer_id) {
+        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
+        const custRows = (custResult as any).rows || custResult || [];
+        if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
+      }
+
+      // Recalculate totals from items
+      let subtotal = 0;
+      let vatAmount = 0;
+      const newItems = data.items || [];
+      for (const item of newItems) {
+        const itemSub = Number(item.unit_price) * Number(item.quantity);
+        const itemVat = itemSub * (Number(item.vat_rate || 21) / 100);
+        subtotal += itemSub;
+        vatAmount += itemVat;
+      }
+      const totalAmount = subtotal + vatAmount;
+
+      // Calculate valid_until from validity_days if provided
+      let validUntil = data.valid_until || existing.valid_until || null;
+      if (data.validity_days && !data.valid_until) {
+        const d = new Date();
+        d.setDate(d.getDate() + Number(data.validity_days));
+        validUntil = d.toISOString().split('T')[0];
+      }
+
+      // Update quote record
+      await db.execute(sql`
+        UPDATE quotes SET
+          customer_id = ${data.customer_id || existing.customer_id || null},
+          enterprise_id = ${enterpriseId},
+          title = ${data.title || existing.title || 'Cotizacion'},
+          valid_until = ${validUntil},
+          subtotal = ${subtotal.toString()},
+          vat_amount = ${vatAmount.toString()},
+          total_amount = ${totalAmount.toString()},
+          notes = ${data.notes !== undefined ? data.notes : existing.notes},
+          updated_at = NOW()
+        WHERE id = ${quoteId} AND company_id = ${companyId}
+      `);
+
+      // Replace items: delete old, insert new
+      await db.execute(sql`DELETE FROM quote_items WHERE quote_id = ${quoteId}`);
+      for (const item of newItems) {
+        const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+        await db.execute(sql`
+          INSERT INTO quote_items (id, quote_id, product_id, product_name, description, quantity, unit_price, vat_rate, subtotal)
+          VALUES (${uuid()}, ${quoteId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.vat_rate || 21).toString()}, ${itemSubtotal.toString()})
+        `);
+      }
+
+      return { id: quoteId, total_amount: totalAmount };
+    } catch (error) {
+      console.error('Update quote error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to update quote');
+    }
+  }
+
   async generateQuotePdf(companyId: string, quoteId: string, template: string = 'clasico', bannerUrl?: string): Promise<Buffer> {
     try {
       // Get quote with items
       const quote = await this.getQuote(companyId, quoteId);
 
-      // Get company info
+      // Get company info (including stored banner)
       const companyResult = await db.execute(sql`
         SELECT * FROM companies WHERE id = ${companyId}
       `);
@@ -316,7 +384,10 @@ export class QuotesService {
 
       if (!company) throw new ApiError(404, 'Company not found');
 
-      const html = this.buildQuoteHtml(company, quote, template, bannerUrl);
+      // Use explicit banner if provided, otherwise fall back to stored banner
+      const effectiveBanner = bannerUrl || (company.quote_banner_base64 ? `data:image/png;base64,${company.quote_banner_base64}` : undefined);
+
+      const html = this.buildQuoteHtml(company, quote, template, effectiveBanner);
 
       // Use puppeteer to generate PDF
       const puppeteer = require('puppeteer');
@@ -754,6 +825,56 @@ export class QuotesService {
 
 </body>
 </html>`;
+  }
+
+  // --- Banner management ---
+
+  async ensureBannerColumn() {
+    try {
+      await db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS quote_banner_base64 TEXT`).catch(() => {});
+    } catch (e) {
+      console.warn('Banner column migration:', e);
+    }
+  }
+
+  async uploadBanner(companyId: string, base64Data: string) {
+    await this.ensureBannerColumn();
+    try {
+      await db.execute(sql`
+        UPDATE companies SET quote_banner_base64 = ${base64Data} WHERE id = ${companyId}
+      `);
+      return { success: true };
+    } catch (error) {
+      console.error('Upload banner error:', error);
+      throw new ApiError(500, 'Failed to upload banner');
+    }
+  }
+
+  async getBanner(companyId: string): Promise<string | null> {
+    await this.ensureBannerColumn();
+    try {
+      const result = await db.execute(sql`
+        SELECT quote_banner_base64 FROM companies WHERE id = ${companyId}
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows[0]?.quote_banner_base64 || null;
+    } catch (error) {
+      console.error('Get banner error:', error);
+      throw new ApiError(500, 'Failed to get banner');
+    }
+  }
+
+  async deleteBanner(companyId: string) {
+    await this.ensureBannerColumn();
+    try {
+      await db.execute(sql`
+        UPDATE companies SET quote_banner_base64 = NULL WHERE id = ${companyId}
+      `);
+      return { success: true };
+    } catch (error) {
+      console.error('Delete banner error:', error);
+      throw new ApiError(500, 'Failed to delete banner');
+    }
   }
 }
 

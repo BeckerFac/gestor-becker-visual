@@ -18,6 +18,7 @@ import { toast } from '@/hooks/useToast'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Order {
   id: string
@@ -251,7 +252,11 @@ export const Orders: React.FC = () => {
       ])
       setOrders(ordersRes.items || [])
       setSummary(ordersRes.summary || {})
-      setProductTypes(Array.isArray(typesRes) ? typesRes : [])
+      // Extract type names from structured response (objects with name property) or plain strings
+      const typeNames = Array.isArray(typesRes)
+        ? typesRes.map((t: any) => typeof t === 'string' ? t : t.name).filter(Boolean)
+        : []
+      setProductTypes(typeNames)
       setCustomers(custRes.items || custRes || [])
       setProducts(prodRes.items || prodRes || [])
       setEnterprises(entRes || [])
@@ -872,16 +877,23 @@ export const Orders: React.FC = () => {
                 onCustomerChange={id => setForm(f => ({ ...f, customer_id: id }))}
                 enterpriseLabel="Empresa"
                 customerLabel="Cliente / Contacto"
+                enterpriseHelpText="Selecciona la empresa cliente. Si no aparece, creala desde Empresas."
               />
 
               {/* Title */}
               <div className="grid grid-cols-1 gap-4">
-                <Input label="Nombre del pedido" placeholder="Ej: Carteleria evento, Ploteo vehicular..." value={formTitle} onChange={e => setFormTitle(e.target.value)} />
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Nombre del pedido<HelpTip text="Un nombre descriptivo para identificar este trabajo. Ej: 'Carteleria evento corporativo'." /></label>
+                  <Input placeholder="Ej: Carteleria evento, Ploteo vehicular..." value={formTitle} onChange={e => setFormTitle(e.target.value)} />
+                </div>
               </div>
 
               {/* Description */}
               <div className="grid grid-cols-1 gap-4">
-                <Input label="Descripcion general" placeholder="Detalles del trabajo..." value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700">Descripcion general<HelpTip text="Detalles adicionales del trabajo que no van en los items individuales." /></label>
+                  <Input placeholder="Detalles del trabajo..." value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+                </div>
               </div>
 
               {/* Items section */}
@@ -899,7 +911,7 @@ export const Orders: React.FC = () => {
                       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
-                          <label className="text-xs font-medium text-gray-500">Tipo</label>
+                          <label className="text-xs font-medium text-gray-500">Tipo<HelpTip text="El tipo categoriza el producto o servicio. Podes configurar los tipos disponibles desde Productos > Gestionar tipos." /></label>
                           <input
                             list={`order-type-list-${idx}`}
                             className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1004,7 +1016,7 @@ export const Orders: React.FC = () => {
                             }}
                             className="rounded border-gray-300"
                           />
-                          <span className="text-xs text-gray-500">Descontar stock</span>
+                          <span className="text-xs text-gray-500">Descontar stock<HelpTip text="Si esta activo, al crear el pedido se descuentan los materiales del inventario automaticamente." /></span>
                         </label>
                       </div>
                     </div>
@@ -1049,7 +1061,7 @@ export const Orders: React.FC = () => {
               {/* Payment + delivery + priority */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Forma de Pago</label>
+                  <label className="text-sm font-medium text-gray-700">Forma de Pago<HelpTip text="Como va a pagar el cliente. Podes cambiarlo despues." /></label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                     {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
@@ -1065,7 +1077,7 @@ export const Orders: React.FC = () => {
                 )}
                 <Input label="Fecha Estimada de Entrega" type="date" value={form.estimated_delivery} onChange={e => setForm({ ...form, estimated_delivery: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Prioridad</label>
+                  <label className="text-sm font-medium text-gray-700">Prioridad<HelpTip text="Urgente sube el pedido en la cola de produccion." /></label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
                     <option value="baja">Baja</option>
                     <option value="normal">Normal</option>

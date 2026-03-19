@@ -14,6 +14,7 @@ import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Enterprise { id: string; name: string }
 interface Order { id: string; order_number: number; title: string; total_amount: string; payment_status?: string; enterprise_id?: string; enterprise?: { id: string; name: string } | null; customer?: { id?: string; name?: string; enterprise_id?: string } }
@@ -834,7 +835,7 @@ export const Cobros: React.FC = () => {
                   onClick={handleToggleInvoices}
                   className="text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
                 >
-                  {showInvoiceSection ? 'Ocultar facturas' : 'Vincular a facturas (opcional)'}
+                  {showInvoiceSection ? 'Ocultar facturas' : 'Vincular a facturas (opcional)'}<HelpTip text="Opcional. Vincular el cobro a facturas especificas permite llevar control parcial de pagos." />
                 </button>
               </div>
 

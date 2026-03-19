@@ -10,6 +10,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface StockItem {
   id: string
@@ -151,7 +152,7 @@ export const Inventory: React.FC = () => {
         </span>
       )
     }},
-    { key: 'min_level' as const, label: 'Min.', render: (_: any, row: StockItem) => {
+    { key: 'min_level' as const, label: 'Min.', headerRender: () => <span>Min.<HelpTip text="Stock minimo. Si la cantidad baja de este numero, se muestra una alerta en rojo." /></span>, render: (_: any, row: StockItem) => {
       const productId = row.product?.id
       if (editingThreshold === productId) {
         return (

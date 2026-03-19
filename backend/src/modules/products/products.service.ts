@@ -199,17 +199,203 @@ export class ProductsService {
     }
   }
 
-  async getProductTypes(companyId: string) {
+  private productTypesMigrated = false;
+
+  async ensureProductTypesMigration() {
+    if (this.productTypesMigrated) return;
     try {
-      const result = await db.execute(sql`
-        SELECT DISTINCT product_type FROM products
-        WHERE company_id = ${companyId} AND product_type IS NOT NULL AND product_type != ''
-        ORDER BY product_type ASC
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS product_types (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          name VARCHAR(100) NOT NULL,
+          description TEXT,
+          sort_order INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(company_id, name)
+        )
       `);
-      const rows = (result as any).rows || result || [];
-      return rows.map((r: any) => r.product_type);
-    } catch {
+      this.productTypesMigrated = true;
+    } catch (error) {
+      console.error('Product types migration error:', error);
+    }
+  }
+
+  async getProductTypes(companyId: string) {
+    await this.ensureProductTypesMigration();
+    try {
+      // Return from product_types table, merged with distinct types from products
+      const [typesRes, distinctRes] = await Promise.all([
+        db.execute(sql`
+          SELECT id, name, description, sort_order FROM product_types
+          WHERE company_id = ${companyId}
+          ORDER BY sort_order ASC, name ASC
+        `),
+        db.execute(sql`
+          SELECT DISTINCT product_type FROM products
+          WHERE company_id = ${companyId} AND product_type IS NOT NULL AND product_type != ''
+          ORDER BY product_type ASC
+        `),
+      ]);
+
+      const typeRows = (typesRes as any).rows || typesRes || [];
+      const distinctRows = (distinctRes as any).rows || distinctRes || [];
+      const typeNames = new Set(typeRows.map((r: any) => r.name.toLowerCase()));
+
+      // If product_types table is empty, seed from distinct product types in products table
+      if (typeRows.length === 0 && distinctRows.length > 0) {
+        for (let i = 0; i < distinctRows.length; i++) {
+          const typeName = distinctRows[i].product_type;
+          try {
+            await db.execute(sql`
+              INSERT INTO product_types (id, company_id, name, sort_order)
+              VALUES (gen_random_uuid(), ${companyId}, ${typeName}, ${i})
+              ON CONFLICT (company_id, name) DO NOTHING
+            `);
+          } catch { /* ignore duplicates */ }
+        }
+        // Re-fetch after seeding
+        const seededRes = await db.execute(sql`
+          SELECT id, name, description, sort_order FROM product_types
+          WHERE company_id = ${companyId}
+          ORDER BY sort_order ASC, name ASC
+        `);
+        return (seededRes as any).rows || seededRes || [];
+      }
+
+      // Merge: add any distinct types from products that aren't in the table yet
+      const newTypes: string[] = [];
+      for (const row of distinctRows) {
+        if (!typeNames.has(row.product_type.toLowerCase())) {
+          newTypes.push(row.product_type);
+        }
+      }
+      if (newTypes.length > 0) {
+        const maxOrder = typeRows.length > 0 ? Math.max(...typeRows.map((r: any) => r.sort_order || 0)) : 0;
+        for (let i = 0; i < newTypes.length; i++) {
+          try {
+            await db.execute(sql`
+              INSERT INTO product_types (id, company_id, name, sort_order)
+              VALUES (gen_random_uuid(), ${companyId}, ${newTypes[i]}, ${maxOrder + i + 1})
+              ON CONFLICT (company_id, name) DO NOTHING
+            `);
+          } catch { /* ignore */ }
+        }
+        const refreshed = await db.execute(sql`
+          SELECT id, name, description, sort_order FROM product_types
+          WHERE company_id = ${companyId}
+          ORDER BY sort_order ASC, name ASC
+        `);
+        return (refreshed as any).rows || refreshed || [];
+      }
+
+      return typeRows;
+    } catch (error) {
+      console.error('Get product types error:', error);
       return [];
+    }
+  }
+
+  async createProductType(companyId: string, data: { name: string; description?: string }) {
+    await this.ensureProductTypesMigration();
+    try {
+      if (!data.name?.trim()) throw new ApiError(400, 'El nombre del tipo es requerido');
+      const maxOrderRes = await db.execute(sql`
+        SELECT COALESCE(MAX(sort_order), -1) as max_order FROM product_types WHERE company_id = ${companyId}
+      `);
+      const maxOrder = ((maxOrderRes as any).rows?.[0]?.max_order ?? -1) + 1;
+      const id = uuid();
+      await db.execute(sql`
+        INSERT INTO product_types (id, company_id, name, description, sort_order)
+        VALUES (${id}, ${companyId}, ${data.name.trim()}, ${data.description || null}, ${maxOrder})
+      `);
+      return { id, name: data.name.trim(), description: data.description || null, sort_order: maxOrder };
+    } catch (error: any) {
+      if (error instanceof ApiError) throw error;
+      if (error?.message?.includes('unique') || error?.message?.includes('duplicate') || error?.code === '23505') {
+        throw new ApiError(409, 'Ya existe un tipo con ese nombre');
+      }
+      throw new ApiError(500, 'Error al crear tipo de producto');
+    }
+  }
+
+  async updateProductType(companyId: string, typeId: string, data: { name?: string; description?: string; sort_order?: number }) {
+    await this.ensureProductTypesMigration();
+    try {
+      // Get current type to know old name for product migration
+      const currentRes = await db.execute(sql`
+        SELECT name FROM product_types WHERE id = ${typeId} AND company_id = ${companyId}
+      `);
+      const currentRows = (currentRes as any).rows || currentRes || [];
+      if (currentRows.length === 0) throw new ApiError(404, 'Tipo no encontrado');
+      const oldName = currentRows[0].name;
+
+      const sets: string[] = [];
+      if (data.name !== undefined) sets.push(`name = '${data.name.trim().replace(/'/g, "''")}'`);
+      if (data.description !== undefined) sets.push(`description = ${data.description ? `'${data.description.replace(/'/g, "''")}'` : 'NULL'}`);
+      if (data.sort_order !== undefined) sets.push(`sort_order = ${data.sort_order}`);
+
+      if (sets.length > 0) {
+        await pool.query(
+          `UPDATE product_types SET ${sets.join(', ')} WHERE id = $1 AND company_id = $2`,
+          [typeId, companyId]
+        );
+      }
+
+      // If name changed, update all products with the old type name
+      if (data.name && data.name.trim() !== oldName) {
+        await pool.query(
+          'UPDATE products SET product_type = $1 WHERE company_id = $2 AND product_type = $3',
+          [data.name.trim(), companyId, oldName]
+        );
+      }
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Error al actualizar tipo de producto');
+    }
+  }
+
+  async deleteProductType(companyId: string, typeId: string) {
+    await this.ensureProductTypesMigration();
+    try {
+      // Check if any products use this type
+      const typeRes = await db.execute(sql`
+        SELECT name FROM product_types WHERE id = ${typeId} AND company_id = ${companyId}
+      `);
+      const typeRows = (typeRes as any).rows || typeRes || [];
+      if (typeRows.length === 0) throw new ApiError(404, 'Tipo no encontrado');
+
+      const typeName = typeRows[0].name;
+      const usageRes = await db.execute(sql`
+        SELECT COUNT(*) as count FROM products WHERE company_id = ${companyId} AND product_type = ${typeName}
+      `);
+      const count = parseInt(((usageRes as any).rows?.[0]?.count ?? '0'), 10);
+      if (count > 0) {
+        throw new ApiError(409, `No se puede eliminar: ${count} producto(s) usan este tipo`);
+      }
+
+      await db.execute(sql`DELETE FROM product_types WHERE id = ${typeId} AND company_id = ${companyId}`);
+      return { success: true };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Error al eliminar tipo de producto');
+    }
+  }
+
+  async reorderProductTypes(companyId: string, orderedIds: string[]) {
+    await this.ensureProductTypesMigration();
+    try {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await pool.query(
+          'UPDATE product_types SET sort_order = $1 WHERE id = $2 AND company_id = $3',
+          [i, orderedIds[i], companyId]
+        );
+      }
+      return { success: true };
+    } catch (error) {
+      throw new ApiError(500, 'Error al reordenar tipos');
     }
   }
 

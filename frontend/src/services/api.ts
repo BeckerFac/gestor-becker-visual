@@ -208,6 +208,22 @@ export const api = {
     const { data } = await client.get('/products/types')
     return data
   },
+  createProductType: async (typeData: { name: string; description?: string }) => {
+    const { data } = await client.post('/products/types', typeData)
+    return data
+  },
+  updateProductType: async (id: string, typeData: { name?: string; description?: string; sort_order?: number }) => {
+    const { data } = await client.put(`/products/types/${id}`, typeData)
+    return data
+  },
+  deleteProductType: async (id: string) => {
+    const { data } = await client.delete(`/products/types/${id}`)
+    return data
+  },
+  reorderProductTypes: async (orderedIds: string[]) => {
+    const { data } = await client.post('/products/types/reorder', { ordered_ids: orderedIds })
+    return data
+  },
   getCategories: async () => {
     const { data } = await client.get('/products/categories')
     return data
@@ -633,8 +649,24 @@ export const api = {
     const response = await client.get(`/quotes/${id}/pdf`, { responseType: 'blob', params })
     return response.data
   },
+  updateQuote: async (id: string, quoteData: any) => {
+    const { data } = await client.put(`/quotes/${id}`, quoteData)
+    return data
+  },
   updateQuoteStatus: async (id: string, status: string) => {
     const { data } = await client.put(`/quotes/${id}/status`, { status })
+    return data
+  },
+  uploadQuoteBanner: async (base64: string, mimeType: string) => {
+    const { data } = await client.post('/quotes/banner', { base64, mime_type: mimeType })
+    return data
+  },
+  getQuoteBanner: async () => {
+    const { data } = await client.get('/quotes/banner')
+    return data
+  },
+  deleteQuoteBanner: async () => {
+    const { data } = await client.delete('/quotes/banner')
     return data
   },
 
@@ -690,6 +722,10 @@ export const api = {
   },
   createRemito: async (remitoData: any) => {
     const { data } = await client.post('/remitos', remitoData)
+    return data
+  },
+  updateRemito: async (id: string, remitoData: any) => {
+    const { data } = await client.put(`/remitos/${id}`, remitoData)
     return data
   },
   getRemitoPdf: async (id: string): Promise<Blob> => {

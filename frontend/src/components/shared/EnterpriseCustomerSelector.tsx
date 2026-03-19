@@ -1,4 +1,5 @@
 import React from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Enterprise { id: string; name: string; cuit?: string | null }
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
@@ -14,6 +15,7 @@ interface EnterpriseCustomerSelectorProps {
   customerRequired?: boolean
   enterpriseLabel?: string
   customerLabel?: string
+  enterpriseHelpText?: string
   className?: string
 }
 
@@ -28,6 +30,7 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
   customerRequired = false,
   enterpriseLabel = 'Empresa',
   customerLabel = 'Cliente / Contacto',
+  enterpriseHelpText,
   className = '',
 }) => {
   const filteredCustomers = selectedEnterpriseId
@@ -49,6 +52,7 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium text-gray-700">
           {enterpriseLabel} {enterpriseRequired && <span className="text-red-500">*</span>}
+          {enterpriseHelpText && <HelpTip text={enterpriseHelpText} />}
         </label>
         <select
           className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

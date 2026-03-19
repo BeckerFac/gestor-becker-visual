@@ -28,6 +28,11 @@ export class RemitosController {
     res.status(201).json(data);
   }
 
+  async updateRemito(req: AuthRequest, res: Response) {
+    const data = await remitosService.updateRemito(req.user!.company_id, req.params.id, req.body);
+    res.json(data);
+  }
+
   async updateStatus(req: AuthRequest, res: Response) {
     const data = await remitosService.updateRemitoStatus(req.user!.company_id, req.params.id, req.body.status);
     res.json(data);

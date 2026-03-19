@@ -5,6 +5,7 @@ interface Column<T> {
   key: keyof T | string
   label: string
   render?: (value: any, row: T) => React.ReactNode
+  headerRender?: () => React.ReactNode
 }
 
 interface DataTableProps<T> {
@@ -32,7 +33,7 @@ export function DataTable<T extends { id?: string | number }>({
                   key={String(col.key)}
                   className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100"
                 >
-                  {col.label}
+                  {col.headerRender ? col.headerRender() : col.label}
                 </th>
               ))}
             </tr>
