@@ -5,11 +5,20 @@ import * as schema from '../db/schema';
 
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  max: 20,
+  // Connection pool configuration
+  max: parseInt(process.env.DB_POOL_MAX || '20', 10),
+  min: parseInt(process.env.DB_POOL_MIN || '2', 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+  // Query timeout: 30 seconds max
+  statement_timeout: 30_000,
 });
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
+  // Automatic reconnection: pg Pool handles this internally.
+  // On idle client errors, the pool removes the broken client
+  // and creates a new one on next query. No manual intervention needed.
 });
 
 export const db = drizzle(pool, { schema });
@@ -313,6 +322,133 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS condicion_iva VARCHAR(100)`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS punto_venta INTEGER`);
+
+    // --- Multi-tenant SaaS: subscription / trial ---
+    try { await pool.query(`CREATE TYPE subscription_status AS ENUM ('trial', 'active', 'grace', 'expired', 'cancelled')`); } catch (_) {}
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS subscription_status subscription_status DEFAULT 'trial'`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS grace_ends_at TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(50)`);
+
+    // --- Email verification & password reset on users ---
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMP WITH TIME ZONE`);
+
+    // --- Invitations ---
+    try { await pool.query(`CREATE TYPE invitation_status AS ENUM ('pending', 'accepted', 'expired', 'revoked')`); } catch (_) {}
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS invitations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        email VARCHAR(100) NOT NULL,
+        role user_role DEFAULT 'viewer',
+        token VARCHAR(255) NOT NULL UNIQUE,
+        status invitation_status DEFAULT 'pending',
+        invited_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        accepted_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_invitations_company ON invitations(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token)`);
+
+    // Backfill existing companies: set trial_ends_at 15 days from now if missing
+    await pool.query(`
+      UPDATE companies
+      SET trial_ends_at = NOW() + INTERVAL '15 days',
+          subscription_status = 'trial'
+      WHERE trial_ends_at IS NULL
+    `);
+
+    // Backfill existing users: mark as email_verified since they pre-date verification
+    await pool.query(`
+      UPDATE users SET email_verified = true WHERE email_verified IS NULL OR email_verified = false
+    `);
+
+    // --- Superadmin flag ---
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN DEFAULT false`);
+    // Set default superadmin (e2etest or first registered user)
+    await pool.query(`
+      UPDATE users SET is_superadmin = true
+      WHERE email = 'e2etest@test.com' AND is_superadmin = false
+    `);
+
+    // --- Advanced Roles: add 'owner' and 'editor' to user_role enum ---
+    try { await pool.query(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'owner' BEFORE 'admin'`); } catch (_) {}
+    try { await pool.query(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'editor' AFTER 'gerente'`); } catch (_) {}
+
+    // --- Pending Invitations table (separate from existing invitations table) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pending_invitations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        email VARCHAR(100) NOT NULL,
+        name VARCHAR(255),
+        role VARCHAR(50) NOT NULL DEFAULT 'viewer',
+        token VARCHAR(255) NOT NULL UNIQUE,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        invited_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_invitations_company ON pending_invitations(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_invitations_token ON pending_invitations(token)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_invitations_email ON pending_invitations(email, company_id)`);
+
+    // --- Backfill: migrate existing 'admin' company creators to 'owner' ---
+    // For each company, the earliest admin becomes the owner (if no owner exists yet)
+    await pool.query(`
+      UPDATE users SET role = 'owner'
+      WHERE id IN (
+        SELECT DISTINCT ON (company_id) id
+        FROM users
+        WHERE role = 'admin' AND active = true
+          AND company_id NOT IN (SELECT company_id FROM users WHERE role = 'owner')
+        ORDER BY company_id, created_at ASC
+      )
+    `);
+
+    // --- Audit log: ensure details_json column alias works ---
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_company_date ON audit_log(company_id, created_at DESC)`);
+
+    // --- Billing: subscriptions & usage_tracking (separate from legacy companies columns) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        plan VARCHAR(50) NOT NULL DEFAULT 'trial',
+        status VARCHAR(50) NOT NULL DEFAULT 'trial',
+        trial_ends_at TIMESTAMP WITH TIME ZONE,
+        current_period_start TIMESTAMP WITH TIME ZONE,
+        current_period_end TIMESTAMP WITH TIME ZONE,
+        payment_provider VARCHAR(50),
+        payment_provider_subscription_id VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usage_tracking (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        month VARCHAR(7) NOT NULL,
+        invoices_count INTEGER DEFAULT 0,
+        orders_count INTEGER DEFAULT 0,
+        users_count INTEGER DEFAULT 0,
+        storage_mb DECIMAL(10,2) DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, month)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_subscriptions_company ON subscriptions(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_tracking_company_month ON usage_tracking(company_id, month)`);
 
     console.log('✅ Auto-migrations completed');
   } catch (error) {

@@ -105,6 +105,7 @@ vi.mock('drizzle-orm', () => {
 // Mock env config with valid test secrets
 vi.mock('../../src/config/env', () => ({
   env: {
+    NODE_ENV: 'test',
     JWT_SECRET: 'test-secret-minimum-16-chars-long',
     JWT_REFRESH_SECRET: 'test-refresh-secret-min-16-chars',
     JWT_EXPIRATION: '15m',
@@ -114,7 +115,44 @@ vi.mock('../../src/config/env', () => ({
     PORT: 3000,
     RATE_LIMIT_WINDOW_MS: 900000,
     RATE_LIMIT_MAX_REQUESTS: 100,
+    BCRYPT_ROUNDS: 4, // Low rounds for fast tests
+    MAX_LOGIN_ATTEMPTS: 5,
+    LOGIN_LOCKOUT_MINUTES: 15,
+    REQUEST_BODY_LIMIT: '2mb',
+    FILE_UPLOAD_LIMIT: '5mb',
+    FRONTEND_URL: 'http://localhost:5173',
+    TRIAL_DAYS: 15,
+    GRACE_DAYS: 3,
   },
+  isDevelopment: false,
+  isProduction: false,
+  validateSecrets: () => true,
+}))
+
+// Mock security middleware exports used by auth.service and auth.controller
+vi.mock('../../src/middlewares/security', () => ({
+  validatePasswordComplexity: (password: string) => {
+    const errors: string[] = []
+    if (password.length < 8) errors.push('La contrasena debe tener al menos 8 caracteres')
+    if (password.length > 128) errors.push('La contrasena no puede tener mas de 128 caracteres')
+    if (!/[A-Z]/.test(password)) errors.push('La contrasena debe contener al menos una letra mayuscula')
+    if (!/[a-z]/.test(password)) errors.push('La contrasena debe contener al menos una letra minuscula')
+    if (!/[0-9]/.test(password)) errors.push('La contrasena debe contener al menos un numero')
+    return { valid: errors.length === 0, errors }
+  },
+  validateEmail: (email: string) => /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email) && email.length <= 254,
+  validateCuit: (cuit: string) => /^\d{11}$/.test(cuit.replace(/-/g, '')),
+  getClientIp: () => '127.0.0.1',
+  recordFailedLogin: vi.fn(),
+  recordSuccessfulLogin: vi.fn(),
+  getRemainingAttempts: () => 5,
+  isIpLocked: () => ({ locked: false, remainingMinutes: 0 }),
+  bruteForceProtection: vi.fn((_req: any, _res: any, next: any) => next()),
+  requestSanitizer: vi.fn((_req: any, _res: any, next: any) => next()),
+  auditLogger: vi.fn((_req: any, _res: any, next: any) => next()),
+  additionalSecurityHeaders: vi.fn((_req: any, _res: any, next: any) => next()),
+  requestSizeGuard: vi.fn(() => vi.fn((_req: any, _res: any, next: any) => next())),
+  getAuditLog: () => [],
 }))
 
 // Mock the schema exports
@@ -129,8 +167,9 @@ vi.mock('../../src/db/schema', () => ({
   stock: { id: 'stock.id', product_id: 'stock.product_id', warehouse_id: 'stock.warehouse_id' },
   stock_movements: { id: 'stock_movements.id' },
   warehouses: { id: 'warehouses.id', company_id: 'warehouses.company_id' },
-  users: { id: 'users.id', email: 'users.email' },
-  companies: { id: 'companies.id' },
+  users: { id: 'users.id', email: 'users.email', email_verified: 'users.email_verified', email_verification_token: 'users.email_verification_token', email_verification_expires: 'users.email_verification_expires', password_reset_token: 'users.password_reset_token', password_reset_expires: 'users.password_reset_expires' },
+  companies: { id: 'companies.id', cuit: 'companies.cuit', subscription_status: 'companies.subscription_status', trial_ends_at: 'companies.trial_ends_at', grace_ends_at: 'companies.grace_ends_at' },
+  invitations: { id: 'invitations.id', token: 'invitations.token' },
   sessions: { id: 'sessions.id', user_id: 'sessions.user_id', refresh_token: 'sessions.refresh_token' },
 }))
 
@@ -143,6 +182,13 @@ vi.mock('../../src/middlewares/errorHandler', () => ({
       this.statusCode = statusCode
       this.name = 'ApiError'
     }
+  },
+}))
+
+// Mock audit service
+vi.mock('../../src/modules/audit/audit.service', () => ({
+  auditService: {
+    log: vi.fn().mockResolvedValue(undefined),
   },
 }))
 

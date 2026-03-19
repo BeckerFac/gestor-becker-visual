@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
+import { toast } from '@/hooks/useToast'
 
 interface PortalOrder {
   id: string
@@ -165,7 +166,7 @@ export const CustomerPortal: React.FC = () => {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e: any) {
-      alert('Error descargando PDF: ' + e.message)
+      toast.error('Error descargando PDF: ' + e.message)
     } finally {
       setDownloadingQuotePdfId(null)
     }
@@ -213,7 +214,7 @@ export const CustomerPortal: React.FC = () => {
             <CardContent className="pt-6 pb-6">
               <form onSubmit={handleLogin} className="space-y-5">
                 {loginError && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+                  <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
                     <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
                     </svg>
@@ -310,7 +311,7 @@ export const CustomerPortal: React.FC = () => {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
             {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
           </div>
         )}

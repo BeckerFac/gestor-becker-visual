@@ -256,8 +256,8 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
+          {error}<button onClick={() => setError(null)} className="ml-2 font-bold" aria-label="Cerrar error">x</button>
         </div>
       )}
       {/* Header with Search */}
@@ -274,7 +274,7 @@ export const Dashboard: React.FC = () => {
           <input
             type="text"
             placeholder="Buscar empresas, pedidos, productos, facturas..."
-            className="w-full px-4 py-2.5 pl-10 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
+            className="w-full px-4 py-2.5 pl-10 border border-gray-300 dark:border-gray-600 rounded-xl text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
             value={searchQuery}
             onChange={handleSearchChange}
             onFocus={() => { if (searchResults) setShowResults(true) }}
@@ -290,7 +290,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Search Results Dropdown */}
           {showResults && searchQuery.trim().length >= 2 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-96 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-50 max-h-96 overflow-y-auto">
               {!hasResults ? (
                 <div className="px-4 py-6 text-center text-gray-500 text-sm">
                   No se encontraron resultados para "{searchQuery}"
@@ -629,7 +629,7 @@ export const Dashboard: React.FC = () => {
                           />
                         </div>
                       </div>
-                      <span className="font-bold text-gray-900 ml-3">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
+                      <span className="font-bold text-gray-900 dark:text-gray-100 ml-3">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
                     </div>
                 ))}
               </div>

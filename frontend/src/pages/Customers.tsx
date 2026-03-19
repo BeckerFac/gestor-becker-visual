@@ -200,8 +200,8 @@ export const Customers: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
-          <p className="text-sm text-gray-500 mt-1">{customers.length} clientes registrados</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Clientes</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{customers.length} clientes registrados</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
@@ -249,9 +249,9 @@ export const Customers: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
+          <button onClick={() => setError(null)} className="ml-2 font-bold" aria-label="Cerrar error">x</button>
         </div>
       )}
 
@@ -266,8 +266,8 @@ export const Customers: React.FC = () => {
               <Input label="Teléfono" placeholder="+54 11 1234-5678" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
               <Input label="Email" type="email" placeholder="email@empresa.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Condición IVA</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.tax_condition} onChange={e => setForm({ ...form, tax_condition: e.target.value })}>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condición IVA</label>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.tax_condition} onChange={e => setForm({ ...form, tax_condition: e.target.value })}>
                   <option>Responsable Inscripto</option>
                   <option>Monotributo</option>
                   <option>Exento</option>
@@ -275,8 +275,8 @@ export const Customers: React.FC = () => {
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Cond. IVA AFIP (RG 5616)</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.condicion_iva} onChange={e => setForm({ ...form, condicion_iva: e.target.value })}>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cond. IVA AFIP (RG 5616)</label>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.condicion_iva} onChange={e => setForm({ ...form, condicion_iva: e.target.value })}>
                   {CONDICION_IVA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
                 <p className="text-xs text-gray-400">Obligatorio desde 01/04/2026 para facturacion AFIP</p>
@@ -287,9 +287,9 @@ export const Customers: React.FC = () => {
               <Input label="Límite de Crédito ($)" type="number" placeholder="0.00" value={form.credit_limit} onChange={e => setForm({ ...form, credit_limit: e.target.value })} />
               <Input label="Plazo de Pago (días)" type="number" placeholder="30" value={form.payment_terms} onChange={e => setForm({ ...form, payment_terms: e.target.value })} />
               <div className="col-span-full">
-                <label className="text-sm font-medium text-gray-700 block mb-1">Notas / Aclaraciones</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas / Aclaraciones</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                   rows={2}
                   placeholder="Observaciones, condiciones especiales, datos adicionales..."
                   value={form.notes}

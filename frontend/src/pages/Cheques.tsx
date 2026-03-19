@@ -313,8 +313,8 @@ export const Cheques: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cheques</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestion de cheques a cobrar</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cheques</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Gestion de cheques a cobrar</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
@@ -384,7 +384,7 @@ export const Cheques: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
@@ -545,7 +545,7 @@ export const Cheques: React.FC = () => {
                       {cheque.cheque_type && cheque.cheque_type !== 'comun' && (
                         <span className="inline-block mt-1 px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{CHEQUE_TYPE_LABELS[cheque.cheque_type] || cheque.cheque_type}</span>
                       )}
-                      {cheque.notes && <p className="text-sm text-gray-500 mt-1">Notas: {cheque.notes}</p>}
+                      {cheque.notes && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Notas: {cheque.notes}</p>}
                       {cheque.collected_date && (
                         <p className="text-sm text-green-700 mt-1">Cobrado el: {formatDate(cheque.collected_date)}</p>
                       )}

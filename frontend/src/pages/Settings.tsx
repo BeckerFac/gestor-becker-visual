@@ -9,6 +9,7 @@ import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
 import { formatDateTime } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { BillingSection } from '@/components/billing/BillingSection'
 
 export const Settings: React.FC = () => {
   const authCompany = useAuthStore((state) => state.company)
@@ -153,7 +154,7 @@ export const Settings: React.FC = () => {
   if (loading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Configuracion</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Configuracion</h1>
         <Card><CardContent><SkeletonTable rows={5} cols={2} /></CardContent></Card>
       </div>
     )
@@ -161,10 +162,10 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Configuracion</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Configuracion</h1>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
@@ -173,6 +174,9 @@ export const Settings: React.FC = () => {
           {success}<button onClick={() => setSuccess(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
+
+      {/* Billing & Subscription */}
+      <BillingSection />
 
       {/* Company Data */}
       <Card>
@@ -323,7 +327,7 @@ export const Settings: React.FC = () => {
                   </div>
                 </div>
 
-                {certError && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{certError}</div>}
+                {certError && <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-3 py-2 rounded text-sm">{certError}</div>}
                 {certSuccess && <div className="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded text-sm">{certSuccess}</div>}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -461,6 +465,31 @@ export const Settings: React.FC = () => {
             <div><span className="text-gray-500">Backend:</span> <span className="font-medium">Express + PostgreSQL</span></div>
             <div><span className="text-gray-500">Frontend:</span> <span className="font-medium">React + Tailwind CSS</span></div>
             <div><span className="text-gray-500">AFIP SDK:</span> <span className="font-medium">@afipsdk/afip.js</span></div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Legal */}
+      <Card>
+        <CardHeader><h3 className="text-lg font-semibold">Legal</h3></CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            <a
+              href="/legal/terminos"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-blue-600 dark:text-blue-400 hover:underline text-sm"
+            >
+              Terminos y Condiciones
+            </a>
+            <a
+              href="/legal/privacidad"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-blue-600 dark:text-blue-400 hover:underline text-sm"
+            >
+              Politica de Privacidad
+            </a>
           </div>
         </CardContent>
       </Card>

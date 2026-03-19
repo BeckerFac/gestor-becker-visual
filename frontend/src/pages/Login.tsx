@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -15,11 +15,20 @@ const loginSchema = z.object({
 })
 
 const registerSchema = z.object({
-  email: z.string().email('Email inválido'),
-  password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
+  email: z.string().email('Email invalido'),
+  password: z.string()
+    .min(8, 'Minimo 8 caracteres')
+    .regex(/[A-Z]/, 'Debe contener al menos una mayuscula')
+    .regex(/[a-z]/, 'Debe contener al menos una minuscula')
+    .regex(/[0-9]/, 'Debe contener al menos un numero'),
+  confirmPassword: z.string(),
   name: z.string().min(2, 'El nombre es requerido'),
   company_name: z.string().min(2, 'El nombre de la empresa es requerido'),
-  cuit: z.string().min(11, 'El CUIT debe tener 11 dígitos'),
+  cuit: z.string().min(11, 'El CUIT debe tener 11 digitos').max(13, 'CUIT invalido'),
+  accept_terms: z.literal(true, { message: 'Debes aceptar los Terminos y Condiciones' }),
+}).refine(data => data.password === data.confirmPassword, {
+  message: 'Las contrasenas no coinciden',
+  path: ['confirmPassword'],
 })
 
 type LoginFormData = z.infer<typeof loginSchema>
@@ -124,24 +133,35 @@ export const Login: React.FC = () => {
                 className="w-full"
                 loading={loading}
               >
-                Iniciar sesión
+                Iniciar sesion
               </Button>
 
-              <div className="text-center">
+              <div className="text-center space-y-2">
+                <Link
+                  to="/forgot-password"
+                  className="text-blue-600 hover:underline text-sm block"
+                >
+                  Olvidaste tu contrasena?
+                </Link>
                 <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  ¿No tienes cuenta?{' '}
+                  No tenes cuenta?{' '}
                   <button
                     type="button"
                     onClick={() => setIsRegister(true)}
                     className="text-blue-600 hover:underline font-medium"
                   >
-                    Regístrate aquí
+                    Registrate aca
                   </button>
                 </p>
               </div>
             </form>
           ) : (
             <form onSubmit={registerForm.handleSubmit(onRegister)} className="space-y-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-2">
+                <p className="text-blue-800 dark:text-blue-200 text-sm font-medium">
+                  15 dias de prueba gratuita - Sin tarjeta de credito
+                </p>
+              </div>
               <Input
                 label="Nombre completo"
                 placeholder="Tu nombre"
@@ -156,11 +176,18 @@ export const Login: React.FC = () => {
                 error={registerForm.formState.errors.email?.message}
               />
               <Input
-                label="Contraseña"
+                label="Contrasena"
                 type="password"
-                placeholder="••••••"
+                placeholder="Min. 8 caracteres, 1 mayuscula, 1 numero"
                 {...registerForm.register('password')}
                 error={registerForm.formState.errors.password?.message}
+              />
+              <Input
+                label="Confirmar contrasena"
+                type="password"
+                placeholder="Repetir contrasena"
+                {...registerForm.register('confirmPassword')}
+                error={registerForm.formState.errors.confirmPassword?.message}
               />
               <Input
                 label="Nombre de la empresa"
@@ -174,6 +201,40 @@ export const Login: React.FC = () => {
                 {...registerForm.register('cuit')}
                 error={registerForm.formState.errors.cuit?.message}
               />
+              <div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    {...registerForm.register('accept_terms')}
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                    Acepto los{' '}
+                    <a
+                      href="/legal/terminos"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline font-medium"
+                    >
+                      Terminos y Condiciones
+                    </a>{' '}
+                    y la{' '}
+                    <a
+                      href="/legal/privacidad"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline font-medium"
+                    >
+                      Politica de Privacidad
+                    </a>
+                  </span>
+                </label>
+                {registerForm.formState.errors.accept_terms && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {registerForm.formState.errors.accept_terms.message}
+                  </p>
+                )}
+              </div>
               <Button
                 type="submit"
                 variant="primary"
@@ -200,6 +261,16 @@ export const Login: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      <div className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400 space-x-3">
+        <a href="/legal/terminos" className="hover:underline hover:text-gray-700 dark:hover:text-gray-300">
+          Terminos y Condiciones
+        </a>
+        <span>|</span>
+        <a href="/legal/privacidad" className="hover:underline hover:text-gray-700 dark:hover:text-gray-300">
+          Politica de Privacidad
+        </a>
+      </div>
     </div>
   )
 }

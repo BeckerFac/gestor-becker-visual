@@ -3,6 +3,7 @@ import { AuthRequest } from './auth';
 import { db } from '../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from './errorHandler';
+import { FULL_ACCESS_ROLES, ROLE_HIERARCHY } from '../shared/permissions.constants';
 
 async function loadUserPermissions(userId: string): Promise<Map<string, Set<string>>> {
   const result = await db.execute(sql`
@@ -25,8 +26,8 @@ export const authorize = (module: string, action: string) => {
         throw new ApiError(401, 'No autenticado');
       }
 
-      // Admin always has full access
-      if (req.user.role === 'admin') {
+      // Owner and Admin always have full access
+      if (FULL_ACCESS_ROLES.includes(req.user.role as any)) {
         return next();
       }
 
@@ -48,9 +49,37 @@ export const authorize = (module: string, action: string) => {
   };
 };
 
+// Require a minimum role level
+export const requireRole = (...allowedRoles: string[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new ApiError(401, 'No autenticado'));
+    }
+    if (!allowedRoles.includes(req.user.role)) {
+      return next(new ApiError(403, 'No tiene el rol requerido para esta accion'));
+    }
+    next();
+  };
+};
+
+// Require minimum role hierarchy level
+export const requireMinRole = (minRole: string) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new ApiError(401, 'No autenticado'));
+    }
+    const userLevel = ROLE_HIERARCHY[req.user.role] ?? 0;
+    const requiredLevel = ROLE_HIERARCHY[minRole] ?? 999;
+    if (userLevel < requiredLevel) {
+      return next(new ApiError(403, 'No tiene el nivel de acceso requerido'));
+    }
+    next();
+  };
+};
+
 // Helper: check if user has ANY permission on a module (for filtering)
 export async function userCanAccessModule(userId: string, role: string, module: string): Promise<boolean> {
-  if (role === 'admin') return true;
+  if (FULL_ACCESS_ROLES.includes(role as any)) return true;
   const result = await db.execute(sql`
     SELECT 1 FROM permissions WHERE user_id = ${userId} AND module = ${module} AND allowed = true LIMIT 1
   `);

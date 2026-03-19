@@ -461,8 +461,8 @@ export const Cobros: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cobros</h1>
-          <p className="text-sm text-gray-500 mt-1">Pagos recibidos de empresas</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cobros</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pagos recibidos de empresas</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename="cobros" />
@@ -780,7 +780,7 @@ export const Cobros: React.FC = () => {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg animate-fadeIn">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg animate-fadeIn">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
@@ -974,7 +974,7 @@ export const Cobros: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
+                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-3">N Recibo</th>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Empresa</th>

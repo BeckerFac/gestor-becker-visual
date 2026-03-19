@@ -13,6 +13,14 @@ vi.mock('bcryptjs', () => ({
   compare: (...args: any[]) => mockCompare(...args),
 }))
 
+// Mock billingService for auth tests (auth.service imports it for register)
+vi.mock('../src/modules/billing/billing.service', () => ({
+  billingService: {
+    createTrialSubscription: vi.fn().mockResolvedValue(undefined),
+    getSubscription: vi.fn().mockResolvedValue(null),
+  },
+}))
+
 // Import after mocks are set up
 import { AuthService } from '../src/modules/auth/auth.service'
 
@@ -23,6 +31,8 @@ describe('AuthService', () => {
     resetMocks()
     mockHash.mockReset()
     mockCompare.mockReset()
+    // Default: hash resolves to a hashed value (for timing-safe dummy hashes too)
+    mockHash.mockResolvedValue('hashed_dummy')
   })
 
   describe('register', () => {
@@ -31,6 +41,9 @@ describe('AuthService', () => {
       const { db } = await import('../src/config/db')
       vi.mocked(db.query.users.findFirst).mockResolvedValueOnce(undefined)
 
+      // Mock: CUIT not taken (companies.findFirst returns undefined)
+      vi.mocked(db.query.companies.findFirst).mockResolvedValueOnce(undefined)
+
       // Mock: insert company returns company
       vi.mocked(db.insert).mockReturnValueOnce({
         values: vi.fn().mockReturnValue({
@@ -38,7 +51,7 @@ describe('AuthService', () => {
         }),
       } as any)
 
-      // Mock: bcrypt hash
+      // Mock: bcrypt hash for password
       mockHash.mockResolvedValueOnce('hashed_password')
 
       // Mock: insert user returns user
@@ -48,14 +61,15 @@ describe('AuthService', () => {
             id: 'user-1',
             email: 'newuser@test.com',
             name: 'New User',
-            role: 'admin',
+            role: 'owner',
           }]),
         }),
       } as any)
 
+      // Use password that meets complexity requirements
       const result = await authService.register(
         'newuser@test.com',
-        'test123',
+        'Test1234',
         'New User',
         'Test Company',
         '20123456789'
@@ -64,7 +78,7 @@ describe('AuthService', () => {
       expect(result.accessToken).toBeDefined()
       expect(result.refreshToken).toBeDefined()
       expect(result.user.email).toBe('newuser@test.com')
-      expect(result.user.role).toBe('admin')
+      expect(result.user.role).toBe('owner')
       expect(result.company.name).toBe('Test Company')
     })
 
@@ -75,9 +89,28 @@ describe('AuthService', () => {
         email: 'existing@test.com',
       } as any)
 
+      // Password must meet complexity to get past validation
       await expect(
-        authService.register('existing@test.com', 'test123', 'User', 'Company', '20123456789')
+        authService.register('existing@test.com', 'Test1234', 'User', 'Company', '20123456789')
       ).rejects.toThrow('Email already registered')
+    })
+
+    it('rejects weak passwords', async () => {
+      await expect(
+        authService.register('test@test.com', 'weak', 'User', 'Company', '20123456789')
+      ).rejects.toThrow('La contrasena debe tener al menos 8 caracteres')
+    })
+
+    it('rejects passwords without uppercase', async () => {
+      await expect(
+        authService.register('test@test.com', 'testpass1', 'User', 'Company', '20123456789')
+      ).rejects.toThrow('mayuscula')
+    })
+
+    it('rejects invalid email format', async () => {
+      await expect(
+        authService.register('not-an-email', 'Test1234', 'User', 'Company', '20123456789')
+      ).rejects.toThrow('email invalido')
     })
   })
 
@@ -93,6 +126,7 @@ describe('AuthService', () => {
         name: 'Test User',
         role: 'admin',
         company_id: 'company-1',
+        active: true,
       } as any)
 
       // Mock: bcrypt compare succeeds
@@ -112,7 +146,12 @@ describe('AuthService', () => {
         cuit: '20123456789',
       } as any)
 
-      const result = await authService.login('test@test.com', 'test123')
+      // Mock: storeSession -> DELETE expired sessions (db.execute)
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      // Mock: is_superadmin check (db.execute)
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ is_superadmin: false }] })
+
+      const result = await authService.login('test@test.com', 'Test1234')
 
       expect(result.accessToken).toBeDefined()
       expect(result.refreshToken).toBeDefined()
@@ -124,7 +163,7 @@ describe('AuthService', () => {
       vi.mocked(db.query.users.findFirst).mockResolvedValueOnce(undefined)
 
       await expect(
-        authService.login('nonexistent@test.com', 'test123')
+        authService.login('nonexistent@test.com', 'Test1234')
       ).rejects.toThrow('Invalid credentials')
     })
 
@@ -138,6 +177,7 @@ describe('AuthService', () => {
         name: 'Test User',
         role: 'admin',
         company_id: 'company-1',
+        active: true,
       } as any)
 
       mockCompare.mockResolvedValueOnce(false)
@@ -145,6 +185,24 @@ describe('AuthService', () => {
       await expect(
         authService.login('test@test.com', 'wrongpassword')
       ).rejects.toThrow('Invalid credentials')
+    })
+
+    it('throws 403 for deactivated user', async () => {
+      const { db } = await import('../src/config/db')
+
+      vi.mocked(db.query.users.findFirst).mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'test@test.com',
+        password_hash: 'hashed_password',
+        name: 'Test User',
+        role: 'admin',
+        company_id: 'company-1',
+        active: false,
+      } as any)
+
+      await expect(
+        authService.login('test@test.com', 'Test1234')
+      ).rejects.toThrow('User deactivated')
     })
   })
 
@@ -158,6 +216,10 @@ describe('AuthService', () => {
           role: 'admin',
           company_id: 'company-1',
           active: true,
+          email_verified: true,
+          subscription_status: 'trial',
+          trial_ends_at: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
+          grace_ends_at: null,
         }],
       })
 
@@ -217,7 +279,7 @@ describe('AuthService', () => {
 
       await expect(
         authService.customerLogin('INVALID-CODE')
-      ).rejects.toThrow('Código de acceso inválido')
+      ).rejects.toThrow('Codigo de acceso invalido')
     })
   })
 })

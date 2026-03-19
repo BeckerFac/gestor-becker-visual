@@ -194,8 +194,8 @@ export const CuentaCorriente: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cuenta Corriente</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cuenta Corriente</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Balance por empresa — pedidos, compras, cobros y pagos
           </p>
         </div>
@@ -278,7 +278,7 @@ export const CuentaCorriente: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}
           <button onClick={() => setError(null)} className="ml-2 font-bold">
             x
@@ -298,7 +298,7 @@ export const CuentaCorriente: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
+                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-6 py-3">Empresa</th>
                   <th className="px-6 py-3 text-right">Nos Deben</th>
                   <th className="px-6 py-3 text-right">Les Debemos</th>

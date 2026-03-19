@@ -10,10 +10,10 @@ export const env = {
   // Database
   DATABASE_URL: process.env.DATABASE_URL || 'postgresql://gestor_user:gestor_password_dev@localhost:5432/gestor_becker',
 
-  // JWT
+  // JWT - secure defaults (15m access, 7d refresh)
   JWT_SECRET: process.env.JWT_SECRET || '',
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || '',
-  JWT_EXPIRATION: process.env.JWT_EXPIRATION || '24h',
+  JWT_EXPIRATION: process.env.JWT_EXPIRATION || '15m',
   JWT_REFRESH_EXPIRATION: process.env.JWT_REFRESH_EXPIRATION || '7d',
 
   // AFIP
@@ -25,9 +25,16 @@ export const env = {
   // Email
   SMTP_HOST: process.env.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
-  SMTP_USER: process.env.SMTP_USER || 'your-email@gmail.com',
-  SMTP_PASS: process.env.SMTP_PASS || 'your-app-password',
+  SMTP_USER: process.env.SMTP_USER || '',
+  SMTP_PASS: process.env.SMTP_PASS || '',
   SMTP_FROM: process.env.SMTP_FROM || 'noreply@gestorbecker.com',
+
+  // App URL (for email links)
+  FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  // Trial
+  TRIAL_DAYS: parseInt(process.env.TRIAL_DAYS || '15', 10),
+  GRACE_DAYS: parseInt(process.env.GRACE_DAYS || '3', 10),
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
@@ -35,7 +42,48 @@ export const env = {
   // Rate Limiting
   RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
   RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+
+  // Security
+  BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
+  MAX_LOGIN_ATTEMPTS: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10),
+  LOGIN_LOCKOUT_MINUTES: parseInt(process.env.LOGIN_LOCKOUT_MINUTES || '15', 10),
+  REQUEST_BODY_LIMIT: process.env.REQUEST_BODY_LIMIT || '2mb',
+  FILE_UPLOAD_LIMIT: process.env.FILE_UPLOAD_LIMIT || '5mb',
 };
 
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isProduction = env.NODE_ENV === 'production';
+
+// Validate critical secrets on import (non-fatal for test environments)
+export function validateSecrets(): boolean {
+  const errors: string[] = [];
+
+  if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) {
+    errors.push('JWT_SECRET must be set and at least 16 characters');
+  }
+  if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 16) {
+    errors.push('JWT_REFRESH_SECRET must be set and at least 16 characters');
+  }
+  if (!env.DATABASE_URL) {
+    errors.push('DATABASE_URL must be set');
+  }
+
+  // Warn about weak secrets in production
+  if (isProduction) {
+    if (env.JWT_SECRET.includes('test') || env.JWT_SECRET.includes('secret')) {
+      errors.push('JWT_SECRET appears to be a test/default value - use a strong random secret in production');
+    }
+    if (!process.env.CORS_ORIGIN) {
+      errors.push('CORS_ORIGIN must be set in production');
+    }
+  }
+
+  if (errors.length > 0) {
+    for (const err of errors) {
+      console.error(`SECURITY: ${err}`);
+    }
+    return false;
+  }
+
+  return true;
+}

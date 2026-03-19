@@ -224,8 +224,8 @@ export const Global: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Busqueda Global</h1>
-          <p className="text-sm text-gray-500 mt-1">Busca una empresa y consulta toda su informacion</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Busqueda Global</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Busca una empresa y consulta toda su informacion</p>
         </div>
       </div>
 

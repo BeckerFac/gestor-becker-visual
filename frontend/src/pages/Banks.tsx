@@ -196,8 +196,8 @@ export const Banks: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Bancos y Métodos de Pago</h1>
-          <p className="text-sm text-gray-500 mt-1">{banks.length} cuenta{banks.length !== 1 ? 's' : ''} bancaria{banks.length !== 1 ? 's' : ''}</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Bancos y Métodos de Pago</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{banks.length} cuenta{banks.length !== 1 ? 's' : ''} bancaria{banks.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           {breakdown && breakdown.recent_movements.length > 0 && (
@@ -255,7 +255,7 @@ export const Banks: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
         </div>
       )}
@@ -525,7 +525,7 @@ export const Banks: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
+                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-3">Banco</th>
                   <th className="px-4 py-3">Titular</th>
                   <th className="px-4 py-3">Tipo</th>
@@ -658,7 +658,7 @@ export const Banks: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
+                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-2">Tipo</th>
                   <th className="px-4 py-2">Fecha</th>
                   <th className="px-4 py-2">Detalle</th>

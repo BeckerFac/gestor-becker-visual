@@ -169,6 +169,157 @@ export class EmailService {
     }
   }
 
+  async sendVerificationEmail(email: string, name: string, token: string): Promise<boolean> {
+    try {
+      const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${token}`
+
+      if (!this.transporter) {
+        console.log('[Email Test] Verification email to', email, '- URL:', verifyUrl)
+        return true
+      }
+
+      const mailOptions = {
+        from: env.SMTP_FROM || env.SMTP_USER,
+        to: email,
+        subject: 'Verifica tu email - Gestor BeckerVisual',
+        html: `
+          <html>
+          <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+            <div style="background: #0066cc; color: white; padding: 20px; text-align: center;">
+              <h1 style="margin: 0;">Gestor BeckerVisual</h1>
+            </div>
+            <div style="padding: 30px;">
+              <h2>Verifica tu email</h2>
+              <p>Hola <strong>${escapeHtml(name)}</strong>,</p>
+              <p>Gracias por registrarte. Para completar tu registro, verifica tu email haciendo clic en el boton:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${escapeHtml(verifyUrl)}" style="background: #0066cc; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-size: 16px;">
+                  Verificar Email
+                </a>
+              </div>
+              <p style="color: #666; font-size: 14px;">Este enlace expira en 24 horas.</p>
+              <p style="color: #666; font-size: 14px;">Si no creaste una cuenta, podes ignorar este email.</p>
+            </div>
+            <hr style="border: none; border-top: 1px solid #ddd;">
+            <p style="font-size: 12px; color: #999; text-align: center; padding: 10px;">
+              Gestor BeckerVisual - Gestion Comercial Profesional
+            </p>
+          </body>
+          </html>
+        `,
+      }
+
+      await this.transporter.sendMail(mailOptions)
+      return true
+    } catch (error) {
+      console.error('Verification email failed:', error)
+      return false
+    }
+  }
+
+  async sendPasswordResetEmail(email: string, name: string, token: string): Promise<boolean> {
+    try {
+      const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${token}`
+
+      if (!this.transporter) {
+        console.log('[Email Test] Password reset to', email, '- URL:', resetUrl)
+        return true
+      }
+
+      const mailOptions = {
+        from: env.SMTP_FROM || env.SMTP_USER,
+        to: email,
+        subject: 'Restablecer contrasena - Gestor BeckerVisual',
+        html: `
+          <html>
+          <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+            <div style="background: #0066cc; color: white; padding: 20px; text-align: center;">
+              <h1 style="margin: 0;">Gestor BeckerVisual</h1>
+            </div>
+            <div style="padding: 30px;">
+              <h2>Restablecer contrasena</h2>
+              <p>Hola <strong>${escapeHtml(name)}</strong>,</p>
+              <p>Recibimos una solicitud para restablecer tu contrasena. Hace clic en el boton para continuar:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${escapeHtml(resetUrl)}" style="background: #dc3545; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-size: 16px;">
+                  Restablecer Contrasena
+                </a>
+              </div>
+              <p style="color: #666; font-size: 14px;">Este enlace expira en 1 hora.</p>
+              <p style="color: #666; font-size: 14px;">Si no solicitaste esto, podes ignorar este email. Tu contrasena no sera modificada.</p>
+            </div>
+            <hr style="border: none; border-top: 1px solid #ddd;">
+            <p style="font-size: 12px; color: #999; text-align: center; padding: 10px;">
+              Gestor BeckerVisual - Gestion Comercial Profesional
+            </p>
+          </body>
+          </html>
+        `,
+      }
+
+      await this.transporter.sendMail(mailOptions)
+      return true
+    } catch (error) {
+      console.error('Password reset email failed:', error)
+      return false
+    }
+  }
+
+  async sendInvitationEmail(email: string, inviterName: string, companyName: string, role: string, token: string): Promise<boolean> {
+    try {
+      const inviteUrl = `${env.FRONTEND_URL}/accept-invite?token=${token}`
+
+      if (!this.transporter) {
+        console.log('[Email Test] Invitation to', email, '- URL:', inviteUrl)
+        return true
+      }
+
+      const roleLabels: Record<string, string> = {
+        admin: 'Administrador',
+        gerente: 'Gerente',
+        editor: 'Editor',
+        vendedor: 'Vendedor',
+        contable: 'Contable',
+        viewer: 'Visualizador',
+      }
+
+      const mailOptions = {
+        from: env.SMTP_FROM || env.SMTP_USER,
+        to: email,
+        subject: `Te invitaron a ${companyName} - Gestor BeckerVisual`,
+        html: `
+          <html>
+          <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+            <div style="background: #0066cc; color: white; padding: 20px; text-align: center;">
+              <h1 style="margin: 0;">Gestor BeckerVisual</h1>
+            </div>
+            <div style="padding: 30px;">
+              <h2>Fuiste invitado a un equipo</h2>
+              <p><strong>${escapeHtml(inviterName)}</strong> te invito a unirte a <strong>${escapeHtml(companyName)}</strong> como <strong>${escapeHtml(roleLabels[role] || role)}</strong>.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${escapeHtml(inviteUrl)}" style="background: #28a745; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-size: 16px;">
+                  Aceptar Invitacion
+                </a>
+              </div>
+              <p style="color: #666; font-size: 14px;">Esta invitacion expira en 7 dias.</p>
+            </div>
+            <hr style="border: none; border-top: 1px solid #ddd;">
+            <p style="font-size: 12px; color: #999; text-align: center; padding: 10px;">
+              Gestor BeckerVisual - Gestion Comercial Profesional
+            </p>
+          </body>
+          </html>
+        `,
+      }
+
+      await this.transporter.sendMail(mailOptions)
+      return true
+    } catch (error) {
+      console.error('Invitation email failed:', error)
+      return false
+    }
+  }
+
   private generateEmailBody(data: any): string {
     return `
       <html>

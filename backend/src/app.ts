@@ -4,10 +4,20 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
 import path from 'path';
-import { env } from './config/env';
-import { pool } from './config/db';
-import { authMiddleware, optionalAuth } from './middlewares/auth';
+import { env, isProduction } from './config/env';
+import { authMiddleware } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
+import {
+  requestSanitizer,
+  auditLogger,
+  bruteForceProtection,
+  additionalSecurityHeaders,
+} from './middlewares/security';
+import { requestIdMiddleware, requestLoggerMiddleware } from './config/logger';
+import { performanceMiddleware } from './middlewares/performanceMonitor';
+import { healthRouter } from './routes/health';
+import { shutdownGuard } from './config/shutdown';
+import { getSentryRequestHandler, getSentryErrorHandler } from './config/sentry';
 import { authRouter } from './modules/auth/auth.router';
 import { productsRouter } from './modules/products/products.router';
 import { pricingRouter } from './modules/pricing/pricing.router';
@@ -39,13 +49,42 @@ import { receiptsRouter } from './modules/receipts/receipts.router';
 import { exportRouter } from './modules/export/export.router';
 import { crmRouter } from './modules/crm/crm.router';
 import { onboardingRouter } from './modules/onboarding/onboarding.router';
+import { adminRouter } from './modules/admin/admin.router';
+import { billingRouter } from './modules/billing/billing.router';
+import { auditRouter } from './modules/audit/audit.router';
+import { invitationsRouter } from './modules/invitations/invitations.router';
+import { accountRouter } from './modules/account/account.router';
 
 export const app = express();
 
-// Trust proxy (behind nginx)
+// Trust proxy (behind nginx/reverse proxy)
 app.set('trust proxy', 1);
 
-// Middleware de seguridad
+// Disable X-Powered-By header (information disclosure)
+app.disable('x-powered-by');
+
+// Shutdown guard - reject new requests during graceful shutdown
+app.use(shutdownGuard as express.RequestHandler);
+
+// Sentry request handler (must be early if configured)
+const sentryRequestHandler = getSentryRequestHandler();
+if (sentryRequestHandler) {
+  app.use(sentryRequestHandler as express.RequestHandler);
+}
+
+// Request ID for distributed tracing
+app.use(requestIdMiddleware);
+
+// Structured request logging
+app.use(requestLoggerMiddleware);
+
+// Performance monitoring (request duration, metrics)
+app.use(performanceMiddleware);
+
+// Additional security headers (before helmet, to layer)
+app.use(additionalSecurityHeaders);
+
+// Helmet security headers (comprehensive)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -53,21 +92,40 @@ app.use(helmet({
       'frame-src': ["'self'", 'blob:'],
     },
   },
-}));
-const corsOrigin = process.env.CORS_ORIGIN
-if (!corsOrigin) {
-  console.warn('WARNING: CORS_ORIGIN not set, defaulting to localhost origins')
-}
-app.use(cors({
-  origin: corsOrigin || ['http://localhost:5173', 'http://localhost:3000'],
-  credentials: true,
+  // Strict transport security for HTTPS
+  hsts: isProduction ? {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  } : false,
+  // Prevent MIME type sniffing
+  noSniff: true,
+  // Prevent clickjacking
+  frameguard: { action: 'deny' },
 }));
 
-// Limiter de rate
+// CORS configuration - never wildcard in production
+const corsOrigin = process.env.CORS_ORIGIN;
+if (!corsOrigin && isProduction) {
+  console.error('SECURITY WARNING: CORS_ORIGIN not set in production - this is a critical misconfiguration');
+}
+app.use(cors({
+  origin: corsOrigin
+    ? corsOrigin.split(',').map(o => o.trim())
+    : ['http://localhost:5173', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400, // Pre-flight cache for 24h
+}));
+
+// Global rate limiter
 const limiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.RATE_LIMIT_MAX_REQUESTS,
-  message: 'Too many requests from this IP, please try again later.',
+  message: { error: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use('/api/', limiter);
@@ -82,32 +140,23 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-// Parsers
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Parsers with size limits
+app.use(express.json({ limit: env.REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ limit: env.REQUEST_BODY_LIMIT, extended: true }));
 
-// Health check
-app.get('/health', async (_req, res) => {
-  try {
-    const dbCheck = await pool.query('SELECT 1 as ok');
-    const dbOk = dbCheck.rows?.[0]?.ok === 1;
-    res.json({
-      status: dbOk ? 'ok' : 'degraded',
-      timestamp: new Date().toISOString(),
-      database: dbOk ? 'connected' : 'disconnected',
-      uptime: process.uptime(),
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'error',
-      timestamp: new Date().toISOString(),
-      database: 'disconnected',
-    });
-  }
-});
+// Request sanitization (trim + escape HTML in string inputs)
+app.use(requestSanitizer);
+
+// Audit logging for state-changing operations
+app.use(auditLogger);
+
+// Health check endpoints (no auth required for /health and /health/detailed)
+// Admin health at /api/admin/health requires auth
+app.use(healthRouter);
 
 // API Routes
-app.use('/api/auth', authLimiter, authRouter);
+// Auth routes with brute force protection + rate limiting
+app.use('/api/auth', bruteForceProtection, authLimiter, authRouter);
 app.use('/api/products', authMiddleware, productsRouter);
 app.use('/api/pricing', authMiddleware, pricingRouter);
 app.use('/api/customers', authMiddleware, customersRouter);
@@ -138,6 +187,11 @@ app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);
 app.use('/api/onboarding', authMiddleware, onboardingRouter);
+app.use('/api/billing', billingRouter); // Mixed auth: some endpoints public (webhook)
+app.use('/api/admin', authMiddleware, adminRouter);
+app.use('/api/audit', authMiddleware, auditRouter);
+app.use('/api/invitations', invitationsRouter); // Mixed auth: validate/accept are public
+app.use('/api/account', authMiddleware, accountRouter); // Data export & deletion (Ley 25.326)
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');
@@ -150,6 +204,12 @@ app.get('*', (req, res) => {
   }
   res.sendFile(path.join(publicPath, 'index.html'));
 });
+
+// Sentry error handler (must be before custom error handler)
+const sentryErrorHandler = getSentryErrorHandler();
+if (sentryErrorHandler) {
+  app.use(sentryErrorHandler as express.ErrorRequestHandler);
+}
 
 // Error handler (must be last)
 app.use(errorHandler);

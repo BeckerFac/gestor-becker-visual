@@ -1,0 +1,29 @@
+{
+  "name": "gestor-beckervisual",
+  "version": "1.0.0",
+  "description": "Sistema de gestión comercial integral, moderno y multi-plataforma para PyMEs argentinas.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test:e2e": "npx playwright test --reporter=list",
+    "test:e2e:headed": "npx playwright test --reporter=list --headed",
+    "test:e2e:debug": "npx playwright test --debug"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BeckerFac/gestor-becker-visual.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/BeckerFac/gestor-becker-visual/issues"
+  },
+  "homepage": "https://github.com/BeckerFac/gestor-becker-visual#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "typescript": "^5.9.3"
+  }
+}

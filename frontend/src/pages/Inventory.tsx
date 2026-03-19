@@ -212,8 +212,8 @@ export const Inventory: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Inventario</h1>
-          <p className="text-sm text-gray-500 mt-1">{stock.length} productos en stock</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Inventario</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{stock.length} productos en stock</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton
@@ -284,7 +284,7 @@ export const Inventory: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}

@@ -17,13 +17,15 @@ import {
 import { sql } from 'drizzle-orm';
 
 // Enums
-export const userRoleEnum = pgEnum('user_role', ['admin', 'gerente', 'vendedor', 'contable', 'viewer']);
+export const userRoleEnum = pgEnum('user_role', ['owner', 'admin', 'gerente', 'editor', 'vendedor', 'contable', 'viewer']);
 export const invoiceTypeEnum = pgEnum('invoice_type', ['A', 'B', 'C']);
 export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'pending', 'authorized', 'cancelled']);
 export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['purchase', 'sale', 'adjustment', 'transfer', 'return_customer', 'return_supplier']);
 export const paymentMethodEnum = pgEnum('payment_method', ['efectivo', 'tarjeta', 'cheque', 'transferencia', 'mixto']);
 
 // ============ COMPANIES & USERS ============
+
+export const subscriptionStatusEnum = pgEnum('subscription_status', ['trial', 'active', 'grace', 'expired', 'cancelled']);
 
 export const companies = pgTable('companies', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -38,6 +40,11 @@ export const companies = pgTable('companies', {
   afip_cert: text('afip_cert'), // PEM encoded
   afip_key: text('afip_key'), // PEM encoded
   afip_env: varchar('afip_env', { length: 20 }).default('homologacion'), // homologacion or produccion
+  // Subscription / trial fields
+  subscription_status: subscriptionStatusEnum('subscription_status').default('trial'),
+  trial_ends_at: timestamp('trial_ends_at', { withTimezone: true }),
+  grace_ends_at: timestamp('grace_ends_at', { withTimezone: true }),
+  subscription_plan: varchar('subscription_plan', { length: 50 }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -50,11 +57,33 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }).notNull(),
   role: userRoleEnum('role').default('viewer'),
   active: boolean('active').default(true),
+  email_verified: boolean('email_verified').default(false),
+  email_verification_token: varchar('email_verification_token', { length: 255 }),
+  email_verification_expires: timestamp('email_verification_expires', { withTimezone: true }),
+  password_reset_token: varchar('password_reset_token', { length: 255 }),
+  password_reset_expires: timestamp('password_reset_expires', { withTimezone: true }),
   last_login: timestamp('last_login', { withTimezone: true }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
   emailIdx: uniqueIndex('unique_email_per_company').on(table.company_id, table.email),
+}));
+
+export const invitationStatusEnum = pgEnum('invitation_status', ['pending', 'accepted', 'expired', 'revoked']);
+
+export const invitations = pgTable('invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  company_id: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  email: varchar('email', { length: 100 }).notNull(),
+  role: userRoleEnum('role').default('viewer'),
+  token: varchar('token', { length: 255 }).notNull().unique(),
+  status: invitationStatusEnum('status').default('pending'),
+  invited_by: uuid('invited_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+  accepted_at: timestamp('accepted_at', { withTimezone: true }),
+  created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  emailCompanyIdx: uniqueIndex('unique_invitation_email_company').on(table.company_id, table.email),
 }));
 
 export const sessions = pgTable('sessions', {
@@ -293,3 +322,4 @@ export type Product = typeof products.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type Stock = typeof stock.$inferSelect;
+export type Invitation = typeof invitations.$inferSelect;

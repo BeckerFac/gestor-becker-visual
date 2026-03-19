@@ -5,7 +5,8 @@ export interface User {
   email: string
   name: string
   company_id: string
-  role: 'admin' | 'gerente' | 'vendedor' | 'contable' | 'viewer'
+  role: 'owner' | 'admin' | 'gerente' | 'editor' | 'vendedor' | 'contable' | 'viewer'
+  is_superadmin?: boolean
   onboarding_completed?: boolean
   enabled_modules?: string[]
 }
@@ -16,6 +17,13 @@ export interface Company {
   cuit: string
 }
 
+export interface SubscriptionInfo {
+  subscription_status: string
+  subscription_days_remaining: number | null
+  subscription_is_read_only: boolean
+  email_verified?: boolean
+}
+
 interface AuthStore {
   user: User | null
   company: Company | null
@@ -24,6 +32,7 @@ interface AuthStore {
   permissions: Record<string, string[]> | null
   onboardingCompleted: boolean
   enabledModules: string[]
+  subscription: SubscriptionInfo | null
   isLoading: boolean
   error: string | null
   setAuth: (user: User, company: Company, accessToken: string, refreshToken: string, permissions?: Record<string, string[]> | null) => void
@@ -37,6 +46,7 @@ interface AuthStore {
   setOnboardingCompleted: (completed: boolean) => void
   setEnabledModules: (modules: string[]) => void
   isModuleEnabled: (moduleKey: string) => boolean
+  setSubscription: (info: SubscriptionInfo) => void
 }
 
 const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports','crm']
@@ -76,6 +86,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   permissions: restoredPermissions,
   onboardingCompleted: restoredOnboarding,
   enabledModules: restoredModules,
+  subscription: null,
   isLoading: false,
   error: null,
   setAuth: (user, company, accessToken, refreshToken, permissions = null) => {
@@ -120,13 +131,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   can: (module, action) => {
     const state = get()
     if (!state.user) return false
-    if (state.user.role === 'admin' || state.permissions === null) return true
+    // Owner and Admin have full access
+    if (state.user.role === 'owner' || state.user.role === 'admin' || state.permissions === null) return true
     return state.permissions[module]?.includes(action) ?? false
   },
   canAny: (module) => {
     const state = get()
     if (!state.user) return false
-    if (state.user.role === 'admin' || state.permissions === null) return true
+    if (state.user.role === 'owner' || state.user.role === 'admin' || state.permissions === null) return true
     return (state.permissions[module]?.length ?? 0) > 0
   },
   updatePermissions: (permissions) => {
@@ -147,4 +159,5 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (!state.enabledModules || state.enabledModules.length === 0) return true
     return state.enabledModules.includes(moduleKey)
   },
+  setSubscription: (info) => set({ subscription: info }),
 }))

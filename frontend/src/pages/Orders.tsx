@@ -729,8 +729,8 @@ export const Orders: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pedidos / Ventas</h1>
-          <p className="text-sm text-gray-500 mt-1">{summary.total || 0} pedidos registrados</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Pedidos / Ventas</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{summary.total || 0} pedidos registrados</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename="pedidos" />
@@ -762,8 +762,8 @@ export const Orders: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
+          {error}<button onClick={() => setError(null)} className="ml-2 font-bold" aria-label="Cerrar error">x</button>
         </div>
       )}
 
@@ -883,7 +883,7 @@ export const Orders: React.FC = () => {
               {/* Title */}
               <div className="grid grid-cols-1 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Nombre del pedido<HelpTip text="Un nombre descriptivo para identificar este trabajo. Ej: 'Carteleria evento corporativo'." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Nombre del pedido<HelpTip text="Un nombre descriptivo para identificar este trabajo. Ej: 'Carteleria evento corporativo'." /></label>
                   <Input placeholder="Ej: Carteleria evento, Ploteo vehicular..." value={formTitle} onChange={e => setFormTitle(e.target.value)} />
                 </div>
               </div>
@@ -891,15 +891,15 @@ export const Orders: React.FC = () => {
               {/* Description */}
               <div className="grid grid-cols-1 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Descripcion general<HelpTip text="Detalles adicionales del trabajo que no van en los items individuales." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Descripcion general<HelpTip text="Detalles adicionales del trabajo que no van en los items individuales." /></label>
                   <Input placeholder="Detalles del trabajo..." value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
                 </div>
               </div>
 
               {/* Items section */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-gray-700">Items del Pedido</h4>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Items del Pedido</h4>
                   <button type="button" onClick={addFormItem} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
                     + Agregar Item
                   </button>
@@ -914,7 +914,7 @@ export const Orders: React.FC = () => {
                           <label className="text-xs font-medium text-gray-500">Tipo<HelpTip text="El tipo categoriza el producto o servicio. Podes configurar los tipos disponibles desde Productos > Gestionar tipos." /></label>
                           <input
                             list={`order-type-list-${idx}`}
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.product_type}
                             onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
                             placeholder="Escribir o elegir..."
@@ -929,7 +929,7 @@ export const Orders: React.FC = () => {
                         <div className="md:col-span-2 flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Producto</label>
                           <select
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.product_id}
                             onChange={e => updateFormItem(idx, 'product_id', e.target.value)}
                           >
@@ -943,7 +943,7 @@ export const Orders: React.FC = () => {
                           </select>
                           {(!item.product_id || item.product_id === 'custom') && (
                             <input
-                              className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                               placeholder="Nombre del producto/servicio"
                               value={item.product_name}
                               onChange={e => updateFormItem(idx, 'product_name', e.target.value)}
@@ -956,7 +956,7 @@ export const Orders: React.FC = () => {
                           <label className="text-xs font-medium text-gray-500">Cantidad</label>
                           <input
                             type="number" min="1"
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={item.quantity}
                             onChange={e => updateFormItem(idx, 'quantity', e.target.value)}
                             required
@@ -967,7 +967,7 @@ export const Orders: React.FC = () => {
                           <label className="text-xs font-medium text-gray-500">Precio Unitario</label>
                           <input
                             type="number" step="0.01" min="0"
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="0.00"
                             value={item.unit_price || ''}
                             onChange={e => updateFormItem(idx, 'unit_price', e.target.value)}
@@ -1061,15 +1061,15 @@ export const Orders: React.FC = () => {
               {/* Payment + delivery + priority */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Forma de Pago<HelpTip text="Como va a pagar el cliente. Podes cambiarlo despues." /></label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Forma de Pago<HelpTip text="Como va a pagar el cliente. Podes cambiarlo despues." /></label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                     {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
                 {showBankSelector && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Banco</label>
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco</label>
+                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
                       <option value="">Seleccionar banco...</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
                     </select>
@@ -1077,8 +1077,8 @@ export const Orders: React.FC = () => {
                 )}
                 <Input label="Fecha Estimada de Entrega" type="date" value={form.estimated_delivery} onChange={e => setForm({ ...form, estimated_delivery: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Prioridad<HelpTip text="Urgente sube el pedido en la cola de produccion." /></label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Prioridad<HelpTip text="Urgente sube el pedido en la cola de produccion." /></label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
                     <option value="baja">Baja</option>
                     <option value="normal">Normal</option>
                     <option value="alta">Alta</option>
@@ -1111,7 +1111,7 @@ export const Orders: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 text-left text-sm font-medium text-gray-500">
+                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-3">N</th>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Empresa</th>
@@ -1126,7 +1126,7 @@ export const Orders: React.FC = () => {
                   <React.Fragment key={order.id}>
                     {/* Compact row */}
                     <tr
-                      className={`hover:bg-gray-50 cursor-pointer transition-colors ${expandedOrder === order.id ? 'bg-blue-50 border-b-0' : 'border-b'}`}
+                      className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${expandedOrder === order.id ? 'bg-blue-50 dark:bg-blue-900/20 border-b-0' : 'border-b dark:border-gray-700'}`}
                       onClick={() => toggleExpand(order.id)}
                     >
                       <td className="px-4 py-3">

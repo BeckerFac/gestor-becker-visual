@@ -161,6 +161,70 @@ export const api = {
     return data.user || data
   },
 
+  // Email verification
+  verifyEmail: async (token: string) => {
+    const { data } = await client.get(`/auth/verify-email/${token}`)
+    return data
+  },
+
+  // Password reset
+  forgotPassword: async (email: string) => {
+    const { data } = await client.post('/auth/forgot-password', { email })
+    return data
+  },
+
+  resetPassword: async (token: string, password: string) => {
+    const { data } = await client.post('/auth/reset-password', { token, password })
+    return data
+  },
+
+  resendVerification: async () => {
+    const { data } = await client.post('/auth/resend-verification')
+    return data
+  },
+
+  // Billing / Subscription
+  getSubscription: async () => {
+    const { data } = await client.get('/billing/subscription')
+    return data
+  },
+
+  getPlans: async () => {
+    const { data } = await client.get('/billing/plans')
+    return data
+  },
+
+  // Invitations
+  getInvitations: async () => {
+    const { data } = await client.get('/invitations')
+    return data.invitations || data
+  },
+
+  createInvitation: async (invitationData: { email: string; role: string; name?: string }) => {
+    const { data } = await client.post('/invitations', invitationData)
+    return data
+  },
+
+  cancelInvitation: async (id: string) => {
+    const { data } = await client.delete(`/invitations/${id}`)
+    return data
+  },
+
+  resendInvitation: async (id: string) => {
+    const { data } = await client.post(`/invitations/${id}/resend`)
+    return data
+  },
+
+  validateInvitation: async (token: string) => {
+    const { data } = await client.get(`/invitations/validate/${token}`)
+    return data
+  },
+
+  acceptInvitation: async (token: string, acceptData: { name: string; password: string }) => {
+    const { data } = await client.post(`/invitations/accept/${token}`, acceptData)
+    return data
+  },
+
   // Enterprises
   getEnterprises: async () => {
     const { data } = await client.get('/enterprises')
@@ -858,6 +922,38 @@ export const api = {
     return data
   },
 
+  // Transfer ownership (owner only)
+  transferOwnership: async (newOwnerId: string) => {
+    const { data } = await client.post('/users/transfer-ownership', { new_owner_id: newOwnerId })
+    return data
+  },
+
+  // Session management
+  getUserSessions: async (userId: string) => {
+    const { data } = await client.get(`/users/${userId}/sessions`)
+    return data.sessions
+  },
+  revokeSession: async (userId: string, sessionId: string) => {
+    const { data } = await client.delete(`/users/${userId}/sessions/${sessionId}`)
+    return data
+  },
+  revokeAllSessions: async (userId: string) => {
+    const { data } = await client.post(`/users/${userId}/revoke-all-sessions`)
+    return data
+  },
+
+  // Audit log
+  getAuditLog: async (filters?: { user_id?: string; action?: string; entity_type?: string; date_from?: string; date_to?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/audit?${params.toString()}`)
+    return data
+  },
+
   // CRM Pipeline
   getCrmDeals: async (filters?: { stage?: string; enterprise_id?: string; priority?: string; search?: string }) => {
     const params = new URLSearchParams()
@@ -1006,6 +1102,76 @@ export const api = {
   portalGetQuotePdf: async (id: string): Promise<Blob> => {
     const response = await portalClient.get(`/portal/quotes/${id}/pdf`, { responseType: 'blob' })
     return response.data
+  },
+
+  // Billing & Subscriptions
+  getBillingSubscription: async () => {
+    const { data } = await client.get('/billing/subscription')
+    return data
+  },
+  getBillingPlans: async () => {
+    const { data } = await client.get('/billing/plans')
+    return data
+  },
+  getBillingUsage: async () => {
+    const { data } = await client.get('/billing/usage')
+    return data
+  },
+  createBillingSubscription: async (planId: string) => {
+    const { data } = await client.post('/billing/create-subscription', { plan_id: planId })
+    return data
+  },
+  cancelBillingSubscription: async () => {
+    const { data } = await client.post('/billing/cancel')
+    return data
+  },
+  checkBillingLimits: async (action: string) => {
+    const { data } = await client.post('/billing/check-limits', { action })
+    return data
+  },
+
+  // Superadmin
+  adminGetAllCompanies: async () => {
+    const { data } = await client.get('/admin/companies')
+    return data
+  },
+  adminGetCompanyDetail: async (id: string) => {
+    const { data } = await client.get(`/admin/companies/${id}`)
+    return data
+  },
+  adminDisableCompany: async (id: string, reason: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/disable`, { reason })
+    return data
+  },
+  adminEnableCompany: async (id: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/enable`)
+    return data
+  },
+  adminImpersonateCompany: async (id: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/impersonate`)
+    return data
+  },
+  adminGetSystemStats: async () => {
+    const { data } = await client.get('/admin/stats')
+    return data
+  },
+  adminGetSystemHealth: async () => {
+    const { data } = await client.get('/admin/health')
+    return data
+  },
+
+  // Account / Legal (Ley 25.326)
+  exportMyData: async () => {
+    const { data } = await client.get('/account/my-data')
+    return data
+  },
+  requestAccountDeletion: async () => {
+    const { data } = await client.delete('/account')
+    return data
+  },
+  getAccountDeletionStatus: async () => {
+    const { data } = await client.get('/account/deletion-status')
+    return data
   },
 }
 

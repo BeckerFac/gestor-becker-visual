@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { usersController } from './users.controller';
-import { authorize } from '../../middlewares/authorize';
+import { authorize, requireRole, requireMinRole } from '../../middlewares/authorize';
 
 export const usersRouter = Router();
 
@@ -13,3 +13,11 @@ usersRouter.get('/:id/permissions', authorize('users', 'view'), (req, res) => us
 usersRouter.put('/:id/permissions', authorize('users', 'edit'), (req, res) => usersController.setUserPermissions(req, res));
 usersRouter.post('/:id/apply-template', authorize('users', 'edit'), (req, res) => usersController.applyTemplate(req, res));
 usersRouter.post('/:id/reset-password', authorize('users', 'edit'), (req, res) => usersController.resetPassword(req, res));
+
+// Transfer ownership (owner only)
+usersRouter.post('/transfer-ownership', requireRole('owner'), (req, res) => usersController.transferOwnership(req, res));
+
+// Session management (admin/owner only)
+usersRouter.get('/:id/sessions', requireMinRole('admin'), (req, res) => usersController.getUserSessions(req, res));
+usersRouter.delete('/:id/sessions/:sessionId', requireMinRole('admin'), (req, res) => usersController.revokeSession(req, res));
+usersRouter.post('/:id/revoke-all-sessions', requireMinRole('admin'), (req, res) => usersController.revokeAllSessions(req, res));
