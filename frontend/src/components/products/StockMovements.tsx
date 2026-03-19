@@ -49,7 +49,8 @@ export const StockMovements: React.FC<StockMovementsProps> = ({ products, onData
   const [editingThreshold, setEditingThreshold] = useState<string | null>(null)
   const [thresholdValue, setThresholdValue] = useState('')
 
-  const stockControlProducts = products.filter((p: any) => p.controls_stock)
+  // Show ALL products in dropdown, not just controls_stock ones
+  const allProducts = products
 
   const loadStock = useCallback(async () => {
     setLoading(true)
@@ -225,11 +226,7 @@ export const StockMovements: React.FC<StockMovementsProps> = ({ products, onData
               {showAdjustForm ? 'Cancelar Ajuste' : 'Ajustar stock'}
             </Button>
           </PermissionGate>
-          <PermissionGate module="inventory" action="create">
-            <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showAdjustForm) setShowAdjustForm(false) }}>
-              {showForm ? 'Cancelar' : '+ Movimiento'}
-            </Button>
-          </PermissionGate>
+          {/* Removed "+ Movimiento" button - redundant with "Ajustar stock" */}
         </div>
       </div>
 
@@ -278,10 +275,7 @@ export const StockMovements: React.FC<StockMovementsProps> = ({ products, onData
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Producto *</label>
                 <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={adjustForm.product_id} onChange={e => setAdjustForm({ ...adjustForm, product_id: e.target.value })} required>
                   <option value="">Seleccionar producto...</option>
-                  {stockControlProducts.length > 0
-                    ? stockControlProducts.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)
-                    : products.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)
-                  }
+                  {allProducts.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
