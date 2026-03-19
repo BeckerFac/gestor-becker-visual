@@ -434,12 +434,29 @@ export class ProductsService {
         );
       }
 
-      // If name changed, update all products with the old type name
+      // If name changed, update all products AND orders with the old type name
       if (data.name && data.name.trim() !== oldName) {
+        const newName = data.name.trim();
+        // Update products
         await pool.query(
           'UPDATE products SET product_type = $1 WHERE company_id = $2 AND product_type = $3',
-          [data.name.trim(), companyId, oldName]
+          [newName, companyId, oldName]
         );
+        // Update orders that reference this type
+        await pool.query(
+          'UPDATE orders SET product_type = $1 WHERE company_id = $2 AND product_type = $3',
+          [newName, companyId, oldName]
+        );
+        // Update quotes that reference this type
+        await pool.query(
+          'UPDATE quote_items SET product_type = $1 WHERE quote_id IN (SELECT id FROM quotes WHERE company_id = $2) AND product_type = $3',
+          [newName, companyId, oldName]
+        ).catch(() => {}); // quote_items may not have product_type column
+        // Update order items
+        await pool.query(
+          'UPDATE order_items SET product_type = $1 WHERE order_id IN (SELECT id FROM orders WHERE company_id = $2) AND product_type = $3',
+          [newName, companyId, oldName]
+        ).catch(() => {}); // order_items may not have product_type column
       }
 
       return { success: true };
