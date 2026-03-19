@@ -709,6 +709,21 @@ export class SecretariaMediaService {
           return { success: false, error: `Tipo de documento "${documentType}" no soportado.` };
       }
 
+      // Guard: reject excessively large PDFs for preview (prevent OOM)
+      const MAX_PREVIEW_PDF_SIZE = 10 * 1024 * 1024; // 10MB
+      if (pdfBuffer.length > MAX_PREVIEW_PDF_SIZE) {
+        logger.warn({ size: pdfBuffer.length, documentId }, '[SecretarIA Media] PDF too large for preview, sending as document');
+        const filename = `${documentType}_${documentNumber}.pdf`;
+        const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
+        if (!mediaId) {
+          return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+        }
+        const sent = await this.sendDocumentByMediaId(phoneNumber, mediaId, filename, `${documentType} #${documentNumber}`);
+        return sent
+          ? { success: true, mediaId }
+          : { success: false, error: 'No pude enviar el documento.' };
+      }
+
       // Convert PDF first page to PNG using Puppeteer
       let screenshotBuffer: Buffer;
       try {

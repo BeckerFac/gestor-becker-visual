@@ -84,6 +84,35 @@ interface SavedMemory {
   readonly type: string;
 }
 
+// ── Memory value sanitization (anti prompt-injection) ──
+
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous\s+)?instructions/i,
+  /system\s*prompt/i,
+  /reveal\s+(your|the)\s+(prompt|instructions|system)/i,
+  /pretend\s+(you('re| are)|to\s+be)/i,
+  /act\s+as\s+(a\s+different|another)/i,
+  /show\s+me\s+(the\s+)?(api|token|secret|key|password)/i,
+  /\bDAN\b/,
+  /jailbreak/i,
+  /bypass\s+(safety|security|filter|rules)/i,
+  /forget\s+(all|your|previous)\s+(instructions|rules)/i,
+];
+
+function sanitizeMemoryValue(value: string): string | null {
+  // Reject values that look like prompt injection attempts
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(value)) {
+      return null;
+    }
+  }
+
+  // Limit length and strip control characters
+  return value
+    .slice(0, 200)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 class SecretariaMemoryService {
   // ── Memory CRUD ──
 
@@ -148,6 +177,27 @@ class SecretariaMemoryService {
     memoryType: string,
   ): Promise<void> {
     const confidence = source === 'explicit' ? 0.9 : 0.5;
+
+    // Enforce max memory entries per company (prevent unbounded growth)
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as cnt FROM secretaria_memory WHERE company_id = $1`,
+      [companyId],
+    );
+    const currentCount = parseInt((countResult.rows[0] as any)?.cnt || '0', 10);
+
+    if (currentCount >= 50) {
+      // Evict lowest-confidence, oldest-used entry to make room
+      await pool.query(
+        `DELETE FROM secretaria_memory
+         WHERE id = (
+           SELECT id FROM secretaria_memory
+           WHERE company_id = $1
+           ORDER BY confidence ASC, last_used ASC
+           LIMIT 1
+         )`,
+        [companyId],
+      );
+    }
 
     await pool.query(
       `INSERT INTO secretaria_memory (company_id, user_id, memory_type, key, value, confidence, source, last_used)
@@ -221,7 +271,11 @@ class SecretariaMemoryService {
       const extracted = pattern.extractor(match, userMessage);
       if (!extracted) continue;
 
-      detected.push({ ...extracted, type: pattern.type });
+      // Sanitize memory values to prevent prompt injection via stored memories
+      const sanitizedValue = sanitizeMemoryValue(extracted.value);
+      if (!sanitizedValue) continue;
+
+      detected.push({ key: extracted.key, value: sanitizedValue, type: pattern.type });
     }
 
     if (detected.length === 0) return Promise.resolve([]);
@@ -269,7 +323,7 @@ class SecretariaMemoryService {
   async verifyLinkingCode(
     phoneNumber: string,
     code: string,
-  ): Promise<{ success: true; companyId: string; userId: string; companyName: string } | { success: false; reason: 'invalid_code' | 'expired' | 'not_found' }> {
+  ): Promise<{ success: true; companyId: string; userId: string; companyName: string } | { success: false; reason: 'invalid_code' | 'expired' | 'not_found' | 'too_many_attempts' }> {
     const result = await pool.query(
       `SELECT slp.*, c.name AS company_name
        FROM secretaria_linked_phones slp
@@ -284,7 +338,27 @@ class SecretariaMemoryService {
 
     const record = result.rows[0];
 
+    // Rate limit: max 5 failed attempts per linking code (anti brute-force)
+    const failedAttempts = record.failed_attempts ?? 0;
+    if (failedAttempts >= 5) {
+      // Invalidate the code entirely after too many attempts
+      await pool.query(
+        `UPDATE secretaria_linked_phones
+         SET linking_code = NULL, linking_code_expires = NULL
+         WHERE id = $1`,
+        [record.id],
+      );
+      return { success: false, reason: 'too_many_attempts' };
+    }
+
     if (record.linking_code !== code) {
+      // Increment failed attempts counter
+      await pool.query(
+        `UPDATE secretaria_linked_phones
+         SET failed_attempts = COALESCE(failed_attempts, 0) + 1
+         WHERE id = $1`,
+        [record.id],
+      );
       return { success: false, reason: 'invalid_code' };
     }
 
@@ -292,10 +366,10 @@ class SecretariaMemoryService {
       return { success: false, reason: 'expired' };
     }
 
-    // Mark as verified and clear linking code
+    // Mark as verified and clear linking code + failed attempts
     await pool.query(
       `UPDATE secretaria_linked_phones
-       SET verified = true, linking_code = NULL, linking_code_expires = NULL
+       SET verified = true, linking_code = NULL, linking_code_expires = NULL, failed_attempts = 0
        WHERE id = $1`,
       [record.id],
     );
@@ -345,7 +419,7 @@ class SecretariaMemoryService {
       companyId: row.company_id,
       userId: row.user_id,
       phoneNumber: row.phone_number,
-      linkingCode: row.linking_code,
+      linkingCode: null, // Never expose active linking codes to frontend
       linkingCodeExpires: row.linking_code_expires ? new Date(row.linking_code_expires) : null,
       verified: row.verified,
       createdAt: new Date(row.created_at),

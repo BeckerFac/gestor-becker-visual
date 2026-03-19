@@ -12,6 +12,7 @@ export type FeatureKey =
   | 'custom_branding'
   | 'priority_support'
   | 'export_completo'
+  | 'secretaria'
 
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
   crm: 'CRM / Pipeline de Oportunidades',
@@ -23,6 +24,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   custom_branding: 'Marca personalizada (logo en comprobantes)',
   priority_support: 'Soporte prioritario',
   export_completo: 'Exportacion completa',
+  secretaria: 'SecretarIA - Asistente WhatsApp',
 }
 
 export interface PlanFeatures {
@@ -84,6 +86,7 @@ function checkFeature(features: PlanFeatures, feature: FeatureKey): boolean {
     case 'custom_branding': return features.customBranding
     case 'priority_support': return features.customBranding
     case 'export_completo': return true
+    case 'secretaria': return features.aiChat // SecretarIA requires Premium (same gate as AI)
     default: return false
   }
 }

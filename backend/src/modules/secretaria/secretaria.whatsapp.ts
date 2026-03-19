@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import logger from '../../config/logger'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,11 +61,11 @@ export class WhatsAppClient {
     const { verifyToken } = getConfig()
 
     if (mode === 'subscribe' && token === verifyToken && challenge) {
-      console.log('[WhatsApp] Webhook verified')
+      logger.info('[WhatsApp] Webhook verified')
       return challenge
     }
 
-    console.warn('[WhatsApp] Webhook verification failed')
+    logger.warn('[WhatsApp] Webhook verification failed')
     return null
   }
 
@@ -76,7 +77,7 @@ export class WhatsAppClient {
     const { appSecret } = getConfig()
 
     if (!appSecret) {
-      console.warn('[WhatsApp] WHATSAPP_APP_SECRET not configured - skipping signature validation (dev mode)')
+      logger.warn('[WhatsApp] WHATSAPP_APP_SECRET not configured - skipping signature validation')
       return false
     }
 
@@ -150,11 +151,11 @@ export class WhatsAppClient {
         }
 
         default:
-          console.warn(`[WhatsApp] Unsupported message type: ${message.type}`)
+          logger.warn({ type: message.type }, '[WhatsApp] Unsupported message type')
           return null
       }
     } catch (error) {
-      console.error('[WhatsApp] Failed to parse incoming message:', error)
+      logger.error({ err: error }, '[WhatsApp] Failed to parse incoming message')
       return null
     }
   }
@@ -244,7 +245,7 @@ export class WhatsAppClient {
     const { accessToken } = getConfig()
 
     if (!accessToken) {
-      console.warn('[WhatsApp] WHATSAPP_ACCESS_TOKEN not configured - cannot download media')
+      logger.warn('[WhatsApp] WHATSAPP_ACCESS_TOKEN not configured - cannot download media')
       return null
     }
 
@@ -255,14 +256,14 @@ export class WhatsAppClient {
       })
 
       if (!metaResponse.ok) {
-        console.error(`[WhatsApp] Failed to get media URL: ${metaResponse.status}`)
+        logger.error({ status: metaResponse.status }, '[WhatsApp] Failed to get media URL')
         return null
       }
 
       const metaData = await metaResponse.json() as { url?: string }
 
       if (!metaData.url) {
-        console.error('[WhatsApp] No URL in media metadata')
+        logger.error('[WhatsApp] No URL in media metadata')
         return null
       }
 
@@ -272,14 +273,14 @@ export class WhatsAppClient {
       })
 
       if (!mediaResponse.ok) {
-        console.error(`[WhatsApp] Failed to download media: ${mediaResponse.status}`)
+        logger.error({ status: mediaResponse.status }, '[WhatsApp] Failed to download media')
         return null
       }
 
       const arrayBuffer = await mediaResponse.arrayBuffer()
       return Buffer.from(arrayBuffer)
     } catch (error) {
-      console.error('[WhatsApp] Media download failed:', error)
+      logger.error({ err: error }, '[WhatsApp] Media download failed')
       return null
     }
   }
@@ -315,13 +316,13 @@ export class WhatsAppClient {
     const { accessToken, phoneNumberId } = getConfig()
 
     if (!accessToken) {
-      console.warn('[WhatsApp] WHATSAPP_ACCESS_TOKEN not configured - message not sent (dev mode)')
+      logger.warn('[WhatsApp] WHATSAPP_ACCESS_TOKEN not configured - message not sent')
       return false
     }
 
     // Rate limit pause
     if (Date.now() < this.rateLimitedUntil) {
-      console.warn('[WhatsApp] Rate limited - skipping send')
+      logger.warn('[WhatsApp] Rate limited - skipping send')
       return false
     }
 
@@ -347,29 +348,29 @@ export class WhatsAppClient {
         // Rate limited
         if (status === 429) {
           this.rateLimitedUntil = Date.now() + 60_000
-          console.warn('[WhatsApp] Rate limited by Meta API - pausing sends for 60s')
+          logger.warn('[WhatsApp] Rate limited by Meta API - pausing sends for 60s')
         }
 
         // Retry on 429 and 5xx
         if ((status === 429 || status >= 500) && attempt < MAX_RETRIES - 1) {
           const delay = RETRY_DELAYS_MS[attempt] ?? 4000
-          console.warn(`[WhatsApp] API error ${status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`)
+          logger.warn({ status, attempt: attempt + 1 }, `[WhatsApp] API error, retrying in ${delay}ms`)
           await this.sleep(delay)
           continue
         }
 
         // Non-retryable error
         const errorBody = await response.text().catch(() => 'unknown')
-        console.error(`[WhatsApp] API error ${status}: ${errorBody}`)
+        logger.error({ status, errorBody }, '[WhatsApp] API error')
         return false
       } catch (error) {
         if (attempt < MAX_RETRIES - 1) {
           const delay = RETRY_DELAYS_MS[attempt] ?? 4000
-          console.warn(`[WhatsApp] Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`)
+          logger.warn({ attempt: attempt + 1 }, `[WhatsApp] Network error, retrying in ${delay}ms`)
           await this.sleep(delay)
           continue
         }
-        console.error('[WhatsApp] Send failed after retries:', error)
+        logger.error({ err: error }, '[WhatsApp] Send failed after retries')
         return false
       }
     }

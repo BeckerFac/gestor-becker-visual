@@ -103,18 +103,19 @@ describe('WhatsAppClient', () => {
   })
 
   // -- Test 5: validateWebhookSignature no secret configured returns false --
-  it('validateWebhookSignature: no secret configured returns false with warning', () => {
+  it('validateWebhookSignature: no secret configured returns false with warning', async () => {
     vi.stubEnv('WHATSAPP_APP_SECRET', '')
-    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const loggerModule = await import('../src/config/logger')
+    const loggerWarnSpy = vi.spyOn(loggerModule.default, 'warn')
 
     const result = client.validateWebhookSignature('body', 'sha256=abc')
 
     expect(result).toBe(false)
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('WHATSAPP_APP_SECRET not configured'),
     )
 
-    consoleSpy.mockRestore()
+    loggerWarnSpy.mockRestore()
   })
 
   // -- Test 6: parseIncomingMessage text message extracts body --
@@ -440,13 +441,17 @@ describe('SecretarIA Memory', () => {
 
   // -- Test 21: setMemory creates new memory with correct confidence --
   it('setMemory: creates new memory with correct confidence', async () => {
+    // First call: COUNT query for limit enforcement
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ cnt: '5' }] })
+    // Second call: INSERT/UPSERT
     mockPoolQuery.mockResolvedValueOnce({ rows: [] })
     const { secretariaMemory } = await import('../src/modules/secretaria/secretaria.memory')
 
     await secretariaMemory.setMemory('company-1', 'user-1', 'test_key', 'test_value', 'explicit', 'preference')
 
-    expect(mockPoolQuery).toHaveBeenCalledTimes(1)
-    const args = mockPoolQuery.mock.calls[0][1]
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2)
+    // The INSERT is the second call (index 1)
+    const args = mockPoolQuery.mock.calls[1][1]
     expect(args[0]).toBe('company-1')
     expect(args[1]).toBe('user-1')
     expect(args[4]).toBe('test_value')
@@ -456,18 +461,21 @@ describe('SecretarIA Memory', () => {
 
   // -- Test 22: setMemory upserts existing memory --
   it('setMemory: upserts existing memory (ON CONFLICT)', async () => {
+    // First call: COUNT query for limit enforcement
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ cnt: '5' }] })
+    // Second call: INSERT/UPSERT
     mockPoolQuery.mockResolvedValueOnce({ rows: [] })
     const { secretariaMemory } = await import('../src/modules/secretaria/secretaria.memory')
 
     await secretariaMemory.setMemory('company-1', 'user-1', 'same_key', 'new_value', 'inferred', 'preference')
 
-    // The SQL contains ON CONFLICT ... DO UPDATE
-    const sqlQuery = mockPoolQuery.mock.calls[0][0]
+    // The INSERT (second call, index 1) contains ON CONFLICT ... DO UPDATE
+    const sqlQuery = mockPoolQuery.mock.calls[1][0]
     expect(sqlQuery).toContain('ON CONFLICT')
     expect(sqlQuery).toContain('DO UPDATE')
 
     // inferred -> confidence 0.5
-    expect(mockPoolQuery.mock.calls[0][1][5]).toBe(0.5)
+    expect(mockPoolQuery.mock.calls[1][1][5]).toBe(0.5)
   })
 
   // -- Test 23: confirmMemory increments confidence (max 1.0) --
@@ -500,7 +508,7 @@ describe('SecretarIA Memory', () => {
 
   // -- Test 25: detectAndSaveMemory "siempre factura A" saves preference --
   it('detectAndSaveMemory: "siempre factura A" saves preference', async () => {
-    mockPoolQuery.mockResolvedValue({ rows: [] }) // setMemory calls
+    mockPoolQuery.mockResolvedValue({ rows: [{ cnt: '0' }] }) // COUNT + setMemory calls
     const { secretariaMemory } = await import('../src/modules/secretaria/secretaria.memory')
 
     const saved = await secretariaMemory.detectAndSaveMemory(
@@ -517,7 +525,7 @@ describe('SecretarIA Memory', () => {
 
   // -- Test 26: detectAndSaveMemory "cuando digo disco..." saves alias --
   it('detectAndSaveMemory: "cuando digo disco me refiero a Disco de Corte" saves alias', async () => {
-    mockPoolQuery.mockResolvedValue({ rows: [] })
+    mockPoolQuery.mockResolvedValue({ rows: [{ cnt: '0' }] })
     const { secretariaMemory } = await import('../src/modules/secretaria/secretaria.memory')
 
     const saved = await secretariaMemory.detectAndSaveMemory(
@@ -648,9 +656,11 @@ describe('SecretarIA Phone Linking', () => {
         linking_code: '123456',
         linking_code_expires: futureDate,
         verified: false,
+        failed_attempts: 0,
         company_name: 'Test Company',
       }],
     })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] }) // UPDATE failed_attempts
     const { secretariaMemory } = await import('../src/modules/secretaria/secretaria.memory')
 
     const result = await secretariaMemory.verifyLinkingCode('5491112345678', '999999')

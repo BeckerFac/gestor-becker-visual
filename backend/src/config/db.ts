@@ -532,11 +532,13 @@ async function runAutoMigrations() {
         phone_number VARCHAR(20) NOT NULL,
         linking_code VARCHAR(10),
         linking_code_expires TIMESTAMP WITH TIME ZONE,
+        failed_attempts INTEGER DEFAULT 0,
         verified BOOLEAN DEFAULT false,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         UNIQUE(company_id, phone_number)
       )
     `);
+    await pool.query(`ALTER TABLE secretaria_linked_phones ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_linked_phones_company ON secretaria_linked_phones(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_linked_phones_phone ON secretaria_linked_phones(phone_number)`);
 

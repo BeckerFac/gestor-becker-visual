@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { formatDateTime } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { BillingSection } from '@/components/billing/BillingSection'
+import { SecretarIASection } from '@/components/secretaria/SecretarIASection'
 
 export const Settings: React.FC = () => {
   const authCompany = useAuthStore((state) => state.company)
@@ -177,6 +178,9 @@ export const Settings: React.FC = () => {
 
       {/* Billing & Subscription */}
       <BillingSection />
+
+      {/* SecretarIA - WhatsApp Assistant */}
+      <SecretarIASection />
 
       {/* Company Data */}
       <Card>

@@ -1308,6 +1308,43 @@ export const api = {
     return data
   },
 
+  // SecretarIA (WhatsApp Assistant)
+  getSecretariaConfig: async () => {
+    const { data } = await client.get('/secretaria/config')
+    return data
+  },
+  updateSecretariaConfig: async (config: any) => {
+    const { data } = await client.put('/secretaria/config', config)
+    return data
+  },
+  generateLinkingCode: async (phoneNumber: string) => {
+    const { data } = await client.post('/secretaria/link', { phone_number: phoneNumber })
+    return data
+  },
+  getSecretariaUsage: async () => {
+    const { data } = await client.get('/secretaria/usage')
+    return data
+  },
+  getSecretariaConversations: async (limit?: number, offset?: number) => {
+    const params = new URLSearchParams()
+    if (limit) params.append('limit', String(limit))
+    if (offset) params.append('offset', String(offset))
+    const { data } = await client.get(`/secretaria/conversations?${params.toString()}`)
+    return data
+  },
+  getLinkedPhones: async () => {
+    const { data } = await client.get('/secretaria/linked-phones')
+    return data
+  },
+  unlinkPhone: async (id: string) => {
+    const { data } = await client.delete(`/secretaria/linked-phones/${id}`)
+    return data
+  },
+  sendBriefNow: async () => {
+    const { data } = await client.post('/secretaria/brief/send')
+    return data
+  },
+
   // Account / Legal (Ley 25.326)
   exportMyData: async () => {
     const { data } = await client.get('/account/my-data')

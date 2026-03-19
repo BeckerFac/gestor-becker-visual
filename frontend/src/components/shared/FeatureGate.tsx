@@ -12,6 +12,7 @@ export type FeatureKey =
   | 'custom_branding'
   | 'priority_support'
   | 'export_completo'
+  | 'secretaria'
 
 interface FeatureGateProps {
   feature: FeatureKey

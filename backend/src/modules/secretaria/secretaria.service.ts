@@ -35,6 +35,32 @@ import {
 
 const phoneProcessingLocks = new Map<string, Promise<void>>();
 
+// ── Webhook deduplication (replay attack protection) ──
+
+const processedMessageIds = new Map<string, number>();
+const DEDUP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const DEDUP_MAX_SIZE = 5000;
+
+function isMessageAlreadyProcessed(messageId: string): boolean {
+  const now = Date.now();
+
+  // Periodic cleanup
+  if (processedMessageIds.size > DEDUP_MAX_SIZE) {
+    for (const [id, ts] of processedMessageIds) {
+      if (now - ts > DEDUP_TTL_MS) {
+        processedMessageIds.delete(id);
+      }
+    }
+  }
+
+  if (processedMessageIds.has(messageId)) {
+    return true;
+  }
+
+  processedMessageIds.set(messageId, now);
+  return false;
+}
+
 function withPhoneLock(phoneNumber: string, fn: () => Promise<void>): void {
   const previous = phoneProcessingLocks.get(phoneNumber) ?? Promise.resolve();
   const next = previous.then(fn).catch(err => {
@@ -81,7 +107,11 @@ async function executeTool(
       return { toolName: 'help', data: null, formatted: SECRETARIA_PROMPTS.help };
     case 'unknown':
     default:
-      return queryGeneral(companyId, entities);
+      return {
+        toolName: 'unknown',
+        data: null,
+        formatted: 'No entendi tu consulta. Escribi "ayuda" para ver lo que puedo hacer.',
+      };
   }
 }
 
@@ -102,6 +132,12 @@ class SecretariaService {
 
     if (!parsed) {
       return; // Status update or unsupported message type
+    }
+
+    // Replay attack protection: deduplicate by WhatsApp message ID
+    if (isMessageAlreadyProcessed(parsed.messageId)) {
+      logger.debug({ messageId: parsed.messageId }, 'SecretarIA: duplicate message ignored');
+      return;
     }
 
     // Serialize processing per phone number
@@ -131,6 +167,17 @@ class SecretariaService {
       await whatsappClient.sendTextMessage(
         phoneNumber,
         'SecretarIA esta desactivada para tu empresa. Pedi al administrador que la active desde GESTIA.',
+      );
+      return;
+    }
+
+    // Step 2.5: Check usage limits (prevent runaway LLM costs)
+    const usageLimits = await secretariaMemory.checkUsageLimits(companyId);
+    if (!usageLimits.withinLimits) {
+      await whatsappClient.sendTextMessage(
+        phoneNumber,
+        'Se alcanzo el limite mensual de mensajes para tu empresa. ' +
+        'Contacta a soporte para ampliar tu plan.',
       );
       return;
     }

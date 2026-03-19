@@ -27,7 +27,14 @@ function getCached(key: string): STTResult | null {
   return transcriptionCache.get(key) ?? null;
 }
 
+const MAX_CACHE_SIZE = 200;
+
 function setCache(key: string, result: STTResult): void {
+  // Evict oldest entries if cache exceeds max size
+  if (transcriptionCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = transcriptionCache.keys().next().value;
+    if (firstKey) transcriptionCache.delete(firstKey);
+  }
   transcriptionCache.set(key, result);
   setTimeout(() => transcriptionCache.delete(key), CACHE_TTL_MS);
 }
@@ -134,6 +141,17 @@ class DeepgramSTTService {
       logger.error({ mediaId }, 'DeepgramSTTService: failed to download media from WhatsApp');
       return {
         text: 'No pude descargar el audio. Intenta enviarlo de nuevo.',
+        confidence: 0,
+        duration_seconds: 0,
+      };
+    }
+
+    // Reject excessively large audio files before sending to STT API (cost protection)
+    const MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+    if (audioBuffer.length > MAX_AUDIO_SIZE_BYTES) {
+      logger.warn({ mediaId, size: audioBuffer.length }, 'DeepgramSTTService: audio file too large');
+      return {
+        text: 'El audio es demasiado grande. Intenta con un mensaje mas corto.',
         confidence: 0,
         duration_seconds: 0,
       };
