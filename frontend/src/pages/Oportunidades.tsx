@@ -7,6 +7,7 @@ import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { FeatureGate } from '@/components/shared/FeatureGate'
 
 interface Enterprise {
   id: string
@@ -90,6 +91,7 @@ export const Oportunidades: React.FC = () => {
   }
 
   return (
+    <FeatureGate feature="crm">
     <div className="space-y-6">
       {/* Page header */}
       <div className="flex items-center justify-between">
@@ -169,5 +171,6 @@ export const Oportunidades: React.FC = () => {
         onSaved={handleStagesSaved}
       />
     </div>
+    </FeatureGate>
   )
 }

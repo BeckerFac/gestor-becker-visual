@@ -95,6 +95,8 @@ export class UsersController {
 
   async getUserPermissions(req: AuthRequest, res: Response) {
     try {
+      // Verify the target user belongs to the same company (prevent IDOR)
+      await usersService.getUser(req.user!.company_id, req.params.id);
       const permissions = await usersService.getUserPermissions(req.params.id);
       res.json({ permissions });
     } catch (error) {

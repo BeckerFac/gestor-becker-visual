@@ -9,6 +9,7 @@ import { SkeletonPage } from '@/components/ui/Skeleton'
 import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { useNavigate } from 'react-router-dom'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { AIInsightsPanel } from '@/components/ai/AIInsightsPanel'
 
 interface DashboardData {
   sales_month: number
@@ -213,36 +214,36 @@ export const Dashboard: React.FC = () => {
     {
       label: `Facturado ${periodLabel}`,
       value: formatCurrency(dashboard?.sales_month || 0),
-      color: 'border-blue-200 bg-blue-50',
-      textColor: 'text-blue-800',
-      labelColor: 'text-blue-600',
+      color: 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40',
+      textColor: 'text-blue-800 dark:text-blue-300',
+      labelColor: 'text-blue-600 dark:text-blue-400',
       onClick: () => navigate('/invoices'),
       visible: canInvoices,
     },
     {
       label: 'Por Cobrar',
       value: formatCurrency(dashboard?.collections_pending || 0),
-      color: 'border-orange-200 bg-orange-50',
-      textColor: 'text-orange-800',
-      labelColor: 'text-orange-600',
+      color: 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/40',
+      textColor: 'text-orange-800 dark:text-orange-300',
+      labelColor: 'text-orange-600 dark:text-orange-400',
       onClick: () => navigate('/cobros'),
       visible: canCobros,
     },
     {
       label: `Cheques a Cobrar (${dashboard?.cheques_pending_count || 0})`,
       value: formatCurrency(dashboard?.cheques_pending_amount || 0),
-      color: 'border-purple-200 bg-purple-50',
-      textColor: 'text-purple-800',
-      labelColor: 'text-purple-600',
+      color: 'border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/40',
+      textColor: 'text-purple-800 dark:text-purple-300',
+      labelColor: 'text-purple-600 dark:text-purple-400',
       onClick: () => navigate('/cheques'),
       visible: canCheques,
     },
     {
       label: `Pedidos sin Pagar (${dashboard?.orders_unpaid_count || 0})`,
       value: formatCurrency(dashboard?.orders_unpaid_amount || 0),
-      color: 'border-red-200 bg-red-50',
-      textColor: 'text-red-800',
-      labelColor: 'text-red-600',
+      color: 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40',
+      textColor: 'text-red-800 dark:text-red-300',
+      labelColor: 'text-red-600 dark:text-red-400',
       onClick: () => navigate('/orders'),
       visible: canOrders,
     },
@@ -299,13 +300,13 @@ export const Dashboard: React.FC = () => {
                 <div className="py-2">
                   {(searchResults!.enterprises?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Empresas</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Empresas</p>
                       {(searchResults!.enterprises || []).map((e: any) => (
-                        <button key={e.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
+                        <button key={e.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
                           <span className="text-lg">🏢</span>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">{e.name}</p>
-                            {e.cuit && <p className="text-xs text-gray-500 font-mono">{e.cuit}</p>}
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{e.name}</p>
+                            {e.cuit && <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{e.cuit}</p>}
                           </div>
                         </button>
                       ))}
@@ -313,12 +314,12 @@ export const Dashboard: React.FC = () => {
                   )}
                   {(searchResults!.orders?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Pedidos</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Pedidos</p>
                       {(searchResults!.orders || []).map((o: any) => (
-                        <button key={o.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/orders')}>
+                        <button key={o.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/orders')}>
                           <span className="text-lg">📋</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               <span className="font-mono text-blue-700">#{String(o.order_number).padStart(4, '0')}</span> {o.title}
                             </p>
                             <p className="text-xs text-gray-500">{o.customer_name || '-'} — {formatCurrency(parseFloat(o.total_amount || '0'))}</p>
@@ -329,12 +330,12 @@ export const Dashboard: React.FC = () => {
                   )}
                   {(searchResults!.purchases?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Compras</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Compras</p>
                       {(searchResults!.purchases || []).map((p: any) => (
-                        <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/compras')}>
+                        <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/compras')}>
                           <span className="text-lg">🛒</span>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               Compra <span className="font-mono text-orange-700">#{String(p.purchase_number).padStart(4, '0')}</span>
                             </p>
                             <p className="text-xs text-gray-500">{p.enterprise_name || '-'} — {formatCurrency(parseFloat(p.total_amount || '0'))}</p>
@@ -345,12 +346,12 @@ export const Dashboard: React.FC = () => {
                   )}
                   {(searchResults!.products?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Productos</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Productos</p>
                       {(searchResults!.products || []).map((p: any) => (
-                        <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/products')}>
+                        <button key={p.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/products')}>
                           <span className="text-lg">📦</span>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">{p.name}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</p>
                             <p className="text-xs text-gray-500">{p.sku ? `SKU: ${p.sku}` : ''} {p.category || ''}</p>
                           </div>
                         </button>
@@ -359,12 +360,12 @@ export const Dashboard: React.FC = () => {
                   )}
                   {(searchResults!.invoices?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Facturas</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Facturas</p>
                       {(searchResults!.invoices || []).map((inv: any) => (
-                        <button key={inv.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/invoices')}>
+                        <button key={inv.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/invoices')}>
                           <span className="text-lg">🧾</span>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               {inv.invoice_type} <span className="font-mono">{String(inv.invoice_number).padStart(8, '0')}</span>
                             </p>
                             <p className="text-xs text-gray-500">{inv.customer_name || '-'} — {formatCurrency(parseFloat(inv.total_amount || '0'))}</p>
@@ -375,12 +376,12 @@ export const Dashboard: React.FC = () => {
                   )}
                   {(searchResults!.customers?.length || 0) > 0 && (
                     <div>
-                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">Contactos</p>
+                      <p className="px-4 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-700/50">Contactos</p>
                       {(searchResults!.customers || []).map((c: any) => (
-                        <button key={c.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
+                        <button key={c.id} className="w-full px-4 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3" onClick={() => handleSearchNavigate('/empresas')}>
                           <span className="text-lg">👤</span>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{c.name}</p>
                             <p className="text-xs text-gray-500">{c.email || ''} {c.cuit || ''}</p>
                           </div>
                         </button>
@@ -509,6 +510,9 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
+      {/* AI Smart Insights (Premium only - auto-hides if no access) */}
+      <AIInsightsPanel />
+
       {/* Action Items - show if there are actions (visible or dismissed) */}
       {(insights?.actions || []).length > 0 && (
         <div className="rounded-xl bg-gradient-to-r from-indigo-50 via-white to-purple-50 dark:from-indigo-950/30 dark:via-gray-900 dark:to-purple-950/30 border border-indigo-100 dark:border-indigo-900/50 shadow-sm overflow-hidden">
@@ -602,7 +606,7 @@ export const Dashboard: React.FC = () => {
               <h3 className="text-lg font-semibold">Ultimos Pedidos</h3>
               <button
                 onClick={() => navigate('/orders')}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
               >
                 Ver todos
               </button>
@@ -612,13 +616,13 @@ export const Dashboard: React.FC = () => {
             {(dashboard?.recent_orders?.length || 0) > 0 ? (
               <div className="space-y-3">
                 {(dashboard!.recent_orders || []).map((order: any) => (
-                    <div key={order.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                    <div key={order.id} className="flex items-center justify-between py-2 border-b dark:border-gray-700 last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-blue-700 text-sm">
+                          <span className="font-mono font-bold text-blue-700 dark:text-blue-400 text-sm">
                             #{String(order.order_number || 0).padStart(4, '0')}
                           </span>
-                          <span className="text-sm text-gray-700 truncate">{order.customer_name || 'Sin cliente'}</span>
+                          <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{order.customer_name || 'Sin cliente'}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           <StatusBadge status={order.status} />
@@ -646,7 +650,7 @@ export const Dashboard: React.FC = () => {
               <h3 className="text-lg font-semibold">Ultimas Facturas</h3>
               <button
                 onClick={() => navigate('/invoices')}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
               >
                 Ver todas
               </button>
@@ -656,19 +660,19 @@ export const Dashboard: React.FC = () => {
             {(dashboard?.recent_invoices?.length || 0) > 0 ? (
               <div className="space-y-3">
                 {(dashboard!.recent_invoices || []).map((inv: any) => (
-                    <div key={inv.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                    <div key={inv.id} className="flex items-center justify-between py-2 border-b dark:border-gray-700 last:border-0">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm">{inv.invoice_type}</span>
-                          <span className="text-sm text-gray-500 font-mono">{String(inv.invoice_number).padStart(8, '0')}</span>
-                          <span className="text-sm text-gray-700 truncate">{inv.customer_name || '-'}</span>
+                          <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">{String(inv.invoice_number).padStart(8, '0')}</span>
+                          <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{inv.customer_name || '-'}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           <StatusBadge status={inv.status} />
                           <span className="text-xs text-gray-500">{formatDate(inv.invoice_date)}</span>
                         </div>
                       </div>
-                      <span className="font-bold text-gray-900 ml-3">{formatCurrency(parseFloat(inv.total_amount || '0'))}</span>
+                      <span className="font-bold text-gray-900 dark:text-gray-100 ml-3">{formatCurrency(parseFloat(inv.total_amount || '0'))}</span>
                     </div>
                 ))}
               </div>

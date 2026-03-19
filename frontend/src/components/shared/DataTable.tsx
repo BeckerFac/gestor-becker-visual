@@ -27,7 +27,7 @@ export function DataTable<T extends { id?: string | number }>({
       <CardContent className="overflow-x-auto">
         <table className="min-w-full border-collapse">
           <thead>
-            <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+            <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
               {columns.map((col) => (
                 <th
                   key={String(col.key)}

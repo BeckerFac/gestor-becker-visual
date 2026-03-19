@@ -10,6 +10,11 @@ import {
   validatePasswordComplexity,
   validateCuit,
 } from '../../middlewares/security';
+import {
+  recordFailedLoginAttempt,
+  isIpAutoBlocked,
+  trackIpCompanyAccess,
+} from '../../lib/security-monitor';
 
 export class AuthController {
   async register(req: Request, res: Response) {
@@ -55,20 +60,34 @@ export class AuthController {
 
       const ip = getClientIp(req);
 
+      // Check if IP is auto-blocked by security monitor
+      const autoBlock = isIpAutoBlocked(ip);
+      if (autoBlock.blocked) {
+        return res.status(429).json({
+          error: 'IP bloqueada temporalmente por actividad sospechosa. Intente mas tarde.',
+        });
+      }
+
       try {
         const result = await authService.login(email, password);
 
         // Successful login - clear failed attempts
         recordSuccessfulLogin(ip);
 
+        // Track IP-company access for anomaly detection
+        if (result.user?.company_id) {
+          trackIpCompanyAccess(ip, result.user.company_id);
+        }
+
         res.json({
           message: 'Login successful',
           ...result,
         });
       } catch (authError) {
-        // Failed login - record attempt
+        // Failed login - record attempt in both systems
         if (authError instanceof ApiError && authError.statusCode === 401) {
           recordFailedLogin(ip);
+          recordFailedLoginAttempt(email, ip, req.get('user-agent'));
           const remaining = getRemainingAttempts(ip);
           if (remaining > 0 && remaining <= 3) {
             return res.status(401).json({

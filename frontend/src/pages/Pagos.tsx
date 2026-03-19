@@ -287,28 +287,28 @@ export const Pagos: React.FC = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="border border-red-200 bg-red-50">
+        <Card className="border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40">
           <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-red-700">Total Pagado</p>
-            <p className="text-xl font-bold text-red-800">{fmt(totalPagado)}</p>
+            <p className="text-xs text-red-700 dark:text-red-400">Total Pagado</p>
+            <p className="text-xl font-bold text-red-800 dark:text-red-300">{fmt(totalPagado)}</p>
           </CardContent>
         </Card>
-        <Card className="border border-blue-200 bg-blue-50">
+        <Card className="border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40">
           <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-blue-700">Registros</p>
-            <p className="text-xl font-bold text-blue-800">{filteredPagos.length}</p>
+            <p className="text-xs text-blue-700 dark:text-blue-400">Registros</p>
+            <p className="text-xl font-bold text-blue-800 dark:text-blue-300">{filteredPagos.length}</p>
           </CardContent>
         </Card>
-        <Card className="border border-purple-200 bg-purple-50">
+        <Card className="border border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/40">
           <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-purple-700">Empresas</p>
-            <p className="text-xl font-bold text-purple-800">{new Set(filteredPagos.map(p => p.enterprise_id).filter(Boolean)).size}</p>
+            <p className="text-xs text-purple-700 dark:text-purple-400">Empresas</p>
+            <p className="text-xl font-bold text-purple-800 dark:text-purple-300">{new Set(filteredPagos.map(p => p.enterprise_id).filter(Boolean)).size}</p>
           </CardContent>
         </Card>
-        <Card className="border border-yellow-200 bg-yellow-50">
+        <Card className="border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/40">
           <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-yellow-700">Deuda Pendiente</p>
-            <p className="text-xl font-bold text-yellow-800">{fmt(totalPendingAmount)}</p>
+            <p className="text-xs text-yellow-700 dark:text-yellow-400">Deuda Pendiente</p>
+            <p className="text-xl font-bold text-yellow-800 dark:text-yellow-300">{fmt(totalPendingAmount)}</p>
           </CardContent>
         </Card>
       </div>
@@ -321,11 +321,11 @@ export const Pagos: React.FC = () => {
 
       {/* Pendientes de Pago Section */}
       {!loading && pendingPurchases.length > 0 && (
-        <Card className="border border-yellow-300 bg-yellow-50">
+        <Card className="border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/30">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-yellow-900">
+                <h3 className="text-lg font-semibold text-yellow-900 dark:text-yellow-200">
                   Pendientes de Pago
                 </h3>
                 <span className="text-xs font-medium bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full">
@@ -347,14 +347,14 @@ export const Pagos: React.FC = () => {
                 {pendingPurchases.map(purchase => (
                   <div
                     key={purchase.id}
-                    className="bg-white border border-yellow-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
+                    className="bg-white dark:bg-gray-800 border border-yellow-200 dark:border-yellow-800 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
                   >
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <span className="font-mono font-bold text-orange-700 text-sm whitespace-nowrap">
                         #{String(purchase.purchase_number).padStart(4, '0')}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900 truncate">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                           {purchase.enterprise_name || 'Sin empresa'}
                         </p>
                         <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
@@ -426,23 +426,23 @@ export const Pagos: React.FC = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Empresa</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value, purchase_id: '' })}>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value, purchase_id: '' })}>
                   <option value="">Seleccionar...</option>
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Compra asociada</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.purchase_id} onChange={e => setForm({ ...form, purchase_id: e.target.value })}>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Compra asociada</label>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.purchase_id} onChange={e => setForm({ ...form, purchase_id: e.target.value })}>
                   <option value="">Sin compra</option>
                   {filteredPurchases.map(p => <option key={p.id} value={p.id}>#{String(p.purchase_number).padStart(4, '0')} ({fmt(p.total_amount)})</option>)}
                 </select>
               </div>
               <Input label="Monto *" type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Metodo de Pago *</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Metodo de Pago *</label>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                   <option value="efectivo">Efectivo</option>
                   <option value="mercado_pago">Mercado Pago</option>
                   <option value="transferencia">Transferencia</option>
@@ -452,8 +452,8 @@ export const Pagos: React.FC = () => {
               </div>
               {showBankSelector && (
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Banco *</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco *</label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
                     <option value="">Seleccionar banco...</option>
                     {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
                   </select>
@@ -463,7 +463,7 @@ export const Pagos: React.FC = () => {
               <Input label="Fecha" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} />
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
-                <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
                 <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Pago</Button>
@@ -479,14 +479,14 @@ export const Pagos: React.FC = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
+              <select className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
                 <option value="">Todas las empresas</option>
                 {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
               </select>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Metodo de Pago</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterMethod} onChange={e => setFilterMethod(e.target.value)}>
+              <select className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={filterMethod} onChange={e => setFilterMethod(e.target.value)}>
                 <option value="">Todos</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="mercado_pago">Mercado Pago</option>
@@ -518,7 +518,7 @@ export const Pagos: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
+                <tr className="bg-gray-50 dark:bg-gray-800 text-left text-sm font-medium text-gray-500 dark:text-gray-400">
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Compra</th>
@@ -531,11 +531,11 @@ export const Pagos: React.FC = () => {
               </thead>
               <tbody>
                 {paginatedPagos.map(pago => (
-                  <tr key={pago.id} className="border-b hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-sm text-gray-600">{fmtDate(pago.payment_date)}</td>
+                  <tr key={pago.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(pago.payment_date)}</td>
                     <td className="px-4 py-3">
                       <div>
-                        <p className="text-sm text-gray-900">{pago.enterprise_name || <span className="text-gray-400">-</span>}</p>
+                        <p className="text-sm text-gray-900 dark:text-gray-100">{pago.enterprise_name || <span className="text-gray-400">-</span>}</p>
                         <TagBadges tags={pago.enterprise_tags || []} size="sm" />
                       </div>
                     </td>

@@ -47,7 +47,7 @@ export class ExportController {
         },
       });
     } catch (error: any) {
-      res.status(500).json({ error: 'Error al exportar datos: ' + error.message });
+      res.status(500).json({ error: 'Error al exportar datos' });
     }
   }
 }

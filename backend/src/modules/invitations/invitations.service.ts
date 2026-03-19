@@ -6,6 +6,9 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { ROLE_TEMPLATES } from '../../shared/permissions.constants';
 import { auditService } from '../audit/audit.service';
+import { emailService } from '../email/email.service';
+import { env } from '../../config/env';
+import { validatePasswordComplexity } from '../../middlewares/security';
 
 export class InvitationsService {
   async createInvitation(companyId: string, invitedBy: string, data: {
@@ -57,6 +60,9 @@ export class InvitationsService {
       ipAddress,
     });
 
+    // Send invitation email (non-blocking, non-fatal)
+    this.sendInvitationEmailAsync(companyId, invitedBy, data.email, data.role, token);
+
     return { id, email: data.email, role: data.role, token, expires_at: expiresAt };
   }
 
@@ -101,8 +107,9 @@ export class InvitationsService {
 
   async resendInvitation(companyId: string, invitationId: string) {
     const existing = await db.execute(sql`
-      SELECT id, email FROM pending_invitations
-      WHERE id = ${invitationId} AND company_id = ${companyId} AND status = 'pending'
+      SELECT pi.id, pi.email, pi.role, pi.invited_by
+      FROM pending_invitations pi
+      WHERE pi.id = ${invitationId} AND pi.company_id = ${companyId} AND pi.status = 'pending'
     `);
     const existingRows = (existing as any).rows || existing || [];
     if (existingRows.length === 0) {
@@ -119,7 +126,31 @@ export class InvitationsService {
       WHERE id = ${invitationId}
     `);
 
+    const invitation = existingRows[0] as { email: string; role: string; invited_by: string };
+
+    // Re-send invitation email (non-blocking, non-fatal)
+    this.sendInvitationEmailAsync(companyId, invitation.invited_by, invitation.email, invitation.role, token);
+
     return { token, expires_at: expiresAt };
+  }
+
+  // Helper: resolve inviter name + company name and send the invitation email
+  private sendInvitationEmailAsync(companyId: string, invitedBy: string, email: string, role: string, token: string) {
+    (async () => {
+      try {
+        const inviterResult = await db.execute(sql`SELECT name FROM users WHERE id = ${invitedBy}`);
+        const inviterRows = (inviterResult as any).rows || inviterResult || [];
+        const inviterName = inviterRows.length > 0 ? (inviterRows[0] as { name: string }).name : 'Un miembro del equipo';
+
+        const companyResult = await db.execute(sql`SELECT name FROM companies WHERE id = ${companyId}`);
+        const companyRows = (companyResult as any).rows || companyResult || [];
+        const companyName = companyRows.length > 0 ? (companyRows[0] as { name: string }).name : 'tu empresa';
+
+        await emailService.sendInvitationEmail(email, inviterName, companyName, role, token);
+      } catch (err) {
+        console.error('[Invitations] Invitation email failed (non-fatal):', err);
+      }
+    })();
   }
 
   async validateToken(token: string) {
@@ -156,9 +187,15 @@ export class InvitationsService {
       throw new ApiError(400, 'La contrasena debe tener al menos 8 caracteres');
     }
 
+    // Validate password complexity (same rules as registration)
+    const passwordCheck = validatePasswordComplexity(data.password);
+    if (!passwordCheck.valid) {
+      throw new ApiError(400, passwordCheck.errors.join('. '));
+    }
+
     // Create user
     const userId = uuid();
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    const hashedPassword = await bcrypt.hash(data.password, env.BCRYPT_ROUNDS);
 
     await db.execute(sql`
       INSERT INTO users (id, company_id, email, name, password_hash, role, active)

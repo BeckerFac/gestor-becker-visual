@@ -7,6 +7,7 @@ import { ROLE_TEMPLATES, ROLE_HIERARCHY } from '../../shared/permissions.constan
 import { auditService } from '../audit/audit.service';
 import { env } from '../../config/env';
 import { validatePasswordComplexity } from '../../middlewares/security';
+import { recordRoleChange } from '../../lib/security-monitor';
 
 export class UsersService {
   async getUsers(companyId: string) {
@@ -187,6 +188,10 @@ export class UsersService {
       // Re-apply template if role changed and template exists
       if (data.role !== 'admin' && data.role !== 'owner' && ROLE_TEMPLATES[data.role]) {
         await this.applyTemplate(companyId, userId, data.role);
+      }
+      // Security: record role change for monitoring (notify admins of privilege escalation)
+      if (data.role !== currentUser.role) {
+        recordRoleChange(companyId, userId, currentUser.email, currentUser.role, data.role, requesterId || 'system');
       }
     }
     if (data.active !== undefined) {

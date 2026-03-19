@@ -416,6 +416,9 @@ async function runAutoMigrations() {
     // --- Audit log: ensure details_json column alias works ---
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_company_date ON audit_log(company_id, created_at DESC)`);
 
+    // ===== ROW LEVEL SECURITY (RLS) — second layer of multi-tenant isolation =====
+    await applyRowLevelSecurity();
+
     // --- Billing: subscriptions & usage_tracking (separate from legacy companies columns) ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS subscriptions (
@@ -450,10 +453,284 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_tracking_company_month ON usage_tracking(company_id, month)`);
 
-    console.log('✅ Auto-migrations completed');
+    // --- Admin: block/unblock with reason ---
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS block_reason VARCHAR(500)`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS block_reason_category VARCHAR(50)`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS blocked_by UUID`);
+    // Admin: billing_period on companies
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS billing_period VARCHAR(20) DEFAULT 'monthly'`);
+    // Admin: custom plan limits overrides
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS plan_overrides JSONB`);
+    // Admin: trial extension
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS trial_extended_days INTEGER DEFAULT 0`);
+
+    // ===== SECURITY: Two-Factor Authentication columns =====
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_backup_codes TEXT`); // JSON array of backup codes
+
+    // ===== SECURITY: API Keys table =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        key_hash VARCHAR(255) NOT NULL UNIQUE,
+        key_prefix VARCHAR(20) NOT NULL,
+        scope VARCHAR(20) NOT NULL DEFAULT 'read',
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        last_used TIMESTAMP WITH TIME ZONE,
+        revoked_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_company ON api_keys(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash) WHERE revoked_at IS NULL`);
+
+    // ===== SECURITY: Security events log (persistent, complements in-memory buffer) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS security_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        event_type VARCHAR(50) NOT NULL,
+        severity VARCHAR(20) NOT NULL DEFAULT 'low',
+        message TEXT NOT NULL,
+        ip_address VARCHAR(45),
+        user_id UUID,
+        company_id UUID,
+        details JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_security_events_date ON security_events(created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(ip_address)`);
+
+    console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
   }
+}
+
+/**
+ * Apply Row Level Security policies to all tables that have company_id.
+ * This is a SECOND LAYER of protection -- the primary layer is app-level
+ * WHERE company_id = $companyId in every query.
+ *
+ * RLS uses the session variable 'app.company_id' set by middleware at
+ * the start of each HTTP request.
+ *
+ * Tables WITHOUT company_id (order_items, quote_items, invoice_items, etc.)
+ * are protected transitively through their parent FK with ON DELETE CASCADE.
+ */
+async function applyRowLevelSecurity() {
+  // Tables with direct company_id column
+  const tablesWithCompanyId = [
+    'users',
+    'enterprises',
+    'orders',
+    'quotes',
+    'invoices',
+    'cheques',
+    'cobros',
+    'pagos',
+    'purchases',
+    'remitos',
+    'receipts',
+    'banks',
+    'products',
+    'categories',
+    'brands',
+    'customers',
+    'suppliers',
+    'warehouses',
+    'tags',
+    'price_lists',
+    'product_components',
+    'product_types',
+    'subscriptions',
+    'usage_tracking',
+    'audit_log',
+    'invitations',
+    'pending_invitations',
+    'crm_deals',
+    'crm_activities',
+    'crm_stages',
+  ];
+
+  for (const table of tablesWithCompanyId) {
+    try {
+      await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+      // Do NOT use FORCE -- we want the app DB user (which owns the tables)
+      // to bypass RLS so migrations and admin queries still work.
+      // RLS applies only to non-owner roles or when explicitly set.
+
+      const policyName = `${table}_company_isolation`;
+      await pool.query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_policies WHERE tablename = '${table}' AND policyname = '${policyName}'
+          ) THEN
+            EXECUTE format(
+              'CREATE POLICY ${policyName} ON ${table} FOR ALL USING (company_id = current_setting(''app.company_id'', true)::uuid)'
+            );
+          END IF;
+        END $$;
+      `);
+    } catch (err) {
+      // Table may not exist yet on first boot
+      console.warn(`RLS for ${table}: ${(err as any)?.message || err}`);
+    }
+  }
+
+  // companies table uses 'id' not 'company_id'
+  try {
+    await pool.query(`ALTER TABLE companies ENABLE ROW LEVEL SECURITY`);
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies WHERE tablename = 'companies' AND policyname = 'companies_self_isolation'
+        ) THEN
+          CREATE POLICY companies_self_isolation ON companies
+            FOR ALL USING (id = current_setting('app.company_id', true)::uuid);
+        END IF;
+      END $$;
+    `);
+  } catch (err) {
+    console.warn(`RLS for companies: ${(err as any)?.message || err}`);
+  }
+
+  console.log('  RLS policies applied');
+}
+
+/**
+ * Set the company_id context for the current database connection.
+ * Call at the start of each request via middleware.
+ */
+export async function setCompanyContext(companyId: string) {
+  await pool.query(`SELECT set_config('app.company_id', $1, false)`, [companyId]);
+}
+
+/**
+ * Clear the company_id context (for admin/superadmin routes).
+ */
+export async function clearCompanyContext() {
+  await pool.query(`SELECT set_config('app.company_id', '', false)`);
+}
+
+/**
+ * Export all data for a specific company as JSON.
+ * Used by the per-company backup system.
+ */
+export async function exportCompanyData(companyId: string): Promise<{
+  metadata: { company_id: string; exported_at: string; row_counts: Record<string, number> };
+  data: Record<string, any[]>;
+}> {
+  const tables: Array<{ name: string; fk: string }> = [
+    { name: 'companies', fk: 'id' },
+    { name: 'users', fk: 'company_id' },
+    { name: 'enterprises', fk: 'company_id' },
+    { name: 'customers', fk: 'company_id' },
+    { name: 'products', fk: 'company_id' },
+    { name: 'categories', fk: 'company_id' },
+    { name: 'brands', fk: 'company_id' },
+    { name: 'orders', fk: 'company_id' },
+    { name: 'quotes', fk: 'company_id' },
+    { name: 'invoices', fk: 'company_id' },
+    { name: 'cheques', fk: 'company_id' },
+    { name: 'cobros', fk: 'company_id' },
+    { name: 'pagos', fk: 'company_id' },
+    { name: 'purchases', fk: 'company_id' },
+    { name: 'remitos', fk: 'company_id' },
+    { name: 'receipts', fk: 'company_id' },
+    { name: 'banks', fk: 'company_id' },
+    { name: 'tags', fk: 'company_id' },
+    { name: 'price_lists', fk: 'company_id' },
+    { name: 'product_components', fk: 'company_id' },
+    { name: 'subscriptions', fk: 'company_id' },
+    { name: 'usage_tracking', fk: 'company_id' },
+    { name: 'audit_log', fk: 'company_id' },
+    { name: 'invitations', fk: 'company_id' },
+    { name: 'pending_invitations', fk: 'company_id' },
+    { name: 'crm_deals', fk: 'company_id' },
+    { name: 'crm_activities', fk: 'company_id' },
+    { name: 'crm_stages', fk: 'company_id' },
+    { name: 'warehouses', fk: 'company_id' },
+    { name: 'suppliers', fk: 'company_id' },
+  ];
+
+  // Child tables accessed via parent FK (no direct company_id)
+  const childTables: Array<{ name: string; parentTable: string; parentFk: string }> = [
+    { name: 'order_items', parentTable: 'orders', parentFk: 'order_id' },
+    { name: 'order_status_history', parentTable: 'orders', parentFk: 'order_id' },
+    { name: 'quote_items', parentTable: 'quotes', parentFk: 'quote_id' },
+    { name: 'invoice_items', parentTable: 'invoices', parentFk: 'invoice_id' },
+    { name: 'purchase_items', parentTable: 'purchases', parentFk: 'purchase_id' },
+    { name: 'remito_items', parentTable: 'remitos', parentFk: 'remito_id' },
+    { name: 'receipt_items', parentTable: 'receipts', parentFk: 'receipt_id' },
+    { name: 'cobro_items', parentTable: 'cobros', parentFk: 'cobro_id' },
+    { name: 'cheque_status_history', parentTable: 'cheques', parentFk: 'cheque_id' },
+    { name: 'price_list_items', parentTable: 'price_lists', parentFk: 'price_list_id' },
+    { name: 'entity_tags', parentTable: 'tags', parentFk: 'tag_id' },
+    { name: 'permissions', parentTable: 'users', parentFk: 'user_id' },
+    { name: 'sessions', parentTable: 'users', parentFk: 'user_id' },
+    { name: 'product_pricing', parentTable: 'products', parentFk: 'product_id' },
+    { name: 'stock', parentTable: 'products', parentFk: 'product_id' },
+    { name: 'stock_movements', parentTable: 'products', parentFk: 'product_id' },
+    { name: 'payments', parentTable: 'invoices', parentFk: 'invoice_id' },
+    { name: 'crm_deal_documents', parentTable: 'crm_deals', parentFk: 'deal_id' },
+    { name: 'crm_deal_stage_history', parentTable: 'crm_deals', parentFk: 'deal_id' },
+  ];
+
+  const result: Record<string, any[]> = {};
+  const rowCounts: Record<string, number> = {};
+
+  // Export direct tables
+  for (const t of tables) {
+    try {
+      const res = await pool.query(
+        `SELECT * FROM ${t.name} WHERE ${t.fk} = $1`,
+        [companyId]
+      );
+      result[t.name] = res.rows;
+      rowCounts[t.name] = res.rows.length;
+    } catch (err) {
+      result[t.name] = [];
+      rowCounts[t.name] = 0;
+    }
+  }
+
+  // Export child tables via parent
+  for (const ct of childTables) {
+    try {
+      const parentRows = result[ct.parentTable] || [];
+      if (parentRows.length === 0) {
+        result[ct.name] = [];
+        rowCounts[ct.name] = 0;
+        continue;
+      }
+      const parentIds = parentRows.map((r: any) => r.id);
+      const res = await pool.query(
+        `SELECT * FROM ${ct.name} WHERE ${ct.parentFk} = ANY($1::uuid[])`,
+        [parentIds]
+      );
+      result[ct.name] = res.rows;
+      rowCounts[ct.name] = res.rows.length;
+    } catch (err) {
+      result[ct.name] = [];
+      rowCounts[ct.name] = 0;
+    }
+  }
+
+  return {
+    metadata: {
+      company_id: companyId,
+      exported_at: new Date().toISOString(),
+      row_counts: rowCounts,
+    },
+    data: result,
+  };
 }
 
 export async function closeDb() {

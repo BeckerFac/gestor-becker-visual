@@ -406,7 +406,7 @@ export const Purchases: React.FC = () => {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa / Proveedor</label>
-              <select className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
+              <select className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
                 <option value="">Todas las empresas</option>
                 {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
               </select>
@@ -425,23 +425,23 @@ export const Purchases: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Empresa / Proveedor</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa / Proveedor</label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value })}>
                     <option value="">Seleccionar...</option>
                     {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name} {ent.cuit ? `(${ent.cuit})` : ''}</option>)}
                   </select>
                 </div>
                 <Input label="Fecha" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Método de Pago</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Método de Pago</label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                     {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
                 {showBankSelector && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Banco</label>
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco</label>
+                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
                       <option value="">Seleccionar banco...</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
                     </select>
@@ -455,7 +455,7 @@ export const Purchases: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1">
                     <label className="text-sm text-gray-600">Tipo</label>
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.invoice_type} onChange={e => setForm({ ...form, invoice_type: e.target.value })}>
+                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.invoice_type} onChange={e => setForm({ ...form, invoice_type: e.target.value })}>
                       <option value="">Sin factura</option>
                       <option value="A">Factura A</option>
                       <option value="B">Factura B</option>
@@ -474,7 +474,7 @@ export const Purchases: React.FC = () => {
               {/* Items */}
               <div className="border-t pt-4">
                 <div className="flex justify-between items-center mb-2">
-                  <p className="text-sm font-medium text-gray-700">Items de la compra</p>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Items de la compra</p>
                   <button type="button" onClick={addItem} className="text-blue-600 text-sm hover:underline">+ Agregar item</button>
                 </div>
                 <div className="space-y-2">
@@ -483,7 +483,7 @@ export const Purchases: React.FC = () => {
                       <div className="col-span-4">
                         <div className="flex flex-col gap-1">
                           <select
-                            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                             value={item.product_id || ''}
                             onChange={e => {
                               const pid = e.target.value
@@ -646,7 +646,7 @@ export const Purchases: React.FC = () => {
                       <td className="px-4 py-3 text-sm text-gray-600">{formatDate(purchase.date)}</td>
                       <td className="px-4 py-3">
                         <div>
-                          <p className="text-sm font-medium text-gray-900">{purchase.enterprise_name || '-'}</p>
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{purchase.enterprise_name || '-'}</p>
                           {purchase.enterprise_cuit && <p className="text-xs text-gray-500">{purchase.enterprise_cuit}</p>}
                           <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
                         </div>
@@ -719,7 +719,7 @@ export const Purchases: React.FC = () => {
                                     <div className="space-y-1.5">
                                       {expandedDetail.items.map((item: any, idx: number) => (
                                         <div key={idx} className="bg-white rounded px-2 py-1.5 border border-orange-100">
-                                          <p className="text-sm font-medium text-gray-900">{item.product_name}</p>
+                                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.product_name}</p>
                                           {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
                                           <div className="flex gap-3 text-xs text-gray-600 mt-0.5">
                                             <span>Cant: {item.quantity}</span>

@@ -264,7 +264,7 @@ export const Global: React.FC = () => {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-medium text-gray-900">{ent.name}</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{ent.name}</span>
                     {ent.razon_social && ent.razon_social !== ent.name && (
                       <span className="ml-2 text-sm text-gray-500">({ent.razon_social})</span>
                     )}
@@ -303,7 +303,7 @@ export const Global: React.FC = () => {
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
-                    <h2 className="text-xl font-bold text-gray-900">{selectedEnterprise.name}</h2>
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{selectedEnterprise.name}</h2>
                     <StatusBadge status={selectedEnterprise.status} />
                   </div>
                   {selectedEnterprise.razon_social && selectedEnterprise.razon_social !== selectedEnterprise.name && (
@@ -407,18 +407,18 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Nombre</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Contacto</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">CUIT</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Email</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Telefono</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Rol</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Nombre</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Contacto</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">CUIT</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Email</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Telefono</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Rol</th>
                           </tr>
                         </thead>
                         <tbody>
                           {contacts.map((c: any) => (
                             <tr key={c.id} className="border-b border-gray-200 hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.name}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
                               <td className="px-4 py-3 text-sm text-gray-600">{c.contact_name || '-'}</td>
                               <td className="px-4 py-3 text-sm font-mono text-gray-600">{c.cuit || '-'}</td>
                               <td className="px-4 py-3 text-sm text-gray-600">{c.email || '-'}</td>
@@ -453,13 +453,13 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Titulo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Cliente</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Pago</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Titulo</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Pago</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -468,7 +468,7 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">
                                 #{String(o.order_number || 0).padStart(4, '0')}
                               </td>
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900">{o.title}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{o.title}</td>
                               <td className="px-4 py-3 text-sm text-gray-600">
                                 {o.customer?.name || o.customer_name || '-'}
                               </td>
@@ -516,13 +516,13 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Titulo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Cliente</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Valida hasta</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Titulo</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Valida hasta</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -531,7 +531,7 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">
                                 #{String(q.quote_number || 0).padStart(4, '0')}
                               </td>
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900">{q.title || 'Cotizacion'}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{q.title || 'Cotizacion'}</td>
                               <td className="px-4 py-3 text-sm text-gray-600">
                                 {q.customer?.name || '-'}
                               </td>
@@ -580,13 +580,13 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Tipo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Cliente</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Pago</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Cliente</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Pago</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -652,11 +652,11 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Metodo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Referencia</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Pedido</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Monto</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Metodo</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Referencia</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Pedido</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Monto</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -708,11 +708,11 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Metodo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Referencia</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Compra</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Monto</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Metodo</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Referencia</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Compra</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Monto</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -798,12 +798,12 @@ export const Global: React.FC = () => {
                             <table className="min-w-full border-collapse text-sm">
                               <thead>
                                 <tr className="border-b border-gray-200 bg-gray-50">
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Fecha</th>
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Tipo</th>
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Descripcion</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Debe</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Haber</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Saldo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Descripcion</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Debe</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Haber</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Saldo</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -844,12 +844,12 @@ export const Global: React.FC = () => {
                             <table className="min-w-full border-collapse text-sm">
                               <thead>
                                 <tr className="border-b border-gray-200 bg-gray-50">
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Fecha</th>
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Tipo</th>
-                                  <th className="px-4 py-2 text-left font-semibold text-gray-900">Descripcion</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Debe</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Haber</th>
-                                  <th className="px-4 py-2 text-right font-semibold text-gray-900">Saldo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Descripcion</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Debe</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Haber</th>
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Saldo</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -899,12 +899,12 @@ export const Global: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Numero</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Banco</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Librador</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Monto</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Vencimiento</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Numero</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Banco</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Librador</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Monto</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Vencimiento</th>
                           </tr>
                         </thead>
                         <tbody>

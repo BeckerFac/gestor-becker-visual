@@ -419,11 +419,11 @@ export const Enterprises: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input label="Nombre Comercial *" placeholder="Nombre de la empresa" value={enterpriseForm.name} onChange={e => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })} required />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Razon Social<HelpTip text="Nombre legal de la empresa como figura en AFIP." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Razon Social<HelpTip text="Nombre legal de la empresa como figura en AFIP." /></label>
                   <Input placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">CUIT<HelpTip text="CUIT de 11 digitos. Se valida automaticamente." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CUIT<HelpTip text="CUIT de 11 digitos. Se valida automaticamente." /></label>
                   <Input placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
                 </div>
               </div>
@@ -431,7 +431,7 @@ export const Enterprises: React.FC = () => {
                 <Input label="Telefono" placeholder="+54 11 1234-5678" value={enterpriseForm.phone} onChange={e => setEnterpriseForm({ ...enterpriseForm, phone: e.target.value })} />
                 <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Condicion IVA<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condicion IVA<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
                     <option>Responsable Inscripto</option>
                     <option>Monotributo</option>
@@ -440,7 +440,7 @@ export const Enterprises: React.FC = () => {
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Lista de Precios</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Lista de Precios</label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.price_list_id} onChange={e => setEnterpriseForm({ ...enterpriseForm, price_list_id: e.target.value })}>
                     <option value="">Sin lista de precios</option>
                     {priceLists.map((pl: any) => <option key={pl.id} value={pl.id}>{pl.name} ({pl.type})</option>)}
@@ -512,7 +512,7 @@ export const Enterprises: React.FC = () => {
           <CardContent>
             <form onSubmit={handleContactSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Empresa</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
                 <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={contactForm.enterprise_id} onChange={e => setContactForm({ ...contactForm, enterprise_id: e.target.value })}>
                   <option value="">Sin empresa</option>
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
@@ -555,7 +555,7 @@ export const Enterprises: React.FC = () => {
           {filteredEnterprises.map(ent => (
             <Card key={ent.id}>
               <div
-                className="px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                className="px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 onClick={() => handleExpandEnterprise(ent.id)}
               >
                 <div className="flex items-center gap-4">
@@ -573,7 +573,7 @@ export const Enterprises: React.FC = () => {
                         }
                         return <div className="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0" title={`Vencido ${health.oldest_days}d - ${formatCurrency(health.total_overdue)}`} />
                       })()}
-                      <h3 className="font-semibold text-gray-900">{ent.name}</h3>
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100">{ent.name}</h3>
                       {ent.razon_social && ent.razon_social !== ent.name && (
                         <span className="text-xs text-gray-400">({ent.razon_social})</span>
                       )}
@@ -646,7 +646,7 @@ export const Enterprises: React.FC = () => {
                       <tbody>
                         {expandedContacts.map(c => (
                           <tr key={c.id} className="border-b border-gray-100">
-                            <td className="py-2 font-medium text-gray-900">{c.name}</td>
+                            <td className="py-2 font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
                             <td className="py-2 font-mono text-gray-600">{c.cuit}</td>
                             <td className="py-2 text-gray-600">{c.role || '-'}</td>
                             <td className="py-2 text-gray-600">{c.phone || '-'}</td>
@@ -699,7 +699,7 @@ export const Enterprises: React.FC = () => {
                   <tbody>
                     {unassignedContacts.map(c => (
                       <tr key={c.id} className="border-b border-gray-100">
-                        <td className="py-2 font-medium text-gray-900">{c.name}</td>
+                        <td className="py-2 font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
                         <td className="py-2 font-mono text-gray-600">{c.cuit}</td>
                         <td className="py-2 text-gray-600">{c.phone || '-'}</td>
                         <td className="py-2 text-gray-600">{c.email || '-'}</td>

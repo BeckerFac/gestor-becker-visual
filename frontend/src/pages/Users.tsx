@@ -34,14 +34,14 @@ interface InvitationRecord {
 }
 
 const ROLE_BADGES: Record<string, string> = {
-  owner: 'bg-amber-100 text-amber-800',
-  admin: 'bg-purple-100 text-purple-800',
-  gerente: 'bg-blue-100 text-blue-800',
-  editor: 'bg-teal-100 text-teal-800',
-  vendedor: 'bg-green-100 text-green-800',
-  contable: 'bg-yellow-100 text-yellow-800',
-  stock_manager: 'bg-orange-100 text-orange-800',
-  viewer: 'bg-gray-100 text-gray-800',
+  owner: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  admin: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  gerente: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  editor: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  vendedor: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  contable: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+  stock_manager: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+  viewer: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -479,7 +479,7 @@ export const Users: React.FC = () => {
                 onChange={e => setInviteForm({ ...inviteForm, name: e.target.value })}
               />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Rol *</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Rol *</label>
                 <select
                   value={inviteForm.role}
                   onChange={e => setInviteForm({ ...inviteForm, role: e.target.value })}
@@ -542,7 +542,7 @@ export const Users: React.FC = () => {
                 />
               )}
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Rol</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Rol</label>
                 <select
                   value={form.role}
                   onChange={e => setForm({ ...form, role: e.target.value })}
@@ -593,7 +593,7 @@ export const Users: React.FC = () => {
                     </td>
                   </tr>
                 ) : invitations.map(inv => (
-                  <tr key={inv.id} className="border-b hover:bg-gray-50">
+                  <tr key={inv.id} className="border-b dark:border-gray-700 hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">{inv.email}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{inv.name || '-'}</td>
                     <td className="px-4 py-3">
@@ -676,10 +676,10 @@ export const Users: React.FC = () => {
                   <tbody>
                     {users.map(user => (
                       <React.Fragment key={user.id}>
-                        <tr className="border-b hover:bg-gray-50">
+                        <tr className="border-b dark:border-gray-700 hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-gray-900">{user.name}</span>
+                              <span className="font-medium text-gray-900 dark:text-gray-100">{user.name}</span>
                               {isCurrentUser(user.id) && (
                                 <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
                                   Tu

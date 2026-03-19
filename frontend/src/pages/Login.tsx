@@ -148,7 +148,7 @@ export const Login: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsRegister(true)}
-                    className="text-blue-600 hover:underline font-medium"
+                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                   >
                     Registrate aca
                   </button>
@@ -214,7 +214,7 @@ export const Login: React.FC = () => {
                       href="/legal/terminos"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline font-medium"
+                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                     >
                       Terminos y Condiciones
                     </a>{' '}
@@ -223,7 +223,7 @@ export const Login: React.FC = () => {
                       href="/legal/privacidad"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline font-medium"
+                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                     >
                       Politica de Privacidad
                     </a>
@@ -251,7 +251,7 @@ export const Login: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsRegister(false)}
-                    className="text-blue-600 hover:underline font-medium"
+                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                   >
                     Inicia sesión aquí
                   </button>

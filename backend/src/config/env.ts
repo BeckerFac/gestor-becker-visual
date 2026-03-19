@@ -22,7 +22,9 @@ export const env = {
   AFIP_CERT_PATH: process.env.AFIP_CERT_PATH || './certs/test.pem',
   AFIP_KEY_PATH: process.env.AFIP_KEY_PATH || './certs/test.key',
 
-  // Email
+  // Email - Resend (preferred) or SMTP fallback
+  RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+  RESEND_FROM: process.env.RESEND_FROM || '',
   SMTP_HOST: process.env.SMTP_HOST || 'smtp.gmail.com',
   SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
   SMTP_USER: process.env.SMTP_USER || '',
@@ -43,12 +45,19 @@ export const env = {
   RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
   RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
 
+  // AI (optional - features degrade gracefully if not set)
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+
   // Security
   BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
   MAX_LOGIN_ATTEMPTS: parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10),
   LOGIN_LOCKOUT_MINUTES: parseInt(process.env.LOGIN_LOCKOUT_MINUTES || '15', 10),
   REQUEST_BODY_LIMIT: process.env.REQUEST_BODY_LIMIT || '2mb',
   FILE_UPLOAD_LIMIT: process.env.FILE_UPLOAD_LIMIT || '5mb',
+
+  // Encryption (for sensitive field encryption at rest)
+  // Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || '',
 };
 
 export const isDevelopment = env.NODE_ENV === 'development';
@@ -75,6 +84,10 @@ export function validateSecrets(): boolean {
     }
     if (!process.env.CORS_ORIGIN) {
       errors.push('CORS_ORIGIN must be set in production');
+    }
+    if (!env.ENCRYPTION_KEY) {
+      // Warning, not fatal - encryption is optional but recommended
+      console.warn('SECURITY WARNING: ENCRYPTION_KEY not set in production. Sensitive fields will be stored in plaintext.');
     }
   }
 

@@ -8,6 +8,8 @@ export interface AuthRequest extends Request {
     email: string;
     company_id: string;
     role: string;
+    impersonating?: boolean;
+    readonly?: boolean;
   };
 }
 
@@ -34,6 +36,8 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
       email: string;
       company_id: string;
       role: string;
+      impersonating?: boolean;
+      readonly?: boolean;
     };
 
     // Validate required claims exist
@@ -46,7 +50,18 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
       email: decoded.email,
       company_id: decoded.company_id,
       role: decoded.role,
+      impersonating: decoded.impersonating || false,
+      readonly: decoded.readonly || false,
     };
+
+    // Enforce read-only mode for impersonation tokens
+    if (decoded.impersonating && decoded.readonly) {
+      const writeMethod = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+      if (writeMethod) {
+        return res.status(403).json({ error: 'Impersonation tokens are read-only. Write operations are not permitted.' });
+      }
+    }
+
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {

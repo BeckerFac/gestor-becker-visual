@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner'
 import { TrialBanner } from '@/components/billing/TrialBanner'
 import { api } from '@/services/api'
+import { AIChatPanel } from '@/components/ai/AIChatPanel'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -29,7 +30,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   }, [])
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 dark:text-gray-100">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-950 dark:text-gray-100">
       {/* Sidebar */}
       <Sidebar />
 
@@ -59,6 +60,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </div>
         </main>
       </div>
+
+      {/* AI Chat Panel - floating button (Premium only, auto-hides if no access) */}
+      <AIChatPanel />
     </div>
   )
 }

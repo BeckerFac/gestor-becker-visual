@@ -6,6 +6,7 @@ import { ReportTable } from './ReportTable'
 import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtNumber } from './helpers'
 import type { InventarioReportData, StockItem, DeadStockItem } from './types'
+import { AIReportNarrative } from '@/components/ai/AIReportNarrative'
 
 interface Props {
   data: InventarioReportData | null
@@ -159,6 +160,8 @@ export const InventarioTab: React.FC<Props> = ({ data }) => {
 
   return (
     <>
+      <AIReportNarrative reportType="inventario" reportData={data} />
+
       <TabActionBar
         excelData={excelData}
         excelColumns={excelColumns}

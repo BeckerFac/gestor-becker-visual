@@ -47,7 +47,7 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({ selected, onChan
           className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
             selected === p.value
               ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
           }`}
         >
           {p.label}

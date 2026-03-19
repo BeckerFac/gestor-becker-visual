@@ -79,7 +79,7 @@ export class AccountController {
       res.setHeader('Content-Type', 'application/json');
       res.json(exportData);
     } catch (error: any) {
-      res.status(500).json({ error: 'Error al exportar datos: ' + error.message });
+      res.status(500).json({ error: 'Error al exportar datos' });
     }
   }
 
@@ -127,7 +127,7 @@ export class AccountController {
       if (error instanceof ApiError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
-      res.status(500).json({ error: 'Error al procesar solicitud de eliminacion: ' + error.message });
+      res.status(500).json({ error: 'Error al procesar solicitud de eliminacion' });
     }
   }
 

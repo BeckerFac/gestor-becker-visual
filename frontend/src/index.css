@@ -65,6 +65,19 @@
   }
 }
 
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar { width: 8px; height: 8px; }
+.dark ::-webkit-scrollbar-track { background: #1F2937; }
+.dark ::-webkit-scrollbar-thumb { background: #4B5563; border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #6B7280; }
+
+/* Dark mode select options */
+.dark option { background: #1F2937; color: #F3F4F6; }
+
+/* Dark mode placeholder */
+.dark input::placeholder,
+.dark textarea::placeholder { color: #6B7280; }
+
 /* Print styles for Reportes page */
 @media print {
   /* Hide navigation, sidebar, and non-essential UI */

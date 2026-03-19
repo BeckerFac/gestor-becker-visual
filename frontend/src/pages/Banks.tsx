@@ -348,7 +348,7 @@ export const Banks: React.FC = () => {
               >
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-semibold text-gray-900">{b.bank_name}</h3>
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">{b.bank_name}</h3>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                       {b.account_type === 'caja de ahorro' ? 'CA' : 'CC'}
                     </span>
@@ -479,7 +479,7 @@ export const Banks: React.FC = () => {
               <Input label="Nombre del Banco *" placeholder="Banco Nación, Galicia, etc." value={form.bank_name} onChange={e => setForm({ ...form, bank_name: e.target.value })} required />
               <Input label="Titular de la Cuenta" placeholder="Nombre del titular" value={form.account_holder} onChange={e => setForm({ ...form, account_holder: e.target.value })} />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Tipo de Cuenta</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Cuenta</label>
                 <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.account_type} onChange={e => setForm({ ...form, account_type: e.target.value })}>
                   <option value="cuenta corriente">Cuenta Corriente</option>
                   <option value="caja de ahorro">Caja de Ahorro</option>
@@ -535,9 +535,9 @@ export const Banks: React.FC = () => {
               </thead>
               <tbody>
                 {banks.map(bank => (
-                  <tr key={bank.id} className="border-b hover:bg-gray-50">
+                  <tr key={bank.id} className="border-b dark:border-gray-700 hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-gray-900">{bank.bank_name}</p>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">{bank.bank_name}</p>
                       {bank.branch && <p className="text-xs text-gray-500">{bank.branch}</p>}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{bank.account_holder || '-'}</td>
@@ -601,7 +601,7 @@ export const Banks: React.FC = () => {
                         <div className="flex items-center gap-3">
                           <span className="text-xl">{meta.icon}</span>
                           <div>
-                            <p className="font-semibold text-gray-900">{meta.label}</p>
+                            <p className="font-semibold text-gray-900 dark:text-gray-100">{meta.label}</p>
                             <p className="text-xs text-gray-500">{data.income_count + data.expense_count} operaciones</p>
                           </div>
                         </div>
@@ -672,7 +672,7 @@ export const Banks: React.FC = () => {
                 {breakdown.recent_movements.map((mov, idx) => {
                   const isIncome = mov.type === 'venta' || mov.type === 'cobro'
                   return (
-                    <tr key={idx} className="border-b hover:bg-gray-50 text-sm">
+                    <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 text-sm">
                       <td className="px-4 py-2">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${MOVEMENT_COLORS[mov.type] || 'bg-gray-100 text-gray-700'}`}>
                           {mov.type === 'venta' ? 'Venta' : mov.type === 'cobro' ? 'Cobro' : mov.type === 'compra' ? 'Compra' : 'Pago'}

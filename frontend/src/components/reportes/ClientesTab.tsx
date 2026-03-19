@@ -7,6 +7,7 @@ import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta, fmtPercent } from './helpers'
 import { formatDate } from '@/lib/utils'
 import type { ClientesReportData, ClienteRow } from './types'
+import { AIReportNarrative } from '@/components/ai/AIReportNarrative'
 
 interface Props {
   data: ClientesReportData | null
@@ -100,6 +101,8 @@ export const ClientesTab: React.FC<Props> = ({ data }) => {
 
   return (
     <>
+      <AIReportNarrative reportType="clientes" reportData={data} />
+
       <TabActionBar
         excelData={excelData}
         excelColumns={excelColumns}

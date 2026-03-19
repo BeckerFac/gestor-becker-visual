@@ -26,7 +26,17 @@ export class PdfService {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--no-first-run',
+          // Prevent the browser from making any network requests (SSRF protection)
+          '--disable-web-security=false',
+        ],
       })
     }
   }
@@ -78,7 +88,7 @@ export class PdfService {
       return pdf
     } catch (error) {
       if (error instanceof ApiError) throw error
-      throw new ApiError(500, `PDF generation failed: ${(error as any).message}`)
+      throw new ApiError(500, 'PDF generation failed')
     }
   }
 
@@ -88,8 +98,22 @@ export class PdfService {
     return cuit
   }
 
+  // Escape HTML to prevent XSS/injection in generated PDFs
+  private escapeHtml(str: string | null | undefined): string {
+    if (!str) return ''
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
   private generateInvoiceHtml(data: any): string {
     const { invoice, items, customer, company } = data
+
+    // Escape all user-controlled strings to prevent HTML injection in PDFs
+    const esc = this.escapeHtml.bind(this)
 
     // Extract punto de venta from AFIP response
     const puntoVenta = invoice.afip_response?.FeCabResp?.PtoVta || ''
@@ -245,8 +269,8 @@ export class PdfService {
     </div>
 
     <div class="header-left">
-      <div class="razonsocial">${company.companyName}</div>
-      ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${domicilio}</div>` : ''}
+      <div class="razonsocial">${esc(company.companyName)}</div>
+      ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${esc(domicilio)}</div>` : ''}
       <div class="header-row"><span class="header-label">Condición frente al IVA:</span> <span class="header-value">${condicionIvaEmisor[invoiceTypeLetter] || 'Monotributo'}</span></div>
     </div>
 
@@ -254,7 +278,7 @@ export class PdfService {
       <div class="comprobante-tipo">FACTURA</div>
       <div class="comprobante-nro">Punto de Venta: ${ptoVtaStr} &nbsp; Comp. Nro: ${nroStr}</div>
       <div class="header-row"><span class="header-label">Fecha de Emisión:</span> <span class="header-value">${invoiceDate}</span></div>
-      <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${companyCuit}</span></div>
+      <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${esc(companyCuit)}</span></div>
     </div>
   </div>
 
@@ -275,15 +299,15 @@ export class PdfService {
   <div class="receptor">
     <div style="display: flex; gap: 40px;">
       <div style="flex: 1;">
-        <div class="info-row"><span class="info-label">Condición frente al IVA:</span> <span class="info-value">${customer?.tax_condition || 'Consumidor Final'}</span></div>
-        <div class="info-row"><span class="info-label">Nombre / Razón Social:</span> <span class="info-value" style="font-weight: bold;">${customer?.name || 'Consumidor Final'}</span></div>
+        <div class="info-row"><span class="info-label">Condición frente al IVA:</span> <span class="info-value">${esc(customer?.tax_condition || 'Consumidor Final')}</span></div>
+        <div class="info-row"><span class="info-label">Nombre / Razón Social:</span> <span class="info-value" style="font-weight: bold;">${esc(customer?.name || 'Consumidor Final')}</span></div>
       </div>
       <div style="flex: 1;">
         ${customer?.cuit
-          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${this.formatCuit(customer.cuit)}</span></div>`
+          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(customer.cuit))}</span></div>`
           : `<div class="info-row"><span class="info-label">Documento:</span> <span class="info-value">-</span></div>`
         }
-        <div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${customer?.address || '-'}</span></div>
+        <div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(customer?.address || '-')}</span></div>
       </div>
     </div>
   </div>
@@ -312,7 +336,7 @@ export class PdfService {
         return `
         <tr>
           <td class="center">${String(idx + 1).padStart(3, '0')}</td>
-          <td>${item.product_name || '-'}</td>
+          <td>${esc(item.product_name || '-')}</td>
           <td class="center">${qty.toFixed(2)}</td>
           <td class="center">unidades</td>
           <td class="right">${price.toFixed(2)}</td>
@@ -373,6 +397,7 @@ export class PdfService {
 
   private generateInternalVoucherHtml(data: any): string {
     const { invoice, items, customer, company } = data
+    const esc = this.escapeHtml.bind(this)
     const nroStr = String(invoice.invoice_number).padStart(6, '0')
     const invoiceDate = new Date(invoice.invoice_date).toLocaleDateString('es-AR')
     const companyCuit = this.formatCuit(company.companyCuit || '')
@@ -439,9 +464,9 @@ export class PdfService {
 
   <div class="header-wrapper">
     <div class="header-left">
-      <div class="razonsocial">${company.companyName}</div>
-      ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${domicilio}</div>` : ''}
-      <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${companyCuit}</span></div>
+      <div class="razonsocial">${esc(company.companyName)}</div>
+      ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${esc(domicilio)}</div>` : ''}
+      <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${esc(companyCuit)}</span></div>
     </div>
     <div class="header-right">
       <div class="comprobante-tipo">COMPROBANTE INTERNO</div>
@@ -453,14 +478,14 @@ export class PdfService {
   <div class="receptor">
     <div style="display: flex; gap: 40px;">
       <div style="flex: 1;">
-        <div class="info-row"><span class="info-label">Nombre / Razon Social:</span> <span class="info-value" style="font-weight: bold;">${customer?.name || 'Sin especificar'}</span></div>
+        <div class="info-row"><span class="info-label">Nombre / Razon Social:</span> <span class="info-value" style="font-weight: bold;">${esc(customer?.name || 'Sin especificar')}</span></div>
       </div>
       <div style="flex: 1;">
         ${customer?.cuit
-          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${this.formatCuit(customer.cuit)}</span></div>`
+          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(customer.cuit))}</span></div>`
           : ''
         }
-        ${customer?.address ? `<div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${customer.address}</span></div>` : ''}
+        ${customer?.address ? `<div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(customer.address)}</span></div>` : ''}
       </div>
     </div>
   </div>
@@ -483,7 +508,7 @@ export class PdfService {
         return `
         <tr>
           <td class="center">${String(idx + 1).padStart(3, '0')}</td>
-          <td>${item.product_name || '-'}</td>
+          <td>${esc(item.product_name || '-')}</td>
           <td class="center">${qty.toFixed(2)}</td>
           <td class="right">${price.toFixed(2)}</td>
           <td class="right">${total.toFixed(2)}</td>
@@ -533,17 +558,18 @@ export class PdfService {
 
       return pdf
     } catch (error) {
-      throw new ApiError(500, `Catalog PDF generation failed: ${(error as any).message}`)
+      throw new ApiError(500, 'Catalog PDF generation failed')
     }
   }
 
   private generateCatalogHtml(products: any[], companyName: string): string {
+    const esc = this.escapeHtml.bind(this)
     return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>Catálogo - ${companyName}</title>
+        <title>Catálogo - ${esc(companyName)}</title>
         <style>
           body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
           h1 { text-align: center; color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 20px; }
@@ -558,7 +584,7 @@ export class PdfService {
         </style>
       </head>
       <body>
-        <h1>${companyName}</h1>
+        <h1>${esc(companyName)}</h1>
         <h2 style="text-align: center; color: #666;">Catálogo de Productos</h2>
 
         <div class="products-grid">
@@ -566,9 +592,9 @@ export class PdfService {
             .map(
               (p: any) => `
             <div class="product-card">
-              <div class="product-name">${p.name}</div>
-              <div class="product-sku">SKU: ${p.sku}</div>
-              <div class="product-price">$${p.final_price || 'Consultar'}</div>
+              <div class="product-name">${esc(p.name)}</div>
+              <div class="product-sku">SKU: ${esc(p.sku)}</div>
+              <div class="product-price">$${esc(p.final_price || 'Consultar')}</div>
             </div>
           `
             )

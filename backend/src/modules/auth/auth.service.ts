@@ -10,6 +10,7 @@ import { validatePasswordComplexity, validateEmail } from '../../middlewares/sec
 import { FULL_ACCESS_ROLES } from '../../shared/permissions.constants';
 import { auditService } from '../audit/audit.service';
 import { billingService } from '../billing/billing.service';
+import { emailService } from '../email/email.service';
 
 export class AuthService {
   async getUserPermissions(userId: string): Promise<Record<string, string[]> | null> {
@@ -116,9 +117,10 @@ export class AuthService {
       // Store refresh token in sessions table
       await this.storeSession(user[0].id, tokens.refreshToken);
 
-      // TODO: Send verification email via email service
-      // emailService.sendVerificationEmail(email, name, verificationToken)
-      console.log(`[Registration] Verification token for ${email}: ${verificationToken}`);
+      // Send verification email (non-blocking, non-fatal)
+      emailService.sendVerificationEmail(email, name, verificationToken).catch(err => {
+        console.error('[Registration] Verification email failed (non-fatal):', err);
+      });
 
       return {
         user: {
@@ -488,10 +490,10 @@ export class AuthService {
       WHERE id = ${user.id}
     `);
 
-    // TODO: Send password reset email
-    // emailService.sendPasswordResetEmail(email, user.name, resetToken)
-    const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    console.log(`[Password Reset] Reset URL for ${email}: ${resetUrl}`);
+    // Send password reset email (non-blocking, non-fatal)
+    emailService.sendPasswordResetEmail(email, user.name!, resetToken).catch(err => {
+      console.error('[Password Reset] Email failed (non-fatal):', err);
+    });
 
     return { message: 'Si el email existe, recibiras un enlace para restablecer tu contrasena' };
   }
@@ -559,8 +561,10 @@ export class AuthService {
       WHERE id = ${userId}
     `);
 
-    // TODO: Send verification email
-    console.log(`[Verification] New token for ${user.email}: ${verificationToken}`);
+    // Send verification email (non-blocking, non-fatal)
+    emailService.sendVerificationEmail(user.email, user.name!, verificationToken).catch(err => {
+      console.error('[Verification] Resend email failed (non-fatal):', err);
+    });
 
     return { message: 'Email de verificacion reenviado' };
   }

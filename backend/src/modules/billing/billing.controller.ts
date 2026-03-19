@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middlewares/auth';
 import { ApiError } from '../../middlewares/errorHandler';
 import { billingService } from './billing.service';
 import { mercadoPagoService } from './mercadopago.service';
+import { ANNUAL_DISCOUNT } from './plans.config';
 
 export class BillingController {
   // GET /api/billing/subscription - Get current subscription
@@ -24,7 +25,12 @@ export class BillingController {
   async getPlans(_req: AuthRequest, res: Response) {
     try {
       const plans = billingService.getPlans();
-      res.json({ plans });
+      const plansGrouped = billingService.getPlansGrouped();
+      res.json({
+        plans,
+        plans_grouped: plansGrouped,
+        annual_discount: ANNUAL_DISCOUNT,
+      });
     } catch (error) {
       res.status(500).json({ error: 'Error al obtener planes' });
     }

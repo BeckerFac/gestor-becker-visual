@@ -67,22 +67,22 @@ const INVOICE_TYPE_DESCRIPTIONS: Record<InvoiceType, string> = {
 }
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: 'Borrador', color: 'bg-yellow-100 text-yellow-800' },
-  authorized: { label: 'Autorizada', color: 'bg-green-100 text-green-800' },
-  cancelled: { label: 'Anulada', color: 'bg-red-100 text-red-800' },
-  emitido: { label: 'Emitido', color: 'bg-blue-100 text-blue-800' },
+  draft: { label: 'Borrador', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
+  authorized: { label: 'Autorizada', color: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' },
+  cancelled: { label: 'Anulada', color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
+  emitido: { label: 'Emitido', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' },
 }
 
 const PAYMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pagado: { label: 'Pagada', color: 'bg-green-100 text-green-800' },
-  parcial: { label: 'Pago parcial', color: 'bg-orange-100 text-orange-800' },
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
+  pagado: { label: 'Pagada', color: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' },
+  parcial: { label: 'Pago parcial', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' },
+  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
 }
 
 const TYPE_BADGE_COLORS: Record<string, string> = {
-  A: 'bg-purple-100 text-purple-800',
-  B: 'bg-blue-100 text-blue-800',
-  C: 'bg-indigo-100 text-indigo-800',
+  A: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  B: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  C: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
 }
 
 const VAT_RATES = [0, 10.5, 21, 27]
@@ -520,12 +520,12 @@ export const Invoices: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Tabs: Fiscal / Interno */}
-      <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit">
         <button
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             vistaMode === 'fiscal'
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
           onClick={() => handleChangeVistaMode('fiscal')}
         >
@@ -534,8 +534,8 @@ export const Invoices: React.FC = () => {
         <button
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             vistaMode === 'no_fiscal'
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
           onClick={() => handleChangeVistaMode('no_fiscal')}
         >
@@ -577,7 +577,7 @@ export const Invoices: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                 value={filterEnterprise}
                 onChange={e => setFilterEnterprise(e.target.value)}
               >
@@ -591,7 +591,7 @@ export const Invoices: React.FC = () => {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-500">Tipo</label>
                 <select
-                  className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                  className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                   value={filterType}
                   onChange={e => setFilterType(e.target.value)}
                 >
@@ -605,7 +605,7 @@ export const Invoices: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Estado</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                 value={filterStatus}
                 onChange={e => setFilterStatus(e.target.value)}
               >
@@ -625,7 +625,7 @@ export const Invoices: React.FC = () => {
               <label className="text-xs font-medium text-gray-500">Buscar</label>
               <div className="flex gap-1">
                 <input
-                  className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                  className="flex-1 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                   placeholder="Cliente, empresa, CAE..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
@@ -729,11 +729,11 @@ export const Invoices: React.FC = () => {
                 {/* Link to order (optional) */}
                 {ordersWithoutInvoice.length > 0 && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Asociar a Pedido <span className="text-xs text-gray-400">(opcional)</span>
                     </label>
                     <select
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                       value={formOrderId}
                       onChange={e => { setFormOrderId(e.target.value); if (!e.target.value) setFormItems([EMPTY_FORM_ITEM()]) }}
                     >
@@ -815,7 +815,7 @@ export const Invoices: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
                     <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
+                      <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                         <th className="px-3 py-2 text-left font-semibold text-gray-600 w-64">Producto / Servicio</th>
                         <th className="px-3 py-2 text-center font-semibold text-gray-600 w-20">Cant.</th>
                         <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">P. Unitario</th>
@@ -830,7 +830,7 @@ export const Invoices: React.FC = () => {
                           <td className="px-3 py-2 relative">
                             <input
                               type="text"
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                               placeholder="Nombre del producto..."
                               value={item.product_name}
                               onChange={e => {
@@ -868,7 +868,7 @@ export const Invoices: React.FC = () => {
                             <input
                               type="number"
                               min="1"
-                              className="w-full text-center px-2 py-1.5 border border-gray-300 rounded text-sm"
+                              className="w-full text-center px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                               value={item.quantity}
                               onChange={e => handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1)}
                             />
@@ -878,7 +878,7 @@ export const Invoices: React.FC = () => {
                               type="number"
                               min="0"
                               step="0.01"
-                              className="w-full text-right px-2 py-1.5 border border-gray-300 rounded text-sm"
+                              className="w-full text-right px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                               value={item.unit_price}
                               onChange={e => handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)}
                             />
@@ -887,7 +887,7 @@ export const Invoices: React.FC = () => {
                             <input
                               type="number" step="0.01" placeholder="21"
                               list={`invoice-vat-list-${idx}`}
-                              className="w-full text-center px-2 py-1.5 border border-gray-300 rounded text-sm"
+                              className="w-full text-center px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                               value={vistaMode !== 'fiscal' || formInvoiceType === 'C' ? 0 : item.vat_rate}
                               onChange={e => handleItemChange(idx, 'vat_rate', parseFloat(e.target.value))}
                               disabled={vistaMode !== 'fiscal' || formInvoiceType === 'C'}
@@ -986,7 +986,7 @@ export const Invoices: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200">
+                <tr className="bg-gray-50 dark:bg-gray-800 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-200 dark:border-gray-700">
                   {vistaMode === 'fiscal' && <th className="px-4 py-3">Tipo</th>}
                   <th className="px-4 py-3">N° Comprobante</th>
                   <th className="px-4 py-3">Fecha</th>
@@ -1006,7 +1006,7 @@ export const Invoices: React.FC = () => {
                   const isLinkOpen = linkDropdownInvoiceId === invoice.id
 
                   return (
-                    <tr key={invoice.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <tr key={invoice.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                       {/* Tipo - only fiscal */}
                       {vistaMode === 'fiscal' && (
                         <td className="px-4 py-3">
@@ -1018,18 +1018,18 @@ export const Invoices: React.FC = () => {
 
                       {/* N° Comprobante */}
                       <td className="px-4 py-3">
-                        <span className="font-mono text-sm text-gray-800">
+                        <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
                           {formatInvoiceNumber(invoice)}
                         </span>
                       </td>
 
                       {/* Fecha */}
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                         {formatDate(invoice.invoice_date)}
                       </td>
 
                       {/* Empresa */}
-                      <td className="px-4 py-3 font-medium text-gray-800">
+                      <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">
                         <div className="flex items-center gap-1.5">
                           {invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
@@ -1037,7 +1037,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Cliente */}
-                      <td className="px-4 py-3 text-gray-700">
+                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                         {invoice.customer?.name || <span className="text-gray-400">Consumidor Final</span>}
                       </td>
 
@@ -1082,7 +1082,7 @@ export const Invoices: React.FC = () => {
                                 <div className="absolute z-10 left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72">
                                   <p className="text-xs font-medium text-gray-600 mb-2">Seleccionar pedido</p>
                                   <select
-                                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs mb-2"
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-xs bg-white dark:bg-gray-700 dark:text-gray-100 mb-2"
                                     value={linkSelectedOrderId}
                                     onChange={e => setLinkSelectedOrderId(e.target.value)}
                                   >
@@ -1116,7 +1116,7 @@ export const Invoices: React.FC = () => {
                       )}
 
                       {/* Total */}
-                      <td className="px-4 py-3 text-right font-bold text-green-700">
+                      <td className="px-4 py-3 text-right font-bold text-green-700 dark:text-green-400">
                         {formatCurrency(parseFloat(invoice.total_amount || '0'))}
                       </td>
 

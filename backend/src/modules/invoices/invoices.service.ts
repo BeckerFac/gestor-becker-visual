@@ -687,7 +687,7 @@ export class InvoicesService {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       console.error('Authorize invoice error:', error);
-      throw new ApiError(500, 'Error al autorizar factura: ' + (error as any).message);
+      throw new ApiError(500, 'Error al autorizar factura');
     }
   }
 }

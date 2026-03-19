@@ -29,13 +29,17 @@ router.get('/health', async (_req: Request, res: Response) => {
 });
 
 // Detailed health check - includes DB, memory, uptime
+// In production, limit information disclosed to prevent reconnaissance
 router.get('/health/detailed', async (_req: Request, res: Response) => {
+  const isProduction = process.env.NODE_ENV === 'production';
   const checks: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     uptime: Math.round(process.uptime()),
-    version: process.env.npm_package_version || '1.0.0',
-    node: process.version,
-    environment: process.env.NODE_ENV || 'development',
+    ...(isProduction ? {} : {
+      version: process.env.npm_package_version || '1.0.0',
+      node: process.version,
+      environment: process.env.NODE_ENV || 'development',
+    }),
   };
 
   // Database check
@@ -70,8 +74,8 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
 
 // Admin-only full system status
 router.get('/api/admin/health', authMiddleware, async (req: AuthRequest, res: Response) => {
-  // Only admins can see full system status
-  if (req.user?.role !== 'admin') {
+  // Only admins/owners can see full system status
+  if (req.user?.role !== 'admin' && req.user?.role !== 'owner') {
     return res.status(403).json({ error: 'Admin access required' });
   }
 

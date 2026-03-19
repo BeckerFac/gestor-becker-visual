@@ -588,16 +588,16 @@ export const Products: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">SKU *<HelpTip text="Codigo unico del producto. Se genera automaticamente pero podes editarlo." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">SKU *<HelpTip text="Codigo unico del producto. Se genera automaticamente pero podes editarlo." /></label>
                   <Input placeholder="PROD-001" value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} required />
                 </div>
                 <Input label="Nombre *" placeholder="Nombre del producto" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Codigo de Barras<HelpTip text="Opcional. Escaneable desde lectores de barras." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Codigo de Barras<HelpTip text="Opcional. Escaneable desde lectores de barras." /></label>
                   <Input placeholder="7790001234567" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Tipo de Producto<HelpTip text="Categoria del producto. Configura los tipos disponibles en 'Gestionar tipos' mas abajo." /></label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Producto<HelpTip text="Categoria del producto. Configura los tipos disponibles en 'Gestionar tipos' mas abajo." /></label>
                   <input
                     list="product-types-list"
                     className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -613,7 +613,7 @@ export const Products: React.FC = () => {
               <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
 
               {/* Stock control */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -622,7 +622,7 @@ export const Products: React.FC = () => {
                       onChange={e => setForm({ ...form, controls_stock: e.target.checked })}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <span className="text-sm font-medium text-gray-700">Controla stock<HelpTip text="Activa para llevar control de inventario. El stock se descuenta automaticamente en pedidos y se suma en compras." /></span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Controla stock<HelpTip text="Activa para llevar control de inventario. El stock se descuenta automaticamente en pedidos y se suma en compras." /></span>
                   </label>
                   {form.controls_stock && (
                     <div className="flex items-center gap-2">
@@ -647,11 +647,11 @@ export const Products: React.FC = () => {
               </div>
 
               {/* Bidirectional Price Fields */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Precios — todos los campos se relacionan entre sí</h4>
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Precios — todos los campos se relacionan entre sí</h4>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Costo (ARS) *<HelpTip text="Precio al que compras este producto. Se usa para calcular el margen." /></label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Costo (ARS) *<HelpTip text="Precio al que compras este producto. Se usa para calcular el margen." /></label>
                     <input
                       type="number" step="0.01" placeholder="0.00" required
                       className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'cost' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
@@ -660,7 +660,7 @@ export const Products: React.FC = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Margen %<HelpTip text="Porcentaje de ganancia sobre el costo. Modifica el precio final automaticamente." /></label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Margen %<HelpTip text="Porcentaje de ganancia sobre el costo. Modifica el precio final automaticamente." /></label>
                     <input
                       type="number" step="0.01" placeholder="30"
                       className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'margin_percent' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
@@ -669,7 +669,7 @@ export const Products: React.FC = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">IVA %</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">IVA %</label>
                     <select
                       className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
                       value={form.vat_rate}
@@ -679,7 +679,7 @@ export const Products: React.FC = () => {
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Precio Final (ARS)</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Precio Final (ARS)</label>
                     <input
                       type="number" step="0.01" placeholder="0.00"
                       className={`px-3 py-2 border rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500 ${lastEdited === 'final_price' ? 'border-green-400 bg-green-50 text-green-800' : 'border-green-300 bg-green-50 text-green-800'}`}
@@ -696,12 +696,12 @@ export const Products: React.FC = () => {
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-amber-800 mb-3">Composicion (BOM)<HelpTip text="Lista de materiales necesarios para fabricar este producto. Cuando se produce, estos materiales se descuentan del inventario." /></h4>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.product_id} onChange={e => setBomNew({ ...bomNew, product_id: e.target.value })}>
+                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.product_id} onChange={e => setBomNew({ ...bomNew, product_id: e.target.value })}>
                       <option value="">Seleccionar material...</option>
                       {products.filter(p => p.id !== editingId).map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
                     </select>
-                    <input type="number" step="0.0001" min="0.0001" placeholder="Cantidad" className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.quantity} onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })} />
-                    <input placeholder="Unidad (unidad, metro, kg...)" className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={bomNew.unit} onChange={e => setBomNew({ ...bomNew, unit: e.target.value })} />
+                    <input type="number" step="0.0001" min="0.0001" placeholder="Cantidad" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.quantity} onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })} />
+                    <input placeholder="Unidad (unidad, metro, kg...)" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.unit} onChange={e => setBomNew({ ...bomNew, unit: e.target.value })} />
                     <Button type="button" variant="primary" onClick={handleAddComponent} disabled={!bomNew.product_id}>+ Agregar</Button>
                   </div>
                   {bomLoading ? (
@@ -764,7 +764,7 @@ export const Products: React.FC = () => {
         <Input placeholder="Buscar por nombre, SKU o codigo de barras..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
         {categories.length > 0 && (
           <select
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
             value={filterCategory}
             onChange={e => setFilterCategory(e.target.value)}
           >
@@ -789,10 +789,10 @@ export const Products: React.FC = () => {
       {/* Categories management (collapsible) */}
       <details className="text-sm">
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar categorias ({categories.length})</summary>
-        <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2">
             <input placeholder="Nombre categoria..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
-            <select value={newCategoryParent} onChange={e => setNewCategoryParent(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
+            <select value={newCategoryParent} onChange={e => setNewCategoryParent(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
               <option value="">Sin padre</option>
               {categories.filter(c => !c.parent_id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -822,7 +822,7 @@ export const Products: React.FC = () => {
       {/* Product Types management (collapsible) */}
       <details className="text-sm">
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar tipos ({productTypes.length})</summary>
-        <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2">
             <input placeholder="Nombre del tipo..." value={newTypeName} onChange={e => setNewTypeName(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
             <input placeholder="Descripcion (opcional)" value={newTypeDesc} onChange={e => setNewTypeDesc(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
@@ -868,10 +868,10 @@ export const Products: React.FC = () => {
       {/* Price Lists management (collapsible) */}
       <details className="text-sm">
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Listas de precios ({priceLists.length})</summary>
-        <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
+        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3">
           <div className="flex items-center gap-2">
             <input placeholder="Nombre de la lista..." value={plForm.name} onChange={e => setPlForm({ ...plForm, name: e.target.value })} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
-            <select value={plForm.type} onChange={e => setPlForm({ ...plForm, type: e.target.value })} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
+            <select value={plForm.type} onChange={e => setPlForm({ ...plForm, type: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
               <option value="default">General</option>
               <option value="customer">Cliente</option>
               <option value="channel">Canal</option>

@@ -13,6 +13,7 @@ import {
   bruteForceProtection,
   additionalSecurityHeaders,
 } from './middlewares/security';
+import { securityAutoBlockCheck } from './middlewares/security-autoblock';
 import { requestIdMiddleware, requestLoggerMiddleware } from './config/logger';
 import { performanceMiddleware } from './middlewares/performanceMonitor';
 import { healthRouter } from './routes/health';
@@ -54,6 +55,8 @@ import { billingRouter } from './modules/billing/billing.router';
 import { auditRouter } from './modules/audit/audit.router';
 import { invitationsRouter } from './modules/invitations/invitations.router';
 import { accountRouter } from './modules/account/account.router';
+import { aiRouter } from './modules/ai/ai.router';
+import { apiKeysRouter } from './modules/apikeys/apikeys.router';
 
 export const app = express();
 
@@ -115,7 +118,7 @@ app.use(cors({
     : ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
   maxAge: 86400, // Pre-flight cache for 24h
 }));
 
@@ -146,6 +149,9 @@ app.use(express.urlencoded({ limit: env.REQUEST_BODY_LIMIT, extended: true }));
 
 // Request sanitization (trim + escape HTML in string inputs)
 app.use(requestSanitizer);
+
+// Auto-block check: deny requests from IPs with 20+ failed logins in 1h
+app.use(securityAutoBlockCheck);
 
 // Audit logging for state-changing operations
 app.use(auditLogger);
@@ -192,6 +198,8 @@ app.use('/api/admin', authMiddleware, adminRouter);
 app.use('/api/audit', authMiddleware, auditRouter);
 app.use('/api/invitations', invitationsRouter); // Mixed auth: validate/accept are public
 app.use('/api/account', authMiddleware, accountRouter); // Data export & deletion (Ley 25.326)
+app.use('/api/ai', authMiddleware, aiRouter); // AI features (Premium)
+app.use('/api/apikeys', authMiddleware, apiKeysRouter); // API key management
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');

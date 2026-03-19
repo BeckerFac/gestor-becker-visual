@@ -7,6 +7,8 @@ import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { exportMultiSheetExcel } from '@/components/shared/ExportExcel'
 import { PlanBadge } from '@/components/billing/PlanBadge'
+import { useBilling } from '@/hooks/useBilling'
+import type { FeatureKey } from '@/hooks/useBilling'
 
 /*
  * Estructura basada en principios de psicologia cognitiva:
@@ -24,6 +26,7 @@ interface NavItem {
   label: string
   icon: string
   module?: string
+  premiumFeature?: FeatureKey  // If set, shows lock icon when feature is not available
 }
 
 interface NavSection {
@@ -46,7 +49,7 @@ const navSections: NavSection[] = [
       { href: '/quotes', label: 'Cotizaciones', icon: '📄', module: 'quotes' },
       { href: '/invoices', label: 'Facturas', icon: '🧾', module: 'invoices' },
       { href: '/remitos', label: 'Remitos', icon: '🚚', module: 'remitos' },
-      { href: '/oportunidades', label: 'Oportunidades', icon: '🎯', module: 'crm' },
+      { href: '/oportunidades', label: 'Oportunidades', icon: '🎯', module: 'crm', premiumFeature: 'crm' },
     ],
   },
   {
@@ -103,6 +106,7 @@ export const Sidebar: React.FC = () => {
 
   const [exporting, setExporting] = useState(false)
   const [billingInfo, setBillingInfo] = useState<{ plan: string; status: string; days_remaining: number | null } | null>(null)
+  const { hasFeature } = useBilling()
 
   useEffect(() => {
     api.getBillingSubscription()
@@ -195,22 +199,32 @@ export const Sidebar: React.FC = () => {
                   {section.label}
                 </p>
               )}
-              {visibleItems.map((item) => (
-                <Link
-                  key={item.href}
-                  to={item.href}
-                  onClick={handleNavClick}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5',
-                    location.pathname === item.href
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  )}
-                >
-                  <span className="text-base leading-none">{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
+              {visibleItems.map((item) => {
+                const isLocked = item.premiumFeature ? !hasFeature(item.premiumFeature) : false
+                return (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    onClick={handleNavClick}
+                    className={cn(
+                      'flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5',
+                      location.pathname === item.href
+                        ? 'bg-blue-600 text-white'
+                        : isLocked
+                          ? 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'
+                          : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                    )}
+                  >
+                    <span className="text-base leading-none">{item.icon}</span>
+                    {item.label}
+                    {isLocked && (
+                      <svg className="w-3.5 h-3.5 ml-auto text-gray-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </Link>
+                )
+              })}
             </div>
           )
         })}

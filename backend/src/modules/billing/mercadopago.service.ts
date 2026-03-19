@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import crypto from 'crypto';
 import { ApiError } from '../../middlewares/errorHandler';
 import { billingService } from './billing.service';
 import { getPlan } from './plans.config';
@@ -91,14 +92,21 @@ class MercadoPagoService {
     const client = this.getClient();
 
     try {
+      // Determine frequency based on billing period
+      const isAnnual = plan.billingPeriod === 'annual';
+      const frequency = isAnnual ? 12 : 1;
+      const frequencyType = 'months';
+      // For annual plans, charge the full annual price upfront
+      const transactionAmount = isAnnual ? plan.priceArs : plan.priceArs;
+
       // Create preapproval (recurring subscription)
       // Docs: https://www.mercadopago.com.ar/developers/es/reference/subscriptions/_preapproval/post
       const response = await client.post('/preapproval', {
-        reason: `Gestor BeckerVisual - Plan ${plan.displayName}`,
+        reason: `Gestor BeckerVisual - Plan ${plan.displayName} (${isAnnual ? 'Anual' : 'Mensual'})`,
         auto_recurring: {
-          frequency: 1,
-          frequency_type: 'months',
-          transaction_amount: plan.priceArs,
+          frequency,
+          frequency_type: frequencyType,
+          transaction_amount: transactionAmount,
           currency_id: 'ARS',
         },
         payer_email: payerEmail,
@@ -218,25 +226,84 @@ class MercadoPagoService {
     }
   }
 
-  // Validate webhook signature (HMAC)
-  // TODO: Implement proper signature validation when deploying
-  // MercadoPago sends x-signature header with HMAC-SHA256
+  // Validate webhook signature (HMAC-SHA256)
+  // MercadoPago sends x-signature header in format: ts=<timestamp>,v1=<hash>
+  // The hash is HMAC-SHA256(secret, "id:<data.id>;request-id:<x-request-id>;ts:<timestamp>;")
   validateWebhookSignature(
-    _headers: Record<string, string>,
+    headers: Record<string, string>,
     _body: string
   ): boolean {
     const config = this.getConfig();
     if (!config.webhookSecret) {
-      // If no secret configured, accept all webhooks (dev mode)
-      console.warn('WARNING: MERCADOPAGO_WEBHOOK_SECRET not set, skipping signature validation');
+      // SECURITY: In production, reject all webhooks if no secret is configured
+      if (process.env.NODE_ENV === 'production') {
+        console.error('SECURITY: MERCADOPAGO_WEBHOOK_SECRET not set in production - rejecting webhook');
+        return false;
+      }
+      console.warn('WARNING: MERCADOPAGO_WEBHOOK_SECRET not set, skipping signature validation (dev mode only)');
       return true;
     }
 
-    // TODO: Implement HMAC validation
-    // const signature = headers['x-signature'];
-    // const requestId = headers['x-request-id'];
-    // ... validate using crypto.createHmac('sha256', config.webhookSecret)
-    return true;
+    const xSignature = headers['x-signature'] || '';
+    const xRequestId = headers['x-request-id'] || '';
+
+    if (!xSignature) {
+      console.warn('Webhook missing x-signature header');
+      return false;
+    }
+
+    // Parse x-signature: ts=<timestamp>,v1=<hash>
+    const parts: Record<string, string> = {};
+    for (const part of xSignature.split(',')) {
+      const [key, ...valueParts] = part.trim().split('=');
+      if (key && valueParts.length > 0) {
+        parts[key] = valueParts.join('=');
+      }
+    }
+
+    const ts = parts['ts'];
+    const receivedHash = parts['v1'];
+
+    if (!ts || !receivedHash) {
+      console.warn('Webhook x-signature missing ts or v1 components');
+      return false;
+    }
+
+    // Reject signatures older than 5 minutes to prevent replay attacks
+    const signatureAge = Math.abs(Date.now() / 1000 - parseInt(ts, 10));
+    if (signatureAge > 300) {
+      console.warn(`Webhook signature too old: ${signatureAge}s`);
+      return false;
+    }
+
+    // Parse the body to extract data.id
+    let dataId = '';
+    try {
+      const parsed = JSON.parse(_body);
+      dataId = parsed?.data?.id || '';
+    } catch {
+      console.warn('Webhook body is not valid JSON');
+      return false;
+    }
+
+    // Build the manifest string per MercadoPago docs
+    const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+
+    // Compute HMAC-SHA256
+    const expectedHash = crypto
+      .createHmac('sha256', config.webhookSecret)
+      .update(manifest)
+      .digest('hex');
+
+    // Constant-time comparison to prevent timing attacks
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(receivedHash, 'hex'),
+        Buffer.from(expectedHash, 'hex')
+      );
+    } catch {
+      return false;
+    }
   }
 }
 

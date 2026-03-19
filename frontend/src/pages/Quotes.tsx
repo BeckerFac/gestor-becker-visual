@@ -52,11 +52,11 @@ interface Product { id: string; name: string; sku: string; pricing?: { cost: str
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-800',
-  sent: 'bg-blue-100 text-blue-800',
-  accepted: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  expired: 'bg-yellow-100 text-yellow-800',
+  draft: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+  sent: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  accepted: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  rejected: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  expired: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -387,7 +387,7 @@ export const Quotes: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={filterEnterprise}
                 onChange={e => setFilterEnterprise(e.target.value)}
               >
@@ -402,7 +402,7 @@ export const Quotes: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Estado</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={filterStatus}
                 onChange={e => setFilterStatus(e.target.value)}
               >
@@ -418,7 +418,7 @@ export const Quotes: React.FC = () => {
               <label className="text-xs font-medium text-gray-500">Buscar</label>
               <input
                 type="text"
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Cliente, titulo, numero..."
                 value={filterSearch}
                 onChange={e => setFilterSearch(e.target.value)}
@@ -481,9 +481,9 @@ export const Quotes: React.FC = () => {
               />
 
               {/* Items section */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-semibold text-gray-700">Items de la Cotizacion</h4>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Items de la Cotizacion</h4>
                   <button type="button" onClick={addItem} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
                     + Agregar Item
                   </button>
@@ -494,13 +494,13 @@ export const Quotes: React.FC = () => {
                 ) : (
                   <div className="space-y-3">
                     {items.map((item, idx) => (
-                      <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3">
+                      <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
                         <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                           {/* Product selector or custom name */}
                           <div className="md:col-span-2 flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">Producto</label>
                             <select
-                              className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                               value={item.product_id}
                               onChange={e => updateItem(idx, 'product_id', e.target.value)}
                             >
@@ -513,7 +513,7 @@ export const Quotes: React.FC = () => {
                             </select>
                             {!item.product_id && (
                               <input
-                                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 placeholder="Nombre del producto/servicio"
                                 value={item.product_name}
                                 onChange={e => updateItem(idx, 'product_name', e.target.value)}
@@ -523,18 +523,18 @@ export const Quotes: React.FC = () => {
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">Cantidad</label>
-                            <input type="number" min="1" className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} required />
+                            <input type="number" min="1" className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} required />
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">Precio Unitario</label>
-                            <input type="number" step="0.01" className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', e.target.value)} required />
+                            <input type="number" step="0.01" className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', e.target.value)} required />
                           </div>
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">IVA %</label>
                             <input
                               type="number" step="0.01" placeholder="21"
                               list={`quote-vat-list-${idx}`}
-                              className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-20"
+                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-20"
                               value={item.vat_rate}
                               onChange={e => updateItem(idx, 'vat_rate', e.target.value)}
                             />
@@ -548,7 +548,7 @@ export const Quotes: React.FC = () => {
                           <div className="flex items-end gap-2">
                             <div className="flex-1 flex flex-col gap-1">
                               <label className="text-xs font-medium text-gray-500">Subtotal</label>
-                              <div className="px-2 py-1.5 bg-green-50 border border-green-300 rounded-lg text-sm font-bold text-green-800">
+                              <div className="px-2 py-1.5 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg text-sm font-bold text-green-800 dark:text-green-300">
                                 {formatCurrency(getItemSubtotal(item))}
                               </div>
                             </div>
@@ -570,15 +570,15 @@ export const Quotes: React.FC = () => {
                 {items.length > 0 && (
                   <div className="mt-4 flex justify-end">
                     <div className="w-72 space-y-1">
-                      <div className="flex justify-between text-sm text-gray-600">
+                      <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                         <span>Subtotal Neto:</span>
                         <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
                       </div>
-                      <div className="flex justify-between text-sm text-gray-600">
+                      <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                         <span>IVA:</span>
                         <span className="font-medium">{formatCurrency(totals.vatAmount)}</span>
                       </div>
-                      <div className="flex justify-between text-lg font-bold text-green-800 pt-2 border-t border-gray-300">
+                      <div className="flex justify-between text-lg font-bold text-green-800 dark:text-green-400 pt-2 border-t border-gray-300 dark:border-gray-600">
                         <span>TOTAL:</span>
                         <span>{formatCurrency(totals.total)}</span>
                       </div>
@@ -618,31 +618,31 @@ export const Quotes: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">N°</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Titulo</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Cliente</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Empresa</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Fecha</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Valida hasta</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Acciones</th>
+                <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">N°</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Titulo</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cliente</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Empresa</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Fecha</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Valida hasta</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Total</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Estado</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {quotes.map(quote => (
-                  <tr key={quote.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={quote.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                     <td className="px-4 py-3">
                       <span className="font-mono font-bold text-blue-700 text-sm">
                         #{String(quote.quote_number || 0).padStart(4, '0')}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{quote.title || '-'}</td>
-                    <td className="px-4 py-3 text-gray-700">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{quote.title || '-'}</td>
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                       {quote.customer?.name ?? <span className="text-gray-400">Sin cliente</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-700">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                       <div className="flex items-center gap-1.5">
                         {quote.enterprise?.name ?? <span className="text-gray-400">-</span>}
                         <TagBadges tags={quote.enterprise_tags || []} size="sm" />
@@ -655,7 +655,7 @@ export const Quotes: React.FC = () => {
                       {quote.valid_until ? formatDate(quote.valid_until) : '-'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-bold text-green-700">{formatCurrency(parseFloat(quote.total_amount || '0'))}</span>
+                      <span className="font-bold text-green-700 dark:text-green-400">{formatCurrency(parseFloat(quote.total_amount || '0'))}</span>
                     </td>
                     <td className="px-4 py-3">
                       <PermissionGate module="quotes" action="edit">

@@ -5,6 +5,8 @@ import { SkeletonTable, SkeletonCards } from '@/components/ui/Skeleton'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { formatDate } from '@/lib/utils'
+import { useBilling } from '@/hooks/useBilling'
+import { UpgradePrompt } from '@/components/shared/UpgradePrompt'
 import { LibroIVAVentasTab } from '@/components/reportes/LibroIVAVentasTab'
 import { LibroIVAComprasTab } from '@/components/reportes/LibroIVAComprasTab'
 import { PosicionIVATab } from '@/components/reportes/PosicionIVATab'
@@ -126,7 +128,13 @@ const flujoExcelCols = [
 
 // -- Component --
 
+// Tabs that require Premium plan (advanced_reports feature)
+const PREMIUM_TABS: TabKey[] = ['biz_rentabilidad', 'biz_clientes', 'biz_cobranzas', 'biz_inventario', 'biz_conversion']
+
 export const Reportes: React.FC = () => {
+  const { hasFeature } = useBilling()
+  const canAccessAdvanced = hasFeature('advanced_reports')
+
   const [activeTab, setActiveTab] = useState<TabKey>('biz_ventas')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -168,6 +176,9 @@ export const Reportes: React.FC = () => {
   }, [dateFrom, dateTo, activeTab])
 
   const loadData = useCallback(async () => {
+    // Don't load data for premium tabs the user can't access
+    if (PREMIUM_TABS.includes(activeTab) && !canAccessAdvanced) return
+
     // Skip date validation for inventory tab
     if (!NO_DATE_TABS.includes(activeTab)) {
       if (validateDateRange(dateFrom, dateTo)) return
@@ -236,7 +247,7 @@ export const Reportes: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [activeTab, dateFrom, dateTo])
+  }, [activeTab, dateFrom, dateTo, canAccessAdvanced])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -376,21 +387,31 @@ export const Reportes: React.FC = () => {
     return { cards: 3, cols: 5 }
   }, [activeTab])
 
-  const renderTabButton = (tab: { key: TabKey; label: string }) => (
-    <button
-      key={tab.key}
-      role="tab"
-      aria-selected={activeTab === tab.key}
-      onClick={() => handleTabChange(tab.key)}
-      className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-        activeTab === tab.key
-          ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20'
-          : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-      }`}
-    >
-      {tab.label}
-    </button>
-  )
+  const renderTabButton = (tab: { key: TabKey; label: string }) => {
+    const isLocked = PREMIUM_TABS.includes(tab.key) && !canAccessAdvanced
+    return (
+      <button
+        key={tab.key}
+        role="tab"
+        aria-selected={activeTab === tab.key}
+        onClick={() => handleTabChange(tab.key)}
+        className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+          activeTab === tab.key
+            ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20'
+            : isLocked
+              ? 'border-transparent text-gray-400 dark:text-gray-500 hover:text-gray-500 hover:border-gray-200'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+        }`}
+      >
+        {tab.label}
+        {isLocked && (
+          <svg className="w-3 h-3 text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+          </svg>
+        )}
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-6 print:space-y-4">
@@ -565,11 +586,11 @@ export const Reportes: React.FC = () => {
 
           {/* Business tabs */}
           {activeTab === 'biz_ventas' && <VentasTab data={bizVentasData} />}
-          {activeTab === 'biz_rentabilidad' && <RentabilidadTab data={bizRentabilidadData} />}
-          {activeTab === 'biz_clientes' && <ClientesTab data={bizClientesData} />}
-          {activeTab === 'biz_cobranzas' && <CobranzasTab data={bizCobranzasData} />}
-          {activeTab === 'biz_inventario' && <InventarioTab data={bizInventarioData} />}
-          {activeTab === 'biz_conversion' && <ConversionTab data={bizConversionData} />}
+          {activeTab === 'biz_rentabilidad' && (canAccessAdvanced ? <RentabilidadTab data={bizRentabilidadData} /> : <UpgradePrompt feature="advanced_reports" />)}
+          {activeTab === 'biz_clientes' && (canAccessAdvanced ? <ClientesTab data={bizClientesData} /> : <UpgradePrompt feature="advanced_reports" />)}
+          {activeTab === 'biz_cobranzas' && (canAccessAdvanced ? <CobranzasTab data={bizCobranzasData} /> : <UpgradePrompt feature="advanced_reports" />)}
+          {activeTab === 'biz_inventario' && (canAccessAdvanced ? <InventarioTab data={bizInventarioData} /> : <UpgradePrompt feature="advanced_reports" />)}
+          {activeTab === 'biz_conversion' && (canAccessAdvanced ? <ConversionTab data={bizConversionData} /> : <UpgradePrompt feature="advanced_reports" />)}
         </>
       )}
     </div>

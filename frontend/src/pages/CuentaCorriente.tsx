@@ -310,11 +310,11 @@ export const CuentaCorriente: React.FC = () => {
                 {resumen.map((r) => (
                   <React.Fragment key={r.id}>
                     <tr
-                      className="border-b hover:bg-gray-50 cursor-pointer even:bg-gray-50/50"
+                      className="border-b dark:border-gray-700 hover:bg-gray-50 cursor-pointer even:bg-gray-50/50"
                       onClick={() => handleVerDetalle(r.id)}
                     >
                       <td className="px-6 py-4">
-                        <span className="font-medium text-gray-900">{r.name}</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{r.name}</span>
                         {r.cuit && (
                           <span className="block text-xs text-gray-400 font-mono mt-0.5">
                             {r.cuit}

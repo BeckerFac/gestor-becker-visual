@@ -570,7 +570,7 @@ export const Remitos: React.FC = () => {
       {showForm && (
         <Card className="animate-fadeIn">
           <CardHeader>
-            <h3 className="text-lg font-semibold text-gray-900">Nuevo Remito</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Nuevo Remito</h3>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreateRemito} className="space-y-5">
@@ -617,7 +617,7 @@ export const Remitos: React.FC = () => {
               {/* Order + Date */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Pedido asociado (opcional)</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Pedido asociado (opcional)</label>
                   <select
                     className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     value={form.order_id}
@@ -664,7 +664,7 @@ export const Remitos: React.FC = () => {
               {/* Items */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-700">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Items a {form.tipo === 'recepcion' ? 'recepcionar' : 'entregar'}
                   </label>
                   <button
@@ -802,7 +802,7 @@ export const Remitos: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {remitos.map(remito => (
-                  <tr key={remito.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={remito.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                     <td className="px-4 py-3">
                       <span className="font-mono font-bold text-blue-700 text-sm">
                         {fmtRemitoNumber(remito.remito_number)}

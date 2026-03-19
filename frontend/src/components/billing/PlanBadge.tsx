@@ -7,20 +7,28 @@ interface PlanBadgeProps {
   size?: 'sm' | 'md'
 }
 
+function getPlanGroup(planId: string): string {
+  if (planId.startsWith('estandar_')) return 'estandar'
+  if (planId.startsWith('premium_')) return 'premium'
+  return planId
+}
+
+function getBillingPeriod(planId: string): string {
+  if (planId.endsWith('_annual')) return 'Anual'
+  if (planId.endsWith('_monthly')) return 'Mensual'
+  return ''
+}
+
 const PLAN_COLORS: Record<string, string> = {
   trial: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  starter: 'bg-blue-100 text-blue-800 border-blue-200',
-  pyme: 'bg-green-100 text-green-800 border-green-200',
-  profesional: 'bg-purple-100 text-purple-800 border-purple-200',
-  enterprise: 'bg-orange-100 text-orange-800 border-orange-200',
+  estandar: 'bg-blue-100 text-blue-800 border-blue-200',
+  premium: 'bg-purple-100 text-purple-800 border-purple-200',
 }
 
 const PLAN_LABELS: Record<string, string> = {
   trial: 'Prueba',
-  starter: 'Starter',
-  pyme: 'PyME',
-  profesional: 'Pro',
-  enterprise: 'Enterprise',
+  estandar: 'Estandar',
+  premium: 'Premium',
 }
 
 const STATUS_INDICATORS: Record<string, string> = {
@@ -32,9 +40,12 @@ const STATUS_INDICATORS: Record<string, string> = {
 }
 
 export const PlanBadge: React.FC<PlanBadgeProps> = ({ plan, status, size = 'sm' }) => {
-  const colorClass = PLAN_COLORS[plan] || PLAN_COLORS.trial
-  const label = PLAN_LABELS[plan] || plan
+  const group = getPlanGroup(plan)
+  const period = getBillingPeriod(plan)
+  const colorClass = PLAN_COLORS[group] || PLAN_COLORS.trial
+  const label = PLAN_LABELS[group] || plan
   const statusSuffix = status ? (STATUS_INDICATORS[status] || '') : ''
+  const periodSuffix = period ? ` ${period}` : ''
 
   return (
     <span
@@ -44,7 +55,7 @@ export const PlanBadge: React.FC<PlanBadgeProps> = ({ plan, status, size = 'sm' 
         size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'
       )}
     >
-      {label}{statusSuffix}
+      {label}{periodSuffix}{statusSuffix}
     </span>
   )
 }

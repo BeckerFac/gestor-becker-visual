@@ -8,21 +8,37 @@ import { UpgradeModal } from './UpgradeModal'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 
+interface PlanFeatures {
+  facturacion: boolean
+  pedidos: boolean
+  stock: boolean
+  reportesBasicos: boolean
+  reportesAvanzados: boolean
+  crm: boolean
+  portal: boolean
+  aiChat: boolean
+  aiInsights: boolean
+  aiNarratives: boolean
+  customBranding: boolean
+}
+
 interface SubscriptionData {
   plan: string
+  billing_period: 'monthly' | 'annual' | null
   status: string
   plan_details: {
     displayName: string
+    billingPeriod: 'monthly' | 'annual' | 'none'
     priceArs: number
+    priceArsMonthly: number
+    basePlanGroup: string
+    features: PlanFeatures
     limits: {
       invoicesPerMonth: number
       usersMax: number
       aiEnabled: boolean
       aiLevel: string
       storageMb: number
-      portalEnabled: boolean
-      crmEnabled: boolean
-      reportsAdvanced: boolean
     }
   }
   usage: {
@@ -34,10 +50,26 @@ interface SubscriptionData {
   }
   days_remaining: number | null
   is_trial: boolean
+  is_estandar: boolean
+  is_premium: boolean
   can_use: boolean
   trial_ends_at: string | null
   current_period_end: string | null
 }
+
+const FEATURE_LABELS: Array<{ key: keyof PlanFeatures; label: string }> = [
+  { key: 'facturacion', label: 'Facturacion AFIP' },
+  { key: 'pedidos', label: 'Pedidos' },
+  { key: 'stock', label: 'Stock' },
+  { key: 'reportesBasicos', label: 'Reportes basicos' },
+  { key: 'crm', label: 'CRM' },
+  { key: 'portal', label: 'Portal clientes' },
+  { key: 'reportesAvanzados', label: 'Reportes avanzados' },
+  { key: 'aiChat', label: 'IA Chat' },
+  { key: 'aiInsights', label: 'IA Insights' },
+  { key: 'aiNarratives', label: 'IA Narrativas' },
+  { key: 'customBranding', label: 'Branding' },
+]
 
 export const BillingSection: React.FC = () => {
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null)
@@ -93,8 +125,29 @@ export const BillingSection: React.FC = () => {
 
   if (!subscription) return null
 
-  const { plan_details, usage, days_remaining, is_trial, status } = subscription
+  const { plan_details, usage, days_remaining, is_trial, is_estandar, is_premium, status } = subscription
   const limits = plan_details.limits
+  const features = plan_details.features
+
+  // Determine billing period label
+  const periodLabel = plan_details.billingPeriod === 'annual'
+    ? 'Anual'
+    : plan_details.billingPeriod === 'monthly'
+      ? 'Mensual'
+      : ''
+
+  // Display name with period
+  const planDisplayName = periodLabel
+    ? `${plan_details.displayName} ${periodLabel}`
+    : plan_details.displayName
+
+  // Show usage meters only for Estandar (Premium is unlimited)
+  const showUsageMeters = is_estandar
+
+  // Determine CTA button text
+  const isTrialOrExpired = is_trial || status === 'expired'
+  const showChangeToPremium = is_estandar
+  const showChangeToAnnual = (is_estandar || is_premium) && plan_details.billingPeriod === 'monthly'
 
   function formatPrice(priceArs: number): string {
     if (priceArs === 0) return 'Gratis'
@@ -121,11 +174,13 @@ export const BillingSection: React.FC = () => {
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
               <div>
                 <p className="font-semibold text-gray-900">
-                  Plan {plan_details.displayName}
+                  Plan {planDisplayName}
                 </p>
                 <p className="text-sm text-gray-500">
                   {plan_details.priceArs > 0
-                    ? `${formatPrice(plan_details.priceArs)}/mes`
+                    ? plan_details.billingPeriod === 'annual'
+                      ? `${formatPrice(plan_details.priceArsMonthly)}/mes (${formatPrice(plan_details.priceArs)}/año)`
+                      : `${formatPrice(plan_details.priceArs)}/mes`
                     : 'Gratis'
                   }
                 </p>
@@ -150,11 +205,30 @@ export const BillingSection: React.FC = () => {
                   </p>
                 )}
               </div>
-              <div className="flex gap-2">
-                <Button variant="primary" onClick={() => setShowUpgrade(true)}>
-                  {is_trial || status === 'expired' ? 'Elegir Plan' : 'Cambiar Plan'}
-                </Button>
-                {status === 'active' && subscription.plan !== 'trial' && (
+              <div className="flex flex-col gap-2 items-end">
+                {/* Trial/Expired users: "Elegir Plan" */}
+                {isTrialOrExpired && (
+                  <Button variant="primary" onClick={() => setShowUpgrade(true)}>
+                    Elegir Plan
+                  </Button>
+                )}
+
+                {/* Estandar users: "Cambiar a Premium" */}
+                {showChangeToPremium && (
+                  <Button variant="primary" onClick={() => setShowUpgrade(true)}>
+                    Cambiar a Premium
+                  </Button>
+                )}
+
+                {/* Monthly users: "Cambiar a anual" */}
+                {showChangeToAnnual && (
+                  <Button variant="secondary" onClick={() => setShowUpgrade(true)}>
+                    Cambiar a anual (ahorra 32%)
+                  </Button>
+                )}
+
+                {/* Cancel button for active paid plans */}
+                {status === 'active' && !is_trial && (
                   <Button variant="secondary" onClick={() => setShowCancel(true)}>
                     Cancelar
                   </Button>
@@ -162,40 +236,45 @@ export const BillingSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Usage meters */}
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Uso este mes</h4>
-              <div className="space-y-3">
-                <UsageMeter
-                  label="Comprobantes"
-                  current={usage.total_documents}
-                  limit={limits.invoicesPerMonth}
-                  unit="este mes"
-                />
-                <UsageMeter
-                  label="Usuarios"
-                  current={usage.users_count}
-                  limit={limits.usersMax}
-                />
+            {/* Usage meters - only for Estandar (Premium is unlimited) */}
+            {showUsageMeters && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Uso este mes</h4>
+                <div className="space-y-3">
+                  <UsageMeter
+                    label="Comprobantes"
+                    current={usage.total_documents}
+                    limit={limits.invoicesPerMonth}
+                    unit="este mes"
+                  />
+                  <UsageMeter
+                    label="Usuarios"
+                    current={usage.users_count}
+                    limit={limits.usersMax}
+                  />
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Premium unlimited indicator */}
+            {is_premium && (
+              <div className="text-sm text-green-600 font-medium p-3 bg-green-50 rounded-lg">
+                Comprobantes y usuarios ilimitados
+              </div>
+            )}
 
             {/* Features */}
             <div>
               <h4 className="text-sm font-semibold text-gray-700 mb-2">Funciones incluidas</h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                <div className={limits.aiEnabled ? 'text-green-600' : 'text-gray-400'}>
-                  {limits.aiEnabled ? 'OK' : '--'} IA {limits.aiLevel === 'full' ? 'completa' : limits.aiLevel === 'basic' ? 'basica' : ''}
-                </div>
-                <div className={limits.portalEnabled ? 'text-green-600' : 'text-gray-400'}>
-                  {limits.portalEnabled ? 'OK' : '--'} Portal clientes
-                </div>
-                <div className={limits.crmEnabled ? 'text-green-600' : 'text-gray-400'}>
-                  {limits.crmEnabled ? 'OK' : '--'} CRM
-                </div>
-                <div className={limits.reportsAdvanced ? 'text-green-600' : 'text-gray-400'}>
-                  {limits.reportsAdvanced ? 'OK' : '--'} Reportes avanzados
-                </div>
+                {FEATURE_LABELS.map(({ key, label }) => {
+                  const included = features[key]
+                  return (
+                    <div key={key} className={included ? 'text-green-600' : 'text-gray-400'}>
+                      {included ? 'OK' : '--'} {label}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -206,12 +285,16 @@ export const BillingSection: React.FC = () => {
         open={showUpgrade}
         onClose={() => { setShowUpgrade(false); loadSubscription() }}
         currentPlan={subscription.plan}
+        currentPlanGroup={plan_details.basePlanGroup}
+        isTrialOrExpired={isTrialOrExpired}
+        isEstandar={is_estandar}
+        isPremium={is_premium}
       />
 
       <ConfirmDialog
         open={showCancel}
         title="Cancelar Suscripcion"
-        message="Al cancelar, mantenes acceso hasta el final del periodo actual. Despues de eso, tu cuenta pasara al plan gratuito con funciones limitadas."
+        message="Al cancelar, mantenes acceso hasta el final del periodo actual. Despues de eso, tu cuenta quedara en modo lectura."
         confirmLabel="Cancelar Suscripcion"
         variant="danger"
         loading={cancelling}

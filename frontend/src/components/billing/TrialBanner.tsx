@@ -6,17 +6,27 @@ interface TrialBannerProps {
   daysRemaining: number | null
   status: string
   plan: string
+  planGroup?: string
+  isEstandar?: boolean
+  isPremium?: boolean
 }
 
 export const TrialBanner: React.FC<TrialBannerProps> = ({
   daysRemaining,
   status,
   plan,
+  planGroup,
+  isEstandar = false,
+  isPremium = false,
 }) => {
   const [showUpgrade, setShowUpgrade] = useState(false)
 
-  // Don't show banner for active paid plans
+  // Don't show banner for active paid plans (Estandar or Premium)
+  // Estandar users paid - respect them, no upgrade pressure
   if (status === 'active' && plan !== 'trial') return null
+
+  // Premium users have everything, no banner needed
+  if (isPremium) return null
 
   let message = ''
   let variant: 'info' | 'warning' | 'danger' = 'info'
@@ -48,6 +58,8 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({
     danger: 'bg-red-50 border-red-200 text-red-800',
   }
 
+  const isTrialOrExpired = status === 'trial' || status === 'expired'
+
   return (
     <>
       <div className={`flex items-center justify-between px-4 py-2 border rounded-lg text-sm ${bgColors[variant]}`}>
@@ -57,7 +69,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({
           className="ml-4 text-xs px-3 py-1"
           onClick={() => setShowUpgrade(true)}
         >
-          Ver planes
+          {isTrialOrExpired ? 'Elegir plan' : 'Ver planes'}
         </Button>
       </div>
 
@@ -65,6 +77,10 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({
         open={showUpgrade}
         onClose={() => setShowUpgrade(false)}
         currentPlan={plan}
+        currentPlanGroup={planGroup}
+        isTrialOrExpired={isTrialOrExpired}
+        isEstandar={isEstandar}
+        isPremium={isPremium}
       />
     </>
   )

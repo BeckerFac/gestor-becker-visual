@@ -483,7 +483,7 @@ export const Cheques: React.FC = () => {
                 <Input label="Numero de Cheque *" placeholder="Ej: 12345678" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} required />
                 <Input label="Banco *" placeholder="Ej: Banco Nacion" value={form.bank} onChange={e => setForm({ ...form, bank: e.target.value })} required />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Tipo de Cheque</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Cheque</label>
                   <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.cheque_type} onChange={e => setForm({ ...form, cheque_type: e.target.value })}>
                     {CHEQUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
@@ -498,8 +498,8 @@ export const Cheques: React.FC = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Cliente (opcional)</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cliente (opcional)</label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
                     <option value="">Sin cliente asociado</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
@@ -537,7 +537,7 @@ export const Cheques: React.FC = () => {
                 <CardContent className="pt-4">
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h4 className="font-semibold text-gray-900">Cheque N. {cheque.number}</h4>
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100">Cheque N. {cheque.number}</h4>
                       <p className="text-sm text-gray-600">
                         {cheque.bank} - {cheque.drawer}
                         {cheque.drawer_cuit && <span className="font-mono text-gray-400 ml-1">({cheque.drawer_cuit})</span>}

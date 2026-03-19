@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { crmController } from './crm.controller';
 import { authorize } from '../../middlewares/authorize';
+import { requireFeature } from '../../middlewares/featureGate';
 
 export const crmRouter = Router();
+
+// All CRM routes require the 'crm' feature (Estandar, Premium, or active Trial)
+crmRouter.use(requireFeature('crm'));
 
 // Stages
 crmRouter.get('/stages', authorize('enterprises', 'view'), (req, res) => crmController.getStages(req as any, res));

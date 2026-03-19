@@ -1131,12 +1131,22 @@ export const api = {
   },
 
   // Superadmin
-  adminGetAllCompanies: async () => {
-    const { data } = await client.get('/admin/companies')
+  adminGetAllCompanies: async (params?: {
+    search?: string; plan?: string; status?: string; sortBy?: string; sortDir?: string
+  }) => {
+    const { data } = await client.get('/admin/companies', { params })
     return data
   },
   adminGetCompanyDetail: async (id: string) => {
     const { data } = await client.get(`/admin/companies/${id}`)
+    return data
+  },
+  adminBlockCompany: async (id: string, category: string, reason: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/block`, { category, reason })
+    return data
+  },
+  adminUnblockCompany: async (id: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/unblock`)
     return data
   },
   adminDisableCompany: async (id: string, reason: string) => {
@@ -1151,12 +1161,58 @@ export const api = {
     const { data } = await client.post(`/admin/companies/${id}/impersonate`)
     return data
   },
+  adminCreateCompany: async (data: {
+    name: string; cuit: string; adminEmail: string; adminName: string; plan: string; billingPeriod: string
+  }) => {
+    const { data: result } = await client.post('/admin/companies', data)
+    return result
+  },
+  adminUpdateCompanyPlan: async (id: string, data: {
+    plan?: string; billingPeriod?: string; planOverrides?: Record<string, any>; trialExtensionDays?: number
+  }) => {
+    const { data: result } = await client.put(`/admin/companies/${id}/plan`, data)
+    return result
+  },
+  adminListBackups: async (id: string) => {
+    const { data } = await client.get(`/admin/companies/${id}/backups`)
+    return data
+  },
+  adminRestoreBackup: async (id: string, backupId: string) => {
+    const { data } = await client.post(`/admin/companies/${id}/restore`, { backupId })
+    return data
+  },
+  adminGetAuditTrail: async (id: string, limit?: number) => {
+    const { data } = await client.get(`/admin/companies/${id}/audit`, { params: { limit } })
+    return data
+  },
+  adminGetBlockReasonCategories: async () => {
+    const { data } = await client.get('/admin/block-reasons')
+    return data
+  },
   adminGetSystemStats: async () => {
     const { data } = await client.get('/admin/stats')
     return data
   },
   adminGetSystemHealth: async () => {
     const { data } = await client.get('/admin/health')
+    return data
+  },
+
+  // AI Features (Premium)
+  getAiStatus: async () => {
+    const { data } = await client.get('/ai/status')
+    return data
+  },
+  aiChat: async (question: string, mode?: 'context' | 'sql') => {
+    const { data } = await client.post('/ai/chat', { question, mode: mode || 'context' })
+    return data
+  },
+  getAiInsights: async () => {
+    const { data } = await client.get('/ai/insights')
+    return data
+  },
+  generateAiNarrative: async (reportType: string, reportData: any) => {
+    const { data } = await client.post('/ai/narrative', { report_type: reportType, report_data: reportData })
     return data
   },
 

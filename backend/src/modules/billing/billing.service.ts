@@ -1,7 +1,16 @@
 import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
-import { getPlan, PLANS, TRIAL_DURATION_DAYS, PlanDefinition } from './plans.config';
+import {
+  getPlan,
+  PLANS,
+  TRIAL_DURATION_DAYS,
+  PlanDefinition,
+  BillingPeriod,
+  isEstandarPlan,
+  isPremiumPlan,
+  getPlansGrouped,
+} from './plans.config';
 
 export type SubscriptionStatus = 'trial' | 'active' | 'past_due' | 'cancelled' | 'expired';
 
@@ -9,6 +18,7 @@ export interface Subscription {
   id: string;
   company_id: string;
   plan: string;
+  billing_period: BillingPeriod | null;
   status: SubscriptionStatus;
   trial_ends_at: string | null;
   current_period_start: string | null;
@@ -42,6 +52,8 @@ export interface SubscriptionWithPlan extends Subscription {
   usage: UsageSummary;
   days_remaining: number | null;
   is_trial: boolean;
+  is_estandar: boolean;
+  is_premium: boolean;
   can_use: boolean;
 }
 
@@ -58,6 +70,7 @@ class BillingService {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
           plan VARCHAR(50) NOT NULL DEFAULT 'trial',
+          billing_period VARCHAR(20),
           status VARCHAR(50) NOT NULL DEFAULT 'trial',
           trial_ends_at TIMESTAMP WITH TIME ZONE,
           current_period_start TIMESTAMP WITH TIME ZONE,
@@ -68,6 +81,19 @@ class BillingService {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           UNIQUE(company_id)
         )
+      `);
+
+      // Add billing_period column if it does not exist (migration for existing DBs)
+      await pool.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'subscriptions' AND column_name = 'billing_period'
+          ) THEN
+            ALTER TABLE subscriptions ADD COLUMN billing_period VARCHAR(20);
+          END IF;
+        END $$;
       `);
 
       await pool.query(`
@@ -164,6 +190,8 @@ class BillingService {
       usage,
       days_remaining: daysRemaining,
       is_trial: subscription.status === 'trial',
+      is_estandar: isEstandarPlan(subscription.plan),
+      is_premium: isPremiumPlan(subscription.plan),
       can_use: canUse,
     };
   }
@@ -176,8 +204,8 @@ class BillingService {
     trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DURATION_DAYS);
 
     const result = await db.execute(sql`
-      INSERT INTO subscriptions (company_id, plan, status, trial_ends_at)
-      VALUES (${companyId}, 'trial', 'trial', ${trialEndsAt.toISOString()})
+      INSERT INTO subscriptions (company_id, plan, billing_period, status, trial_ends_at)
+      VALUES (${companyId}, 'trial', NULL, 'trial', ${trialEndsAt.toISOString()})
       ON CONFLICT (company_id) DO NOTHING
       RETURNING *
     `);
@@ -194,7 +222,7 @@ class BillingService {
     return rows[0] as Subscription;
   }
 
-  // Upgrade plan (called after successful payment)
+  // Upgrade/change plan (called after successful payment)
   async upgradePlan(
     companyId: string,
     planId: string,
@@ -210,13 +238,27 @@ class BillingService {
       throw new ApiError(400, 'Plan no valido');
     }
 
+    // Validate plan ID exists in our plan definitions
+    if (!PLANS[planId]) {
+      throw new ApiError(400, 'Plan no valido');
+    }
+
     const now = new Date();
     const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+    // Set period based on billing period
+    if (plan.billingPeriod === 'annual') {
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    } else {
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    }
+
+    const billingPeriod = plan.billingPeriod === 'none' ? null : plan.billingPeriod;
 
     const result = await db.execute(sql`
       UPDATE subscriptions SET
         plan = ${planId},
+        billing_period = ${billingPeriod},
         status = 'active',
         current_period_start = ${now.toISOString()},
         current_period_end = ${periodEnd.toISOString()},
@@ -260,9 +302,18 @@ class BillingService {
   async renewSubscription(companyId: string): Promise<Subscription> {
     await this.ensureMigrations();
 
+    // Fetch current subscription to determine billing period
+    const current = await this.getSubscription(companyId);
+    const plan = getPlan(current.plan);
+
     const now = new Date();
     const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+    if (plan.billingPeriod === 'annual') {
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    } else {
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    }
 
     const result = await db.execute(sql`
       UPDATE subscriptions SET
@@ -415,7 +466,7 @@ class BillingService {
             allowed: false,
             current,
             limit,
-            message: `Alcanzaste el limite de ${limit} comprobantes/mes de tu plan ${subscriptionData.plan_details.displayName}. Upgrade para continuar.`,
+            message: `Alcanzaste el limite de ${limit} comprobantes/mes de tu plan ${subscriptionData.plan_details.displayName}. Cambia a Premium para continuar.`,
           };
         }
         return { allowed: true, current, limit, message: null };
@@ -428,7 +479,7 @@ class BillingService {
             allowed: false,
             current,
             limit,
-            message: `Alcanzaste el limite de ${limit} comprobantes/mes de tu plan ${subscriptionData.plan_details.displayName}. Upgrade para continuar.`,
+            message: `Alcanzaste el limite de ${limit} comprobantes/mes de tu plan ${subscriptionData.plan_details.displayName}. Cambia a Premium para continuar.`,
           };
         }
         return { allowed: true, current, limit, message: null };
@@ -441,7 +492,7 @@ class BillingService {
             allowed: false,
             current,
             limit,
-            message: `Alcanzaste el limite de ${limit} usuarios de tu plan ${subscriptionData.plan_details.displayName}. Upgrade para agregar mas usuarios.`,
+            message: `Alcanzaste el limite de ${limit} usuarios de tu plan ${subscriptionData.plan_details.displayName}. Cambia a Premium para agregar mas usuarios.`,
           };
         }
         return { allowed: true, current, limit, message: null };
@@ -451,11 +502,16 @@ class BillingService {
     }
   }
 
-  // Get all plans for display
+  // Get all plans for display (grouped by base plan)
   getPlans(): ReadonlyArray<PlanDefinition> {
     return Object.values(PLANS)
       .filter(p => p.id !== 'trial')
       .sort((a, b) => a.order - b.order);
+  }
+
+  // Get plans grouped for frontend display
+  getPlansGrouped() {
+    return getPlansGrouped();
   }
 }
 

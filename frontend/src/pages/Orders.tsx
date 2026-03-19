@@ -777,34 +777,34 @@ export const Orders: React.FC = () => {
         }} />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <Card className="border border-yellow-200 bg-yellow-50">
+        <Card className="border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/40">
           <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-yellow-700 truncate">Pendientes</p>
-            <p className="text-lg md:text-xl font-bold text-yellow-800 truncate">{periodSummary.pendientes}</p>
+            <p className="text-xs text-yellow-700 dark:text-yellow-400 truncate">Pendientes</p>
+            <p className="text-lg md:text-xl font-bold text-yellow-800 dark:text-yellow-300 truncate">{periodSummary.pendientes}</p>
           </CardContent>
         </Card>
-        <Card className="border border-blue-200 bg-blue-50">
+        <Card className="border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40">
           <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-blue-700 truncate">En Produccion</p>
-            <p className="text-lg md:text-xl font-bold text-blue-800 truncate">{periodSummary.en_produccion}</p>
+            <p className="text-xs text-blue-700 dark:text-blue-400 truncate">En Produccion</p>
+            <p className="text-lg md:text-xl font-bold text-blue-800 dark:text-blue-300 truncate">{periodSummary.en_produccion}</p>
           </CardContent>
         </Card>
-        <Card className="border border-green-200 bg-green-50">
+        <Card className="border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/40">
           <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-green-700 truncate">Terminados</p>
-            <p className="text-lg md:text-xl font-bold text-green-800 truncate">{periodSummary.terminados}</p>
+            <p className="text-xs text-green-700 dark:text-green-400 truncate">Terminados</p>
+            <p className="text-lg md:text-xl font-bold text-green-800 dark:text-green-300 truncate">{periodSummary.terminados}</p>
           </CardContent>
         </Card>
-        <Card className="border border-emerald-200 bg-emerald-50">
+        <Card className="border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40">
           <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-emerald-700 truncate">Entregados</p>
-            <p className="text-lg md:text-xl font-bold text-emerald-800 truncate">{periodSummary.entregados}</p>
+            <p className="text-xs text-emerald-700 dark:text-emerald-400 truncate">Entregados</p>
+            <p className="text-lg md:text-xl font-bold text-emerald-800 dark:text-emerald-300 truncate">{periodSummary.entregados}</p>
           </CardContent>
         </Card>
-        <Card className="border border-indigo-200 bg-indigo-50">
+        <Card className="border border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/40">
           <CardContent className="pt-3 pb-2 overflow-hidden">
-            <p className="text-xs text-indigo-700 truncate">Facturado</p>
-            <p className="text-lg md:text-xl font-bold text-indigo-800 truncate">{formatCurrency(periodSummary.total_facturado)}</p>
+            <p className="text-xs text-indigo-700 dark:text-indigo-400 truncate">Facturado</p>
+            <p className="text-lg md:text-xl font-bold text-indigo-800 dark:text-indigo-300 truncate">{formatCurrency(periodSummary.total_facturado)}</p>
           </CardContent>
         </Card>
       </div>
@@ -851,7 +851,7 @@ export const Orders: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Buscar</label>
               <div className="flex gap-1">
-                <input className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" placeholder="Producto, cliente..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} />
+                <input className="flex-1 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" placeholder="Producto, cliente..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} />
                 <button onClick={handleSearch} className="px-2 py-1.5 bg-blue-600 text-white rounded-lg text-sm">Ir</button>
               </div>
             </div>
@@ -907,7 +907,7 @@ export const Orders: React.FC = () => {
 
                 <div className="space-y-3">
                   {formItems.map((item, idx) => (
-                    <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3">
+                    <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
                       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                         {/* Product type */}
                         <div className="flex flex-col gap-1">
@@ -979,7 +979,7 @@ export const Orders: React.FC = () => {
                         <div className="flex items-end gap-2">
                           <div className="flex-1 flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">Subtotal</label>
-                            <div className="px-2 py-1.5 bg-green-50 border border-green-300 rounded-lg text-sm font-bold text-green-800">
+                            <div className="px-2 py-1.5 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg text-sm font-bold text-green-800 dark:text-green-300">
                               {formatCurrency(getFormItemSubtotal(item))}
                             </div>
                           </div>
@@ -998,7 +998,7 @@ export const Orders: React.FC = () => {
                       {/* Description + stock checkbox */}
                       <div className="mt-2 flex items-center gap-4">
                         <input
-                          className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 px-2 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           placeholder="Descripcion adicional del item (opcional)"
                           value={item.description}
                           onChange={e => updateFormItem(idx, 'description', e.target.value)}
@@ -1031,7 +1031,7 @@ export const Orders: React.FC = () => {
                       <input
                         type="number" step="0.01" placeholder="21"
                         list="order-vat-rate-list"
-                        className="px-2 py-1 border border-gray-300 rounded text-sm w-20"
+                        className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm w-20 bg-white dark:bg-gray-700 dark:text-gray-100"
                         value={form.vat_rate}
                         onChange={e => setForm({ ...form, vat_rate: e.target.value })}
                       />
@@ -1042,15 +1042,15 @@ export const Orders: React.FC = () => {
                         <option value="27">27%</option>
                       </datalist>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-600">
+                    <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                       <span>Subtotal Neto:</span>
                       <span className="font-medium">{formatCurrency(formTotals.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-600">
+                    <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                       <span>IVA ({form.vat_rate}%):</span>
                       <span className="font-medium">{formatCurrency(formTotals.vat)}</span>
                     </div>
-                    <div className="flex justify-between text-lg font-bold text-green-800 pt-2 border-t border-gray-300">
+                    <div className="flex justify-between text-lg font-bold text-green-800 dark:text-green-400 pt-2 border-t border-gray-300 dark:border-gray-600">
                       <span>TOTAL:</span>
                       <span>{formatCurrency(formTotals.total)}</span>
                     </div>
@@ -1111,7 +1111,7 @@ export const Orders: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
+                <tr className="bg-gray-50 dark:bg-gray-800 text-left text-sm font-medium text-gray-500 dark:text-gray-400">
                   <th className="px-4 py-3">N</th>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Empresa</th>
@@ -1130,14 +1130,14 @@ export const Orders: React.FC = () => {
                       onClick={() => toggleExpand(order.id)}
                     >
                       <td className="px-4 py-3">
-                        <span className="font-mono font-bold text-blue-700">#{String(order.order_number || 0).padStart(4, '0')}</span>
+                        <span className="font-mono font-bold text-blue-700 dark:text-blue-400">#{String(order.order_number || 0).padStart(4, '0')}</span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{formatDate(order.created_at)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(order.created_at)}</td>
                       <td className="px-4 py-3">
                         {order.enterprise ? (
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <p className="text-sm font-semibold text-gray-900">{order.enterprise.name}</p>
+                              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{order.enterprise.name}</p>
                               <TagBadges tags={order.enterprise_tags || []} size="sm" />
                             </div>
                             {order.customer?.name && <p className="text-xs text-gray-500">{order.customer.name}</p>}
@@ -1152,16 +1152,16 @@ export const Orders: React.FC = () => {
                         <div>
                           <p className="font-medium text-sm">{order.title}</p>
                           <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
                               {order.product_type || 'otro'}
                             </span>
                             {order.quote && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-mono">
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 font-mono">
                                 Cot #{String(order.quote.quote_number || 0).padStart(4, '0')}
                               </span>
                             )}
                             {order.cobro && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700 dark:bg-green-900/40 dark:text-green-300">
                                 Cobro: {formatCurrency(parseFloat(order.cobro.amount || '0'))}
                               </span>
                             )}
@@ -1169,16 +1169,16 @@ export const Orders: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="font-bold text-green-700">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
+                        <span className="font-bold text-green-700 dark:text-green-400">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
                       </td>
                       <td className="px-4 py-2 text-center">
                         <span
                           className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
                             order.payment_status === 'pagado'
-                              ? 'bg-green-100 text-green-800'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
                               : order.payment_status === 'parcial'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-red-100 text-red-800'
+                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
                           }`}
                         >
                           {order.payment_status === 'pagado' ? 'Pagado' : order.payment_status === 'parcial' ? 'Parcial' : 'No pagado'}
@@ -1227,7 +1227,7 @@ export const Orders: React.FC = () => {
                     {expandedOrder === order.id && (
                       <tr>
                         <td colSpan={7} className="px-0 py-0 border-b-2 border-blue-300">
-                          <div className="mx-3 my-3 bg-blue-50 border border-blue-200 rounded-lg shadow-sm overflow-hidden animate-slideDown">
+                          <div className="mx-3 my-3 bg-blue-50 dark:bg-gray-800 border border-blue-200 dark:border-gray-600 rounded-lg shadow-sm overflow-hidden animate-slideDown">
                             <div className="border-l-4 border-blue-500 px-4 py-4">
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
