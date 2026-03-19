@@ -114,7 +114,7 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
         <select
           value={selectedTemplate}
           onChange={e => setSelectedTemplate(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Seleccionar template...</option>
           {Object.keys(ROLE_TEMPLATES).map(key => (

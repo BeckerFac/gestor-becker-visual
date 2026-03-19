@@ -480,7 +480,7 @@ export const Banks: React.FC = () => {
               <Input label="Titular de la Cuenta" placeholder="Nombre del titular" value={form.account_holder} onChange={e => setForm({ ...form, account_holder: e.target.value })} />
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Cuenta</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.account_type} onChange={e => setForm({ ...form, account_type: e.target.value })}>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.account_type} onChange={e => setForm({ ...form, account_type: e.target.value })}>
                   <option value="cuenta corriente">Cuenta Corriente</option>
                   <option value="caja de ahorro">Caja de Ahorro</option>
                 </select>
@@ -492,7 +492,7 @@ export const Banks: React.FC = () => {
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                   rows={2}
                   placeholder="Observaciones, datos adicionales..."
                   value={form.notes}

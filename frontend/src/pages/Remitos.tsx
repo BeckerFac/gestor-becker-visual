@@ -486,7 +486,7 @@ export const Remitos: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={filterEnterprise}
                 onChange={e => setFilterEnterprise(e.target.value)}
               >
@@ -501,7 +501,7 @@ export const Remitos: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Estado</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={filterStatus}
                 onChange={e => setFilterStatus(e.target.value)}
               >
@@ -516,7 +516,7 @@ export const Remitos: React.FC = () => {
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Tipo</label>
               <select
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={filterTipo}
                 onChange={e => setFilterTipo(e.target.value)}
               >
@@ -532,7 +532,7 @@ export const Remitos: React.FC = () => {
               <label className="text-xs font-medium text-gray-500">Buscar</label>
               <input
                 type="text"
-                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Receptor, transporte..."
                 value={filterSearch}
                 onChange={e => setFilterSearch(e.target.value)}
@@ -556,7 +556,7 @@ export const Remitos: React.FC = () => {
               <div className="flex items-end">
                 <button
                   onClick={clearFilters}
-                  className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   Limpiar filtros
                 </button>
@@ -619,7 +619,7 @@ export const Remitos: React.FC = () => {
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Pedido asociado (opcional)</label>
                   <select
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     value={form.order_id}
                     onChange={e => handleOrderSelect(e.target.value)}
                   >
@@ -680,7 +680,7 @@ export const Remitos: React.FC = () => {
                     <div key={idx} className="flex gap-2 items-center bg-gray-50 p-3 rounded-lg">
                       <div className="flex-1 min-w-0">
                         <input
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           placeholder="Nombre del producto *"
                           value={item.product_name}
                           onChange={e => handleItemChange(idx, 'product_name', e.target.value)}
@@ -689,7 +689,7 @@ export const Remitos: React.FC = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <input
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           placeholder="Descripcion (opcional)"
                           value={item.description}
                           onChange={e => handleItemChange(idx, 'description', e.target.value)}
@@ -699,7 +699,7 @@ export const Remitos: React.FC = () => {
                         <input
                           type="number"
                           min="1"
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-center focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm text-center bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           placeholder="Cant."
                           value={item.quantity}
                           onChange={e => handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1)}
@@ -707,7 +707,7 @@ export const Remitos: React.FC = () => {
                       </div>
                       <div className="w-28 shrink-0">
                         <select
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           value={item.unit}
                           onChange={e => handleItemChange(idx, 'unit', e.target.value)}
                         >

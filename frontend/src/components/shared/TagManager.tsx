@@ -119,7 +119,7 @@ export const TagManager: React.FC<TagManagerProps> = ({
             placeholder="Nombre..."
             value={newTagName}
             onChange={e => setNewTagName(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-xs w-24"
+            className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs w-24 bg-white dark:bg-gray-700 dark:text-gray-100"
             autoFocus
             onKeyDown={e => e.key === 'Enter' && handleCreate()}
           />

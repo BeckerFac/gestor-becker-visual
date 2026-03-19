@@ -579,7 +579,7 @@ export const Purchases: React.FC = () => {
                     <input
                       type="number" step="0.01" placeholder="21"
                       list="purchase-vat-rate-list"
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-24 bg-white dark:bg-gray-700 dark:text-gray-100"
                       value={form.vat_rate}
                       onChange={e => setForm({ ...form, vat_rate: e.target.value })}
                     />
@@ -597,7 +597,7 @@ export const Purchases: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <textarea className="px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y w-64" rows={2} placeholder="Notas..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+                  <textarea className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm resize-y w-64 bg-white dark:bg-gray-700 dark:text-gray-100" rows={2} placeholder="Notas..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                   <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Compra'}</Button>
                 </div>
               </div>

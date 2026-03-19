@@ -600,7 +600,7 @@ export const Products: React.FC = () => {
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Producto<HelpTip text="Categoria del producto. Configura los tipos disponibles en 'Gestionar tipos' mas abajo." /></label>
                   <input
                     list="product-types-list"
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={form.product_type}
                     onChange={e => setForm({ ...form, product_type: e.target.value })}
                     placeholder="Escribir o elegir tipo..."
@@ -631,7 +631,7 @@ export const Products: React.FC = () => {
                         type="number"
                         step="0.01"
                         min="0"
-                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm w-24 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-24 bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
                         value={form.low_stock_threshold}
                         onChange={e => setForm({ ...form, low_stock_threshold: e.target.value })}
                         placeholder="0"
@@ -654,7 +654,7 @@ export const Products: React.FC = () => {
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Costo (ARS) *<HelpTip text="Precio al que compras este producto. Se usa para calcular el margen." /></label>
                     <input
                       type="number" step="0.01" placeholder="0.00" required
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'cost' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
+                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'cost' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
                       value={form.cost}
                       onChange={e => handlePriceField('cost', e.target.value)}
                     />
@@ -663,7 +663,7 @@ export const Products: React.FC = () => {
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Margen %<HelpTip text="Porcentaje de ganancia sobre el costo. Modifica el precio final automaticamente." /></label>
                     <input
                       type="number" step="0.01" placeholder="30"
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'margin_percent' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
+                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'margin_percent' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
                       value={form.margin_percent}
                       onChange={e => handlePriceField('margin_percent', e.target.value)}
                     />
@@ -671,7 +671,7 @@ export const Products: React.FC = () => {
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">IVA %</label>
                     <select
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
+                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
                       value={form.vat_rate}
                       onChange={e => handlePriceField('vat_rate', e.target.value)}
                     >
@@ -682,7 +682,7 @@ export const Products: React.FC = () => {
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Precio Final (ARS)</label>
                     <input
                       type="number" step="0.01" placeholder="0.00"
-                      className={`px-3 py-2 border rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500 ${lastEdited === 'final_price' ? 'border-green-400 bg-green-50 text-green-800' : 'border-green-300 bg-green-50 text-green-800'}`}
+                      className={`px-3 py-2 border rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500 ${lastEdited === 'final_price' ? 'border-green-400 bg-green-50 text-green-800 dark:border-green-600 dark:bg-green-900/30 dark:text-green-100' : 'border-green-300 bg-green-50 text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-100'}`}
                       value={form.final_price}
                       onChange={e => handlePriceField('final_price', e.target.value)}
                     />
@@ -791,7 +791,7 @@ export const Products: React.FC = () => {
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar categorias ({categories.length})</summary>
         <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2">
-            <input placeholder="Nombre categoria..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
+            <input placeholder="Nombre categoria..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
             <select value={newCategoryParent} onChange={e => setNewCategoryParent(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
               <option value="">Sin padre</option>
               {categories.filter(c => !c.parent_id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -802,12 +802,12 @@ export const Products: React.FC = () => {
             <div className="space-y-1">
               {categories.filter(c => !c.parent_id).map(c => (
                 <div key={c.id}>
-                  <div className="flex items-center justify-between py-1 px-2 bg-white rounded">
+                  <div className="flex items-center justify-between py-1 px-2 bg-white dark:bg-gray-700 rounded">
                     <span className="font-medium">{c.name} <span className="text-gray-400 text-xs">({c.product_count})</span></span>
                     <button onClick={() => handleDeleteCategory(c.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
                   </div>
                   {categories.filter(sub => sub.parent_id === c.id).map(sub => (
-                    <div key={sub.id} className="flex items-center justify-between py-1 px-2 ml-6 bg-white rounded">
+                    <div key={sub.id} className="flex items-center justify-between py-1 px-2 ml-6 bg-white dark:bg-gray-700 rounded">
                       <span className="text-gray-600">{sub.name} <span className="text-gray-400 text-xs">({sub.product_count})</span></span>
                       <button onClick={() => handleDeleteCategory(sub.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
                     </div>
@@ -824,14 +824,14 @@ export const Products: React.FC = () => {
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar tipos ({productTypes.length})</summary>
         <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
           <div className="flex items-center gap-2">
-            <input placeholder="Nombre del tipo..." value={newTypeName} onChange={e => setNewTypeName(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
-            <input placeholder="Descripcion (opcional)" value={newTypeDesc} onChange={e => setNewTypeDesc(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
+            <input placeholder="Nombre del tipo..." value={newTypeName} onChange={e => setNewTypeName(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
+            <input placeholder="Descripcion (opcional)" value={newTypeDesc} onChange={e => setNewTypeDesc(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
             <Button variant="primary" onClick={handleCreateType} disabled={!newTypeName.trim()}>+ Crear</Button>
           </div>
           {productTypes.length > 0 && (
             <div className="space-y-1">
               {(productTypes.filter(t => typeof t !== 'string') as ProductType[]).map((t, idx, arr) => (
-                <div key={t.id} className="flex items-center justify-between py-1 px-2 bg-white rounded">
+                <div key={t.id} className="flex items-center justify-between py-1 px-2 bg-white dark:bg-gray-700 rounded">
                   {editingTypeId === t.id ? (
                     <div className="flex items-center gap-2 flex-1">
                       <input
@@ -870,7 +870,7 @@ export const Products: React.FC = () => {
         <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Listas de precios ({priceLists.length})</summary>
         <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3">
           <div className="flex items-center gap-2">
-            <input placeholder="Nombre de la lista..." value={plForm.name} onChange={e => setPlForm({ ...plForm, name: e.target.value })} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1" />
+            <input placeholder="Nombre de la lista..." value={plForm.name} onChange={e => setPlForm({ ...plForm, name: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
             <select value={plForm.type} onChange={e => setPlForm({ ...plForm, type: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
               <option value="default">General</option>
               <option value="customer">Cliente</option>
@@ -882,7 +882,7 @@ export const Products: React.FC = () => {
           {priceLists.length > 0 && (
             <div className="space-y-2">
               {priceLists.map((pl: any) => (
-                <div key={pl.id} className="bg-white border border-gray-200 rounded-lg">
+                <div key={pl.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
                   <div className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-50" onClick={() => handleExpandPriceList(pl.id)}>
                     <div className="flex items-center gap-2">
                       <span className="text-xs">{expandedListId === pl.id ? '▼' : '▶'}</span>
@@ -903,14 +903,14 @@ export const Products: React.FC = () => {
                             product_id: pid,
                             price: prod?.pricing?.final_price || '',
                           })
-                        }} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm flex-1">
+                        }} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100">
                           <option value="">Agregar producto...</option>
                           {products.filter(p => !expandedListItems.some((it: any) => it.product_id === p.id)).map(p => (
                             <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>
                           ))}
                         </select>
-                        <input type="number" step="0.01" placeholder="Precio" value={plAddProduct.price} onChange={e => setPlAddProduct({ ...plAddProduct, price: e.target.value })} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm w-28" />
-                        <input type="number" step="0.01" placeholder="Dto %" value={plAddProduct.discount_percent} onChange={e => setPlAddProduct({ ...plAddProduct, discount_percent: e.target.value })} className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm w-20" />
+                        <input type="number" step="0.01" placeholder="Precio" value={plAddProduct.price} onChange={e => setPlAddProduct({ ...plAddProduct, price: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-28 bg-white dark:bg-gray-700 dark:text-gray-100" />
+                        <input type="number" step="0.01" placeholder="Dto %" value={plAddProduct.discount_percent} onChange={e => setPlAddProduct({ ...plAddProduct, discount_percent: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-20 bg-white dark:bg-gray-700 dark:text-gray-100" />
                         <Button variant="primary" onClick={handleAddProductToList} disabled={!plAddProduct.product_id || !plAddProduct.price}>+</Button>
                       </div>
                       {expandedListItems.length > 0 ? (
@@ -958,7 +958,7 @@ export const Products: React.FC = () => {
           <CardContent className="pt-4">
             <h4 className="text-sm font-semibold text-blue-800 mb-3">Aumento masivo de precios — {selectedIds.size} producto{selectedIds.size > 1 ? 's' : ''}</h4>
             <div className="flex items-center gap-3">
-              <input type="number" step="0.1" placeholder="Ej: 15 para +15%" value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
+              <input type="number" step="0.1" placeholder="Ej: 15 para +15%" value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-40 bg-white dark:bg-gray-700 dark:text-gray-100" />
               <span className="text-sm text-gray-600">%</span>
               <Button variant="success" onClick={handleBulkPriceUpdate} loading={bulkUpdating} disabled={!bulkPercent}>Aplicar</Button>
               <Button variant="secondary" onClick={() => { setShowBulkModal(false); setBulkPercent('') }}>Cancelar</Button>

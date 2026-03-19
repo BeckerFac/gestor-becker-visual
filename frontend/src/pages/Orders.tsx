@@ -1324,7 +1324,7 @@ export const Orders: React.FC = () => {
                                         <div className="flex items-center gap-1 mt-0.5">
                                           <input
                                             type="datetime-local"
-                                            className="text-xs border border-gray-300 rounded px-1.5 py-1"
+                                            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-700 dark:text-gray-100"
                                             value={editTimerValue}
                                             onChange={e => setEditTimerValue(e.target.value)}
                                           />
@@ -1420,7 +1420,7 @@ export const Orders: React.FC = () => {
                                     <p className="text-xs text-gray-500">Estado de Pago</p>
                                     <PermissionGate module="orders" action="edit">
                                       <select
-                                        className="text-sm border border-gray-300 rounded px-2 py-1 mt-0.5"
+                                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 mt-0.5 bg-white dark:bg-gray-700 dark:text-gray-100"
                                         value={order.payment_status || 'pendiente'}
                                         onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
                                       >
@@ -1541,7 +1541,7 @@ export const Orders: React.FC = () => {
                                               <div className="flex items-center gap-2">
                                                 <label className="text-xs text-gray-500">Tipo:</label>
                                                 <select
-                                                  className="px-2 py-1 border border-gray-300 rounded text-xs"
+                                                  className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs bg-white dark:bg-gray-700 dark:text-gray-100"
                                                   value={invoiceType[order.id] || 'B'}
                                                   onChange={e => setInvoiceType(prev => ({ ...prev, [order.id]: e.target.value }))}
                                                 >
@@ -1579,7 +1579,7 @@ export const Orders: React.FC = () => {
                                                                 max={item.pending_qty}
                                                                 value={qtyToInvoice}
                                                                 onChange={e => handleInvoiceQtyChange(order.id, item.id, parseInt(e.target.value) || 0, item.pending_qty)}
-                                                                className="w-16 px-1 py-0.5 border border-gray-300 rounded text-xs text-center"
+                                                                className="w-16 px-1 py-0.5 border border-gray-300 dark:border-gray-600 rounded text-xs text-center bg-white dark:bg-gray-700 dark:text-gray-100"
                                                                 disabled={item.pending_qty === 0}
                                                               />
                                                             </td>

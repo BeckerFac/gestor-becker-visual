@@ -442,7 +442,7 @@ export const Quotes: React.FC = () => {
               <div className="flex items-end">
                 <button
                   onClick={clearFilters}
-                  className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   Limpiar filtros
                 </button>
@@ -559,7 +559,7 @@ export const Quotes: React.FC = () => {
                         </div>
                         {/* Description */}
                         <div className="mt-2">
-                          <input className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Descripcion adicional (opcional)" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
+                          <input className="w-full px-2 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Descripcion adicional (opcional)" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
                         </div>
                       </div>
                     ))}

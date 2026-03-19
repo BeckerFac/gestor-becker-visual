@@ -483,7 +483,7 @@ export const Users: React.FC = () => {
                 <select
                   value={inviteForm.role}
                   onChange={e => setInviteForm({ ...inviteForm, role: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {ASSIGNABLE_ROLES.map(role => (
                     <option key={role} value={role}>
@@ -546,7 +546,7 @@ export const Users: React.FC = () => {
                 <select
                   value={form.role}
                   onChange={e => setForm({ ...form, role: e.target.value })}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={editingId === currentUser?.id}
                 >
                   {ASSIGNABLE_ROLES.map(role => (
@@ -855,7 +855,7 @@ export const Users: React.FC = () => {
                   <select
                     value={transferTargetId || ''}
                     onChange={e => setTransferTargetId(e.target.value || null)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
                     <option value="">Seleccionar Admin...</option>
                     {admins.map(admin => (

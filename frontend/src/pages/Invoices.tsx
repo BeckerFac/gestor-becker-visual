@@ -651,7 +651,7 @@ export const Invoices: React.FC = () => {
               {isFiltered && (
                 <button
                   onClick={clearFilters}
-                  className="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   Limpiar filtros
                 </button>

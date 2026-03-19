@@ -432,7 +432,7 @@ export const Enterprises: React.FC = () => {
                 <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condicion IVA<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
                     <option>Responsable Inscripto</option>
                     <option>Monotributo</option>
                     <option>Exento</option>
@@ -441,7 +441,7 @@ export const Enterprises: React.FC = () => {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Lista de Precios</label>
-                  <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.price_list_id} onChange={e => setEnterpriseForm({ ...enterpriseForm, price_list_id: e.target.value })}>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.price_list_id} onChange={e => setEnterpriseForm({ ...enterpriseForm, price_list_id: e.target.value })}>
                     <option value="">Sin lista de precios</option>
                     {priceLists.map((pl: any) => <option key={pl.id} value={pl.id}>{pl.name} ({pl.type})</option>)}
                   </select>
@@ -495,7 +495,7 @@ export const Enterprises: React.FC = () => {
 
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
-                <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={enterpriseForm.notes} onChange={e => setEnterpriseForm({ ...enterpriseForm, notes: e.target.value })} />
+                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={enterpriseForm.notes} onChange={e => setEnterpriseForm({ ...enterpriseForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
                 <Button type="submit" variant="success" loading={saving} className="w-full">{editingEnterpriseId ? 'Guardar' : 'Crear Empresa'}</Button>
@@ -513,7 +513,7 @@ export const Enterprises: React.FC = () => {
             <form onSubmit={handleContactSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
-                <select className="px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500" value={contactForm.enterprise_id} onChange={e => setContactForm({ ...contactForm, enterprise_id: e.target.value })}>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={contactForm.enterprise_id} onChange={e => setContactForm({ ...contactForm, enterprise_id: e.target.value })}>
                   <option value="">Sin empresa</option>
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
                 </select>
@@ -526,7 +526,7 @@ export const Enterprises: React.FC = () => {
               <Input label="Email" type="email" placeholder="email@empresa.com" value={contactForm.email} onChange={e => setContactForm({ ...contactForm, email: e.target.value })} />
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
-                <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={contactForm.notes} onChange={e => setContactForm({ ...contactForm, notes: e.target.value })} />
+                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={contactForm.notes} onChange={e => setContactForm({ ...contactForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end gap-2">
                 <Button type="submit" variant="success" loading={saving} className="w-full">{editingContactId ? 'Guardar' : 'Crear Contacto'}</Button>

@@ -78,6 +78,21 @@
 .dark input::placeholder,
 .dark textarea::placeholder { color: #6B7280; }
 
+/* Dark mode global form elements - ensures all inputs/selects/textareas are visible */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="submit"]):not([type="button"]),
+.dark select,
+.dark textarea {
+  background-color: #374151; /* gray-700 */
+  color: #F3F4F6; /* gray-100 */
+  border-color: #4B5563; /* gray-600 */
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="submit"]):not([type="button"]):focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #3B82F6; /* blue-500 */
+}
+
 /* Print styles for Reportes page */
 @media print {
   /* Hide navigation, sidebar, and non-essential UI */

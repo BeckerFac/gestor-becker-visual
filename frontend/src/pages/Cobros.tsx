@@ -892,7 +892,7 @@ export const Cobros: React.FC = () => {
                                           return next
                                         })
                                       }}
-                                      className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm"
+                                      className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                                     />
                                   ) : (
                                     <span className="text-xs text-green-600 font-medium">Completo</span>
