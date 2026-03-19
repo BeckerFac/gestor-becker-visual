@@ -281,14 +281,14 @@ export const Sidebar: React.FC = () => {
       {/* User section */}
       <div className="border-t border-gray-700 px-3 py-4">
         {billingInfo && (
-          <div className="mb-3 flex items-center gap-2">
+          <a href="/settings" className="mb-3 flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-800 transition-colors cursor-pointer" title="Ver plan y facturacion">
             <PlanBadge plan={billingInfo.plan} status={billingInfo.status} />
             {billingInfo.status === 'trial' && billingInfo.days_remaining !== null && (
               <span className="text-[10px] text-gray-400">
                 {billingInfo.days_remaining}d restantes
               </span>
             )}
-          </div>
+          </a>
         )}
         {user && (
           <div className="mb-4">

@@ -10,7 +10,7 @@ import { PWAUpdatePrompt } from '@/components/shared/PWAUpdatePrompt'
 import { PWAInstallPrompt } from '@/components/shared/PWAInstallPrompt'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { CookieConsent } from '@/components/shared/CookieConsent'
-import { TrialBanner } from '@/components/shared/TrialBanner'
+// TrialBanner removed - trial info shown in sidebar badge only
 import { SkeletonPage } from '@/components/ui/Skeleton'
 
 // Lazy-loaded page components for code splitting
@@ -214,9 +214,6 @@ function App() {
       <PWAUpdatePrompt />
       <PWAInstallPrompt />
       <CookieConsent />
-
-      {/* Trial / Subscription Banner */}
-      {user && accessToken && <TrialBanner />}
 
       {/* Onboarding Wizard overlay */}
       {showOnboarding && user && accessToken && (
