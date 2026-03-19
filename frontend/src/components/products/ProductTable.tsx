@@ -1,0 +1,205 @@
+import React from 'react'
+import { Card, CardContent } from '@/components/ui/Card'
+import { PermissionGate } from '@/components/shared/PermissionGate'
+import { formatCurrency } from '@/lib/utils'
+import type { Product } from './types'
+
+interface ProductTableProps {
+  products: Product[]
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
+  onToggleSelectAll: () => void
+  onRowClick: (product: Product) => void
+  onEdit: (product: Product) => void
+  onDelete: (product: Product) => void
+  hasStockProducts: boolean
+  // Pagination
+  page: number
+  totalPages: number
+  total: number
+  onPageChange: (page: number) => void
+}
+
+const getStockIndicator = (product: Product) => {
+  const qty = parseFloat(String(product.stock_quantity ?? 0))
+  const threshold = parseFloat(String(product.low_stock_threshold ?? 0))
+
+  if (qty <= 0) {
+    return <span className="inline-flex items-center gap-1 font-bold text-red-600 dark:text-red-400">
+      <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{qty}
+    </span>
+  }
+  if (threshold > 0 && qty <= threshold) {
+    return <span className="inline-flex items-center gap-1 font-bold text-yellow-600 dark:text-yellow-400">
+      <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />{qty}
+    </span>
+  }
+  return <span className="inline-flex items-center gap-1 font-bold text-green-600 dark:text-green-400">
+    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />{qty}
+  </span>
+}
+
+const getPriceWithoutVat = (pricing: Product['pricing']) => {
+  if (!pricing) return null
+  const final_price = parseFloat(pricing.final_price)
+  const vat = parseFloat(pricing.vat_rate) || 0
+  return final_price / (1 + vat / 100)
+}
+
+export const ProductTable: React.FC<ProductTableProps> = ({
+  products,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  onRowClick,
+  onEdit,
+  onDelete,
+  hasStockProducts,
+  page,
+  totalPages,
+  total,
+  onPageChange,
+}) => {
+  return (
+    <Card>
+      <CardContent className="overflow-x-auto p-0">
+        <table className="min-w-full border-collapse">
+          <thead>
+            <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100 w-10">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === products.length && products.length > 0}
+                  onChange={onToggleSelectAll}
+                  className="rounded border-gray-300 dark:border-gray-600"
+                />
+              </th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">SKU</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Producto</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Costo</th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Margen%</th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Precio</th>
+              {hasStockProducts && (
+                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Stock</th>
+              )}
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.length === 0 ? (
+              <tr>
+                <td colSpan={hasStockProducts ? 10 : 9} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                  No hay productos
+                </td>
+              </tr>
+            ) : (
+              products.map((product) => (
+                <tr
+                  key={product.id}
+                  className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                  onClick={() => onRowClick(product)}
+                >
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(product.id)}
+                      onChange={() => onToggleSelect(product.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="rounded border-gray-300 dark:border-gray-600"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-300">{product.sku}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 font-medium">{product.name}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="px-2 py-0.5 rounded text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
+                      {product.product_type || '-'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+                    {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+                    {product.pricing ? `${product.pricing.margin_percent}%` : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    {product.pricing ? (
+                      <span className="font-bold text-green-700 dark:text-green-400">
+                        {formatCurrency(parseFloat(product.pricing.final_price))}
+                      </span>
+                    ) : '-'}
+                  </td>
+                  {hasStockProducts && (
+                    <td className="px-4 py-3 text-sm text-right">
+                      {product.controls_stock ? getStockIndicator(product) : (
+                        <span className="text-gray-300 dark:text-gray-600">-</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="px-4 py-3 text-sm">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      product.active
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                        : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
+                    }`}>
+                      {product.active ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    <div className="flex gap-2 justify-end">
+                      <PermissionGate module="products" action="edit">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onEdit(product) }}
+                          className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
+                        >
+                          Editar
+                        </button>
+                      </PermissionGate>
+                      <PermissionGate module="products" action="delete">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDelete(product) }}
+                          className="text-red-600 dark:text-red-400 hover:underline text-sm"
+                        >
+                          Eliminar
+                        </button>
+                      </PermissionGate>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {total} producto{total !== 1 ? 's' : ''} en total
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onPageChange(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                Anterior
+              </button>
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                Pagina {page} de {totalPages}
+              </span>
+              <button
+                onClick={() => onPageChange(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}

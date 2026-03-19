@@ -99,10 +99,14 @@ describe('ProductsService', () => {
       mockDbVoid() // migrations
       mockDbVoid()
 
-      mockDbRows([
-        { id: 'p1', name: 'Product A', sku: 'A-001', pricing: { cost: '100', final_price: '150' } },
-        { id: 'p2', name: 'Product B', sku: 'B-001', pricing: null },
-      ])
+      // getProducts now uses pool.query for count, has_stock check, and main query
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [{ total: '2' }] }) // count query
+        .mockResolvedValueOnce({ rows: [{ has_stock: false }] }) // has_stock_products query
+        .mockResolvedValueOnce({ rows: [
+          { id: 'p1', name: 'Product A', sku: 'A-001', pricing: { cost: '100', final_price: '150' }, stock_quantity: 0, stock_min_level: 0 },
+          { id: 'p2', name: 'Product B', sku: 'B-001', pricing: null, stock_quantity: 0, stock_min_level: 0 },
+        ] }) // main query
 
       const result = await service.getProducts('company-1')
 
@@ -110,6 +114,7 @@ describe('ProductsService', () => {
       expect(result).toHaveProperty('total')
       expect(result).toHaveProperty('skip')
       expect(result).toHaveProperty('limit')
+      expect(result).toHaveProperty('has_stock_products')
       expect(result.items).toHaveLength(2)
       expect(result.total).toBe(2)
     })

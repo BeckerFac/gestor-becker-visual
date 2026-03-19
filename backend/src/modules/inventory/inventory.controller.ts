@@ -31,6 +31,16 @@ export class InventoryController {
     res.status(201).json(data);
   }
 
+  async getStockMovements(req: AuthRequest, res: Response) {
+    const { skip = '0', limit = '50', product_id = '' } = req.query;
+    const data = await inventoryService.getStockMovements(req.user!.company_id, {
+      skip: parseInt(skip as string, 10),
+      limit: parseInt(limit as string, 10),
+      product_id: product_id as string,
+    });
+    res.json(data);
+  }
+
   async addStockFromPurchase(req: AuthRequest, res: Response) {
     const data = await inventoryService.addStockFromPurchase(
       req.user!.company_id,

@@ -55,12 +55,17 @@
   animation: slideIn 0.3s ease-out;
 }
 
+.animate-slide-in-right {
+  animation: slideIn 0.25s ease-out;
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn,
   .animate-slideDown,
   .animate-scaleIn,
-  .animate-slide-in {
+  .animate-slide-in,
+  .animate-slide-in-right {
     animation: none !important;
   }
 }

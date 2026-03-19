@@ -18,7 +18,8 @@ const Dashboard = React.lazy(() => import('@/pages/Dashboard').then(m => ({ defa
 const Products = React.lazy(() => import('@/pages/Products').then(m => ({ default: m.Products })))
 const Customers = React.lazy(() => import('@/pages/Customers').then(m => ({ default: m.Customers })))
 const Invoices = React.lazy(() => import('@/pages/Invoices').then(m => ({ default: m.Invoices })))
-const Inventory = React.lazy(() => import('@/pages/Inventory').then(m => ({ default: m.Inventory })))
+// Inventory route now redirects to /products?tab=movimientos
+// const Inventory = React.lazy(() => import('@/pages/Inventory').then(m => ({ default: m.Inventory })))
 const Settings = React.lazy(() => import('@/pages/Settings').then(m => ({ default: m.Settings })))
 const Orders = React.lazy(() => import('@/pages/Orders').then(m => ({ default: m.Orders })))
 const Quotes = React.lazy(() => import('@/pages/Quotes').then(m => ({ default: m.Quotes })))
@@ -238,7 +239,7 @@ function App() {
         <Route path="/compras" element={<ProtectedRoute module="purchases"><Purchases /></ProtectedRoute>} />
         <Route path="/quotes" element={<ProtectedRoute module="quotes"><Quotes /></ProtectedRoute>} />
         <Route path="/invoices" element={<ProtectedRoute module="invoices"><Invoices /></ProtectedRoute>} />
-        <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
+        <Route path="/inventory" element={<Navigate to="/products?tab=movimientos" replace />} />
         <Route path="/cobros" element={<ProtectedRoute module="cobros"><Cobros /></ProtectedRoute>} />
         <Route path="/pagos" element={<ProtectedRoute module="pagos"><Pagos /></ProtectedRoute>} />
         <Route path="/cuenta-corriente" element={<ProtectedRoute module="cuenta_corriente"><CuentaCorriente /></ProtectedRoute>} />

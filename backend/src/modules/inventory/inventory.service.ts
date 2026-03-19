@@ -210,6 +210,43 @@ export class InventoryService {
     }
   }
 
+  async getStockMovements(companyId: string, { skip = 0, limit = 50, product_id = '' } = {}) {
+    try {
+      const conditions = [`p.company_id = '${companyId.replace(/'/g, "''")}'`];
+      if (product_id) {
+        conditions.push(`sm.product_id = '${product_id.replace(/'/g, "''")}'`);
+      }
+      const whereClause = conditions.join(' AND ');
+
+      const countResult = await db.execute(sql`
+        SELECT COUNT(*) as total
+        FROM stock_movements sm
+        JOIN products p ON p.id = sm.product_id
+        WHERE ${sql.raw(whereClause)}
+      `);
+      const total = parseInt(((countResult as any).rows?.[0]?.total ?? '0'), 10);
+
+      const result = await db.execute(sql`
+        SELECT sm.*,
+          json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
+          json_build_object('id', w.id, 'name', w.name) as warehouse
+        FROM stock_movements sm
+        JOIN products p ON p.id = sm.product_id
+        LEFT JOIN warehouses w ON w.id = sm.warehouse_id
+        WHERE ${sql.raw(whereClause)}
+        ORDER BY sm.created_at DESC
+        LIMIT ${limit} OFFSET ${skip}
+      `);
+
+      const items = (result as any).rows || result || [];
+      return { items, total, skip, limit };
+    } catch (error) {
+      console.error('Get stock movements error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to get stock movements');
+    }
+  }
+
   async addStockFromPurchase(companyId: string, userId: string, purchaseId: string, items: { product_id: string; quantity: number }[], customNote?: string) {
     try {
       // Get or create default warehouse

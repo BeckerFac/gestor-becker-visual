@@ -87,10 +87,57 @@ export class ProductsService {
     }
   }
 
-  async getProducts(companyId: string, { skip = 0, limit = 50, search = '' } = {}) {
+  async getProducts(companyId: string, { skip = 0, limit = 50, search = '', stock_status = 'all', category_id = '', product_type = '', active = '' } = {}) {
     await this.ensureMigrations();
     try {
-      const result = await db.execute(sql`
+      // Build WHERE conditions
+      const conditions: string[] = [`p.company_id = '${companyId.replace(/'/g, "''")}'`];
+
+      if (search) {
+        const s = search.replace(/'/g, "''");
+        conditions.push(`(p.name ILIKE '%${s}%' OR p.sku ILIKE '%${s}%' OR p.barcode ILIKE '%${s}%')`);
+      }
+      if (category_id) {
+        conditions.push(`p.category_id = '${category_id.replace(/'/g, "''")}'`);
+      }
+      if (product_type) {
+        conditions.push(`p.product_type = '${product_type.replace(/'/g, "''")}'`);
+      }
+      if (active === 'true') {
+        conditions.push(`p.active = true`);
+      } else if (active === 'false') {
+        conditions.push(`p.active = false`);
+      }
+
+      // Stock status filter applied after JOIN
+      let stockHaving = '';
+      if (stock_status === 'in_stock') {
+        stockHaving = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0`;
+      } else if (stock_status === 'low') {
+        stockHaving = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0 AND COALESCE(CAST(s.quantity AS decimal), 0) <= COALESCE(NULLIF(CAST(p.low_stock_threshold AS decimal), 0), NULLIF(CAST(s.min_level AS decimal), 0), 0)`;
+      } else if (stock_status === 'out') {
+        stockHaving = `AND p.controls_stock = true AND COALESCE(CAST(s.quantity AS decimal), 0) <= 0`;
+      }
+
+      const whereClause = conditions.join(' AND ');
+
+      // Count total for pagination
+      const countResult = await pool.query(`
+        SELECT COUNT(*) as total
+        FROM products p
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE ${whereClause} ${stockHaving}
+      `);
+      const total = parseInt(countResult.rows?.[0]?.total || '0', 10);
+
+      // Check if any product in company has controls_stock = true
+      const hasStockResult = await pool.query(`
+        SELECT EXISTS(SELECT 1 FROM products WHERE company_id = $1 AND controls_stock = true) as has_stock
+      `, [companyId]);
+      const has_stock_products = hasStockResult.rows?.[0]?.has_stock || false;
+
+      // Main query with stock data
+      const result = await pool.query(`
         SELECT p.*,
           CASE WHEN pp.id IS NOT NULL THEN
             json_build_object(
@@ -99,21 +146,25 @@ export class ProductsService {
               'vat_rate', pp.vat_rate,
               'final_price', pp.final_price
             )
-          ELSE NULL END as pricing
+          ELSE NULL END as pricing,
+          COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level
         FROM products p
         LEFT JOIN product_pricing pp ON pp.product_id = p.id
-        WHERE p.company_id = ${companyId}
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE ${whereClause} ${stockHaving}
         ORDER BY p.name ASC
         LIMIT ${limit} OFFSET ${skip}
       `);
 
-      const items = (result as any).rows || result || [];
+      const items = result.rows || [];
 
       return {
         items,
-        total: items.length,
+        total,
         skip,
         limit,
+        has_stock_products,
       };
     } catch (error) {
       console.error('Get products error:', error);
@@ -442,17 +493,51 @@ export class ProductsService {
     }
   }
 
+  async bulkPricePreview(companyId: string, productIds: string[], percentIncrease: number) {
+    try {
+      if (productIds.length === 0) throw new ApiError(400, 'No products selected');
+      if (percentIncrease === 0) throw new ApiError(400, 'Percentage must be non-zero');
+
+      const multiplier = 1 + percentIncrease / 100;
+      const placeholders = productIds.map((_, i) => `$${i + 1}`).join(',');
+      const result = await pool.query(`
+        SELECT pp.product_id, p.sku, p.name,
+          pp.cost as old_cost, pp.margin_percent, pp.vat_rate, pp.final_price as old_final_price,
+          ROUND(CAST(pp.cost AS decimal) * ${multiplier}, 2) as new_cost,
+          ROUND(
+            ROUND(CAST(pp.cost AS decimal) * ${multiplier}, 2) *
+            (1 + CAST(pp.margin_percent AS decimal) / 100) *
+            (1 + CAST(pp.vat_rate AS decimal) / 100),
+          2) as new_final_price
+        FROM product_pricing pp
+        JOIN products p ON p.id = pp.product_id
+        WHERE pp.product_id IN (${placeholders}) AND p.company_id = $${productIds.length + 1}
+        ORDER BY p.name ASC
+      `, [...productIds, companyId]);
+
+      return { items: result.rows || [], percent: percentIncrease };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to preview bulk price update');
+    }
+  }
+
   async bulkUpdatePrice(companyId: string, productIds: string[], percentIncrease: number) {
     try {
       if (productIds.length === 0) throw new ApiError(400, 'No products selected');
       if (percentIncrease === 0) throw new ApiError(400, 'Percentage must be non-zero');
 
       const multiplier = 1 + percentIncrease / 100;
+      // FIXED formula: update cost, then recalculate final_price preserving margin% and vat%
       for (const pid of productIds) {
         await db.execute(sql`
           UPDATE product_pricing SET
             cost = ROUND(CAST(cost AS decimal) * ${multiplier.toString()}, 2),
-            final_price = ROUND(CAST(final_price AS decimal) * ${multiplier.toString()}, 2),
+            final_price = ROUND(
+              ROUND(CAST(cost AS decimal) * ${multiplier.toString()}, 2) *
+              (1 + CAST(margin_percent AS decimal) / 100) *
+              (1 + CAST(vat_rate AS decimal) / 100),
+            2),
             updated_at = NOW()
           WHERE product_id = ${pid}
         `);

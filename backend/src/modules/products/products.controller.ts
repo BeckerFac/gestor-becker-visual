@@ -24,10 +24,15 @@ export class ProductsController {
     try {
       if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
 
-      const { skip = '0', limit = '50' } = req.query;
+      const { skip = '0', limit = '50', search = '', stock_status = 'all', category_id = '', product_type = '', active = '' } = req.query;
       const products = await productsService.getProducts(req.user.company_id, {
         skip: parseInt(skip as string, 10),
         limit: parseInt(limit as string, 10),
+        search: search as string,
+        stock_status: stock_status as string,
+        category_id: category_id as string,
+        product_type: product_type as string,
+        active: active as string,
       });
 
       res.json(products);
@@ -123,6 +128,21 @@ export class ProductsController {
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
       res.status(500).json({ error: 'Failed to bulk update prices' });
+    }
+  }
+
+  async bulkPricePreview(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { product_ids, percent } = req.body;
+      if (!Array.isArray(product_ids) || typeof percent !== 'number') {
+        throw new ApiError(400, 'product_ids (array) and percent (number) required');
+      }
+      const result = await productsService.bulkPricePreview(req.user.company_id, product_ids, percent);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to preview bulk price update' });
     }
   }
 

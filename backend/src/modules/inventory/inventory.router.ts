@@ -5,6 +5,7 @@ import { authorize } from '../../middlewares/authorize';
 export const inventoryRouter = Router();
 
 inventoryRouter.get('/', authorize('inventory', 'view'), (req, res) => inventoryController.getStock(req as any, res));
+inventoryRouter.get('/movements', authorize('inventory', 'view'), (req, res) => inventoryController.getStockMovements(req as any, res));
 inventoryRouter.post('/movements', authorize('inventory', 'create'), (req, res) => inventoryController.createMovement(req as any, res));
 inventoryRouter.get('/low-stock', authorize('inventory', 'view'), (req, res) => inventoryController.getLowStock(req as any, res));
 inventoryRouter.post('/adjust', authorize('inventory', 'create'), (req, res) => inventoryController.adjustStock(req as any, res));

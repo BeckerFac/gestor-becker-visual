@@ -57,7 +57,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/compras', label: 'Compras', icon: '🛒', module: 'purchases' },
       { href: '/products', label: 'Productos', icon: '📦', module: 'products' },
-      { href: '/inventory', label: 'Inventario', icon: '🏭', module: 'inventory' },
+      { href: '/products?tab=movimientos', label: 'Inventario', icon: '🏭', module: 'inventory' },
     ],
   },
   {
@@ -208,7 +208,7 @@ export const Sidebar: React.FC = () => {
                     onClick={handleNavClick}
                     className={cn(
                       'flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5',
-                      location.pathname === item.href
+                      (location.pathname + location.search) === item.href || location.pathname === item.href
                         ? 'bg-blue-600 text-white'
                         : isLocked
                           ? 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'

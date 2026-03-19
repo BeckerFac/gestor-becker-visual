@@ -1,434 +1,132 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardHeader } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { DataTable } from '@/components/shared/DataTable'
+import { useSearchParams } from 'react-router-dom'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { toast } from '@/hooks/useToast'
-import { formatCurrency } from '@/lib/utils'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
-import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
-import { HelpTip } from '@/components/shared/HelpTip'
+import { Button } from '@/components/ui/Button'
+import { toast } from '@/hooks/useToast'
+import { api } from '@/services/api'
 
-interface ProductType {
-  id: string
-  name: string
-  description: string | null
-  sort_order: number
-}
+import { ProductTable } from '@/components/products/ProductTable'
+import { ProductDetailPanel } from '@/components/products/ProductDetailPanel'
+import { ProductForm } from '@/components/products/ProductForm'
+import { ProductFilters } from '@/components/products/ProductFilters'
+import { StockMovements } from '@/components/products/StockMovements'
+import { BulkPriceModal } from '@/components/products/BulkPriceModal'
+import { TypesManager } from '@/components/products/TypesManager'
+import { CategoriesManager } from '@/components/products/CategoriesManager'
+import { PriceListsManager } from '@/components/products/PriceListsManager'
+import type { Product, ProductType, Category } from '@/components/products/types'
+import { emptyForm } from '@/components/products/types'
 
-interface Product {
-  id: string
-  sku: string
-  barcode: string | null
-  name: string
-  description: string | null
-  product_type: string | null
-  category_id: string | null
-  active: boolean
-  controls_stock?: boolean
-  low_stock_threshold?: string | number
-  pricing?: { cost: string; margin_percent: string; vat_rate: string; final_price: string }
-}
+const ITEMS_PER_PAGE = 50
 
-interface Category {
-  id: string
-  name: string
-  parent_id: string | null
-  product_count: number
-}
-
-const DEFAULT_TYPES = [
-  'portabanner', 'bandera', 'ploteo', 'carteleria', 'vinilo',
-  'lona', 'backing', 'senaletica', 'vehicular', 'textil', 'otro',
-]
-
-const VAT_OPTIONS = [
-  { value: '0', label: '0%' },
-  { value: '10.5', label: '10.5%' },
-  { value: '21', label: '21%' },
-  { value: '27', label: '27%' },
-]
-
-const emptyForm = {
-  sku: '', name: '', description: '', barcode: '', product_type: 'otro',
-  cost: '', margin_percent: '30', vat_rate: '21', final_price: '',
-  controls_stock: false, low_stock_threshold: '0',
-}
+const TAB_KEYS = ['productos', 'movimientos', 'tipos', 'categorias', 'listas'] as const
+type TabKey = typeof TAB_KEYS[number]
 
 export const Products: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialTab = (searchParams.get('tab') as TabKey) || 'productos'
+  const [activeTab, setActiveTab] = useState<TabKey>(TAB_KEYS.includes(initialTab) ? initialTab : 'productos')
+
+  // Products state
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [hasStockProducts, setHasStockProducts] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Metadata
+  const [productTypes, setProductTypes] = useState<ProductType[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [priceLists, setPriceLists] = useState<any[]>([])
+
+  // Filters
+  const [search, setSearch] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [stockStatusFilter, setStockStatusFilter] = useState('all')
+
+  // Selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBulkModal, setShowBulkModal] = useState(false)
+
+  // Form
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState(emptyForm)
-  const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [lastEdited, setLastEdited] = useState<string>('')
+  const [editingForm, setEditingForm] = useState(emptyForm)
+
+  // Detail panel
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+
+  // Delete
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // Product types & categories
-  const [productTypes, setProductTypes] = useState<ProductType[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [newCategoryName, setNewCategoryName] = useState('')
-  const [newCategoryParent, setNewCategoryParent] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
-  const [newTypeName, setNewTypeName] = useState('')
-  const [newTypeDesc, setNewTypeDesc] = useState('')
-  const [editingTypeId, setEditingTypeId] = useState<string | null>(null)
-  const [editingTypeName, setEditingTypeName] = useState('')
+  // Update tab in URL
+  const handleTabChange = (tab: TabKey) => {
+    setActiveTab(tab)
+    if (tab === 'productos') {
+      searchParams.delete('tab')
+    } else {
+      searchParams.set('tab', tab)
+    }
+    setSearchParams(searchParams, { replace: true })
+  }
 
-  // Bulk price update
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [showBulkModal, setShowBulkModal] = useState(false)
-  const [bulkPercent, setBulkPercent] = useState('')
-  const [bulkUpdating, setBulkUpdating] = useState(false)
-
-  // Price Lists state
-  const [priceLists, setPriceLists] = useState<any[]>([])
-  const [expandedListId, setExpandedListId] = useState<string | null>(null)
-  const [expandedListItems, setExpandedListItems] = useState<any[]>([])
-  const [plForm, setPlForm] = useState({ name: '', type: 'default' })
-  const [plSaving, setPlSaving] = useState(false)
-  const [plAddProduct, setPlAddProduct] = useState({ product_id: '', price: '', discount_percent: '0' })
-
-  // BOM state
-  const [bomComponents, setBomComponents] = useState<any[]>([])
-  const [bomCost, setBomCost] = useState<number | null>(null)
-  const [bomLoading, setBomLoading] = useState(false)
-  const [bomNew, setBomNew] = useState({ product_id: '', quantity: '1', unit: 'unidad' })
-
-  const loadProducts = async () => {
+  // Load products
+  const loadProducts = useCallback(async () => {
     try {
       setLoading(true)
-      const [res, typesRes, catsRes, plRes] = await Promise.all([
-        api.getProducts().catch((err: any) => {
-          setError(`Error cargando productos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
-          return { items: [] }
-        }),
-        api.getProductTypes().catch(() => []),
-        api.getCategories().catch(() => []),
-        api.getPriceLists().catch(() => []),
-      ])
-      setProducts(res.items || res || [])
-      setProductTypes(Array.isArray(typesRes) ? typesRes : [])
-      // Note: typesRes now returns objects {id, name, description, sort_order} from the table
-      setCategories(Array.isArray(catsRes) ? catsRes : [])
-      setPriceLists(Array.isArray(plRes) ? plRes : [])
+      const skip = (page - 1) * ITEMS_PER_PAGE
+      const res = await api.getProducts({
+        skip,
+        limit: ITEMS_PER_PAGE,
+        search: search || undefined,
+        category_id: filterCategory || undefined,
+        stock_status: stockStatusFilter !== 'all' ? stockStatusFilter : undefined,
+      }).catch((err: any) => {
+        setError(`Error cargando productos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+        return { items: [], total: 0, has_stock_products: false }
+      })
+      setProducts(res.items || [])
+      setTotal(res.total || 0)
+      setHasStockProducts(res.has_stock_products || false)
     } catch (e: any) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, search, filterCategory, stockStatusFilter])
 
-  useEffect(() => { loadProducts() }, [])
-
-  // Bidirectional price calculation
-  const recalcFrom = useCallback((field: string, value: string, currentForm: typeof emptyForm) => {
-    const cost = field === 'cost' ? (parseFloat(value) || 0) : (parseFloat(currentForm.cost) || 0)
-    const margin = field === 'margin_percent' ? (parseFloat(value) || 0) : (parseFloat(currentForm.margin_percent) || 0)
-    const vat = field === 'vat_rate' ? (parseFloat(value) || 0) : (parseFloat(currentForm.vat_rate) || 0)
-    const finalPrice = field === 'final_price' ? (parseFloat(value) || 0) : (parseFloat(currentForm.final_price) || 0)
-
-    const updated = { ...currentForm, [field]: value }
-
-    if (field === 'final_price') {
-      // User changed final price -> recalc margin
-      if (cost > 0 && vat >= 0) {
-        const priceWithoutVat = finalPrice / (1 + vat / 100)
-        const newMargin = ((priceWithoutVat / cost) - 1) * 100
-        updated.margin_percent = isFinite(newMargin) && newMargin >= 0 ? newMargin.toFixed(2) : '0'
-      }
-    } else if (field === 'margin_percent') {
-      // User changed margin -> recalc final price
-      const newFinal = cost * (1 + margin / 100) * (1 + vat / 100)
-      updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
-    } else if (field === 'cost') {
-      // User changed cost -> recalc final price
-      const newCost = parseFloat(value) || 0
-      const newFinal = newCost * (1 + margin / 100) * (1 + vat / 100)
-      updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
-    } else if (field === 'vat_rate') {
-      // User changed VAT -> recalc final price
-      const newVat = parseFloat(value) || 0
-      const newFinal = cost * (1 + margin / 100) * (1 + newVat / 100)
-      updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
-    }
-
-    return updated
+  const loadMetadata = useCallback(async () => {
+    const [typesRes, catsRes, plRes] = await Promise.all([
+      api.getProductTypes().catch(() => []),
+      api.getCategories().catch(() => []),
+      api.getPriceLists().catch(() => []),
+    ])
+    setProductTypes(Array.isArray(typesRes) ? typesRes : [])
+    setCategories(Array.isArray(catsRes) ? catsRes : [])
+    setPriceLists(Array.isArray(plRes) ? plRes : [])
   }, [])
 
-  const handlePriceField = (field: string, value: string) => {
-    setLastEdited(field)
-    setForm(prev => recalcFrom(field, value, prev))
-  }
+  useEffect(() => { loadProducts() }, [loadProducts])
+  useEffect(() => { loadMetadata() }, [loadMetadata])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    setError(null)
-    try {
-      const cost = parseFloat(form.cost) || 0
-      const margin = parseFloat(form.margin_percent) || 0
-      const vat = parseFloat(form.vat_rate) || 0
-      const finalPrice = parseFloat(form.final_price) || cost * (1 + margin / 100) * (1 + vat / 100)
+  // Close detail panel on route change
+  useEffect(() => {
+    setSelectedProduct(null)
+  }, [activeTab])
 
-      const payload = {
-        sku: form.sku,
-        name: form.name,
-        description: form.description || null,
-        barcode: form.barcode || null,
-        product_type: form.product_type || 'otro',
-        cost: cost,
-        margin_percent: margin,
-        vat_rate: vat,
-        final_price: Math.round(finalPrice * 100) / 100,
-        controls_stock: form.controls_stock,
-        low_stock_threshold: form.controls_stock ? parseFloat(form.low_stock_threshold) || 0 : 0,
-      }
-      if (editingId) {
-        await api.updateProduct(editingId, payload)
-        toast.success('Producto actualizado')
-      } else {
-        await api.createProduct(payload)
-        toast.success('Producto creado')
-      }
-      setShowForm(false)
-      setEditingId(null)
-      setForm(emptyForm)
-      await loadProducts()
-    } catch (e: any) {
-      toast.error(e.message)
-      setError(e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  // Reset page on filter change
+  const handleSearchChange = (val: string) => { setSearch(val); setPage(1) }
+  const handleCategoryChange = (val: string) => { setFilterCategory(val); setPage(1) }
+  const handleStockStatusChange = (val: string) => { setStockStatusFilter(val); setPage(1) }
 
-  const loadBOM = async (productId: string) => {
-    setBomLoading(true)
-    try {
-      const [comps, costData] = await Promise.all([
-        api.getProductComponents(productId).catch(() => []),
-        api.getProductBOMCost(productId).catch(() => null),
-      ])
-      setBomComponents(comps || [])
-      setBomCost(costData?.bom_cost ? parseFloat(costData.bom_cost) : null)
-    } catch { setBomComponents([]); setBomCost(null) }
-    finally { setBomLoading(false) }
-  }
-
-  const handleAddComponent = async () => {
-    if (!editingId || !bomNew.product_id) return
-    try {
-      await api.addProductComponent(editingId, {
-        component_product_id: bomNew.product_id,
-        quantity_required: parseFloat(bomNew.quantity) || 1,
-        unit: bomNew.unit || 'unidad',
-      })
-      setBomNew({ product_id: '', quantity: '1', unit: 'unidad' })
-      await loadBOM(editingId)
-      toast.success('Componente agregado')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleRemoveComponent = async (componentId: string) => {
-    if (!editingId) return
-    try {
-      await api.removeProductComponent(editingId, componentId)
-      await loadBOM(editingId)
-      toast.success('Componente eliminado')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleEdit = (product: Product) => {
-    const pricing = product.pricing
-    const cost = pricing?.cost || '0'
-    const margin = pricing?.margin_percent || '30'
-    const vatRate = pricing?.vat_rate || '21'
-    const finalPrice = pricing?.final_price || '0'
-
-    setForm({
-      sku: product.sku, name: product.name, description: product.description || '',
-      barcode: product.barcode || '', product_type: (product as any).product_type || 'otro',
-      cost, margin_percent: margin, vat_rate: vatRate, final_price: finalPrice,
-      controls_stock: !!(product as any).controls_stock,
-      low_stock_threshold: String((product as any).low_stock_threshold || '0'),
-    })
-    setEditingId(product.id)
-    setShowForm(true)
-    loadBOM(product.id)
-  }
-
-  const handleCreateCategory = async () => {
-    if (!newCategoryName.trim()) return
-    try {
-      await api.createCategory({ name: newCategoryName.trim(), parent_id: newCategoryParent || undefined })
-      setNewCategoryName('')
-      setNewCategoryParent('')
-      const catsRes = await api.getCategories().catch(() => [])
-      setCategories(Array.isArray(catsRes) ? catsRes : [])
-      toast.success('Categoria creada')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleDeleteCategory = async (catId: string) => {
-    try {
-      await api.deleteCategory(catId)
-      const catsRes = await api.getCategories().catch(() => [])
-      setCategories(Array.isArray(catsRes) ? catsRes : [])
-      toast.success('Categoria eliminada')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const reloadTypes = async () => {
-    const typesRes = await api.getProductTypes().catch(() => [])
-    setProductTypes(Array.isArray(typesRes) ? typesRes : [])
-  }
-
-  const handleCreateType = async () => {
-    if (!newTypeName.trim()) return
-    try {
-      await api.createProductType({ name: newTypeName.trim(), description: newTypeDesc.trim() || undefined })
-      setNewTypeName('')
-      setNewTypeDesc('')
-      await reloadTypes()
-      toast.success('Tipo creado')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleUpdateType = async (typeId: string) => {
-    if (!editingTypeName.trim()) return
-    try {
-      await api.updateProductType(typeId, { name: editingTypeName.trim() })
-      setEditingTypeId(null)
-      setEditingTypeName('')
-      await reloadTypes()
-      toast.success('Tipo actualizado')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleDeleteType = async (typeId: string) => {
-    try {
-      await api.deleteProductType(typeId)
-      await reloadTypes()
-      toast.success('Tipo eliminado')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleMoveType = async (typeId: string, direction: 'up' | 'down') => {
-    const structured = productTypes.filter(t => typeof t !== 'string') as ProductType[]
-    const idx = structured.findIndex(t => t.id === typeId)
-    if (idx < 0) return
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= structured.length) return
-    const ordered = [...structured]
-    const temp = ordered[idx]
-    ordered[idx] = ordered[swapIdx]
-    ordered[swapIdx] = temp
-    try {
-      await api.reorderProductTypes(ordered.map(t => t.id))
-      await reloadTypes()
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  // Price List handlers
-  const handleCreatePriceList = async () => {
-    if (!plForm.name.trim()) return
-    setPlSaving(true)
-    try {
-      await api.createPriceList({ name: plForm.name.trim(), type: plForm.type })
-      setPlForm({ name: '', type: 'default' })
-      const plRes = await api.getPriceLists().catch(() => [])
-      setPriceLists(Array.isArray(plRes) ? plRes : [])
-      toast.success('Lista de precios creada')
-    } catch (e: any) { toast.error(e.message) }
-    finally { setPlSaving(false) }
-  }
-
-  const handleDeletePriceList = async (listId: string) => {
-    try {
-      await api.deletePriceList(listId)
-      if (expandedListId === listId) { setExpandedListId(null); setExpandedListItems([]) }
-      const plRes = await api.getPriceLists().catch(() => [])
-      setPriceLists(Array.isArray(plRes) ? plRes : [])
-      toast.success('Lista de precios eliminada')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleExpandPriceList = async (listId: string) => {
-    if (expandedListId === listId) { setExpandedListId(null); setExpandedListItems([]); return }
-    try {
-      const detail = await api.getPriceList(listId)
-      setExpandedListItems(detail.items || [])
-      setExpandedListId(listId)
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleAddProductToList = async () => {
-    if (!expandedListId || !plAddProduct.product_id || !plAddProduct.price) return
-    try {
-      const newItems = [
-        ...expandedListItems.map((it: any) => ({
-          product_id: it.product_id,
-          price: parseFloat(it.price),
-          discount_percent: parseFloat(it.discount_percent || '0'),
-        })),
-        {
-          product_id: plAddProduct.product_id,
-          price: parseFloat(plAddProduct.price),
-          discount_percent: parseFloat(plAddProduct.discount_percent || '0'),
-        },
-      ]
-      const updated = await api.setPriceListItems(expandedListId, newItems)
-      setExpandedListItems(updated || [])
-      setPlAddProduct({ product_id: '', price: '', discount_percent: '0' })
-      const plRes = await api.getPriceLists().catch(() => [])
-      setPriceLists(Array.isArray(plRes) ? plRes : [])
-      toast.success('Producto agregado a la lista')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleRemoveProductFromList = async (productId: string) => {
-    if (!expandedListId) return
-    try {
-      const newItems = expandedListItems
-        .filter((it: any) => it.product_id !== productId)
-        .map((it: any) => ({
-          product_id: it.product_id,
-          price: parseFloat(it.price),
-          discount_percent: parseFloat(it.discount_percent || '0'),
-        }))
-      const updated = await api.setPriceListItems(expandedListId, newItems)
-      setExpandedListItems(updated || [])
-      const plRes = await api.getPriceLists().catch(() => [])
-      setPriceLists(Array.isArray(plRes) ? plRes : [])
-      toast.success('Producto removido de la lista')
-    } catch (e: any) { toast.error(e.message) }
-  }
-
-  const handleBulkPriceUpdate = async () => {
-    const pct = parseFloat(bulkPercent)
-    if (!pct || selectedIds.size === 0) return
-    setBulkUpdating(true)
-    try {
-      await api.bulkUpdatePrice(Array.from(selectedIds), pct)
-      toast.success(`${selectedIds.size} productos actualizados (${pct > 0 ? '+' : ''}${pct}%)`)
-      setSelectedIds(new Set())
-      setShowBulkModal(false)
-      setBulkPercent('')
-      await loadProducts()
-    } catch (e: any) { toast.error(e.message) }
-    finally { setBulkUpdating(false) }
-  }
-
+  // Selection
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -439,10 +137,27 @@ export const Products: React.FC = () => {
   }
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filtered.length) setSelectedIds(new Set())
-    else setSelectedIds(new Set(filtered.map(p => p.id)))
+    if (selectedIds.size === products.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(products.map(p => p.id)))
   }
 
+  // Edit handler
+  const handleEdit = (product: Product) => {
+    const pricing = product.pricing
+    setEditingForm({
+      sku: product.sku, name: product.name, description: product.description || '',
+      barcode: product.barcode || '', product_type: product.product_type || 'otro',
+      cost: pricing?.cost || '0', margin_percent: pricing?.margin_percent || '30',
+      vat_rate: pricing?.vat_rate || '21', final_price: pricing?.final_price || '0',
+      controls_stock: !!product.controls_stock,
+      low_stock_threshold: String(product.low_stock_threshold || '0'),
+    })
+    setEditingId(product.id)
+    setShowForm(true)
+    setSelectedProduct(null)
+  }
+
+  // Delete handler
   const handleDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -458,116 +173,66 @@ export const Products: React.FC = () => {
     }
   }
 
-  const typeNames = productTypes.map(t => typeof t === 'string' ? t : t.name)
-  const allTypes = [...new Set([...DEFAULT_TYPES, ...typeNames])].sort()
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE) || 1
 
-  const filtered = products.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase()) ||
-      (p.barcode || '').includes(search)
-    const matchCategory = !filterCategory || p.category_id === filterCategory
-    return matchSearch && matchCategory
-  })
+  // Export data
+  const exportData = products.map(p => ({
+    sku: p.sku,
+    nombre: p.name,
+    tipo: p.product_type || '-',
+    costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
+    margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
+    iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
+    precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
+    stock: hasStockProducts && p.controls_stock ? parseFloat(String(p.stock_quantity ?? 0)) : '-',
+    estado: p.active ? 'Activo' : 'Inactivo',
+  }))
 
-  const getPriceWithoutVat = (pricing: Product['pricing']) => {
-    if (!pricing) return null
-    const final = parseFloat(pricing.final_price)
-    const vat = parseFloat(pricing.vat_rate) || 0
-    return final / (1 + vat / 100)
-  }
+  const exportColumns = [
+    { key: 'sku', label: 'SKU' },
+    { key: 'nombre', label: 'Producto' },
+    { key: 'tipo', label: 'Tipo' },
+    { key: 'costo', label: 'Costo' },
+    { key: 'margen', label: 'Margen' },
+    { key: 'iva', label: 'IVA' },
+    { key: 'precio_final', label: 'Precio Final' },
+    ...(hasStockProducts ? [{ key: 'stock', label: 'Stock' }] : []),
+    { key: 'estado', label: 'Estado' },
+  ]
 
-  const columns = [
-    { key: 'id' as const, label: '', render: (_: any, row: Product) => (
-      <input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleSelect(row.id)} onClick={e => e.stopPropagation()} className="rounded border-gray-300" />
-    )},
-    { key: 'sku' as const, label: 'SKU' },
-    { key: 'name' as const, label: 'Producto' },
-    { key: 'product_type' as const, label: 'Tipo', render: (v: any) => (
-      <span className="px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{v || '-'}</span>
-    )},
-    { key: 'pricing' as const, label: 'Costo', render: (v: any) => v ? formatCurrency(parseFloat(v.cost)) : '-' },
-    { key: 'pricing' as const, label: 'Margen', render: (v: any) => v ? `${v.margin_percent}%` : '-' },
-    { key: 'pricing' as const, label: 'IVA', render: (v: any) => v ? `${v.vat_rate}%` : '-' },
-    { key: 'pricing' as const, label: 'Sin IVA', render: (v: any) => {
-      const p = getPriceWithoutVat(v)
-      return p !== null ? <span className="text-gray-600">{formatCurrency(p)}</span> : '-'
-    }},
-    { key: 'pricing' as const, label: 'Precio Final', render: (v: any) => v ? (
-      <span className="font-bold text-green-700">{formatCurrency(parseFloat(v.final_price))}</span>
-    ) : '-' },
-    { key: 'active' as const, label: 'Estado', render: (v: any) => (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${v ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-        {v ? 'Activo' : 'Inactivo'}
-      </span>
-    )},
-    { key: 'id' as const, label: 'Acciones', render: (_: any, row: Product) => (
-      <div className="flex gap-2">
-        <PermissionGate module="products" action="edit">
-          <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
-        </PermissionGate>
-        <PermissionGate module="products" action="delete">
-          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
-        </PermissionGate>
-      </div>
-    )},
+  const tabs: { key: TabKey; label: string; show: boolean }[] = [
+    { key: 'productos', label: 'Productos', show: true },
+    { key: 'movimientos', label: 'Stock / Movimientos', show: hasStockProducts },
+    { key: 'tipos', label: 'Tipos', show: true },
+    { key: 'categorias', label: 'Categorias', show: true },
+    { key: 'listas', label: 'Listas de Precios', show: true },
   ]
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Productos</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{products.length} productos registrados</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{total} productos registrados</p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportCSVButton
-            data={filtered.map(p => ({
-              sku: p.sku,
-              nombre: p.name,
-              tipo: p.product_type || '-',
-              costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
-              margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
-              iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
-              precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
-              estado: p.active ? 'Activo' : 'Inactivo',
-            }))}
-            columns={[
-              { key: 'sku', label: 'SKU' },
-              { key: 'nombre', label: 'Producto' },
-              { key: 'tipo', label: 'Tipo' },
-              { key: 'costo', label: 'Costo' },
-              { key: 'margen', label: 'Margen' },
-              { key: 'iva', label: 'IVA' },
-              { key: 'precio_final', label: 'Precio Final' },
-              { key: 'estado', label: 'Estado' },
-            ]}
-            filename="productos"
-          />
-          <ExportExcelButton
-            data={filtered.map(p => ({
-              sku: p.sku,
-              nombre: p.name,
-              tipo: p.product_type || '-',
-              costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
-              margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
-              iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
-              precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
-              estado: p.active ? 'Activo' : 'Inactivo',
-            }))}
-            columns={[
-              { key: 'sku', label: 'SKU' },
-              { key: 'nombre', label: 'Producto' },
-              { key: 'tipo', label: 'Tipo' },
-              { key: 'costo', label: 'Costo' },
-              { key: 'margen', label: 'Margen' },
-              { key: 'iva', label: 'IVA' },
-              { key: 'precio_final', label: 'Precio Final' },
-              { key: 'estado', label: 'Estado' },
-            ]}
-            filename="productos"
-          />
+          <ExportCSVButton data={exportData} columns={exportColumns} filename="productos" />
+          <ExportExcelButton data={exportData} columns={exportColumns} filename="productos" />
           <PermissionGate module="products" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+            <Button
+              variant={showForm ? 'danger' : 'primary'}
+              onClick={() => {
+                if (showForm) {
+                  setShowForm(false)
+                  setEditingId(null)
+                } else {
+                  setEditingForm(emptyForm)
+                  setEditingId(null)
+                  setShowForm(true)
+                }
+              }}
+            >
               {showForm ? 'Cancelar' : '+ Nuevo Producto'}
             </Button>
           </PermissionGate>
@@ -577,414 +242,139 @@ export const Products: React.FC = () => {
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
+          <button onClick={() => setError(null)} className="ml-2 font-bold">x</button>
         </div>
       )}
 
+      {/* Product form (create/edit) */}
       {showForm && (
-        <Card>
-          <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Producto' : 'Nuevo Producto'}</h3></CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">SKU *<HelpTip text="Codigo unico del producto. Se genera automaticamente pero podes editarlo." /></label>
-                  <Input placeholder="PROD-001" value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} required />
-                </div>
-                <Input label="Nombre *" placeholder="Nombre del producto" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Codigo de Barras<HelpTip text="Opcional. Escaneable desde lectores de barras." /></label>
-                  <Input placeholder="7790001234567" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Producto<HelpTip text="Categoria del producto. Configura los tipos disponibles en 'Gestionar tipos' mas abajo." /></label>
-                  <input
-                    list="product-types-list"
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.product_type}
-                    onChange={e => setForm({ ...form, product_type: e.target.value })}
-                    placeholder="Escribir o elegir tipo..."
-                  />
-                  <datalist id="product-types-list">
-                    {allTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                  </datalist>
-                </div>
-              </div>
-              <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-
-              {/* Stock control */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.controls_stock}
-                      onChange={e => setForm({ ...form, controls_stock: e.target.checked })}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Controla stock<HelpTip text="Activa para llevar control de inventario. El stock se descuenta automaticamente en pedidos y se suma en compras." /></span>
-                  </label>
-                  {form.controls_stock && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-600">Alerta stock bajo:</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-24 bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        value={form.low_stock_threshold}
-                        onChange={e => setForm({ ...form, low_stock_threshold: e.target.value })}
-                        placeholder="0"
-                      />
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs text-gray-400 mt-1">
-                  {form.controls_stock
-                    ? 'Este producto se descontara del inventario en pedidos y se sumara en compras'
-                    : 'Activar para gestionar el stock de este producto'}
-                </p>
-              </div>
-
-              {/* Bidirectional Price Fields */}
-              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Precios — todos los campos se relacionan entre sí</h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Costo (ARS) *<HelpTip text="Precio al que compras este producto. Se usa para calcular el margen." /></label>
-                    <input
-                      type="number" step="0.01" placeholder="0.00" required
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'cost' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
-                      value={form.cost}
-                      onChange={e => handlePriceField('cost', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Margen %<HelpTip text="Porcentaje de ganancia sobre el costo. Modifica el precio final automaticamente." /></label>
-                    <input
-                      type="number" step="0.01" placeholder="30"
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'margin_percent' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
-                      value={form.margin_percent}
-                      onChange={e => handlePriceField('margin_percent', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">IVA %</label>
-                    <select
-                      className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
-                      value={form.vat_rate}
-                      onChange={e => handlePriceField('vat_rate', e.target.value)}
-                    >
-                      {VAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Precio Final (ARS)</label>
-                    <input
-                      type="number" step="0.01" placeholder="0.00"
-                      className={`px-3 py-2 border rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500 ${lastEdited === 'final_price' ? 'border-green-400 bg-green-50 text-green-800 dark:border-green-600 dark:bg-green-900/30 dark:text-green-100' : 'border-green-300 bg-green-50 text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-100'}`}
-                      value={form.final_price}
-                      onChange={e => handlePriceField('final_price', e.target.value)}
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400 mt-2">Modificá cualquier campo y los otros se recalculan automáticamente</p>
-              </div>
-
-              {/* BOM Section */}
-              {editingId ? (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <h4 className="text-sm font-semibold text-amber-800 mb-3">Composicion (BOM)<HelpTip text="Lista de materiales necesarios para fabricar este producto. Cuando se produce, estos materiales se descuentan del inventario." /></h4>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
-                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.product_id} onChange={e => setBomNew({ ...bomNew, product_id: e.target.value })}>
-                      <option value="">Seleccionar material...</option>
-                      {products.filter(p => p.id !== editingId).map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
-                    </select>
-                    <input type="number" step="0.0001" min="0.0001" placeholder="Cantidad" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.quantity} onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })} />
-                    <input placeholder="Unidad (unidad, metro, kg...)" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.unit} onChange={e => setBomNew({ ...bomNew, unit: e.target.value })} />
-                    <Button type="button" variant="primary" onClick={handleAddComponent} disabled={!bomNew.product_id}>+ Agregar</Button>
-                  </div>
-                  {bomLoading ? (
-                    <p className="text-xs text-gray-400">Cargando composicion...</p>
-                  ) : bomComponents.length > 0 ? (
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-amber-100/50 text-xs text-amber-700">
-                          <th className="px-3 py-1.5 text-left">Material</th>
-                          <th className="px-3 py-1.5 text-left">SKU</th>
-                          <th className="px-3 py-1.5 text-right">Cantidad</th>
-                          <th className="px-3 py-1.5 text-left">Unidad</th>
-                          <th className="px-3 py-1.5 text-right">Costo Unit.</th>
-                          <th className="px-3 py-1.5 text-right">Stock</th>
-                          <th className="px-3 py-1.5 w-8"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bomComponents.map((comp: any) => (
-                          <tr key={comp.id} className="border-t border-amber-200/50">
-                            <td className="px-3 py-1.5 text-gray-800">{comp.component_name}</td>
-                            <td className="px-3 py-1.5 text-gray-500 font-mono text-xs">{comp.component_sku}</td>
-                            <td className="px-3 py-1.5 text-right">{parseFloat(comp.quantity_required)}</td>
-                            <td className="px-3 py-1.5 text-gray-600">{comp.unit || 'unidad'}</td>
-                            <td className="px-3 py-1.5 text-right">{formatCurrency(parseFloat(comp.component_cost || '0'))}</td>
-                            <td className="px-3 py-1.5 text-right">
-                              <span className={parseFloat(comp.stock_available || '0') >= parseFloat(comp.quantity_required) ? 'text-green-600' : 'text-red-600'}>
-                                {parseFloat(comp.stock_available || '0')}
-                              </span>
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <button type="button" onClick={() => handleRemoveComponent(comp.id)} className="text-red-500 hover:text-red-700 text-xs">x</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="text-xs text-gray-400">Sin componentes. Este producto no tiene lista de materiales.</p>
-                  )}
-                  {bomCost !== null && bomCost > 0 && (
-                    <div className="mt-2 flex gap-4 text-xs">
-                      <span className="text-amber-700">Costo BOM: <strong>{formatCurrency(bomCost)}</strong></span>
-                      <span className="text-gray-500">Costo manual: <strong>{formatCurrency(parseFloat(form.cost || '0'))}</strong></span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400 italic">Guarda el producto primero para agregar composicion de materiales.</p>
-              )}
-
-              <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Producto'}</Button>
-            </form>
-          </CardContent>
-        </Card>
+        <ProductForm
+          editingId={editingId}
+          initialForm={editingForm}
+          productTypes={productTypes}
+          products={products}
+          onSaved={() => { setShowForm(false); setEditingId(null); loadProducts(); loadMetadata() }}
+          onCancel={() => { setShowForm(false); setEditingId(null) }}
+        />
       )}
 
-      {/* Filters row */}
-      <div className="flex items-center gap-3">
-        <Input placeholder="Buscar por nombre, SKU o codigo de barras..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
-        {categories.length > 0 && (
-          <select
-            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-            value={filterCategory}
-            onChange={e => setFilterCategory(e.target.value)}
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+        {tabs.filter(t => t.show).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => handleTabChange(tab.key)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === tab.key
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
           >
-            <option value="">Todas las categorias</option>
-            {categories.filter(c => !c.parent_id).map(c => (
-              <React.Fragment key={c.id}>
-                <option value={c.id}>{c.name} ({c.product_count})</option>
-                {categories.filter(sub => sub.parent_id === c.id).map(sub => (
-                  <option key={sub.id} value={sub.id}>&nbsp;&nbsp;{sub.name} ({sub.product_count})</option>
-                ))}
-              </React.Fragment>
-            ))}
-          </select>
-        )}
-        {selectedIds.size > 0 && (
-          <Button variant="secondary" onClick={() => setShowBulkModal(true)}>
-            Aumentar precio ({selectedIds.size})
-          </Button>
-        )}
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Categories management (collapsible) */}
-      <details className="text-sm">
-        <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar categorias ({categories.length})</summary>
-        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <input placeholder="Nombre categoria..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
-            <select value={newCategoryParent} onChange={e => setNewCategoryParent(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
-              <option value="">Sin padre</option>
-              {categories.filter(c => !c.parent_id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <Button variant="primary" onClick={handleCreateCategory} disabled={!newCategoryName.trim()}>+ Crear</Button>
-          </div>
-          {categories.length > 0 && (
-            <div className="space-y-1">
-              {categories.filter(c => !c.parent_id).map(c => (
-                <div key={c.id}>
-                  <div className="flex items-center justify-between py-1 px-2 bg-white dark:bg-gray-700 rounded">
-                    <span className="font-medium">{c.name} <span className="text-gray-400 text-xs">({c.product_count})</span></span>
-                    <button onClick={() => handleDeleteCategory(c.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
-                  </div>
-                  {categories.filter(sub => sub.parent_id === c.id).map(sub => (
-                    <div key={sub.id} className="flex items-center justify-between py-1 px-2 ml-6 bg-white dark:bg-gray-700 rounded">
-                      <span className="text-gray-600">{sub.name} <span className="text-gray-400 text-xs">({sub.product_count})</span></span>
-                      <button onClick={() => handleDeleteCategory(sub.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </details>
+      {/* Productos tab */}
+      {activeTab === 'productos' && (
+        <>
+          <ProductFilters
+            search={search}
+            onSearchChange={handleSearchChange}
+            filterCategory={filterCategory}
+            onFilterCategoryChange={handleCategoryChange}
+            categories={categories}
+            selectedCount={selectedIds.size}
+            onBulkPrice={() => setShowBulkModal(true)}
+            hasStockProducts={hasStockProducts}
+            stockStatusFilter={stockStatusFilter}
+            onStockStatusChange={handleStockStatusChange}
+          />
 
-      {/* Product Types management (collapsible) */}
-      <details className="text-sm">
-        <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Gestionar tipos ({productTypes.length})</summary>
-        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <input placeholder="Nombre del tipo..." value={newTypeName} onChange={e => setNewTypeName(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
-            <input placeholder="Descripcion (opcional)" value={newTypeDesc} onChange={e => setNewTypeDesc(e.target.value)} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
-            <Button variant="primary" onClick={handleCreateType} disabled={!newTypeName.trim()}>+ Crear</Button>
-          </div>
-          {productTypes.length > 0 && (
-            <div className="space-y-1">
-              {(productTypes.filter(t => typeof t !== 'string') as ProductType[]).map((t, idx, arr) => (
-                <div key={t.id} className="flex items-center justify-between py-1 px-2 bg-white dark:bg-gray-700 rounded">
-                  {editingTypeId === t.id ? (
-                    <div className="flex items-center gap-2 flex-1">
-                      <input
-                        className="px-2 py-1 border border-blue-300 rounded text-sm flex-1"
-                        value={editingTypeName}
-                        onChange={e => setEditingTypeName(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleUpdateType(t.id)}
-                        autoFocus
-                      />
-                      <button onClick={() => handleUpdateType(t.id)} className="text-blue-600 text-xs hover:underline">OK</button>
-                      <button onClick={() => setEditingTypeId(null)} className="text-gray-400 text-xs hover:underline">x</button>
-                    </div>
-                  ) : (
-                    <>
-                      <span className="font-medium">
-                        {t.name}
-                        {t.description && <span className="text-gray-400 text-xs ml-2">({t.description})</span>}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => handleMoveType(t.id, 'up')} disabled={idx === 0} className="text-gray-400 hover:text-gray-600 text-xs disabled:opacity-30" title="Subir">^</button>
-                        <button onClick={() => handleMoveType(t.id, 'down')} disabled={idx === arr.length - 1} className="text-gray-400 hover:text-gray-600 text-xs disabled:opacity-30" title="Bajar">v</button>
-                        <button onClick={() => { setEditingTypeId(t.id); setEditingTypeName(t.name) }} className="text-blue-500 text-xs hover:underline ml-1">Editar</button>
-                        <button onClick={() => handleDeleteType(t.id)} className="text-red-500 text-xs hover:underline">Eliminar</button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
+          {showBulkModal && (
+            <BulkPriceModal
+              selectedIds={selectedIds}
+              onClose={() => { setShowBulkModal(false) }}
+              onUpdated={() => { setSelectedIds(new Set()); setShowBulkModal(false); loadProducts() }}
+            />
           )}
-        </div>
-      </details>
 
-      {/* Price Lists management (collapsible) */}
-      <details className="text-sm">
-        <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Listas de precios ({priceLists.length})</summary>
-        <div className="mt-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-3">
-          <div className="flex items-center gap-2">
-            <input placeholder="Nombre de la lista..." value={plForm.name} onChange={e => setPlForm({ ...plForm, name: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100" />
-            <select value={plForm.type} onChange={e => setPlForm({ ...plForm, type: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100">
-              <option value="default">General</option>
-              <option value="customer">Cliente</option>
-              <option value="channel">Canal</option>
-              <option value="promo">Promocion</option>
-            </select>
-            <Button variant="primary" onClick={handleCreatePriceList} loading={plSaving} disabled={!plForm.name.trim()}>+ Crear</Button>
-          </div>
-          {priceLists.length > 0 && (
-            <div className="space-y-2">
-              {priceLists.map((pl: any) => (
-                <div key={pl.id} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                  <div className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-50" onClick={() => handleExpandPriceList(pl.id)}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs">{expandedListId === pl.id ? '▼' : '▶'}</span>
-                      <span className="font-medium">{pl.name}</span>
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{pl.type}</span>
-                      <span className="text-gray-400 text-xs">{pl.item_count} producto{Number(pl.item_count) !== 1 ? 's' : ''}</span>
-                    </div>
-                    <button onClick={(e) => { e.stopPropagation(); handleDeletePriceList(pl.id) }} className="text-red-500 text-xs hover:underline">Eliminar</button>
-                  </div>
-                  {expandedListId === pl.id && (
-                    <div className="border-t border-gray-200 px-3 py-2 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <select value={plAddProduct.product_id} onChange={e => {
-                          const pid = e.target.value
-                          const prod = products.find(p => p.id === pid)
-                          setPlAddProduct({
-                            ...plAddProduct,
-                            product_id: pid,
-                            price: prod?.pricing?.final_price || '',
-                          })
-                        }} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm flex-1 bg-white dark:bg-gray-700 dark:text-gray-100">
-                          <option value="">Agregar producto...</option>
-                          {products.filter(p => !expandedListItems.some((it: any) => it.product_id === p.id)).map(p => (
-                            <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>
-                          ))}
-                        </select>
-                        <input type="number" step="0.01" placeholder="Precio" value={plAddProduct.price} onChange={e => setPlAddProduct({ ...plAddProduct, price: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-28 bg-white dark:bg-gray-700 dark:text-gray-100" />
-                        <input type="number" step="0.01" placeholder="Dto %" value={plAddProduct.discount_percent} onChange={e => setPlAddProduct({ ...plAddProduct, discount_percent: e.target.value })} className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-20 bg-white dark:bg-gray-700 dark:text-gray-100" />
-                        <Button variant="primary" onClick={handleAddProductToList} disabled={!plAddProduct.product_id || !plAddProduct.price}>+</Button>
-                      </div>
-                      {expandedListItems.length > 0 ? (
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-gray-500 text-xs border-b">
-                              <th className="pb-1 font-medium">SKU</th>
-                              <th className="pb-1 font-medium">Producto</th>
-                              <th className="pb-1 font-medium text-right">Precio Lista</th>
-                              <th className="pb-1 font-medium text-right">Dto %</th>
-                              <th className="pb-1 font-medium text-right">Precio Base</th>
-                              <th className="pb-1 w-8"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {expandedListItems.map((item: any) => (
-                              <tr key={item.id} className="border-b border-gray-100">
-                                <td className="py-1 font-mono text-xs text-gray-500">{item.product_sku}</td>
-                                <td className="py-1 text-gray-800">{item.product_name}</td>
-                                <td className="py-1 text-right font-semibold text-green-700">{formatCurrency(parseFloat(item.price))}</td>
-                                <td className="py-1 text-right text-gray-600">{parseFloat(item.discount_percent || '0')}%</td>
-                                <td className="py-1 text-right text-gray-400">{item.current_price ? formatCurrency(parseFloat(item.current_price)) : '-'}</td>
-                                <td className="py-1">
-                                  <button onClick={() => handleRemoveProductFromList(item.product_id)} className="text-red-500 hover:text-red-700 text-xs">x</button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <p className="text-xs text-gray-400 text-center py-2">Sin productos en esta lista.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+          {loading ? (
+            <SkeletonTable rows={6} cols={6} />
+          ) : products.length === 0 ? (
+            <EmptyState
+              title={search ? 'Sin resultados' : 'Sin productos'}
+              description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
+              actionLabel={!search ? '+ Nuevo Producto' : undefined}
+              onAction={!search ? () => { setEditingForm(emptyForm); setEditingId(null); setShowForm(true) } : undefined}
+            />
+          ) : (
+            <ProductTable
+              products={products}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onRowClick={(product) => setSelectedProduct(product)}
+              onEdit={handleEdit}
+              onDelete={(product) => setDeleteTarget(product)}
+              hasStockProducts={hasStockProducts}
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={setPage}
+            />
           )}
-        </div>
-      </details>
-
-      {/* Bulk price modal */}
-      {showBulkModal && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="pt-4">
-            <h4 className="text-sm font-semibold text-blue-800 mb-3">Aumento masivo de precios — {selectedIds.size} producto{selectedIds.size > 1 ? 's' : ''}</h4>
-            <div className="flex items-center gap-3">
-              <input type="number" step="0.1" placeholder="Ej: 15 para +15%" value={bulkPercent} onChange={e => setBulkPercent(e.target.value)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-40 bg-white dark:bg-gray-700 dark:text-gray-100" />
-              <span className="text-sm text-gray-600">%</span>
-              <Button variant="success" onClick={handleBulkPriceUpdate} loading={bulkUpdating} disabled={!bulkPercent}>Aplicar</Button>
-              <Button variant="secondary" onClick={() => { setShowBulkModal(false); setBulkPercent('') }}>Cancelar</Button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">Usa valores negativos para disminuir (ej: -10 para -10%)</p>
-          </CardContent>
-        </Card>
+        </>
       )}
 
-      {loading ? (
-        <SkeletonTable rows={6} cols={6} />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          title={search ? 'Sin resultados' : 'Sin productos'}
-          description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
-          actionLabel={!search ? '+ Nuevo Producto' : undefined}
-          onAction={!search ? () => setShowForm(true) : undefined}
+      {/* Stock / Movimientos tab */}
+      {activeTab === 'movimientos' && hasStockProducts && (
+        <StockMovements
+          products={products}
+          onDataChanged={() => { loadProducts(); loadMetadata() }}
         />
-      ) : (
-        <DataTable columns={columns} data={filtered} />
       )}
 
+      {/* Tipos tab */}
+      {activeTab === 'tipos' && (
+        <TypesManager
+          productTypes={productTypes}
+          onReload={loadMetadata}
+        />
+      )}
+
+      {/* Categorias tab */}
+      {activeTab === 'categorias' && (
+        <CategoriesManager
+          categories={categories}
+          onReload={loadMetadata}
+        />
+      )}
+
+      {/* Listas de precios tab */}
+      {activeTab === 'listas' && (
+        <PriceListsManager
+          priceLists={priceLists}
+          products={products}
+          onReload={loadMetadata}
+        />
+      )}
+
+      {/* Detail Panel */}
+      {selectedProduct && (
+        <ProductDetailPanel
+          product={selectedProduct}
+          products={products}
+          onClose={() => setSelectedProduct(null)}
+          onSaved={() => { loadProducts(); setSelectedProduct(null) }}
+        />
+      )}
+
+      {/* Delete dialog */}
       <ConfirmDialog
         open={!!deleteTarget}
         title="Eliminar producto"
-        message={`¿Seguro que querés eliminar "${deleteTarget?.name}"? Esta acción no se puede deshacer.`}
+        message={`Seguro que queres eliminar "${deleteTarget?.name}"? Esta accion no se puede deshacer.`}
         confirmLabel="Eliminar"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}

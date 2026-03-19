@@ -248,8 +248,14 @@ export const api = {
   },
 
   // Products
-  getProducts: async () => {
-    const { data } = await client.get('/products')
+  getProducts: async (filters?: { skip?: number; limit?: number; search?: string; stock_status?: string; category_id?: string; product_type?: string; active?: string }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/products?${params.toString()}`)
     return data
   },
   createProduct: async (productData: any) => {
@@ -302,6 +308,10 @@ export const api = {
   },
   bulkUpdatePrice: async (productIds: string[], percent: number) => {
     const { data } = await client.post('/products/bulk-price', { product_ids: productIds, percent })
+    return data
+  },
+  bulkPricePreview: async (productIds: string[], percent: number) => {
+    const { data } = await client.post('/products/bulk-price-preview', { product_ids: productIds, percent })
     return data
   },
 
@@ -616,6 +626,16 @@ export const api = {
   // Inventory
   getInventory: async () => {
     const { data } = await client.get('/inventory')
+    return data
+  },
+  getStockMovements: async (filters?: { skip?: number; limit?: number; product_id?: string }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/inventory/movements?${params.toString()}`)
     return data
   },
   createInventoryMovement: async (movementData: any) => {
