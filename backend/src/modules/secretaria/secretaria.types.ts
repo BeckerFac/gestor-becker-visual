@@ -42,6 +42,7 @@ export type SecretariaIntent =
   | 'query_orders'
   | 'query_general'
   | 'morning_brief'
+  | 'send_document'
   | 'help'
   | 'greeting'
   | 'unknown';
@@ -86,6 +87,8 @@ export interface SecretariaConfig {
   morningBriefEnabled: boolean;
   morningBriefTime: string; // HH:mm format
   timezone: string;
+  lastBriefDate: string | null; // YYYY-MM-DD or null
+  briefSections: readonly string[]; // subset of available sections
 }
 
 export interface LinkedPhone {

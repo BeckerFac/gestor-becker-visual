@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { secretariaService } from './secretaria.service';
 import { whatsappClient } from './secretaria.whatsapp';
+import { secretariaScheduler, isValidTimeFormat, isValidTimezone, isValidBriefSections } from './secretaria.scheduler';
 import { ApiError } from '../../middlewares/errorHandler';
 import logger from '../../config/logger';
 
@@ -74,13 +75,32 @@ class SecretariaController {
 
   async updateConfig(req: AuthRequest, res: Response): Promise<void> {
     const companyId = req.user!.company_id;
-    const { enabled, morningBriefEnabled, morningBriefTime, timezone } = req.body;
+    const { enabled, morningBriefEnabled, morningBriefTime, timezone, briefSections } = req.body;
 
     const updates: Record<string, unknown> = {};
     if (typeof enabled === 'boolean') updates.enabled = enabled;
     if (typeof morningBriefEnabled === 'boolean') updates.morningBriefEnabled = morningBriefEnabled;
-    if (typeof morningBriefTime === 'string') updates.morningBriefTime = morningBriefTime;
-    if (typeof timezone === 'string') updates.timezone = timezone;
+
+    if (typeof morningBriefTime === 'string') {
+      if (!isValidTimeFormat(morningBriefTime)) {
+        throw new ApiError(400, 'Formato de hora invalido. Usa HH:MM (ej: 08:00)');
+      }
+      updates.morningBriefTime = morningBriefTime;
+    }
+
+    if (typeof timezone === 'string') {
+      if (!isValidTimezone(timezone)) {
+        throw new ApiError(400, 'Zona horaria invalida. Usa formato IANA (ej: America/Argentina/Buenos_Aires)');
+      }
+      updates.timezone = timezone;
+    }
+
+    if (Array.isArray(briefSections)) {
+      if (!isValidBriefSections(briefSections)) {
+        throw new ApiError(400, 'Secciones de brief invalidas. Opciones: ventas, pedidos, cobros, stock, cheques, pipeline');
+      }
+      updates.briefSections = briefSections;
+    }
 
     if (Object.keys(updates).length === 0) {
       throw new ApiError(400, 'No se enviaron campos validos para actualizar');
@@ -163,6 +183,22 @@ class SecretariaController {
 
     await secretariaService.unlinkPhone(companyId, phoneId);
     res.json({ message: 'Telefono desvinculado correctamente' });
+  }
+
+  // --------------------------------------------------------------------------
+  // POST /brief/send — Trigger morning brief immediately
+  // --------------------------------------------------------------------------
+
+  async sendBriefNow(req: AuthRequest, res: Response): Promise<void> {
+    const companyId = req.user!.company_id;
+
+    const sent = await secretariaScheduler.sendBriefNow(companyId);
+
+    if (sent) {
+      res.json({ message: 'Brief enviado correctamente a los telefonos vinculados.' });
+    } else {
+      res.json({ message: 'No se pudo enviar el brief. Verifica que haya telefonos vinculados y verificados.' });
+    }
   }
 }
 

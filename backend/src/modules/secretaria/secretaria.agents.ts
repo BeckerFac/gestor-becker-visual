@@ -43,6 +43,8 @@ export async function classifyIntent(
 ): Promise<IntentClassification> {
   const client = getOpenAIClient();
   const { companyId, displayName } = context;
+  // NOTE: companyName is not available at intent classification level,
+  // using displayName as fallback for the security block context
   const companyName = displayName;
 
   const recentContext = context.recentMessages.slice(-3);
@@ -174,6 +176,7 @@ const VALID_INTENTS: ReadonlyArray<SecretariaIntent> = [
   'query_orders',
   'query_general',
   'morning_brief',
+  'send_document',
   'help',
   'greeting',
   'unknown',
@@ -191,13 +194,16 @@ function validateIntent(raw: string | undefined): SecretariaIntent {
 function sanitizeEntities(raw: Record<string, string> | undefined): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
 
-  const allowed = ['client_name', 'product_name', 'date_from', 'date_to', 'period', 'status', 'amount', 'invoice_type'];
+  const allowed = ['client_name', 'product_name', 'date_from', 'date_to', 'period', 'status', 'amount', 'invoice_type', 'document_type', 'document_number', 'report_type', 'send_format'];
   const sanitized: Record<string, string> = {};
 
   for (const key of allowed) {
     if (key in raw && typeof raw[key] === 'string') {
-      // Limit entity value length to prevent injection
-      sanitized[key] = raw[key].slice(0, 100);
+      // Defense-in-depth: limit length + strip SQL metacharacters
+      // (queries are parameterized, but belt-and-suspenders)
+      sanitized[key] = raw[key]
+        .slice(0, 100)
+        .replace(/['";\\]/g, '');
     }
   }
 

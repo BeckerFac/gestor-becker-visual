@@ -51,6 +51,7 @@
     "soap": "^1.7.1",
     "typescript": "^5.3.3",
     "uuid": "^9.0.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.22.0"
   },
   "devDependencies": {

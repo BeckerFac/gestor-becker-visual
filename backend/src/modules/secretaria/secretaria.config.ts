@@ -57,6 +57,7 @@ Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - query_orders: consultas sobre pedidos (estado, entregas, listados)
 - query_general: consultas generales del negocio (totales, resumenes)
 - morning_brief: pedido de resumen matutino / brief del dia
+- send_document: pedido de envio de documento (PDF factura, cotizacion, remito, reporte Excel, preview)
 - help: pedido de ayuda o lista de funciones
 - greeting: saludo simple (hola, buen dia, etc.)
 - unknown: no se puede clasificar
@@ -65,6 +66,7 @@ Responde SOLO con un JSON valido:
 {"intent": "<categoria>", "confidence": <0.0-1.0>, "entities": {<entidades extraidas>}}
 
 Ejemplos de entidades: {"client_name": "Garcia"}, {"product_name": "tornillo"}, {"period": "este mes"}
+Para send_document: {"document_type": "factura|cotizacion|remito|reporte", "client_name": "...", "document_number": "0002", "report_type": "ventas|facturas|clientes|productos|deudores", "send_format": "pdf|excel|preview"}
 No inventes entidades que no esten en el mensaje.`,
 
   responseGeneration: `Sos SecretarIA, la asistente virtual de gestion comercial por WhatsApp.
@@ -106,6 +108,8 @@ Puedo ayudarte con:
 - Revisar facturas pendientes
 - Consultar stock y precios
 - Resumen del dia
+- Enviar PDFs de facturas, cotizaciones y remitos
+- Generar reportes en Excel
 
 Escribime lo que necesites.`,
 
@@ -117,6 +121,7 @@ Escribime lo que necesites.`,
 *Productos*: "precio de X", "stock bajo"
 *Saldos*: "cuenta corriente de X", "deudores"
 *Resumen*: "brief del dia", "resumen matutino"
+*Documentos*: "mandame la factura 0002", "pasame el PDF de la cotizacion 3", "quiero el reporte de ventas en Excel", "preview del remito 5"
 
 Escribime tu consulta y te respondo al toque.`,
 } as const;

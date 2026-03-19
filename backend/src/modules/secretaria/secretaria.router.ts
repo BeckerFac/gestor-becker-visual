@@ -67,3 +67,10 @@ secretariaRouter.delete(
   authorize('secretaria', 'edit'),
   (req, res) => secretariaController.unlinkPhone(req as any, res),
 );
+
+secretariaRouter.post(
+  '/brief/send',
+  ...auth,
+  authorize('secretaria', 'edit'),
+  (req, res) => secretariaController.sendBriefNow(req as any, res),
+);

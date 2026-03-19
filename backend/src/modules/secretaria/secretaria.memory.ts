@@ -489,10 +489,13 @@ export async function loadMemory(companyId: string): Promise<Record<string, stri
  */
 export async function detectAndSaveMemory(
   companyId: string,
+  userId: string,
   userMessage: string,
   agentResponse: string,
 ): Promise<readonly SavedMemory[]> {
-  // Use a generic userId since the caller doesn't provide one
-  // The service resolves the user at a higher level
-  return secretariaMemory.detectAndSaveMemory(companyId, '', userMessage, agentResponse);
+  if (!userId) {
+    // Avoid creating memory entries with empty user_id
+    return [];
+  }
+  return secretariaMemory.detectAndSaveMemory(companyId, userId, userMessage, agentResponse);
 }

@@ -15,9 +15,11 @@ import {
   queryOrders,
   queryGeneral,
   morningBrief,
+  sendDocument,
 } from './secretaria.tools';
 import { secretariaMemory } from './secretaria.memory';
 import { SECRETARIA_CONFIG, SECRETARIA_PROMPTS } from './secretaria.config';
+import { deepgramSTT } from './secretaria.stt';
 import {
   WhatsAppWebhookPayload,
   SecretariaIntent,
@@ -54,6 +56,7 @@ async function executeTool(
   intent: SecretariaIntent,
   entities: Record<string, string>,
   companyId: string,
+  phoneNumber?: string,
 ): Promise<ToolResult> {
   switch (intent) {
     case 'query_clients':
@@ -70,8 +73,10 @@ async function executeTool(
       return morningBrief(companyId);
     case 'query_general':
       return queryGeneral(companyId, entities);
+    case 'send_document':
+      return sendDocument(companyId, entities, phoneNumber);
     case 'greeting':
-      return { toolName: 'greeting', data: null, formatted: SECRETARIA_PROMPTS.greeting };
+      return { toolName: 'greeting', data: null, formatted: SECRETARIA_PROMPTS.greeting.replace('{{displayName}}', 'usuario') };
     case 'help':
       return { toolName: 'help', data: null, formatted: SECRETARIA_PROMPTS.help };
     case 'unknown':
@@ -133,13 +138,47 @@ class SecretariaService {
     // Step 3: Mark as read
     await whatsappClient.markAsRead(message.messageId);
 
-    // Step 4: Extract text content
-    const textContent = message.text || '';
+    // Step 4: Extract text content (supports text + audio messages)
+    let textContent = message.text || '';
+
+    if (message.type === 'audio' && message.mediaId) {
+      const sttResult = await deepgramSTT.transcribeFromWhatsApp(
+        message.mediaId,
+        (id) => whatsappClient.downloadMedia(id),
+      );
+
+      // Validate transcription quality
+      const validation = deepgramSTT.validateAndFormat(sttResult);
+
+      if (validation && !validation.warning) {
+        // Hard error (empty, too long, etc.) — respond and stop
+        await whatsappClient.sendTextMessage(phoneNumber, validation.text);
+        return;
+      }
+
+      if (validation?.warning) {
+        // Low confidence or non-Spanish — send warning, then continue processing
+        await whatsappClient.sendTextMessage(phoneNumber, validation.warning);
+      }
+
+      textContent = sttResult.text;
+
+      // Track STT usage
+      await secretariaMemory.trackUsage(companyId, {
+        stt_minutes: sttResult.duration_seconds / 60,
+        estimated_cost_usd: deepgramSTT.estimateCostUsd(sttResult.duration_seconds),
+      });
+
+      logger.info(
+        { companyId, phoneNumber, duration: sttResult.duration_seconds, confidence: sttResult.confidence },
+        'SecretarIA: audio transcribed',
+      );
+    }
 
     if (!textContent.trim()) {
       await whatsappClient.sendTextMessage(
         phoneNumber,
-        'Por ahora solo puedo procesar mensajes de texto. Enviame tu consulta escrita.',
+        'Por ahora solo puedo procesar mensajes de texto y audio. Enviame tu consulta escrita o por audio.',
       );
       return;
     }
@@ -171,7 +210,7 @@ class SecretariaService {
       const intentResult = await classifyIntent(textContent, context);
 
       // Step 8: Execute tool based on intent
-      const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId);
+      const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId, phoneNumber);
 
       // Step 9: Generate natural language response
       const responseText = await generateResponse(toolResult, context, companyName);
@@ -237,7 +276,8 @@ class SecretariaService {
 
   async getConfig(companyId: string): Promise<SecretariaConfig> {
     const result = await db.execute(sql`
-      SELECT company_id, enabled, morning_brief_enabled, morning_brief_time, timezone
+      SELECT company_id, enabled, morning_brief_enabled, morning_brief_time, timezone,
+             last_brief_date, COALESCE(brief_sections, ARRAY['ventas','pedidos','cobros','stock']) AS brief_sections
       FROM secretaria_config
       WHERE company_id = ${companyId}
     `);
@@ -252,6 +292,8 @@ class SecretariaService {
         morningBriefEnabled: SECRETARIA_CONFIG.morningBrief.enabled,
         morningBriefTime: SECRETARIA_CONFIG.morningBrief.defaultTime,
         timezone: SECRETARIA_CONFIG.morningBrief.defaultTimezone,
+        lastBriefDate: null,
+        briefSections: ['ventas', 'pedidos', 'cobros', 'stock'],
       };
 
       await db.execute(sql`
@@ -270,12 +312,14 @@ class SecretariaService {
       morningBriefEnabled: row.morning_brief_enabled,
       morningBriefTime: row.morning_brief_time,
       timezone: row.timezone,
+      lastBriefDate: row.last_brief_date ? String(row.last_brief_date) : null,
+      briefSections: row.brief_sections ?? ['ventas', 'pedidos', 'cobros', 'stock'],
     };
   }
 
   async updateConfig(
     companyId: string,
-    updates: Partial<Pick<SecretariaConfig, 'enabled' | 'morningBriefEnabled' | 'morningBriefTime' | 'timezone'>>,
+    updates: Partial<Pick<SecretariaConfig, 'enabled' | 'morningBriefEnabled' | 'morningBriefTime' | 'timezone' | 'briefSections'>>,
   ): Promise<SecretariaConfig> {
     // Ensure config row exists
     await this.getConfig(companyId);
@@ -301,6 +345,13 @@ class SecretariaService {
     if (updates.timezone !== undefined) {
       await db.execute(sql`
         UPDATE secretaria_config SET timezone = ${updates.timezone} WHERE company_id = ${companyId}
+      `);
+    }
+
+    if (updates.briefSections !== undefined) {
+      const sectionsArray = [...updates.briefSections];
+      await db.execute(sql`
+        UPDATE secretaria_config SET brief_sections = ${sectionsArray} WHERE company_id = ${companyId}
       `);
     }
 

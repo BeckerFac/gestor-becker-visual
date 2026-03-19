@@ -4,6 +4,7 @@ import { env, validateSecrets, isProduction } from './config/env';
 import { initSentry, setupGlobalErrorHandlers } from './config/sentry';
 import { setupGracefulShutdown } from './config/shutdown';
 import { startMemoryMonitoring } from './middlewares/performanceMonitor';
+import { secretariaScheduler } from './modules/secretaria/secretaria.scheduler';
 import logger from './config/logger';
 
 async function start() {
@@ -48,6 +49,9 @@ async function start() {
 
     // Start periodic memory monitoring
     startMemoryMonitoring();
+
+    // Start SecretarIA morning brief scheduler
+    secretariaScheduler.start();
 
     logger.info('All systems initialized successfully');
   } catch (error) {

@@ -596,6 +596,10 @@ async function runAutoMigrations() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_usage_company_month ON secretaria_usage(company_id, month)`);
 
+    // SecretarIA: scheduler columns for morning brief
+    await pool.query(`ALTER TABLE secretaria_config ADD COLUMN IF NOT EXISTS last_brief_date DATE`);
+    await pool.query(`ALTER TABLE secretaria_config ADD COLUMN IF NOT EXISTS brief_sections TEXT[] DEFAULT ARRAY['ventas','pedidos','cobros','stock']`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

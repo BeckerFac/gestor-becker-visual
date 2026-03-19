@@ -11,6 +11,7 @@ import {
 } from '../ai/ai.queries';
 import { SecretariaIntent, ToolResult } from './secretaria.types';
 import { SECRETARIA_PROMPTS } from './secretaria.config';
+import { secretariaMediaService } from './secretaria.media';
 import logger from '../../config/logger';
 
 // ── Formatting Helpers ──
@@ -630,12 +631,273 @@ export async function morningBrief(companyId: string): Promise<ToolResult> {
   }
 }
 
+// ── Send Document ──
+
+export async function sendDocument(
+  companyId: string,
+  entities: Record<string, string>,
+  phoneNumber?: string,
+): Promise<ToolResult> {
+  try {
+    if (!phoneNumber) {
+      return {
+        toolName: 'sendDocument',
+        data: null,
+        formatted: 'No puedo enviar documentos sin un numero de telefono vinculado.',
+      };
+    }
+
+    const documentType = entities.document_type?.toLowerCase() || '';
+    const reportType = entities.report_type?.toLowerCase() || '';
+    const sendFormat = entities.send_format?.toLowerCase() || 'pdf';
+    const clientName = entities.client_name || '';
+    const documentNumber = entities.document_number || '';
+
+    // Handle Excel reports
+    if (documentType === 'reporte' || reportType) {
+      const effectiveReportType = reportType || 'ventas';
+      const result = await secretariaMediaService.sendExcelReport(
+        phoneNumber,
+        effectiveReportType,
+        companyId,
+        entities.date_from,
+        entities.date_to,
+      );
+
+      if (!result.success) {
+        return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar el reporte.' };
+      }
+
+      return {
+        toolName: 'sendDocument',
+        data: { type: 'excel_report', reportType: effectiveReportType },
+        formatted: `Te envie el reporte de ${effectiveReportType} en Excel.`,
+      };
+    }
+
+    // Resolve document ID from number + client name
+    if (documentType === 'factura' || (!documentType && !reportType)) {
+      // Try to find invoice by number or client name
+      const invoiceId = await resolveInvoiceId(companyId, documentNumber, clientName);
+
+      if (!invoiceId) {
+        return {
+          toolName: 'sendDocument',
+          data: null,
+          formatted: documentNumber
+            ? `No encontre la factura ${documentNumber}.`
+            : clientName
+              ? `No encontre facturas para "${clientName}".`
+              : 'Necesito que me digas el numero de factura o el nombre del cliente. Ej: "mandame la factura 0002" o "mandame la factura de Garcia".',
+        };
+      }
+
+      if (sendFormat === 'preview') {
+        const result = await secretariaMediaService.sendPreviewImage(phoneNumber, 'factura', invoiceId, companyId);
+        if (!result.success) {
+          return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar la preview.' };
+        }
+        return { toolName: 'sendDocument', data: { type: 'preview', documentType: 'factura' }, formatted: 'Te envie la preview de la factura.' };
+      }
+
+      const result = await secretariaMediaService.sendInvoicePdf(phoneNumber, invoiceId, companyId);
+      if (!result.success) {
+        return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar la factura.' };
+      }
+      return { toolName: 'sendDocument', data: { type: 'invoice_pdf' }, formatted: 'Te envie el PDF de la factura.' };
+    }
+
+    if (documentType === 'cotizacion') {
+      const quoteId = await resolveQuoteId(companyId, documentNumber, clientName);
+
+      if (!quoteId) {
+        return {
+          toolName: 'sendDocument',
+          data: null,
+          formatted: documentNumber
+            ? `No encontre la cotizacion ${documentNumber}.`
+            : clientName
+              ? `No encontre cotizaciones para "${clientName}".`
+              : 'Necesito el numero de cotizacion o el nombre del cliente.',
+        };
+      }
+
+      if (sendFormat === 'preview') {
+        const result = await secretariaMediaService.sendPreviewImage(phoneNumber, 'cotizacion', quoteId, companyId);
+        if (!result.success) {
+          return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar la preview.' };
+        }
+        return { toolName: 'sendDocument', data: { type: 'preview', documentType: 'cotizacion' }, formatted: 'Te envie la preview de la cotizacion.' };
+      }
+
+      const result = await secretariaMediaService.sendQuotePdf(phoneNumber, quoteId, companyId);
+      if (!result.success) {
+        return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar la cotizacion.' };
+      }
+      return { toolName: 'sendDocument', data: { type: 'quote_pdf' }, formatted: 'Te envie el PDF de la cotizacion.' };
+    }
+
+    if (documentType === 'remito') {
+      const remitoId = await resolveRemitoId(companyId, documentNumber, clientName);
+
+      if (!remitoId) {
+        return {
+          toolName: 'sendDocument',
+          data: null,
+          formatted: documentNumber
+            ? `No encontre el remito ${documentNumber}.`
+            : clientName
+              ? `No encontre remitos para "${clientName}".`
+              : 'Necesito el numero de remito o el nombre del cliente.',
+        };
+      }
+
+      if (sendFormat === 'preview') {
+        const result = await secretariaMediaService.sendPreviewImage(phoneNumber, 'remito', remitoId, companyId);
+        if (!result.success) {
+          return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar la preview.' };
+        }
+        return { toolName: 'sendDocument', data: { type: 'preview', documentType: 'remito' }, formatted: 'Te envie la preview del remito.' };
+      }
+
+      const result = await secretariaMediaService.sendRemitoPdf(phoneNumber, remitoId, companyId);
+      if (!result.success) {
+        return { toolName: 'sendDocument', data: null, formatted: result.error || 'Error al enviar el remito.' };
+      }
+      return { toolName: 'sendDocument', data: { type: 'remito_pdf' }, formatted: 'Te envie el PDF del remito.' };
+    }
+
+    return {
+      toolName: 'sendDocument',
+      data: null,
+      formatted: 'No entendi que documento necesitas. Podes pedirme una factura, cotizacion, remito o un reporte en Excel.',
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ error: message }, 'SecretarIA sendDocument failed');
+    return { toolName: 'sendDocument', data: null, formatted: 'Error al procesar el envio del documento. Intenta desde GESTIA.' };
+  }
+}
+
+// ── Document ID Resolvers (by number or client name) ──
+
+async function resolveInvoiceId(
+  companyId: string,
+  documentNumber: string,
+  clientName: string,
+): Promise<string | null> {
+  try {
+    if (documentNumber) {
+      // Strip leading zeros and try exact match
+      const num = parseInt(documentNumber, 10);
+      const result = await pool.query(
+        `SELECT i.id FROM invoices i
+         WHERE i.company_id = $1 AND i.invoice_number = $2
+         ORDER BY i.invoice_date DESC LIMIT 1`,
+        [companyId, num],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    if (clientName) {
+      const searchTerm = `%${clientName}%`;
+      const result = await pool.query(
+        `SELECT i.id FROM invoices i
+         LEFT JOIN enterprises e ON i.enterprise_id = e.id
+         LEFT JOIN customers c ON i.customer_id = c.id
+         WHERE i.company_id = $1
+           AND (e.name ILIKE $2 OR c.name ILIKE $2)
+         ORDER BY i.invoice_date DESC LIMIT 1`,
+        [companyId, searchTerm],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveQuoteId(
+  companyId: string,
+  documentNumber: string,
+  clientName: string,
+): Promise<string | null> {
+  try {
+    if (documentNumber) {
+      const num = parseInt(documentNumber, 10);
+      const result = await pool.query(
+        `SELECT q.id FROM quotes q
+         WHERE q.company_id = $1 AND q.quote_number = $2
+         ORDER BY q.created_at DESC LIMIT 1`,
+        [companyId, num],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    if (clientName) {
+      const searchTerm = `%${clientName}%`;
+      const result = await pool.query(
+        `SELECT q.id FROM quotes q
+         LEFT JOIN customers c ON q.customer_id = c.id
+         WHERE q.company_id = $1
+           AND (c.name ILIKE $2 OR q.title ILIKE $2)
+         ORDER BY q.created_at DESC LIMIT 1`,
+        [companyId, searchTerm],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveRemitoId(
+  companyId: string,
+  documentNumber: string,
+  clientName: string,
+): Promise<string | null> {
+  try {
+    if (documentNumber) {
+      const num = parseInt(documentNumber, 10);
+      const result = await pool.query(
+        `SELECT r.id FROM remitos r
+         WHERE r.company_id = $1 AND r.remito_number = $2
+         ORDER BY r.created_at DESC LIMIT 1`,
+        [companyId, num],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    if (clientName) {
+      const searchTerm = `%${clientName}%`;
+      const result = await pool.query(
+        `SELECT r.id FROM remitos r
+         LEFT JOIN customers c ON r.customer_id = c.id
+         WHERE r.company_id = $1
+           AND (c.name ILIKE $2 OR r.receiver_name ILIKE $2)
+         ORDER BY r.created_at DESC LIMIT 1`,
+        [companyId, searchTerm],
+      );
+      if (result.rows.length > 0) return (result.rows[0] as any).id;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Tool Dispatcher ──
 
 export async function executeTool(
   intent: SecretariaIntent,
   entities: Record<string, string>,
   companyId: string,
+  phoneNumber?: string,
 ): Promise<ToolResult> {
   switch (intent) {
     case 'query_clients':
@@ -652,6 +914,8 @@ export async function executeTool(
       return queryGeneral(companyId, entities);
     case 'morning_brief':
       return morningBrief(companyId);
+    case 'send_document':
+      return sendDocument(companyId, entities, phoneNumber);
     case 'greeting':
       return {
         toolName: 'greeting',
