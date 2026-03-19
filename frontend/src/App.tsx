@@ -23,6 +23,7 @@ import { Pagos } from '@/pages/Pagos'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { Users } from '@/pages/Users'
 import { Global } from '@/pages/Global'
+import { Reportes } from '@/pages/Reportes'
 import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
 
@@ -118,6 +119,7 @@ function App() {
         <Route path="/pagos" element={<ProtectedRoute module="pagos"><Pagos /></ProtectedRoute>} />
         <Route path="/cuenta-corriente" element={<ProtectedRoute module="cuenta_corriente"><CuentaCorriente /></ProtectedRoute>} />
         <Route path="/cheques" element={<ProtectedRoute module="cheques"><Cheques /></ProtectedRoute>} />
+        <Route path="/reportes" element={<ProtectedRoute module="reports"><Reportes /></ProtectedRoute>} />
         <Route path="/remitos" element={<ProtectedRoute module="remitos"><Remitos /></ProtectedRoute>} />
         <Route path="/bancos" element={<ProtectedRoute module="banks"><Banks /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />

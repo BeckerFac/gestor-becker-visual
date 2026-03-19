@@ -387,6 +387,22 @@ export const api = {
     const { data } = await client.get('/reports/insights')
     return data
   },
+  getLibroIVAVentas: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/libro-iva-ventas', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getLibroIVACompras: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/libro-iva-compras', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getPosicionIVA: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/posicion-iva', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getFlujoCaja: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/flujo-caja', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
   globalSearch: async (query: string) => {
     const { data } = await client.get(`/reports/search?q=${encodeURIComponent(query)}`)
     return data

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { reportsService } from './reports.service';
+import { accountingService } from './accounting.service';
 
 export class ReportsController {
   async getDashboard(req: AuthRequest, res: Response) {
@@ -33,6 +34,61 @@ export class ReportsController {
     const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
     const data = await reportsService.globalSearch(req.user!.company_id, query, userPermissions);
     res.json(data);
+  }
+  async getLibroIVAVentas(req: AuthRequest, res: Response) {
+    try {
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
+      const data = await accountingService.getLibroIVAVentas(req.user!.company_id, dateFrom, dateTo);
+      res.json(data);
+    } catch (error) {
+      console.error('Controller getLibroIVAVentas error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Internal server error';
+      res.status(status).json({ error: message });
+    }
+  }
+
+  async getLibroIVACompras(req: AuthRequest, res: Response) {
+    try {
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
+      const data = await accountingService.getLibroIVACompras(req.user!.company_id, dateFrom, dateTo);
+      res.json(data);
+    } catch (error) {
+      console.error('Controller getLibroIVACompras error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Internal server error';
+      res.status(status).json({ error: message });
+    }
+  }
+
+  async getPosicionIVA(req: AuthRequest, res: Response) {
+    try {
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
+      const data = await accountingService.getPosicionIVA(req.user!.company_id, dateFrom, dateTo);
+      res.json(data);
+    } catch (error) {
+      console.error('Controller getPosicionIVA error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Internal server error';
+      res.status(status).json({ error: message });
+    }
+  }
+
+  async getFlujoCaja(req: AuthRequest, res: Response) {
+    try {
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
+      const data = await accountingService.getFlujoCaja(req.user!.company_id, dateFrom, dateTo);
+      res.json(data);
+    } catch (error) {
+      console.error('Controller getFlujoCaja error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Internal server error';
+      res.status(status).json({ error: message });
+    }
   }
 }
 

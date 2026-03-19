@@ -61,6 +61,7 @@ const navSections: NavSection[] = [
       { href: '/pagos', label: 'Pagos', icon: '💸', module: 'pagos' },
       { href: '/cuenta-corriente', label: 'Cuenta Corriente', icon: '📒', module: 'cuenta_corriente' },
       { href: '/cheques', label: 'Cheques', icon: '📝', module: 'cheques' },
+      { href: '/reportes', label: 'Reportes', icon: '📈', module: 'reports' },
     ],
   },
   {
