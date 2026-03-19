@@ -392,9 +392,7 @@ export class CrmService {
       const stages = (stagesResult as any).rows || stagesResult || [];
 
       // Get all active deals (not in loss stage)
-      const lossStageIds = stages.filter((s: any) => s.is_loss_stage).map((s: any) => s.id);
-
-      let dealsQuery = sql`
+      const dealsQuery = sql`
         SELECT d.*,
           e.name as enterprise_name,
           e.cuit as enterprise_cuit,
@@ -409,14 +407,11 @@ export class CrmService {
         LEFT JOIN crm_stages s ON d.stage_id = s.id
         WHERE d.company_id = ${companyId}
           AND d.stage_id IS NOT NULL
+          AND d.stage_id NOT IN (
+            SELECT id FROM crm_stages WHERE company_id = ${companyId} AND is_loss_stage = true
+          )
+        ORDER BY d.value DESC NULLS LAST, d.updated_at ASC
       `;
-
-      // Exclude loss stages
-      if (lossStageIds.length > 0) {
-        dealsQuery = sql`${dealsQuery} AND d.stage_id != ALL(${lossStageIds}::uuid[])`;
-      }
-
-      dealsQuery = sql`${dealsQuery} ORDER BY d.value DESC NULLS LAST, d.updated_at ASC`;
 
       const dealsResult = await db.execute(dealsQuery);
       const deals = (dealsResult as any).rows || dealsResult || [];
