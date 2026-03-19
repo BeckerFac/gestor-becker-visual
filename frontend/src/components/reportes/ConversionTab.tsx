@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta, fmtPercent } from './helpers'
 import { formatDate } from '@/lib/utils'
 import type { ConversionReportData, CotizacionAbierta } from './types'
@@ -89,8 +90,35 @@ export const ConversionTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() =>
+    cotizaciones_abiertas.map(c => ({
+      cliente: c.cliente,
+      titulo: c.titulo,
+      fecha: c.fecha,
+      monto: c.monto,
+      dias_abierto: c.dias_abierto,
+      status: c.status,
+    })),
+  [cotizaciones_abiertas])
+
+  const excelColumns = [
+    { key: 'cliente', label: 'Cliente' },
+    { key: 'titulo', label: 'Titulo' },
+    { key: 'fecha', label: 'Fecha', type: 'date' as const },
+    { key: 'monto', label: 'Monto', type: 'currency' as const },
+    { key: 'dias_abierto', label: 'Dias Abierto', type: 'number' as const },
+    { key: 'status', label: 'Estado' },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Conversion_Reporte"
+        headerText="BeckerVisual - Reporte de Conversion"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <SummaryCard

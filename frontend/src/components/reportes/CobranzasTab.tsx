@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta } from './helpers'
 import type { CobranzasReportData, MorosoRow } from './types'
 
@@ -76,8 +77,32 @@ export const CobranzasTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() => {
+    const rows: Record<string, any>[] = []
+    aging.forEach(a => rows.push({ bucket: a.label, cantidad: a.cantidad, monto: a.monto }))
+    if (morosos.length > 0) {
+      rows.push({ bucket: '', cantidad: '', monto: '' })
+      rows.push({ bucket: 'MOROSOS', cantidad: 'Pedidos', monto: 'Monto' })
+      morosos.forEach(m => rows.push({ bucket: m.nombre, cantidad: m.pedidos_pendientes, monto: m.monto_pendiente }))
+    }
+    return rows
+  }, [aging, morosos])
+
+  const excelColumns = [
+    { key: 'bucket', label: 'Concepto' },
+    { key: 'cantidad', label: 'Cantidad', type: 'number' as const },
+    { key: 'monto', label: 'Monto', type: 'currency' as const },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Cobranzas_Reporte"
+        headerText="BeckerVisual - Reporte de Cobranzas"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <SummaryCard

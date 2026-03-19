@@ -142,31 +142,43 @@ export const FlujoCajaTab: React.FC<Props> = ({ rows }) => {
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] w-14 text-right text-gray-400 shrink-0">Ingresos</span>
                     <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 overflow-hidden relative">
-                      <div
-                        className="h-full bg-green-500 dark:bg-green-600 rounded-full transition-all duration-500 flex items-center justify-end pr-1.5"
-                        style={{ width: `${Math.max((row.ingresos / maxValue) * 100, 1)}%`, minWidth: '2px' }}
-                      >
-                        {(row.ingresos / maxValue) > 0.15 && (
-                          <span className="text-[10px] font-medium text-white whitespace-nowrap">{fmtCurrency(row.ingresos)}</span>
-                        )}
-                      </div>
+                      {row.ingresos === 0 ? (
+                        <div className="h-full flex items-center pl-2">
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 italic">sin movimiento</span>
+                        </div>
+                      ) : (
+                        <div
+                          className="h-full bg-green-500 dark:bg-green-600 rounded-full transition-all duration-500 flex items-center justify-end pr-1.5"
+                          style={{ width: `${Math.max((row.ingresos / maxValue) * 100, 3)}%`, minWidth: '8px' }}
+                        >
+                          {(row.ingresos / maxValue) > 0.15 && (
+                            <span className="text-[10px] font-medium text-white whitespace-nowrap">{fmtCurrency(row.ingresos)}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs text-gray-600 dark:text-gray-300 w-28 text-right shrink-0 font-mono tabular-nums">{fmtCurrency(row.ingresos)}</span>
+                    <span className={`text-xs w-28 text-right shrink-0 font-mono tabular-nums ${row.ingresos === 0 ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>{fmtCurrency(row.ingresos)}</span>
                   </div>
                   {/* Egresos bar */}
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] w-14 text-right text-gray-400 shrink-0">Egresos</span>
                     <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-5 overflow-hidden relative">
-                      <div
-                        className="h-full bg-red-500 dark:bg-red-600 rounded-full transition-all duration-500 flex items-center justify-end pr-1.5"
-                        style={{ width: `${Math.max((row.egresos / maxValue) * 100, 1)}%`, minWidth: '2px' }}
-                      >
-                        {(row.egresos / maxValue) > 0.15 && (
-                          <span className="text-[10px] font-medium text-white whitespace-nowrap">{fmtCurrency(row.egresos)}</span>
-                        )}
-                      </div>
+                      {row.egresos === 0 ? (
+                        <div className="h-full flex items-center pl-2">
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 italic">sin movimiento</span>
+                        </div>
+                      ) : (
+                        <div
+                          className="h-full bg-red-500 dark:bg-red-600 rounded-full transition-all duration-500 flex items-center justify-end pr-1.5"
+                          style={{ width: `${Math.max((row.egresos / maxValue) * 100, 3)}%`, minWidth: '8px' }}
+                        >
+                          {(row.egresos / maxValue) > 0.15 && (
+                            <span className="text-[10px] font-medium text-white whitespace-nowrap">{fmtCurrency(row.egresos)}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs text-gray-600 dark:text-gray-300 w-28 text-right shrink-0 font-mono tabular-nums">{fmtCurrency(row.egresos)}</span>
+                    <span className={`text-xs w-28 text-right shrink-0 font-mono tabular-nums ${row.egresos === 0 ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>{fmtCurrency(row.egresos)}</span>
                   </div>
                 </div>
               ))}

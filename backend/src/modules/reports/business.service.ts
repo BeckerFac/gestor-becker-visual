@@ -554,7 +554,7 @@ export class BusinessService {
       // DSO: average days between order creation and cobro payment_date
       const dsoResult = await db.execute(sql`
         SELECT AVG(
-          EXTRACT(DAY FROM (cb.payment_date - o.created_at))
+          EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
         ) as dso_promedio
         FROM cobros cb
         JOIN orders o ON cb.order_id = o.id
@@ -567,7 +567,7 @@ export class BusinessService {
       // Previous DSO
       const prevDsoResult = await db.execute(sql`
         SELECT AVG(
-          EXTRACT(DAY FROM (cb.payment_date - o.created_at))
+          EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
         ) as dso_promedio
         FROM cobros cb
         JOIN orders o ON cb.order_id = o.id
@@ -800,7 +800,7 @@ export class BusinessService {
       // Average time from quote to order (for converted quotes)
       const timeResult = await db.execute(sql`
         SELECT
-          AVG(EXTRACT(DAY FROM (o.created_at - q.created_at))) as dias_promedio
+          AVG(EXTRACT(EPOCH FROM (o.created_at - q.created_at)) / 86400) as dias_promedio
         FROM quotes q
         JOIN orders o ON o.quote_id = q.id
         WHERE q.company_id = ${companyId}

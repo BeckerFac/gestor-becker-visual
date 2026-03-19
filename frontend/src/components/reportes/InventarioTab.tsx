@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtNumber } from './helpers'
 import type { InventarioReportData, StockItem, DeadStockItem } from './types'
 
@@ -138,8 +139,33 @@ export const InventarioTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() =>
+    stock_items.map(s => ({
+      nombre: s.nombre,
+      sku: s.sku,
+      stock_actual: s.stock_actual,
+      costo_unitario: s.costo_unitario,
+      valor_stock: s.valor_stock,
+    })),
+  [stock_items])
+
+  const excelColumns = [
+    { key: 'nombre', label: 'Producto' },
+    { key: 'sku', label: 'SKU' },
+    { key: 'stock_actual', label: 'Stock', type: 'number' as const },
+    { key: 'costo_unitario', label: 'Costo Unitario', type: 'currency' as const },
+    { key: 'valor_stock', label: 'Valor Stock', type: 'currency' as const },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Inventario_Reporte"
+        headerText="BeckerVisual - Reporte de Inventario"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <SummaryCard

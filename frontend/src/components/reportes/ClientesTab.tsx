@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta, fmtPercent } from './helpers'
 import { formatDate } from '@/lib/utils'
 import type { ClientesReportData, ClienteRow } from './types'
@@ -79,8 +80,33 @@ export const ClientesTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() =>
+    top_clientes.map(c => ({
+      nombre: c.nombre,
+      revenue: c.revenue,
+      cantidad_compras: c.cantidad_compras,
+      ticket_promedio: c.ticket_promedio,
+      ultima_compra: c.ultima_compra,
+    })),
+  [top_clientes])
+
+  const excelColumns = [
+    { key: 'nombre', label: 'Cliente' },
+    { key: 'revenue', label: 'Facturado', type: 'currency' as const },
+    { key: 'cantidad_compras', label: 'Compras', type: 'number' as const },
+    { key: 'ticket_promedio', label: 'Ticket Promedio', type: 'currency' as const },
+    { key: 'ultima_compra', label: 'Ultima Compra', type: 'date' as const },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Clientes_Reporte"
+        headerText="BeckerVisual - Reporte de Clientes"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <SummaryCard

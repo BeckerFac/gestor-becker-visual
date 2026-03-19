@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta, fmtPercent } from './helpers'
 import type { RentabilidadReportData, RentabilidadProducto } from './types'
 
@@ -116,8 +117,35 @@ export const RentabilidadTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() =>
+    productos.map(p => ({
+      nombre: p.nombre,
+      revenue: p.revenue,
+      costo_total: p.costo_total,
+      margen: p.margen,
+      margen_pct: p.margen_pct,
+      unidades: p.unidades,
+    })),
+  [productos])
+
+  const excelColumns = [
+    { key: 'nombre', label: 'Producto' },
+    { key: 'revenue', label: 'Revenue', type: 'currency' as const },
+    { key: 'costo_total', label: 'Costo', type: 'currency' as const },
+    { key: 'margen', label: 'Margen $', type: 'currency' as const },
+    { key: 'margen_pct', label: 'Margen %', type: 'number' as const },
+    { key: 'unidades', label: 'Unidades', type: 'number' as const },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Rentabilidad_Reporte"
+        headerText="BeckerVisual - Reporte de Rentabilidad"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <SummaryCard

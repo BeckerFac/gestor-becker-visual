@@ -17,6 +17,7 @@ const pageNames: Record<string, { label: string; section?: string }> = {
   '/pagos': { label: 'Pagos', section: 'Finanzas' },
   '/cuenta-corriente': { label: 'Cuenta Corriente', section: 'Finanzas' },
   '/cheques': { label: 'Cheques', section: 'Finanzas' },
+  '/reportes': { label: 'Reportes', section: 'Finanzas' },
   '/empresas': { label: 'Empresas', section: 'Directorio' },
   '/bancos': { label: 'Bancos', section: 'Directorio' },
   '/customers': { label: 'Clientes', section: 'Directorio' },
@@ -29,7 +30,7 @@ export const Header: React.FC = () => {
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const { isDark, toggle: toggleTheme } = useTheme()
   const page = pageNames[location.pathname]
-  const pageName = page?.label || 'Página'
+  const pageName = page?.label || location.pathname.replace(/^\//, '').replace(/-/g, ' ') || 'Pagina'
   const section = page?.section
 
   return (

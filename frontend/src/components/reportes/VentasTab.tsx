@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SummaryCard } from './SummaryCard'
 import { ReportTable } from './ReportTable'
+import { TabActionBar } from './TabActionBar'
 import { fmtCurrency, fmtDelta, fmtNumber } from './helpers'
 import type { VentasReportData, TopProductoRow } from './types'
 
@@ -70,8 +71,27 @@ export const VentasTab: React.FC<Props> = ({ data }) => {
     },
   ], [])
 
+  const excelData = useMemo(() => {
+    const rows: Record<string, any>[] = []
+    ventas_por_mes.forEach(r => rows.push({ periodo: r.periodo, total: r.total, cantidad: r.cantidad }))
+    return rows
+  }, [ventas_por_mes])
+
+  const excelColumns = [
+    { key: 'periodo', label: 'Periodo' },
+    { key: 'total', label: 'Total Facturado', type: 'currency' as const },
+    { key: 'cantidad', label: 'Cantidad Pedidos', type: 'number' as const },
+  ]
+
   return (
     <>
+      <TabActionBar
+        excelData={excelData}
+        excelColumns={excelColumns}
+        excelFilename="Ventas_Reporte"
+        headerText="BeckerVisual - Reporte de Ventas"
+      />
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <SummaryCard

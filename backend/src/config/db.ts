@@ -30,6 +30,25 @@ async function runAutoMigrations() {
   try {
     // Create core tables that are not in drizzle schema but used by services
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS enterprises (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        cuit VARCHAR(20),
+        address TEXT,
+        city VARCHAR(100),
+        province VARCHAR(100),
+        phone VARCHAR(20),
+        email VARCHAR(100),
+        tax_condition VARCHAR(50),
+        notes TEXT,
+        status VARCHAR(50) DEFAULT 'active',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -150,8 +169,10 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS cheques_status_idx ON cheques(company_id, status)`);
     try { await pool.query(`ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'mercado_pago'`); } catch (_) {}
 
-    // Add product_type to products table
+    // Add product_type, controls_stock, low_stock_threshold to products table
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type VARCHAR(50) DEFAULT 'otro'`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS controls_stock BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12,2) DEFAULT 0`);
 
     // Add signed_pdf_url to remitos table
     await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS signed_pdf_url TEXT`);
@@ -163,6 +184,26 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS orders_payment_idx ON orders(company_id, payment_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_company_idx ON invoices(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_status_idx ON invoices(company_id, status)`);
+
+    // --- Cobros table ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cobros (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        enterprise_id UUID,
+        order_id UUID REFERENCES orders(id),
+        invoice_id UUID REFERENCES invoices(id),
+        amount DECIMAL(12,2) NOT NULL,
+        payment_method VARCHAR(50) NOT NULL,
+        bank_id UUID,
+        reference VARCHAR(255),
+        payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        notes TEXT,
+        receipt_image TEXT,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
 
     // --- Cobro items (partial payments) ---
     await pool.query(`
