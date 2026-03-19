@@ -9,6 +9,12 @@ import { LibroIVAVentasTab } from '@/components/reportes/LibroIVAVentasTab'
 import { LibroIVAComprasTab } from '@/components/reportes/LibroIVAComprasTab'
 import { PosicionIVATab } from '@/components/reportes/PosicionIVATab'
 import { FlujoCajaTab } from '@/components/reportes/FlujoCajaTab'
+import { VentasTab } from '@/components/reportes/VentasTab'
+import { RentabilidadTab } from '@/components/reportes/RentabilidadTab'
+import { ClientesTab } from '@/components/reportes/ClientesTab'
+import { CobranzasTab } from '@/components/reportes/CobranzasTab'
+import { InventarioTab } from '@/components/reportes/InventarioTab'
+import { ConversionTab } from '@/components/reportes/ConversionTab'
 import {
   getMonthRange,
   getSixMonthsRange,
@@ -25,16 +31,33 @@ import type {
   IVAComprasRow,
   PosicionIVARow,
   FlujoCajaRow,
+  VentasReportData,
+  RentabilidadReportData,
+  ClientesReportData,
+  CobranzasReportData,
+  InventarioReportData,
+  ConversionReportData,
 } from '@/components/reportes/types'
 
-// -- Constants --
+// -- Tab groups --
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'ventas', label: 'Libro IVA Ventas' },
-  { key: 'compras', label: 'Libro IVA Compras' },
+const ACCOUNTING_TABS: { key: TabKey; label: string }[] = [
+  { key: 'iva_ventas', label: 'Libro IVA Ventas' },
+  { key: 'iva_compras', label: 'Libro IVA Compras' },
   { key: 'posicion', label: 'Posicion IVA' },
   { key: 'flujo', label: 'Flujo de Caja' },
 ]
+
+const BUSINESS_TABS: { key: TabKey; label: string }[] = [
+  { key: 'biz_ventas', label: 'Ventas' },
+  { key: 'biz_rentabilidad', label: 'Rentabilidad' },
+  { key: 'biz_clientes', label: 'Clientes' },
+  { key: 'biz_cobranzas', label: 'Cobranzas' },
+  { key: 'biz_inventario', label: 'Inventario' },
+  { key: 'biz_conversion', label: 'Conversion' },
+]
+
+const ALL_TABS = [...ACCOUNTING_TABS, ...BUSINESS_TABS]
 
 const DATE_PRESETS: { key: DatePreset; label: string }[] = [
   { key: 'este_mes', label: 'Este mes' },
@@ -42,6 +65,17 @@ const DATE_PRESETS: { key: DatePreset; label: string }[] = [
   { key: 'trimestre', label: 'Este trimestre' },
   { key: 'anio', label: 'Este anio' },
 ]
+
+// Tabs that use a 6-month default range
+const LONG_RANGE_TABS: TabKey[] = ['posicion', 'flujo']
+// Tabs that need date-range validation for >1 year
+const IVA_TABS: TabKey[] = ['iva_ventas', 'iva_compras']
+// Tabs that don't need date range (inventario)
+const NO_DATE_TABS: TabKey[] = ['biz_inventario']
+
+function isAccountingTab(tab: TabKey): boolean {
+  return ACCOUNTING_TABS.some(t => t.key === tab)
+}
 
 // -- Excel column definitions --
 
@@ -87,10 +121,13 @@ const flujoExcelCols = [
   { key: 'acumulado', label: 'Acumulado', type: 'currency' as const },
 ]
 
+// Business tabs don't use the top-level Excel button (they have their own via the tab component)
+// but we still need a fallback for the print header
+
 // -- Component --
 
 export const Reportes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabKey>('ventas')
+  const [activeTab, setActiveTab] = useState<TabKey>('biz_ventas')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -100,13 +137,21 @@ export const Reportes: React.FC = () => {
   const [dateTo, setDateTo] = useState(defaultRange.to)
   const [dateError, setDateError] = useState<string | null>(null)
 
-  // Data
-  const [ventasRows, setVentasRows] = useState<IVAVentasRow[]>([])
-  const [ventasTotals, setVentasTotals] = useState<Record<string, number>>({})
-  const [comprasRows, setComprasRows] = useState<IVAComprasRow[]>([])
-  const [comprasTotals, setComprasTotals] = useState<Record<string, number>>({})
+  // Accounting data
+  const [ivaVentasRows, setIvaVentasRows] = useState<IVAVentasRow[]>([])
+  const [ivaVentasTotals, setIvaVentasTotals] = useState<Record<string, number>>({})
+  const [ivaComprasRows, setIvaComprasRows] = useState<IVAComprasRow[]>([])
+  const [ivaComprasTotals, setIvaComprasTotals] = useState<Record<string, number>>({})
   const [posicionRows, setPosicionRows] = useState<PosicionIVARow[]>([])
   const [flujoRows, setFlujoRows] = useState<FlujoCajaRow[]>([])
+
+  // Business data
+  const [bizVentasData, setBizVentasData] = useState<VentasReportData | null>(null)
+  const [bizRentabilidadData, setBizRentabilidadData] = useState<RentabilidadReportData | null>(null)
+  const [bizClientesData, setBizClientesData] = useState<ClientesReportData | null>(null)
+  const [bizCobranzasData, setBizCobranzasData] = useState<CobranzasReportData | null>(null)
+  const [bizInventarioData, setBizInventarioData] = useState<InventarioReportData | null>(null)
+  const [bizConversionData, setBizConversionData] = useState<ConversionReportData | null>(null)
 
   // Date validation
   useEffect(() => {
@@ -115,7 +160,7 @@ export const Reportes: React.FC = () => {
       setDateError(rangeErr)
       return
     }
-    if ((activeTab === 'ventas' || activeTab === 'compras') && isRangeOverOneYear(dateFrom, dateTo)) {
+    if (IVA_TABS.includes(activeTab) && isRangeOverOneYear(dateFrom, dateTo)) {
       setDateError('El rango de fechas no puede superar 1 anio para el Libro IVA. Reducilo para evitar problemas de rendimiento.')
       return
     }
@@ -123,24 +168,26 @@ export const Reportes: React.FC = () => {
   }, [dateFrom, dateTo, activeTab])
 
   const loadData = useCallback(async () => {
-    // Don't load if there's a date validation error
-    if (validateDateRange(dateFrom, dateTo)) return
-    if ((activeTab === 'ventas' || activeTab === 'compras') && isRangeOverOneYear(dateFrom, dateTo)) return
+    // Skip date validation for inventory tab
+    if (!NO_DATE_TABS.includes(activeTab)) {
+      if (validateDateRange(dateFrom, dateTo)) return
+      if (IVA_TABS.includes(activeTab) && isRangeOverOneYear(dateFrom, dateTo)) return
+    }
 
     setLoading(true)
     setError(null)
     try {
       switch (activeTab) {
-        case 'ventas': {
+        case 'iva_ventas': {
           const res = await api.getLibroIVAVentas(dateFrom, dateTo)
-          setVentasRows(res.rows || [])
-          setVentasTotals(res.totals || {})
+          setIvaVentasRows(res.rows || [])
+          setIvaVentasTotals(res.totals || {})
           break
         }
-        case 'compras': {
+        case 'iva_compras': {
           const res = await api.getLibroIVACompras(dateFrom, dateTo)
-          setComprasRows(res.rows || [])
-          setComprasTotals(res.totals || {})
+          setIvaComprasRows(res.rows || [])
+          setIvaComprasTotals(res.totals || {})
           break
         }
         case 'posicion': {
@@ -151,6 +198,36 @@ export const Reportes: React.FC = () => {
         case 'flujo': {
           const res = await api.getFlujoCaja(dateFrom, dateTo)
           setFlujoRows(res.rows || [])
+          break
+        }
+        case 'biz_ventas': {
+          const res = await api.getBusinessVentas(dateFrom, dateTo)
+          setBizVentasData(res)
+          break
+        }
+        case 'biz_rentabilidad': {
+          const res = await api.getBusinessRentabilidad(dateFrom, dateTo)
+          setBizRentabilidadData(res)
+          break
+        }
+        case 'biz_clientes': {
+          const res = await api.getBusinessClientes(dateFrom, dateTo)
+          setBizClientesData(res)
+          break
+        }
+        case 'biz_cobranzas': {
+          const res = await api.getBusinessCobranzas(dateFrom, dateTo)
+          setBizCobranzasData(res)
+          break
+        }
+        case 'biz_inventario': {
+          const res = await api.getBusinessInventario()
+          setBizInventarioData(res)
+          break
+        }
+        case 'biz_conversion': {
+          const res = await api.getBusinessConversion(dateFrom, dateTo)
+          setBizConversionData(res)
           break
         }
       }
@@ -166,11 +243,11 @@ export const Reportes: React.FC = () => {
   // When switching tabs, set sensible default date ranges
   const handleTabChange = (tab: TabKey) => {
     if (tab === activeTab) return
-    if (tab === 'posicion' || tab === 'flujo') {
+    if (LONG_RANGE_TABS.includes(tab)) {
       const range = getSixMonthsRange()
       setDateFrom(range.from)
       setDateTo(range.to)
-    } else {
+    } else if (!NO_DATE_TABS.includes(tab)) {
       const range = getMonthRange(0)
       setDateFrom(range.from)
       setDateTo(range.to)
@@ -185,7 +262,7 @@ export const Reportes: React.FC = () => {
   }
 
   const resetFilters = () => {
-    const range = (activeTab === 'posicion' || activeTab === 'flujo')
+    const range = LONG_RANGE_TABS.includes(activeTab)
       ? getSixMonthsRange()
       : getMonthRange(0)
     setDateFrom(range.from)
@@ -199,16 +276,31 @@ export const Reportes: React.FC = () => {
   // Active preset detection
   const activePreset = getActivePreset(dateFrom, dateTo)
 
-  // Excel data
+  // Whether to show date filters (all tabs except inventory)
+  const showDateFilters = !NO_DATE_TABS.includes(activeTab)
+
+  // Excel data (only for accounting tabs that have row-level export)
   const currentExcelData = useMemo(() => {
     const filename = buildExcelFilename(activeTab, dateFrom, dateTo)
     const dateRangeStr = `${formatDate(dateFrom)} - ${formatDate(dateTo)}`
-    const headerText = `BeckerVisual - ${TABS.find(t => t.key === activeTab)?.label || 'Reporte'} - ${dateRangeStr}`
+    const tabLabel = ALL_TABS.find(t => t.key === activeTab)?.label || 'Reporte'
+    const headerText = `BeckerVisual - ${tabLabel} - ${dateRangeStr}`
+
+    // Business tabs: provide empty data (business tabs export differently via their own components)
+    if (!isAccountingTab(activeTab)) {
+      return {
+        data: [] as any[],
+        columns: [] as any[],
+        filename,
+        totalsRow: undefined as any,
+        headerText,
+      }
+    }
 
     switch (activeTab) {
-      case 'ventas':
+      case 'iva_ventas':
         return {
-          data: ventasRows,
+          data: ivaVentasRows,
           columns: ventasExcelCols,
           filename,
           totalsRow: {
@@ -216,13 +308,13 @@ export const Reportes: React.FC = () => {
             comprobante: 'TOTALES',
             customer_name: '',
             customer_cuit: '',
-            ...ventasTotals,
+            ...ivaVentasTotals,
           },
           headerText,
         }
-      case 'compras':
+      case 'iva_compras':
         return {
-          data: comprasRows,
+          data: ivaComprasRows,
           columns: comprasExcelCols,
           filename,
           totalsRow: {
@@ -230,7 +322,7 @@ export const Reportes: React.FC = () => {
             comprobante: 'TOTALES',
             enterprise_name: '',
             enterprise_cuit: '',
-            ...comprasTotals,
+            ...ivaComprasTotals,
           },
           headerText,
         }
@@ -269,8 +361,36 @@ export const Reportes: React.FC = () => {
           headerText,
         }
       }
+      default:
+        return { data: [], columns: [], filename, totalsRow: undefined, headerText }
     }
-  }, [activeTab, ventasRows, comprasRows, posicionRows, flujoRows, ventasTotals, comprasTotals, dateFrom, dateTo])
+  }, [activeTab, ivaVentasRows, ivaComprasRows, posicionRows, flujoRows, ivaVentasTotals, ivaComprasTotals, dateFrom, dateTo])
+
+  const skeletonConfig = useMemo(() => {
+    if (isAccountingTab(activeTab)) {
+      return {
+        cards: activeTab === 'iva_ventas' ? 4 : 3,
+        cols: activeTab === 'iva_ventas' ? 11 : activeTab === 'iva_compras' ? 7 : activeTab === 'posicion' ? 4 : 5,
+      }
+    }
+    return { cards: 3, cols: 5 }
+  }, [activeTab])
+
+  const renderTabButton = (tab: { key: TabKey; label: string }) => (
+    <button
+      key={tab.key}
+      role="tab"
+      aria-selected={activeTab === tab.key}
+      onClick={() => handleTabChange(tab.key)}
+      className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+        activeTab === tab.key
+          ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20'
+          : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+      }`}
+    >
+      {tab.label}
+    </button>
+  )
 
   return (
     <div className="space-y-6 print:space-y-4">
@@ -278,7 +398,9 @@ export const Reportes: React.FC = () => {
       <div className="flex items-center justify-between print:hidden">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Reportes</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Reportes contables e impositivos</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Reportes contables y de negocio
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handlePrint}>
@@ -287,108 +409,117 @@ export const Reportes: React.FC = () => {
             </svg>
             Imprimir
           </Button>
-          <ExportExcelButton
-            data={currentExcelData.data}
-            columns={currentExcelData.columns}
-            filename={currentExcelData.filename}
-            totalsRow={currentExcelData.totalsRow}
-            headerText={currentExcelData.headerText}
-          />
+          {isAccountingTab(activeTab) && currentExcelData.data.length > 0 && (
+            <ExportExcelButton
+              data={currentExcelData.data}
+              columns={currentExcelData.columns}
+              filename={currentExcelData.filename}
+              totalsRow={currentExcelData.totalsRow}
+              headerText={currentExcelData.headerText}
+            />
+          )}
         </div>
       </div>
 
       {/* Print header (only visible in print) */}
       <div className="hidden print:block print:mb-4">
-        <h1 className="text-xl font-bold">{TABS.find(t => t.key === activeTab)?.label}</h1>
+        <h1 className="text-xl font-bold">{ALL_TABS.find(t => t.key === activeTab)?.label}</h1>
         <p className="text-sm text-gray-600">{formatDate(dateFrom)} - {formatDate(dateTo)}</p>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - two groups with visual separator */}
       <div className="border-b border-gray-200 dark:border-gray-700 print:hidden">
         <nav className="flex gap-0 -mb-px overflow-x-auto" role="tablist">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              role="tab"
-              aria-selected={activeTab === tab.key}
-              onClick={() => handleTabChange(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {/* Business group */}
+          <div className="flex items-center">
+            <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 px-2 py-2 self-end select-none">
+              Negocio
+            </span>
+            {BUSINESS_TABS.map(renderTabButton)}
+          </div>
+
+          {/* Separator */}
+          <div className="mx-1.5 self-stretch flex items-end pb-2">
+            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
+          </div>
+
+          {/* Accounting group */}
+          <div className="flex items-center">
+            <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 px-2 py-2 self-end select-none">
+              Contable
+            </span>
+            {ACCOUNTING_TABS.map(renderTabButton)}
+          </div>
         </nav>
       </div>
 
       {/* Filters */}
-      <Card className="print:hidden">
-        <CardContent className="pt-4 pb-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Desde</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                placeholder="DD/MM/AAAA"
-                className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
-                  dateError
-                    ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
-                    : 'border-gray-300 dark:border-gray-600'
-                }`}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Hasta</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                placeholder="DD/MM/AAAA"
-                className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
-                  dateError
-                    ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
-                    : 'border-gray-300 dark:border-gray-600'
-                }`}
-              />
-            </div>
-            <div className="flex gap-1.5 flex-wrap">
-              {DATE_PRESETS.map(p => (
-                <button
-                  key={p.key}
-                  onClick={() => applyPreset(p.key)}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                    activePreset === p.key
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500/30'
-                      : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+      {showDateFilters && (
+        <Card className="print:hidden">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Desde</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  placeholder="DD/MM/AAAA"
+                  className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
+                    dateError
+                      ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
+                      : 'border-gray-300 dark:border-gray-600'
                   }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Hasta</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  placeholder="DD/MM/AAAA"
+                  className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
+                    dateError
+                      ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
+                      : 'border-gray-300 dark:border-gray-600'
+                  }`}
+                />
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {DATE_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => applyPreset(p.key)}
+                    className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                      activePreset === p.key
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500/30'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={resetFilters}
+                className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Limpiar filtros"
+              >
+                Limpiar filtros
+              </button>
             </div>
-            <button
-              onClick={resetFilters}
-              className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title="Limpiar filtros"
-            >
-              Limpiar filtros
-            </button>
-          </div>
-          {dateError && (
-            <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              {dateError}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            {dateError && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                {dateError}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Error */}
       {error && (
@@ -419,22 +550,24 @@ export const Reportes: React.FC = () => {
       {/* Content */}
       {loading ? (
         <div className="space-y-6">
-          <SkeletonCards count={activeTab === 'ventas' ? 4 : 3} />
-          <SkeletonTable
-            rows={8}
-            cols={
-              activeTab === 'ventas' ? 11 :
-              activeTab === 'compras' ? 7 :
-              activeTab === 'posicion' ? 4 : 5
-            }
-          />
+          <SkeletonCards count={skeletonConfig.cards} />
+          <SkeletonTable rows={8} cols={skeletonConfig.cols} />
         </div>
       ) : (
         <>
-          {activeTab === 'ventas' && <LibroIVAVentasTab rows={ventasRows} totals={ventasTotals} />}
-          {activeTab === 'compras' && <LibroIVAComprasTab rows={comprasRows} totals={comprasTotals} />}
+          {/* Accounting tabs */}
+          {activeTab === 'iva_ventas' && <LibroIVAVentasTab rows={ivaVentasRows} totals={ivaVentasTotals} />}
+          {activeTab === 'iva_compras' && <LibroIVAComprasTab rows={ivaComprasRows} totals={ivaComprasTotals} />}
           {activeTab === 'posicion' && <PosicionIVATab rows={posicionRows} />}
           {activeTab === 'flujo' && <FlujoCajaTab rows={flujoRows} />}
+
+          {/* Business tabs */}
+          {activeTab === 'biz_ventas' && <VentasTab data={bizVentasData} />}
+          {activeTab === 'biz_rentabilidad' && <RentabilidadTab data={bizRentabilidadData} />}
+          {activeTab === 'biz_clientes' && <ClientesTab data={bizClientesData} />}
+          {activeTab === 'biz_cobranzas' && <CobranzasTab data={bizCobranzasData} />}
+          {activeTab === 'biz_inventario' && <InventarioTab data={bizInventarioData} />}
+          {activeTab === 'biz_conversion' && <ConversionTab data={bizConversionData} />}
         </>
       )}
     </div>

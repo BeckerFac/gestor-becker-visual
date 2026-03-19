@@ -387,6 +387,10 @@ export const api = {
     const { data } = await client.get('/reports/insights')
     return data
   },
+  getAgingReport: async () => {
+    const { data } = await client.get('/reports/aging')
+    return data
+  },
   getLibroIVAVentas: async (dateFrom: string, dateTo: string) => {
     const { data } = await client.get('/reports/libro-iva-ventas', { params: { date_from: dateFrom, date_to: dateTo } })
     return data
@@ -401,6 +405,31 @@ export const api = {
   },
   getFlujoCaja: async (dateFrom: string, dateTo: string) => {
     const { data } = await client.get('/reports/flujo-caja', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  // Business Intelligence Reports
+  getBusinessVentas: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/business/ventas', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getBusinessRentabilidad: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/business/rentabilidad', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getBusinessClientes: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/business/clientes', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getBusinessCobranzas: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/business/cobranzas', { params: { date_from: dateFrom, date_to: dateTo } })
+    return data
+  },
+  getBusinessInventario: async () => {
+    const { data } = await client.get('/reports/business/inventario')
+    return data
+  },
+  getBusinessConversion: async (dateFrom: string, dateTo: string) => {
+    const { data } = await client.get('/reports/business/conversion', { params: { date_from: dateFrom, date_to: dateTo } })
     return data
   },
   globalSearch: async (query: string) => {
@@ -793,9 +822,93 @@ export const api = {
     return data
   },
 
+  // CRM Pipeline
+  getCrmDeals: async (filters?: { stage?: string; enterprise_id?: string; priority?: string; search?: string }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/crm/deals?${params.toString()}`)
+    return data
+  },
+  getCrmDealsByStage: async () => {
+    const { data } = await client.get('/crm/deals/by-stage')
+    return data
+  },
+  createCrmDeal: async (dealData: any) => {
+    const { data } = await client.post('/crm/deals', dealData)
+    return data
+  },
+  updateCrmDeal: async (id: string, dealData: any) => {
+    const { data } = await client.put(`/crm/deals/${id}`, dealData)
+    return data
+  },
+  moveCrmDealStage: async (id: string, stage: string) => {
+    const { data } = await client.post(`/crm/deals/${id}/move`, { stage })
+    return data
+  },
+  closeCrmDeal: async (id: string, won: boolean, reason?: string) => {
+    const { data } = await client.post(`/crm/deals/${id}/close`, { won, reason })
+    return data
+  },
+  deleteCrmDeal: async (id: string) => {
+    const { data } = await client.delete(`/crm/deals/${id}`)
+    return data
+  },
+  getCrmActivities: async (filters?: { deal_id?: string; enterprise_id?: string; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/crm/activities?${params.toString()}`)
+    return data
+  },
+  createCrmActivity: async (activityData: any) => {
+    const { data } = await client.post('/crm/activities', activityData)
+    return data
+  },
+  getCrmPipelineSummary: async () => {
+    const { data } = await client.get('/crm/summary')
+    return data
+  },
+  getCrmCustomerHealth: async () => {
+    const { data } = await client.get('/crm/health')
+    return data
+  },
+
   // Export
   exportCompanyData: async () => {
     const { data } = await client.get('/export/company')
+    return data
+  },
+
+  // Onboarding
+  getOnboardingStatus: async () => {
+    const { data } = await client.get('/onboarding/status')
+    return data
+  },
+  completeOnboardingStep: async (step: number, stepData: any) => {
+    const { data } = await client.put(`/onboarding/step/${step}`, stepData)
+    return data
+  },
+  completeOnboarding: async () => {
+    const { data } = await client.post('/onboarding/complete')
+    return data
+  },
+  resetOnboarding: async () => {
+    const { data } = await client.post('/onboarding/reset')
+    return data
+  },
+  updateEnabledModules: async (modules: string[]) => {
+    const { data } = await client.put('/onboarding/modules', { modules })
+    return data
+  },
+  lookupCUIT: async (cuit: string) => {
+    const { data } = await client.post('/onboarding/cuit-lookup', { cuit })
     return data
   },
 

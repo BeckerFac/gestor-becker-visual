@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0A0A0F">
+  <title>Sin conexion - GESTIA</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background-color: #0A0A0F;
+      color: #E5E7EB;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: 1.5rem;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 1.5rem;
+      opacity: 0.5;
+    }
+    .icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #F3F4F6;
+      margin-bottom: 0.75rem;
+    }
+    p {
+      font-size: 0.875rem;
+      color: #9CA3AF;
+      line-height: 1.5;
+      margin-bottom: 2rem;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.625rem 1.5rem;
+      background-color: #3B82F6;
+      color: white;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border: none;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background-color 0.2s;
+    }
+    .btn:hover {
+      background-color: #2563EB;
+    }
+    .btn:active {
+      background-color: #1D4ED8;
+    }
+    .brand {
+      margin-top: 3rem;
+      font-size: 0.75rem;
+      color: #4B5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="1" y1="1" x2="23" y2="23"></line>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+        <path d="M10.71 5.05A16 16 0 0 1 22.56 9"></path>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+      </svg>
+    </div>
+    <h1>Sin conexion</h1>
+    <p>GESTIA necesita conexion a internet para funcionar. Verifica tu conexion e intenta nuevamente.</p>
+    <button class="btn" onclick="window.location.reload()">Reintentar</button>
+    <div class="brand">GESTIA - Gestion Empresarial</div>
+  </div>
+</body>
+</html>

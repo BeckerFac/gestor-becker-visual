@@ -34,6 +34,19 @@ interface InsightsData {
   top_customers: Array<{ name: string; revenue: number; order_count: number }>
 }
 
+interface AgingData {
+  summary: {
+    current: number
+    bucket_1_30: number
+    bucket_31_60: number
+    bucket_61_90: number
+    bucket_90_plus: number
+    total_overdue: number
+  }
+  worst_clients: Array<{ enterprise_name: string; total_overdue: number; oldest_days: number }>
+  avg_dso: number
+}
+
 interface SearchResults {
   enterprises: any[]
   customers: any[]
@@ -70,6 +83,7 @@ export const Dashboard: React.FC = () => {
   const navigate = useNavigate()
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [insights, setInsights] = useState<InsightsData | null>(null)
+  const [aging, setAging] = useState<AgingData | null>(null)
   const [dismissed, setDismissed] = useState<string[]>(getDismissed())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -95,7 +109,7 @@ export const Dashboard: React.FC = () => {
       try {
         setLoading(true)
         setError(null)
-        const [dashRes, insightsRes] = await Promise.all([
+        const [dashRes, insightsRes, agingRes] = await Promise.all([
           api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
             return {
@@ -106,9 +120,11 @@ export const Dashboard: React.FC = () => {
             }
           }),
           api.getInsights().catch(() => ({ actions: [], top_customers: [] })),
+          api.getAgingReport().catch(() => null),
         ])
         setDashboard(dashRes)
         setInsights(insightsRes)
+        setAging(agingRes)
       } finally {
         setLoading(false)
       }
@@ -395,6 +411,102 @@ export const Dashboard: React.FC = () => {
           </Card>
         ))}
       </div>
+
+      {/* Aging Summary Bar */}
+      {aging && aging.summary.total_overdue > 0 && canCobros && (
+        <div
+          className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate('/cobros')}
+        >
+          <div className="px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Antiguedad de Saldos</span>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Total vencido: <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(aging.summary.total_overdue)}</span>
+                  {aging.avg_dso > 0 && <span className="ml-3">DSO promedio: <span className="font-bold">{aging.avg_dso} dias</span></span>}
+                </p>
+              </div>
+            </div>
+            {aging.worst_clients.length > 0 && (
+              <div className="hidden md:block text-right">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Mayor deudor</p>
+                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {aging.worst_clients[0].enterprise_name}
+                  <span className="ml-1 text-red-600 dark:text-red-400">{formatCurrency(aging.worst_clients[0].total_overdue)}</span>
+                  <span className="ml-1 text-xs text-gray-400">({aging.worst_clients[0].oldest_days}d)</span>
+                </p>
+              </div>
+            )}
+          </div>
+          {/* Stacked bar */}
+          <div className="px-5 pb-3">
+            <div className="flex w-full h-4 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+              {(() => {
+                const s = aging.summary
+                const total = s.current + s.bucket_1_30 + s.bucket_31_60 + s.bucket_61_90 + s.bucket_90_plus
+                if (total === 0) return null
+                const segments = [
+                  { value: s.current, color: 'bg-[#22C55E]', label: 'Al dia' },
+                  { value: s.bucket_1_30, color: 'bg-[#EAB308]', label: '1-30d' },
+                  { value: s.bucket_31_60, color: 'bg-[#F97316]', label: '31-60d' },
+                  { value: s.bucket_61_90, color: 'bg-[#EF4444]', label: '61-90d' },
+                  { value: s.bucket_90_plus, color: 'bg-[#991B1B]', label: '90+d' },
+                ]
+                return segments.map((seg, i) => {
+                  const pct = (seg.value / total) * 100
+                  if (pct < 0.5) return null
+                  return (
+                    <div
+                      key={i}
+                      className={`${seg.color} transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                      title={`${seg.label}: ${formatCurrency(seg.value)} (${pct.toFixed(0)}%)`}
+                    />
+                  )
+                })
+              })()}
+            </div>
+            <div className="flex items-center gap-4 mt-2 flex-wrap">
+              {[
+                { label: 'Al dia', value: aging.summary.current, color: 'bg-[#22C55E]' },
+                { label: '1-30d', value: aging.summary.bucket_1_30, color: 'bg-[#EAB308]' },
+                { label: '31-60d', value: aging.summary.bucket_31_60, color: 'bg-[#F97316]' },
+                { label: '61-90d', value: aging.summary.bucket_61_90, color: 'bg-[#EF4444]' },
+                { label: '90+d', value: aging.summary.bucket_90_plus, color: 'bg-[#991B1B]' },
+              ].filter(b => b.value > 0).map((b, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+                  <div className={`w-2.5 h-2.5 rounded-full ${b.color}`} />
+                  <span>{b.label}:</span>
+                  <span className="font-semibold text-gray-800 dark:text-gray-200">{formatCurrency(b.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zero overdue celebration */}
+      {aging && aging.summary.total_overdue === 0 && canCobros && (aging.summary.current > 0 || aging.avg_dso > 0) && (
+        <div className="rounded-xl border border-green-200 dark:border-green-900 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 px-5 py-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-green-800 dark:text-green-200">Todo al dia</p>
+              <p className="text-xs text-green-600 dark:text-green-400">No hay facturas vencidas pendientes de cobro</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action Items - only show if there are visible actions */}
       {visibleActions.length > 0 && (

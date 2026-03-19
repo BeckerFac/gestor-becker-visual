@@ -91,13 +91,42 @@ export function getActivePreset(dateFrom: string, dateTo: string): DatePreset | 
 /** Build the Excel filename with report type and date range */
 export function buildExcelFilename(tabKey: string, dateFrom: string, dateTo: string): string {
   const tabLabels: Record<string, string> = {
-    ventas: 'Libro_IVA_Ventas',
-    compras: 'Libro_IVA_Compras',
+    iva_ventas: 'Libro_IVA_Ventas',
+    iva_compras: 'Libro_IVA_Compras',
     posicion: 'Posicion_IVA',
     flujo: 'Flujo_Caja',
+    // Keep legacy keys for backward compat
+    ventas: 'Libro_IVA_Ventas',
+    compras: 'Libro_IVA_Compras',
+    // Business tabs
+    biz_ventas: 'Ventas',
+    biz_rentabilidad: 'Rentabilidad',
+    biz_clientes: 'Clientes',
+    biz_cobranzas: 'Cobranzas',
+    biz_inventario: 'Inventario',
+    biz_conversion: 'Conversion',
   }
   const label = tabLabels[tabKey] || 'Reporte'
   const from = dateFrom.replace(/-/g, '')
   const to = dateTo.replace(/-/g, '')
   return `${label}_${from}_${to}`
+}
+
+/** Format a delta percentage with sign and arrow */
+export function fmtDelta(delta: number | null | undefined): string {
+  if (delta === null || delta === undefined) return ''
+  const sign = delta > 0 ? '+' : ''
+  return `${sign}${delta.toFixed(1)}%`
+}
+
+/** Format a number with locale (for non-currency values) */
+export function fmtNumber(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '0'
+  return n.toLocaleString('es-AR', { maximumFractionDigits: 1 })
+}
+
+/** Format a percentage */
+export function fmtPercent(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '0%'
+  return `${n.toFixed(1)}%`
 }

@@ -424,6 +424,34 @@ export const Settings: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Module Configuration */}
+      <Card>
+        <CardHeader><h3 className="text-lg font-semibold">Modulos y Configuracion</h3></CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Configura que modulos se muestran en el sistema. Podes activar o desactivar modulos segun lo que tu empresa necesite.
+            </p>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    await api.resetOnboarding()
+                    useAuthStore.getState().setOnboardingCompleted(false)
+                    window.location.reload()
+                  } catch (e: any) {
+                    toast.error(e.message || 'Error al reiniciar wizard')
+                  }
+                }}
+              >
+                Repetir asistente de configuracion
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* System Info */}
       <Card>
         <CardHeader><h3 className="text-lg font-semibold">Informacion del Sistema</h3></CardHeader>

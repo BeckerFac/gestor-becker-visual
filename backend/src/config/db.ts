@@ -262,6 +262,15 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pagos_company_date ON pagos(company_id, payment_date)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_cheques_company_status_collected ON cheques(company_id, status, collected_date)`);
 
+    // --- Onboarding wizard ---
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMP WITH TIME ZONE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS onboarding_current_step INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS enabled_modules TEXT[] DEFAULT ARRAY['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos']`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS condicion_iva VARCHAR(100)`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS punto_venta INTEGER`);
+
     console.log('✅ Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

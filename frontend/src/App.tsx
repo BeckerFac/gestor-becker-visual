@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/services/api'
@@ -26,6 +26,9 @@ import { Global } from '@/pages/Global'
 import { Reportes } from '@/pages/Reportes'
 import { UnauthorizedPage } from '@/components/shared/UnauthorizedPage'
 import { ToastContainer } from '@/components/ui/Toast'
+import { PWAUpdatePrompt } from '@/components/shared/PWAUpdatePrompt'
+import { PWAInstallPrompt } from '@/components/shared/PWAInstallPrompt'
+import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 
 // Error Boundary to catch and display React render errors
 class ErrorBoundary extends React.Component<
@@ -88,20 +91,56 @@ function App() {
   const user = useAuthStore((state) => state.user)
   const accessToken = useAuthStore((state) => state.accessToken)
   const clearAuth = useAuthStore((state) => state.clearAuth)
+  const onboardingCompleted = useAuthStore((state) => state.onboardingCompleted)
+  const setOnboardingCompleted = useAuthStore((state) => state.setOnboardingCompleted)
+  const setEnabledModules = useAuthStore((state) => state.setEnabledModules)
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   // Validate token on app start - if token exists but is invalid, clear auth
+  // Also fetch onboarding status and enabled_modules
   useEffect(() => {
     if (accessToken && user) {
-      api.getMe().catch(() => {
+      api.getMe().then((meData) => {
+        // Update onboarding and modules from server
+        if (meData.onboarding_completed !== undefined) {
+          setOnboardingCompleted(meData.onboarding_completed)
+          if (!meData.onboarding_completed) {
+            setShowOnboarding(true)
+          }
+        }
+        if (meData.enabled_modules) {
+          setEnabledModules(meData.enabled_modules)
+        }
+      }).catch(() => {
         clearAuth()
       })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Show onboarding when user is logged in but hasn't completed it
+  useEffect(() => {
+    if (user && accessToken && !onboardingCompleted) {
+      setShowOnboarding(true)
+    }
+  }, [user, accessToken, onboardingCompleted])
+
+  const handleOnboardingComplete = useCallback(() => {
+    setShowOnboarding(false)
+    setOnboardingCompleted(true)
+  }, [setOnboardingCompleted])
+
   return (
     <ErrorBoundary>
     <Router>
       <ToastContainer />
+      <PWAUpdatePrompt />
+      <PWAInstallPrompt />
+
+      {/* Onboarding Wizard overlay */}
+      {showOnboarding && user && accessToken && (
+        <OnboardingWizard onComplete={handleOnboardingComplete} />
+      )}
+
       <Routes>
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
 

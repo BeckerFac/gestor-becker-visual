@@ -231,13 +231,20 @@ export class AuthService {
 
   async me(userId: string) {
     const result = await db.execute(sql`
-      SELECT id, email, name, role, company_id, active FROM users WHERE id = ${userId}
+      SELECT u.id, u.email, u.name, u.role, u.company_id, u.active,
+             c.onboarding_completed, c.enabled_modules
+      FROM users u
+      JOIN companies c ON c.id = u.company_id
+      WHERE u.id = ${userId}
     `);
     const rows = (result as any).rows || result || [];
     if (rows.length === 0) {
       throw new ApiError(404, 'User not found');
     }
-    const user = rows[0] as { id: string; email: string; name: string; role: string; company_id: string; active: boolean };
+    const user = rows[0] as {
+      id: string; email: string; name: string; role: string; company_id: string; active: boolean;
+      onboarding_completed: boolean; enabled_modules: string[];
+    };
     if (user.active === false) {
       throw new ApiError(403, 'User deactivated');
     }

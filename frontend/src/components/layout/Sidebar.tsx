@@ -80,11 +80,21 @@ const navSections: NavSection[] = [
   },
 ]
 
+// Map from sidebar module keys to enabled_modules keys
+// Some sidebar module names differ from enabled_modules keys
+const MODULE_KEY_MAP: Record<string, string> = {
+  'reports': 'reports',
+  'cuenta_corriente': 'cobros', // cuenta corriente shows if cobros is enabled
+  'settings': 'settings', // always visible
+  'users': 'users', // always visible
+}
+
 export const Sidebar: React.FC = () => {
   const location = useLocation()
   const user = useAuthStore((state) => state.user)
   const clearAuth = useAuthStore((state) => state.clearAuth)
   const canAny = useAuthStore((state) => state.canAny)
+  const isModuleEnabled = useAuthStore((state) => state.isModuleEnabled)
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
   const setSidebarOpen = useUIStore((state) => state.setSidebarOpen)
 
@@ -156,7 +166,16 @@ export const Sidebar: React.FC = () => {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-3">
         {navSections.map((section, sIdx) => {
-          const visibleItems = section.items.filter(item => !item.module || canAny(item.module))
+          const visibleItems = section.items.filter(item => {
+            // Permission check
+            if (item.module && !canAny(item.module)) return false
+            // Module enabled check (skip for system items without module, and for settings/users)
+            if (item.module && item.module !== 'settings' && item.module !== 'users') {
+              const enabledKey = MODULE_KEY_MAP[item.module] || item.module
+              if (!isModuleEnabled(enabledKey)) return false
+            }
+            return true
+          })
           if (visibleItems.length === 0) return null
 
           return (

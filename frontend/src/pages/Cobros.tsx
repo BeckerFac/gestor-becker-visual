@@ -73,6 +73,65 @@ interface InvoiceForReceipt {
   total_cobrado: string
 }
 
+interface AgingDetail {
+  enterprise_name: string
+  customer_name: string
+  document_type: 'invoice' | 'order'
+  document_number: string
+  total_amount: number
+  paid_amount: number
+  remaining: number
+  due_date: string
+  days_overdue: number
+  bucket: 'current' | '1-30' | '31-60' | '61-90' | '90+'
+}
+
+interface AgingData {
+  summary: {
+    current: number
+    bucket_1_30: number
+    bucket_31_60: number
+    bucket_61_90: number
+    bucket_90_plus: number
+    total_overdue: number
+  }
+  details: AgingDetail[]
+  worst_clients: Array<{ enterprise_name: string; total_overdue: number; oldest_days: number }>
+  avg_dso: number
+}
+
+const BUCKET_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
+  'current': { bg: 'bg-green-50 dark:bg-green-950/30', border: 'border-t-[#22C55E]', text: 'text-green-800 dark:text-green-200', dot: 'bg-[#22C55E]' },
+  '1-30': { bg: 'bg-yellow-50 dark:bg-yellow-950/30', border: 'border-t-[#EAB308]', text: 'text-yellow-800 dark:text-yellow-200', dot: 'bg-[#EAB308]' },
+  '31-60': { bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-t-[#F97316]', text: 'text-orange-800 dark:text-orange-200', dot: 'bg-[#F97316]' },
+  '61-90': { bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-t-[#EF4444]', text: 'text-red-800 dark:text-red-200', dot: 'bg-[#EF4444]' },
+  '90+': { bg: 'bg-red-100 dark:bg-red-950/50', border: 'border-t-[#991B1B]', text: 'text-red-900 dark:text-red-100', dot: 'bg-[#991B1B]' },
+}
+
+const BUCKET_LABELS: Record<string, string> = {
+  'current': 'Al dia',
+  '1-30': '1-30 dias',
+  '31-60': '31-60 dias',
+  '61-90': '61-90 dias',
+  '90+': '90+ dias',
+}
+
+function getRowBgClass(bucket: string): string {
+  switch (bucket) {
+    case '1-30': return 'bg-yellow-50/50 dark:bg-yellow-950/10'
+    case '31-60': return 'bg-orange-50/50 dark:bg-orange-950/10'
+    case '61-90': return 'bg-red-50/50 dark:bg-red-950/10'
+    case '90+': return 'bg-red-100/50 dark:bg-red-950/20'
+    default: return ''
+  }
+}
+
+function getPaymentBehavior(avgDaysOverdue: number): { label: string; className: string } {
+  if (avgDaysOverdue <= 7) return { label: 'Buen pagador', className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' }
+  if (avgDaysOverdue <= 30) return { label: 'Regular', className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' }
+  return { label: 'Moroso', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' }
+}
+
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
   mercado_pago: 'Mercado Pago',
@@ -109,6 +168,8 @@ export const Cobros: React.FC = () => {
   const [banks, setBanks] = useState<Bank[]>([])
   const [cobros, setCobros] = useState<Cobro[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [aging, setAging] = useState<AgingData | null>(null)
+  const [agingCollapsed, setAgingCollapsed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -147,7 +208,7 @@ export const Cobros: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [receiptsRes, cobrosRes, entRes, ordersRes, bankRes] = await Promise.all([
+      const [receiptsRes, cobrosRes, entRes, ordersRes, bankRes, agingRes] = await Promise.all([
         api.getReceipts().catch((err: any) => {
           console.warn('Could not load receipts:', err.message)
           return []
@@ -159,12 +220,14 @@ export const Cobros: React.FC = () => {
         api.getEnterprises().catch(() => []),
         api.getOrders({ limit: 200 }).catch(() => ({ items: [] })),
         api.getBanks().catch(() => []),
+        api.getAgingReport().catch(() => null),
       ])
       setReceipts(receiptsRes || [])
       setCobros(cobrosRes || [])
       setEnterprises(entRes || [])
       setOrders((ordersRes.items || ordersRes || []))
       setBanks(bankRes || [])
+      setAging(agingRes)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -538,6 +601,181 @@ export const Cobros: React.FC = () => {
         >
           Mostrar pedidos por cobrar ocultos ({dismissedPendingCobros.length})
         </button>
+      )}
+
+      {/* Aging Report Section */}
+      {!loading && aging && (aging.summary.total_overdue > 0 || aging.details.length > 0) && (
+        <Card className="border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Antiguedad de Saldos
+                </h3>
+                {aging.avg_dso > 0 && (
+                  <span className="text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded-full">
+                    DSO: {aging.avg_dso}d
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setAgingCollapsed(!agingCollapsed)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-sm font-medium transition-colors flex items-center gap-1"
+              >
+                {agingCollapsed ? 'Expandir' : 'Colapsar'}
+                <span className="text-xs">{agingCollapsed ? '\u25BC' : '\u25B2'}</span>
+              </button>
+            </div>
+          </CardHeader>
+          {!agingCollapsed && (
+            <CardContent className="pt-0 space-y-4">
+              {/* Bucket summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {([
+                  { key: 'current', value: aging.summary.current },
+                  { key: '1-30', value: aging.summary.bucket_1_30 },
+                  { key: '31-60', value: aging.summary.bucket_31_60 },
+                  { key: '61-90', value: aging.summary.bucket_61_90 },
+                  { key: '90+', value: aging.summary.bucket_90_plus },
+                ] as const).map(({ key, value }) => {
+                  const colors = BUCKET_COLORS[key]
+                  const count = aging.details.filter(d => d.bucket === key).length
+                  return (
+                    <div key={key} className={`rounded-lg border border-gray-200 dark:border-gray-700 border-t-4 ${colors.border} ${colors.bg} px-3 py-2`}>
+                      <p className={`text-xs font-medium ${colors.text}`}>{BUCKET_LABELS[key]}</p>
+                      <p className={`text-lg font-bold ${colors.text}`}>{fmt(value)}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{count} doc{count !== 1 ? 's' : ''}</p>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Stacked bar */}
+              {aging.summary.total_overdue > 0 && (
+                <div>
+                  <div className="flex w-full h-3 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                    {(() => {
+                      const s = aging.summary
+                      const total = s.current + s.bucket_1_30 + s.bucket_31_60 + s.bucket_61_90 + s.bucket_90_plus
+                      if (total === 0) return null
+                      const segments = [
+                        { value: s.current, color: 'bg-[#22C55E]' },
+                        { value: s.bucket_1_30, color: 'bg-[#EAB308]' },
+                        { value: s.bucket_31_60, color: 'bg-[#F97316]' },
+                        { value: s.bucket_61_90, color: 'bg-[#EF4444]' },
+                        { value: s.bucket_90_plus, color: 'bg-[#991B1B]' },
+                      ]
+                      return segments.map((seg, i) => {
+                        const pct = (seg.value / total) * 100
+                        if (pct < 0.5) return null
+                        return <div key={i} className={`${seg.color}`} style={{ width: `${pct}%` }} />
+                      })
+                    })()}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Total vencido: <span className="font-bold text-red-600 dark:text-red-400">{fmt(aging.summary.total_overdue)}</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Worst clients */}
+              {aging.worst_clients.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Principales deudores</p>
+                  <div className="flex flex-wrap gap-2">
+                    {aging.worst_clients.map((client, i) => {
+                      const behavior = getPaymentBehavior(client.oldest_days)
+                      return (
+                        <div key={i} className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5">
+                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{client.enterprise_name}</span>
+                          <span className="text-sm font-bold text-red-600 dark:text-red-400">{fmt(client.total_overdue)}</span>
+                          <span className="text-xs text-gray-400">({client.oldest_days}d)</span>
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${behavior.className}`}>{behavior.label}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Detail table */}
+              {aging.details.filter(d => d.days_overdue > 0).length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-800 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <th className="px-3 py-2">Empresa</th>
+                        <th className="px-3 py-2">Tipo</th>
+                        <th className="px-3 py-2">N Doc</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                        <th className="px-3 py-2 text-right">Pagado</th>
+                        <th className="px-3 py-2 text-right">Restante</th>
+                        <th className="px-3 py-2 text-center">Dias</th>
+                        <th className="px-3 py-2 text-center">Bucket</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aging.details.filter(d => d.days_overdue > 0).map((item, idx) => {
+                        const colors = BUCKET_COLORS[item.bucket]
+                        return (
+                          <tr key={idx} className={`border-t border-gray-100 dark:border-gray-700 ${getRowBgClass(item.bucket)}`}>
+                            <td className="px-3 py-2 text-gray-900 dark:text-gray-100 font-medium">{item.enterprise_name}</td>
+                            <td className="px-3 py-2">
+                              <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                                item.document_type === 'invoice'
+                                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                                  : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                              }`}>
+                                {item.document_type === 'invoice' ? 'Factura' : 'Sin facturar'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs text-gray-600 dark:text-gray-400">
+                              {item.document_type === 'invoice'
+                                ? String(item.document_number).padStart(8, '0')
+                                : `#${String(item.document_number).padStart(4, '0')}`
+                              }
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{fmt(item.total_amount)}</td>
+                            <td className="px-3 py-2 text-right text-green-600 dark:text-green-400">{fmt(item.paid_amount)}</td>
+                            <td className="px-3 py-2 text-right font-bold text-gray-900 dark:text-gray-100">{fmt(item.remaining)}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`font-bold ${
+                                item.days_overdue > 90 ? 'text-red-900 dark:text-red-300' :
+                                item.days_overdue > 60 ? 'text-red-600 dark:text-red-400' :
+                                item.days_overdue > 30 ? 'text-orange-600 dark:text-orange-400' :
+                                'text-yellow-600 dark:text-yellow-400'
+                              }`}>
+                                {item.days_overdue}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
+                                <span className="text-xs text-gray-500 dark:text-gray-400">{BUCKET_LABELS[item.bucket]}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Zero overdue */}
+              {aging.summary.total_overdue === 0 && aging.details.length > 0 && (
+                <div className="text-center py-4">
+                  <div className="inline-flex items-center gap-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg px-4 py-2">
+                    <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-sm font-semibold text-green-800 dark:text-green-200">Todo al dia - Sin facturas vencidas</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
       )}
 
       {error && (
