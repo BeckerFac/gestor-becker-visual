@@ -64,3 +64,68 @@
     animation: none !important;
   }
 }
+
+/* Print styles for Reportes page */
+@media print {
+  /* Hide navigation, sidebar, and non-essential UI */
+  nav,
+  aside,
+  header,
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print\\:block {
+    display: block !important;
+  }
+
+  /* Expand content to full width */
+  main,
+  [role="main"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Remove shadows and borders for clean print */
+  .shadow, .shadow-lg, .shadow-md, .shadow-sm {
+    box-shadow: none !important;
+  }
+
+  /* Ensure tables are readable */
+  table {
+    font-size: 10pt !important;
+  }
+
+  /* Avoid page breaks inside cards and table rows */
+  .print\\:break-inside-avoid,
+  tr {
+    break-inside: avoid;
+  }
+
+  /* Keep table headers on every page */
+  thead {
+    display: table-header-group;
+  }
+
+  /* Keep totals on same page as last data rows */
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* Reset dark mode colors for print */
+  * {
+    color: black !important;
+    background: white !important;
+    border-color: #ccc !important;
+  }
+
+  /* Restore colored text for specific elements in print */
+  .text-red-600, .text-red-700 { color: #dc2626 !important; }
+  .text-green-600, .text-green-700 { color: #16a34a !important; }
+  .text-blue-600, .text-blue-700 { color: #2563eb !important; }
+  .text-purple-700 { color: #7c3aed !important; }
+  .text-orange-700 { color: #ea580c !important; }
+}

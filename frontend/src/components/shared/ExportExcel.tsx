@@ -13,6 +13,10 @@ interface ExportExcelProps {
   columns: { key: string; label: string; type?: 'text' | 'date' | 'currency' | 'number' }[]
   filename?: string
   sheetName?: string
+  /** Optional totals row to append at the bottom of the sheet */
+  totalsRow?: Record<string, any>
+  /** Optional header text (e.g. company name + date range) shown above the data */
+  headerText?: string
 }
 
 function formatCellValue(value: any, type?: string): any {
@@ -52,23 +56,57 @@ export function exportToExcel(
   data: Record<string, any>[],
   columns: ExcelColumn[],
   filename: string,
-  sheetName: string = 'Datos'
+  sheetName: string = 'Datos',
+  options?: { totalsRow?: Record<string, any>; headerText?: string }
 ) {
   if (data.length === 0) return
 
-  const mapped = data.map(row => {
+  const rows: Record<string, any>[] = []
+
+  // Optional header row
+  if (options?.headerText) {
+    const headerObj: Record<string, any> = {}
+    columns.forEach((col, idx) => {
+      headerObj[col.header] = idx === 0 ? options.headerText : ''
+    })
+    rows.push(headerObj)
+    // Empty row after header
+    const emptyObj: Record<string, any> = {}
+    columns.forEach(col => { emptyObj[col.header] = '' })
+    rows.push(emptyObj)
+  }
+
+  // Data rows
+  data.forEach(row => {
     const obj: Record<string, any> = {}
     columns.forEach(col => {
       obj[col.header] = formatCellValue(row[col.key], col.type)
     })
-    return obj
+    rows.push(obj)
   })
 
-  const ws = XLSX.utils.json_to_sheet(mapped)
+  // Totals row
+  if (options?.totalsRow) {
+    const totalsObj: Record<string, any> = {}
+    columns.forEach(col => {
+      const val = options.totalsRow![col.key]
+      if (val !== undefined) {
+        totalsObj[col.header] = formatCellValue(val, col.type)
+      } else {
+        totalsObj[col.header] = ''
+      }
+    })
+    rows.push(totalsObj)
+  }
+
+  const ws = XLSX.utils.json_to_sheet(rows)
 
   // Auto-fit column widths
   const widths = autoFitColumns(data, columns)
   ws['!cols'] = widths.map(w => ({ wch: w }))
+
+  // Determine data start row (after optional header rows)
+  const dataStartRow = options?.headerText ? 3 : 1 // 0-indexed: header text row + empty row + column headers
 
   // Freeze header row
   ws['!freeze'] = { xSplit: 0, ySplit: 1 }
@@ -77,7 +115,7 @@ export function exportToExcel(
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
   columns.forEach((col, colIdx) => {
     if (col.type === 'currency') {
-      for (let row = range.s.r + 1; row <= range.e.r; row++) {
+      for (let row = dataStartRow; row <= range.e.r; row++) {
         const cellRef = XLSX.utils.encode_cell({ r: row, c: colIdx })
         const cell = ws[cellRef]
         if (cell && typeof cell.v === 'number') {
@@ -133,6 +171,8 @@ export const ExportExcelButton: React.FC<ExportExcelProps> = ({
   columns,
   filename = 'export',
   sheetName = 'Datos',
+  totalsRow,
+  headerText,
 }) => {
   const disabled = data.length === 0
 
@@ -143,8 +183,7 @@ export const ExportExcelButton: React.FC<ExportExcelProps> = ({
       width: 18,
       type: c.type,
     }))
-    const dateStr = new Date().toISOString().split('T')[0]
-    exportToExcel(data, excelColumns, `${filename}_${dateStr}`, sheetName)
+    exportToExcel(data, excelColumns, filename, sheetName, { totalsRow, headerText })
   }
 
   return (
