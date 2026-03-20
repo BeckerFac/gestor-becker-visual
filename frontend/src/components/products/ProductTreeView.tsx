@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { useProductDragDrop } from '@/hooks/useProductDragDrop'
 import { CategoryRow } from './CategoryRow'
 import type { CategoryTreeNode } from './CategoryRow'
 import type { Product } from './types'
@@ -43,7 +44,7 @@ function saveExpanded(expanded: Set<string>) {
   } catch { /* ignore */ }
 }
 
-// Product row with indentation
+// Product row with indentation and drag support
 const ProductRow: React.FC<{
   product: Product
   depth: number
@@ -54,8 +55,16 @@ const ProductRow: React.FC<{
   onDelete: (product: Product) => void
   hasStockProducts: boolean
   highlight?: string
-}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight }) => {
+  // Drag support
+  onDragStart?: (e: React.DragEvent<HTMLTableRowElement>, productId: string, productName: string, sourceCategoryId: string | null) => void
+  onDragEnd?: () => void
+  isDraggedOver?: boolean
+  isTouchDevice?: boolean
+  categories?: CategoryTreeNode[]
+  onMoveToCategory?: (productId: string, categoryId: string | null) => void
+}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory }) => {
   const paddingLeft = depth * 24
+  const [showMoveMenu, setShowMoveMenu] = useState(false)
 
   const highlightText = (text: string) => {
     if (!highlight) return text
@@ -90,17 +99,31 @@ const ProductRow: React.FC<{
 
   return (
     <tr
-      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+      className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''}`}
       onClick={() => onRowClick(product)}
+      draggable={!isTouchDevice}
+      onDragStart={onDragStart ? (e) => onDragStart(e, product.id, product.name, product.category_id) : undefined}
+      onDragEnd={onDragEnd}
+      style={!isTouchDevice ? { cursor: 'grab' } : undefined}
     >
       <td className="px-4 py-3" style={{ paddingLeft: paddingLeft + 16 }}>
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => onToggleSelect(product.id)}
-          onClick={e => e.stopPropagation()}
-          className="rounded border-gray-300 dark:border-gray-600"
-        />
+        <div className="flex items-center gap-2">
+          {/* Drag handle indicator */}
+          {!isTouchDevice && (
+            <span className="text-gray-300 dark:text-gray-600 select-none" title="Arrastrar para mover">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z"/>
+              </svg>
+            </span>
+          )}
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(product.id)}
+            onClick={e => e.stopPropagation()}
+            className="rounded border-gray-300 dark:border-gray-600"
+          />
+        </div>
       </td>
       <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-300">
         {highlightText(product.sku)}
@@ -143,7 +166,39 @@ const ProductRow: React.FC<{
         </span>
       </td>
       <td className="px-4 py-3 text-sm text-right">
-        <div className="flex gap-2 justify-end">
+        <div className="flex gap-2 justify-end items-center">
+          {/* Mobile: "Mover a..." button */}
+          {isTouchDevice && categories && onMoveToCategory && (
+            <PermissionGate module="products" action="edit">
+              <div className="relative" onClick={e => e.stopPropagation()}>
+                <button
+                  onClick={() => setShowMoveMenu(!showMoveMenu)}
+                  className="text-xs px-2 py-1 rounded text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-700 transition-colors"
+                >
+                  Mover a...
+                </button>
+                {showMoveMenu && (
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-[160px] max-h-[200px] overflow-y-auto">
+                    <button
+                      onClick={() => { onMoveToCategory(product.id, null); setShowMoveMenu(false) }}
+                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${!product.category_id ? 'font-bold text-blue-600' : 'text-gray-700 dark:text-gray-300'}`}
+                    >
+                      Sin categoria
+                    </button>
+                    {categories.map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => { onMoveToCategory(product.id, cat.id); setShowMoveMenu(false) }}
+                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${product.category_id === cat.id ? 'font-bold text-blue-600' : 'text-gray-700 dark:text-gray-300'}`}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </PermissionGate>
+          )}
           <PermissionGate module="products" action="edit">
             <button
               onClick={(e) => { e.stopPropagation(); onEdit(product) }}
@@ -179,7 +234,14 @@ const CategoryProducts: React.FC<{
   onRowClick: (product: Product) => void
   onEdit: (product: Product) => void
   onDelete: (product: Product) => void
-}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete }) => {
+  // Drag support
+  onDragStart?: (e: React.DragEvent<HTMLTableRowElement>, productId: string, productName: string, sourceCategoryId: string | null) => void
+  onDragEnd?: () => void
+  isDraggedProduct?: (productId: string) => boolean
+  isTouchDevice?: boolean
+  allCategories?: CategoryTreeNode[]
+  onMoveToCategory?: (productId: string, categoryId: string | null) => void
+}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory }) => {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -260,6 +322,12 @@ const CategoryProducts: React.FC<{
           onDelete={onDelete}
           hasStockProducts={hasStockProducts}
           highlight={search}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          isDraggedOver={isDraggedProduct?.(product.id)}
+          isTouchDevice={isTouchDevice}
+          categories={allCategories}
+          onMoveToCategory={onMoveToCategory}
         />
       ))}
       {hasMore && (
@@ -415,6 +483,35 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
     onReload()
   }
 
+  // Drag and drop
+  const dnd = useProductDragDrop({
+    selectedIds,
+    onReload: handleFullReload,
+    expandCategory: (categoryId: string) => {
+      setExpanded(prev => {
+        if (prev.has(categoryId)) return prev
+        const next = new Set(prev)
+        next.add(categoryId)
+        saveExpanded(next)
+        return next
+      })
+    },
+    isCategoryExpanded: (categoryId: string) => expanded.has(categoryId),
+  })
+
+  // Flatten categories for mobile move menu
+  const flattenCategories = (cats: CategoryTreeNode[]): CategoryTreeNode[] => {
+    const result: CategoryTreeNode[] = []
+    for (const cat of cats) {
+      result.push(cat)
+      if (cat.children.length > 0) {
+        result.push(...flattenCategories(cat.children))
+      }
+    }
+    return result
+  }
+  const allFlatCategories = treeData ? flattenCategories(treeData.categories) : []
+
   // Get the category that's about to be deleted for its info
   const findCategory = (cats: CategoryTreeNode[], id: string): CategoryTreeNode | null => {
     for (const cat of cats) {
@@ -454,6 +551,11 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
             onDelete={(catId) => setDeleteTarget(catId)}
             onReload={handleFullReload}
             hasStockProducts={hasStockProducts}
+            isDropTarget={dnd.isDropTargetActive(cat.id)}
+            onDragOver={(e) => dnd.handleCategoryDragOver(e, cat.id)}
+            onDragLeave={dnd.handleCategoryDragLeave}
+            onDrop={(e) => dnd.handleCategoryDrop(e, cat.id)}
+            isDraggingActive={dnd.isDragging}
           />
           {isExp && cat.children.length > 0 && renderCategoryTree(cat.children, depth + 1)}
           {isExp && (
@@ -469,6 +571,12 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
               onRowClick={onRowClick}
               onEdit={onEdit}
               onDelete={onDelete}
+              onDragStart={dnd.handleDragStart}
+              onDragEnd={dnd.handleDragEnd}
+              isDraggedProduct={dnd.isDraggedProduct}
+              isTouchDevice={dnd.isTouchDevice}
+              allCategories={allFlatCategories}
+              onMoveToCategory={dnd.handleMoveToCategory}
             />
           )}
         </React.Fragment>
@@ -573,10 +681,15 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                 </tr>
               )}
 
-              {/* Uncategorized products */}
-              {treeData.uncategorized_count > 0 && (
+              {/* Uncategorized products - always show as drop target when dragging */}
+              {(treeData.uncategorized_count > 0 || dnd.isDragging) && (
                 <>
-                  <tr className="bg-gray-50/50 dark:bg-gray-800/40">
+                  <tr
+                    className={`bg-gray-50/50 dark:bg-gray-800/40 transition-colors ${dnd.isDropTargetActive(null) ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20' : ''}`}
+                    onDragOver={(e) => dnd.handleCategoryDragOver(e, null)}
+                    onDragLeave={dnd.handleCategoryDragLeave}
+                    onDrop={(e) => dnd.handleCategoryDrop(e, null)}
+                  >
                     <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-gray-600 dark:text-gray-300">Sin categoria</span>
@@ -588,22 +701,35 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                             {formatCurrency(treeData.uncategorized_stock_value)} en stock
                           </span>
                         )}
+                        {dnd.isDropTargetActive(null) && (
+                          <span className="text-xs text-blue-500 dark:text-blue-400 font-medium animate-pulse">
+                            Soltar aqui
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
-                  <CategoryProducts
-                    categoryId="uncategorized"
-                    depth={0}
-                    search={search}
-                    stockStatusFilter={stockStatusFilter}
-                    hasStockProducts={hasStockProducts}
-                    selectedIds={selectedIds}
-                    onToggleSelect={onToggleSelect}
-                    onSelectMultiple={onSelectMultiple}
-                    onRowClick={onRowClick}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                  />
+                  {treeData.uncategorized_count > 0 && (
+                    <CategoryProducts
+                      categoryId="uncategorized"
+                      depth={0}
+                      search={search}
+                      stockStatusFilter={stockStatusFilter}
+                      hasStockProducts={hasStockProducts}
+                      selectedIds={selectedIds}
+                      onToggleSelect={onToggleSelect}
+                      onSelectMultiple={onSelectMultiple}
+                      onRowClick={onRowClick}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onDragStart={dnd.handleDragStart}
+                      onDragEnd={dnd.handleDragEnd}
+                      isDraggedProduct={dnd.isDraggedProduct}
+                      isTouchDevice={dnd.isTouchDevice}
+                      allCategories={allFlatCategories}
+                      onMoveToCategory={dnd.handleMoveToCategory}
+                    />
+                  )}
                 </>
               )}
 

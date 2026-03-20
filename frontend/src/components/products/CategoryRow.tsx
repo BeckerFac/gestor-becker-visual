@@ -34,6 +34,12 @@ interface CategoryRowProps {
   onDelete: (categoryId: string) => void
   onReload: () => void
   hasStockProducts: boolean
+  // Drop target props
+  isDropTarget?: boolean
+  onDragOver?: (e: React.DragEvent) => void
+  onDragLeave?: (e: React.DragEvent) => void
+  onDrop?: (e: React.DragEvent) => void
+  isDraggingActive?: boolean
 }
 
 function formatCompactCurrency(value: number): string {
@@ -53,6 +59,11 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
   onDelete,
   onReload,
   hasStockProducts,
+  isDropTarget,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  isDraggingActive,
 }) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState({
@@ -168,8 +179,11 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
   return (
     <>
       <tr
-        className="border-b border-gray-100 dark:border-gray-700/50 bg-gray-50/80 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer transition-colors group"
+        className={`border-b border-gray-100 dark:border-gray-700/50 bg-gray-50/80 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer transition-colors group ${isDropTarget ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''} ${isDraggingActive ? 'transition-all duration-150' : ''}`}
         onClick={onToggle}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
       >
         <td
           colSpan={hasStockProducts ? 10 : 9}
@@ -219,6 +233,11 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
               )}
               {category.default_margin_percent && (
                 <span className="text-xs text-gray-400">M: {category.default_margin_percent}%</span>
+              )}
+              {isDropTarget && (
+                <span className="text-xs text-blue-500 dark:text-blue-400 font-medium animate-pulse">
+                  Soltar aqui
+                </span>
               )}
             </div>
 
