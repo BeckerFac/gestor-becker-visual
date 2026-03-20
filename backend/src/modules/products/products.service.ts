@@ -779,13 +779,7 @@ export class ProductsService {
 
       const id = uuid();
 
-      // Get max sort_order
-      const maxOrderResult = await db.execute(sql`
-        SELECT COALESCE(MAX(sort_order), -1) as max_order FROM categories
-        WHERE company_id = ${companyId} AND COALESCE(parent_id, '00000000-0000-0000-0000-000000000000') = COALESCE(${data.parent_id || null}, '00000000-0000-0000-0000-000000000000')
-      `);
-      const maxOrder = (((maxOrderResult as any).rows?.[0]?.max_order) ?? -1) + 1;
-
+      // Insert the category with basic fields (Drizzle schema)
       await db.insert(categories).values({
         id,
         company_id: companyId,
@@ -794,11 +788,21 @@ export class ProductsService {
         parent_id: data.parent_id || null,
       });
 
-      // Update extra fields via raw SQL
-      await pool.query(
-        `UPDATE categories SET sort_order = $1, default_vat_rate = $2, default_margin_percent = $3, color = $4 WHERE id = $5`,
-        [maxOrder, data.default_vat_rate || null, data.default_margin_percent || null, data.color || null, id]
-      );
+      // Try to update extra fields via raw SQL (columns may not exist yet in production)
+      try {
+        const maxOrderResult = await pool.query(
+          `SELECT COALESCE(MAX(sort_order), -1) as max_order FROM categories WHERE company_id = $1`,
+          [companyId]
+        );
+        const maxOrder = (maxOrderResult.rows?.[0]?.max_order ?? -1) + 1;
+        await pool.query(
+          `UPDATE categories SET sort_order = $1, default_vat_rate = $2, default_margin_percent = $3, color = $4 WHERE id = $5`,
+          [maxOrder, data.default_vat_rate ?? null, data.default_margin_percent ?? null, data.color || null, id]
+        );
+      } catch (extraErr) {
+        // Extra columns might not exist - non-blocking, category was already created
+        console.error('Category extra fields update failed (non-blocking):', (extraErr as any)?.message);
+      }
 
       return { id, name: data.name, parent_id: data.parent_id || null };
     } catch (error) {
