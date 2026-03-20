@@ -14,13 +14,15 @@ export const UsageMeter: React.FC<UsageMeterProps> = ({
   limit,
   unit = '',
 }) => {
-  const isUnlimited = !Number.isFinite(limit)
-  const percentage = isUnlimited ? 0 : Math.min(100, (current / limit) * 100)
+  const safeCurrent = current ?? 0
+  const safeLimit = limit ?? 0
+  const isUnlimited = !Number.isFinite(safeLimit) || safeLimit === 0
+  const percentage = isUnlimited ? 0 : Math.min(100, (safeCurrent / safeLimit) * 100)
   const isWarning = percentage >= 80
   const isExceeded = percentage >= 100
 
-  const displayLimit = isUnlimited ? 'Ilimitado' : `${limit.toLocaleString('es-AR')}`
-  const displayCurrent = `${current.toLocaleString('es-AR')}`
+  const displayLimit = isUnlimited ? 'Ilimitado' : `${safeLimit.toLocaleString('es-AR')}`
+  const displayCurrent = `${safeCurrent.toLocaleString('es-AR')}`
 
   return (
     <div className="space-y-1">

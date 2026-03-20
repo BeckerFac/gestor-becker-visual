@@ -381,7 +381,7 @@ const UsageDashboard: React.FC = () => {
         </div>
         <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 text-center">
           <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-            ${usage.estimated_cost_ars.toLocaleString('es-AR')}
+            ${(usage.estimated_cost_ars ?? 0).toLocaleString('es-AR')}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">Costo est.</p>
         </div>
