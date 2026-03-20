@@ -9,12 +9,14 @@ export class CuentaCorrienteService {
         SELECT
           e.id, e.name, e.cuit, e.status,
           COALESCE((
-            SELECT SUM(CAST(o.total_amount AS decimal))
-            FROM orders o
-            LEFT JOIN customers c ON o.customer_id = c.id
-            WHERE o.company_id = ${companyId}
-              AND (o.enterprise_id = e.id OR c.enterprise_id = e.id)
-              AND o.status != 'cancelado'
+            SELECT SUM(CAST(i.total_amount AS decimal))
+            FROM invoices i
+            LEFT JOIN enterprises ie ON i.enterprise_id = ie.id
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status = 'authorized'
+              AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
           ), 0) as total_ventas,
           COALESCE((
             SELECT SUM(CAST(co.amount AS decimal))
@@ -87,16 +89,20 @@ export class CuentaCorrienteService {
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entRows[0];
 
-      // Ventas (pedidos) -- nos deben
+      // Facturado AFIP (facturas autorizadas) -- nos deben
       const ordersResult = await db.execute(sql`
-        SELECT o.id, 'venta' as tipo, o.created_at as fecha,
-          'Pedido #' || LPAD(CAST(o.order_number AS TEXT), 4, '0') || ' — ' || COALESCE(o.title, '') as descripcion,
-          CAST(o.total_amount AS decimal) as monto
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = ${companyId}
-          AND (o.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-          AND o.status != 'cancelado'
+        SELECT i.id, 'factura' as tipo, i.invoice_date as fecha,
+          'Factura ' || COALESCE(i.invoice_type, '') || ' ' ||
+            LPAD(CAST(COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 1) AS TEXT), 5, '0') || '-' ||
+            LPAD(CAST(i.invoice_number AS TEXT), 8, '0') || ' — $' ||
+            TRIM(TO_CHAR(CAST(i.total_amount AS decimal), '999G999G999D00')) as descripcion,
+          CAST(i.total_amount AS decimal) as monto
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.company_id = ${companyId}
+          AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+          AND i.status = 'authorized'
+          AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
       `);
 
       // Cobros -- nos pagaron
@@ -215,14 +221,18 @@ export class CuentaCorrienteService {
 
       // ALL transactions (for total balance)
       const allOrders = await db.execute(sql`
-        SELECT o.id, 'venta' as tipo, o.created_at as fecha,
-          'Pedido #' || LPAD(CAST(o.order_number AS TEXT), 4, '0') || ' — ' || COALESCE(o.title, '') as descripcion,
-          CAST(o.total_amount AS decimal) as monto
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = ${companyId}
-          AND (o.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-          AND o.status != 'cancelado'
+        SELECT i.id, 'factura' as tipo, i.invoice_date as fecha,
+          'Factura ' || COALESCE(i.invoice_type, '') || ' ' ||
+            LPAD(CAST(COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 1) AS TEXT), 5, '0') || '-' ||
+            LPAD(CAST(i.invoice_number AS TEXT), 8, '0') || ' — $' ||
+            TRIM(TO_CHAR(CAST(i.total_amount AS decimal), '999G999G999D00')) as descripcion,
+          CAST(i.total_amount AS decimal) as monto
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.company_id = ${companyId}
+          AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+          AND i.status = 'authorized'
+          AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
       `);
       const allCobros = await db.execute(sql`
         SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,

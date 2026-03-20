@@ -37,9 +37,80 @@ export class ReceiptsService {
       await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS reference VARCHAR(255)`);
       // Add cobro_id to cheques table for linking
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`);
+
+      // Add migrated_to_receipt column to cobros table
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS migrated_to_receipt BOOLEAN DEFAULT false`);
+
+      // Migrate old cobros that don't have a corresponding receipt
+      await this.migrateOldCobros();
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Receipts migrations error:', error);
+    }
+  }
+
+  private async migrateOldCobros() {
+    try {
+      // Check if migration already ran (any cobro already marked as migrated)
+      const checkMigration = await db.execute(sql`
+        SELECT COUNT(*) as cnt FROM cobros WHERE migrated_to_receipt = true
+      `);
+      const alreadyMigrated = parseInt(((checkMigration as any).rows || checkMigration)?.[0]?.cnt || '0');
+
+      // Also check if there are any unmigrated cobros without a receipt reference
+      const unmigrated = await db.execute(sql`
+        SELECT c.id, c.company_id, c.enterprise_id, c.amount, c.payment_method,
+          c.bank_id, c.reference, c.payment_date, c.notes, c.created_by
+        FROM cobros c
+        WHERE c.migrated_to_receipt = false
+          AND c.reference NOT LIKE 'Recibo #%'
+      `);
+      const unmigratedRows = (unmigrated as any).rows || unmigrated || [];
+
+      if (unmigratedRows.length === 0) return;
+
+      // Group by company_id for receipt_number generation
+      const byCompany: Record<string, any[]> = {};
+      for (const cobro of unmigratedRows) {
+        const cid = cobro.company_id;
+        if (!byCompany[cid]) byCompany[cid] = [];
+        byCompany[cid].push(cobro);
+      }
+
+      for (const [companyId, cobros] of Object.entries(byCompany)) {
+        // Get current max receipt number for this company
+        const maxResult = await db.execute(sql`
+          SELECT COALESCE(MAX(receipt_number), 0) as max_num
+          FROM receipts WHERE company_id = ${companyId}
+        `);
+        let nextNumber = parseInt(((maxResult as any).rows || maxResult)?.[0]?.max_num || '0') + 1;
+
+        for (const cobro of cobros) {
+          const receiptId = uuid();
+          await db.execute(sql`BEGIN`);
+          try {
+            await db.execute(sql`
+              INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, enterprise_id, bank_id, reference, created_by, created_at)
+              VALUES (${receiptId}, ${companyId}, ${nextNumber}, ${cobro.payment_date || new Date().toISOString()}, ${cobro.amount}, ${cobro.payment_method || null}, ${cobro.notes || null}, ${cobro.enterprise_id || null}, ${cobro.bank_id || null}, ${cobro.reference || null}, ${cobro.created_by || null}, NOW())
+            `);
+
+            await db.execute(sql`
+              UPDATE cobros SET migrated_to_receipt = true WHERE id = ${cobro.id}
+            `);
+
+            await db.execute(sql`COMMIT`);
+            nextNumber++;
+          } catch (txErr) {
+            await db.execute(sql`ROLLBACK`);
+            console.error(`Failed to migrate cobro ${cobro.id}:`, txErr);
+          }
+        }
+      }
+
+      console.log(`Migrated ${unmigratedRows.length} old cobros to receipts`);
+    } catch (error) {
+      console.error('Cobros migration error (non-fatal):', error);
     }
   }
 

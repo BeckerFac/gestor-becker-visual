@@ -11,7 +11,7 @@ describe('ReceiptsService', () => {
     service = new ReceiptsService()
   })
 
-  // Helper: mock the 6 migration calls (CREATE TABLE x2 + ALTER TABLE x4)
+  // Helper: mock migration calls (CREATE TABLE x2 + ALTER TABLE x5 + migration check + unmigrated cobros check)
   function mockMigrations() {
     mockDbVoid() // CREATE TABLE receipts
     mockDbVoid() // CREATE TABLE receipt_items
@@ -19,6 +19,9 @@ describe('ReceiptsService', () => {
     mockDbVoid() // ALTER TABLE bank_id
     mockDbVoid() // ALTER TABLE reference
     mockDbVoid() // ALTER TABLE cheques cobro_id
+    mockDbVoid() // ALTER TABLE cobros migrated_to_receipt
+    mockDbRows([{ cnt: '0' }]) // migration check: no cobros migrated yet
+    mockDbRows([]) // unmigrated cobros: none found
   }
 
   describe('createReceipt', () => {

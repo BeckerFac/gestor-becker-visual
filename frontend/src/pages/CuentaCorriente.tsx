@@ -50,6 +50,7 @@ interface Detalle {
 }
 
 const tipoColors: Record<string, string> = {
+  factura: 'bg-blue-100 text-blue-700',
   venta: 'bg-blue-100 text-blue-700',
   cobro: 'bg-green-100 text-green-700',
   compra: 'bg-orange-100 text-orange-700',
@@ -58,7 +59,8 @@ const tipoColors: Record<string, string> = {
 }
 
 const tipoLabels: Record<string, string> = {
-  venta: 'Venta',
+  factura: 'Factura',
+  venta: 'Factura',
   cobro: 'Cobro',
   compra: 'Compra',
   pago: 'Pago',
@@ -368,14 +370,14 @@ export const CuentaCorriente: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cuenta Corriente</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Balance por empresa — pedidos, compras, cobros y pagos
+            Balance por empresa — facturas AFIP, compras, cobros y pagos
           </p>
         </div>
         <ExportCSVButton
           data={resumen.map((r) => ({
             empresa: r.name,
             cuit: r.cuit || '',
-            ventas: r.total_ventas,
+            facturado: r.total_ventas,
             cobros: r.total_cobros,
             a_cobrar: r.a_cobrar,
             compras: r.total_compras,
@@ -386,7 +388,7 @@ export const CuentaCorriente: React.FC = () => {
           columns={[
             { key: 'empresa', label: 'Empresa' },
             { key: 'cuit', label: 'CUIT' },
-            { key: 'ventas', label: 'Ventas' },
+            { key: 'facturado', label: 'Facturado AFIP' },
             { key: 'cobros', label: 'Cobros' },
             { key: 'a_cobrar', label: 'A Cobrar' },
             { key: 'compras', label: 'Compras' },
@@ -400,7 +402,7 @@ export const CuentaCorriente: React.FC = () => {
           data={resumen.map((r) => ({
             empresa: r.name,
             cuit: r.cuit || '',
-            ventas: r.total_ventas,
+            facturado: r.total_ventas,
             cobros: r.total_cobros,
             a_cobrar: r.a_cobrar,
             compras: r.total_compras,
@@ -411,7 +413,7 @@ export const CuentaCorriente: React.FC = () => {
           columns={[
             { key: 'empresa', label: 'Empresa' },
             { key: 'cuit', label: 'CUIT' },
-            { key: 'ventas', label: 'Ventas' },
+            { key: 'facturado', label: 'Facturado AFIP' },
             { key: 'cobros', label: 'Cobros' },
             { key: 'a_cobrar', label: 'A Cobrar' },
             { key: 'compras', label: 'Compras' },
@@ -536,7 +538,7 @@ export const CuentaCorriente: React.FC = () => {
                               {/* Mini summary cards */}
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                                  <span className="text-xs text-blue-600 block">Ventas totales</span>
+                                  <span className="text-xs text-blue-600 block">Facturado AFIP</span>
                                   <span className="text-base font-bold text-blue-700">{fmt(detalle.cuentas_a_cobrar.total_ventas)}</span>
                                 </div>
                                 <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
