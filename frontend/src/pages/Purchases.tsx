@@ -820,14 +820,22 @@ export const Purchases: React.FC = () => {
                                   </div>
                                   <div className="pt-2 border-t border-orange-200">
                                     <PermissionGate module="inventory" action="create">
-                                      <button
-                                        onClick={() => handleAddToInventory(purchase)}
-                                        disabled={addingToInventory === purchase.id}
-                                        className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                                      >
-                                        {addingToInventory === purchase.id ? 'Agregando...' : 'Agregar al inventario'}
-                                      </button>
-                                      <p className="text-xs text-gray-400 mt-1">Suma stock de los productos que controlan inventario</p>
+                                      {(purchase as any).stock_added ? (
+                                        <div className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-center">
+                                          Agregado al inventario ✓
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleAddToInventory(purchase)}
+                                          disabled={addingToInventory === purchase.id}
+                                          className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                                        >
+                                          {addingToInventory === purchase.id ? 'Agregando...' : 'Agregar al inventario'}
+                                        </button>
+                                      )}
+                                      <p className="text-xs text-gray-400 mt-1">
+                                        {(purchase as any).stock_added ? 'El stock ya fue sumado desde esta compra' : 'Suma stock de los productos que controlan inventario'}
+                                      </p>
                                     </PermissionGate>
                                   </div>
                                 </div>

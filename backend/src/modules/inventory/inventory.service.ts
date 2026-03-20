@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { stock, stock_movements, products, warehouses } from '../../db/schema';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
@@ -313,6 +313,11 @@ export class InventoryService {
 
         results.push({ product_id: item.product_id, quantity_added: quantity, new_quantity: newQty });
       }
+
+      // Mark purchase as stock_added
+      try {
+        await pool.query('UPDATE purchases SET stock_added = true WHERE id = $1', [purchaseId]);
+      } catch { /* column may not exist yet */ }
 
       return { purchase_id: purchaseId, items_processed: results };
     } catch (error) {
