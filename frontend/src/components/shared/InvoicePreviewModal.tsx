@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { InvoiceTemplate } from './InvoiceTemplate'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { DateInput } from '@/components/ui/DateInput'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
 
 const INVOICE_TYPES = ['A', 'B', 'C']
@@ -449,18 +450,17 @@ export function InvoicePreviewModal({
                     <label className="text-xs font-medium text-gray-400" htmlFor="inv-date">Fecha</label>
                     {!authorized ? (
                       <>
-                        <input
+                        <DateInput
                           id="inv-date"
-                          type="date"
-                          className={`px-2 py-1.5 border rounded-lg text-sm outline-none transition-colors ${
-                            !dateValidation.valid
-                              ? 'border-red-300 bg-red-50/50 focus:border-red-400 focus:ring-1 focus:ring-red-200'
-                              : dateValidation.warning
-                                ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-1 focus:ring-amber-200'
-                                : 'border-gray-200 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200'
-                          }`}
                           value={localInvoiceDate}
-                          onChange={e => setLocalInvoiceDate(e.target.value)}
+                          onChange={setLocalInvoiceDate}
+                          className={`px-2 py-1.5 text-sm ${
+                            !dateValidation.valid
+                              ? 'border-red-300 bg-red-50/50'
+                              : dateValidation.warning
+                                ? 'border-amber-300 bg-amber-50/50'
+                                : 'border-gray-200'
+                          }`}
                         />
                         {!dateValidation.valid && dateValidation.error && (
                           <p className="text-xs text-red-500">{dateValidation.error}</p>

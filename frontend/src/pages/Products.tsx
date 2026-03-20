@@ -7,6 +7,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
@@ -71,6 +72,15 @@ export const Products: React.FC = () => {
   // Delete
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Quick category creation
+  const [showQuickCategory, setShowQuickCategory] = useState(false)
+  const [quickCategoryName, setQuickCategoryName] = useState('')
+  const [creatingCategory, setCreatingCategory] = useState(false)
+  const quickCategoryRef = useRef<HTMLInputElement>(null)
+
+  // Bulk category assignment
+  const [showBulkCategory, setShowBulkCategory] = useState(false)
 
   // Update tab in URL
   const handleTabChange = (tab: TabKey) => {
@@ -204,6 +214,48 @@ export const Products: React.FC = () => {
     }
   }
 
+  // Quick category creation
+  const handleQuickCategoryCreate = async () => {
+    const name = quickCategoryName.trim()
+    if (!name) return
+    setCreatingCategory(true)
+    try {
+      await api.createCategory({ name })
+      toast.success(`Categoria "${name}" creada`)
+      setQuickCategoryName('')
+      setShowQuickCategory(false)
+      await loadMetadata()
+      setTreeViewKey(k => k + 1)
+    } catch (e: any) {
+      toast.error(e.response?.data?.error || e.message || 'Error al crear categoria')
+    } finally {
+      setCreatingCategory(false)
+    }
+  }
+
+  // Bulk category assignment
+  const handleBulkCategoryAssign = async (categoryId: string) => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    try {
+      await Promise.all(ids.map(id => api.updateProduct(id, { category_id: categoryId || null })))
+      toast.success(`${ids.length} producto${ids.length > 1 ? 's' : ''} actualizado${ids.length > 1 ? 's' : ''}`)
+      setSelectedIds(new Set())
+      setShowBulkCategory(false)
+      await loadProducts()
+      await loadMetadata()
+      setTreeViewKey(k => k + 1)
+    } catch (e: any) {
+      toast.error(e.message || 'Error al asignar categoria')
+    }
+  }
+
+  const handleCategoryChanged = async () => {
+    await loadProducts()
+    await loadMetadata()
+    setTreeViewKey(k => k + 1)
+  }
+
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE) || 1
 
   // Export data
@@ -323,18 +375,112 @@ export const Products: React.FC = () => {
       {/* Productos tab */}
       {activeTab === 'productos' && (
         <>
-          <ProductFilters
-            search={search}
-            onSearchChange={handleSearchChange}
-            filterCategory={useTreeView ? '' : filterCategory}
-            onFilterCategoryChange={handleCategoryChange}
-            categories={useTreeView ? [] : categories}
-            selectedCount={selectedIds.size}
-            onBulkPrice={() => setShowBulkModal(true)}
-            hasStockProducts={hasStockProducts}
-            stockStatusFilter={stockStatusFilter}
-            onStockStatusChange={handleStockStatusChange}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <ProductFilters
+                search={search}
+                onSearchChange={handleSearchChange}
+                filterCategory={useTreeView ? '' : filterCategory}
+                onFilterCategoryChange={handleCategoryChange}
+                categories={useTreeView ? [] : categories}
+                selectedCount={selectedIds.size}
+                onBulkPrice={() => setShowBulkModal(true)}
+                hasStockProducts={hasStockProducts}
+                stockStatusFilter={stockStatusFilter}
+                onStockStatusChange={handleStockStatusChange}
+              />
+            </div>
+            <PermissionGate module="products" action="create">
+              {showQuickCategory ? (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    ref={quickCategoryRef}
+                    placeholder="Nombre..."
+                    value={quickCategoryName}
+                    onChange={e => setQuickCategoryName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleQuickCategoryCreate()
+                      if (e.key === 'Escape') { setShowQuickCategory(false); setQuickCategoryName('') }
+                    }}
+                    className="w-36 text-sm"
+                    autoFocus
+                  />
+                  <Button
+                    size="sm"
+                    variant="success"
+                    onClick={handleQuickCategoryCreate}
+                    loading={creatingCategory}
+                    disabled={!quickCategoryName.trim()}
+                  >
+                    Crear
+                  </Button>
+                  <button
+                    onClick={() => { setShowQuickCategory(false); setQuickCategoryName('') }}
+                    className="text-gray-400 hover:text-gray-600 text-sm px-1"
+                  >
+                    x
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => { setShowQuickCategory(true); setTimeout(() => quickCategoryRef.current?.focus(), 50) }}
+                >
+                  + Nueva Categoria
+                </Button>
+              )}
+            </PermissionGate>
+          </div>
+
+          {/* Bulk actions bar */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2">
+              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                {selectedIds.size} producto{selectedIds.size > 1 ? 's' : ''} seleccionado{selectedIds.size > 1 ? 's' : ''}
+              </span>
+              <PermissionGate module="products" action="edit">
+                <div className="relative">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowBulkCategory(!showBulkCategory)}
+                  >
+                    Mover a categoria
+                  </Button>
+                  {showBulkCategory && (
+                    <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-20 w-56 max-h-64 overflow-y-auto">
+                      <button
+                        onClick={() => handleBulkCategoryAssign('')}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Sin categoria
+                      </button>
+                      {categories.filter(c => !c.parent_id).map(c => (
+                        <React.Fragment key={c.id}>
+                          <button
+                            onClick={() => handleBulkCategoryAssign(c.id)}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
+                          >
+                            {c.name}
+                          </button>
+                          {categories.filter(sub => sub.parent_id === c.id).map(sub => (
+                            <button
+                              key={sub.id}
+                              onClick={() => handleBulkCategoryAssign(sub.id)}
+                              className="w-full text-left px-3 py-2 pl-6 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              {sub.name}
+                            </button>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </PermissionGate>
+            </div>
+          )}
 
           {showBulkModal && (
             <BulkPriceModal
@@ -381,6 +527,8 @@ export const Products: React.FC = () => {
                   onEdit={handleEdit}
                   onDelete={(product) => setDeleteTarget(product)}
                   hasStockProducts={hasStockProducts}
+                  categories={categories}
+                  onCategoryChanged={handleCategoryChanged}
                   page={page}
                   totalPages={totalPages}
                   total={total}

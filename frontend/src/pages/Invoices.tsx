@@ -1142,17 +1142,11 @@ export const Invoices: React.FC = () => {
                     <p className="text-xs text-red-500">El CAE debe tener 14 digitos ({importData.cae.length}/14)</p>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Fecha vencimiento CAE <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                    value={importData.cae_expiry_date}
-                    onChange={e => setImportData(prev => ({ ...prev, cae_expiry_date: e.target.value }))}
-                  />
-                </div>
+                <DateInput
+                  label="Fecha vencimiento CAE *"
+                  value={importData.cae_expiry_date}
+                  onChange={val => setImportData(prev => ({ ...prev, cae_expiry_date: val }))}
+                />
               </div>
 
               {/* Row 3: Enterprise + Customer CUIT */}

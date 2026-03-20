@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { DateInput } from '@/components/ui/DateInput'
 import { SkeletonTable, SkeletonCards } from '@/components/ui/Skeleton'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
@@ -481,34 +482,22 @@ export const Reportes: React.FC = () => {
         <Card className="print:hidden">
           <CardContent className="pt-4 pb-3">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Desde</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={e => setDateFrom(e.target.value)}
-                  placeholder="DD/MM/AAAA"
-                  className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
-                    dateError
-                      ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
-                      : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Hasta</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={e => setDateTo(e.target.value)}
-                  placeholder="DD/MM/AAAA"
-                  className={`px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
-                    dateError
-                      ? 'border-red-400 dark:border-red-600 focus:ring-red-500'
-                      : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                />
-              </div>
+              <DateInput
+                label="Desde"
+                value={dateFrom}
+                onChange={setDateFrom}
+                className={`text-sm py-1.5 ${
+                  dateError ? 'border-red-400 dark:border-red-600' : ''
+                }`}
+              />
+              <DateInput
+                label="Hasta"
+                value={dateTo}
+                onChange={setDateTo}
+                className={`text-sm py-1.5 ${
+                  dateError ? 'border-red-400 dark:border-red-600' : ''
+                }`}
+              />
               <div className="flex gap-1.5 flex-wrap">
                 {DATE_PRESETS.map(p => (
                   <button
