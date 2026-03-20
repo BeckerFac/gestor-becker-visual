@@ -521,6 +521,32 @@ class SecretariaMemoryService {
     };
   }
 
+  /**
+   * Count messages sent today for a company (for daily limit enforcement).
+   */
+  async getDailyMessageCount(companyId: string): Promise<number> {
+    try {
+      const result = await pool.query(
+        `SELECT COUNT(*) as cnt FROM secretaria_conversations
+         WHERE company_id = $1
+           AND role = 'user'
+           AND created_at >= DATE_TRUNC('day', NOW())`,
+        [companyId],
+      );
+      return parseInt((result.rows[0] as any)?.cnt || '0', 10);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Get monthly received message count for a company.
+   */
+  async getMonthlyMessageCount(companyId: string): Promise<number> {
+    const usage = await this.getUsage(companyId);
+    return usage ? usage.messagesReceived : 0;
+  }
+
   async checkUsageLimits(companyId: string): Promise<{
     withinLimits: boolean;
     messagesUsed: number;

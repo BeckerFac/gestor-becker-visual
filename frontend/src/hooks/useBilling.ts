@@ -41,6 +41,18 @@ export interface PlanFeatures {
   customBranding: boolean
 }
 
+export interface AiFeatures {
+  enabled: boolean
+  chatMessagesPerDay: number
+  chatMessagesPerMonth: number
+  whatsappEnabled: boolean
+  morningBriefEnabled: boolean
+  voiceEnabled: boolean
+  documentSendEnabled: boolean
+  insightsPerDay: number
+  narrativesEnabled: boolean
+}
+
 export interface SubscriptionData {
   plan: string
   status: string
@@ -52,6 +64,7 @@ export interface SubscriptionData {
     priceArsMonthly: number
     basePlanGroup: string
     features: PlanFeatures
+    ai: AiFeatures
     limits: {
       invoicesPerMonth: number
       usersMax: number
@@ -149,6 +162,8 @@ export function useBilling() {
     }
   }, [])
 
+  const aiFeatures = subscription?.plan_details?.ai ?? null
+
   return {
     subscription,
     loading,
@@ -157,6 +172,7 @@ export function useBilling() {
     isEstandar,
     isTrial,
     planGroup,
+    aiFeatures,
     refresh,
   }
 }

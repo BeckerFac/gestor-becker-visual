@@ -10,6 +10,7 @@ import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { useNavigate } from 'react-router-dom'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { AIInsightsPanel } from '@/components/ai/AIInsightsPanel'
+import { useBilling } from '@/hooks/useBilling'
 
 interface DashboardData {
   sales_month: number
@@ -96,6 +97,9 @@ export const Dashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
   const [searchLoading, setSearchLoading] = useState(false)
+
+  // Billing hook for feature gating
+  const { hasFeature: hasBillingFeature } = useBilling()
 
   // Permission hooks - must be called before any conditional return
   const canInvoices = useCanAny('invoices')
@@ -518,7 +522,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       {/* AI Smart Insights (Premium only - auto-hides if no access) */}
-      <AIInsightsPanel />
+      {hasBillingFeature('ai_insights') && <AIInsightsPanel />}
 
       {/* Action Items - show if there are actions (visible or dismissed) */}
       {(insights?.actions || []).length > 0 && (

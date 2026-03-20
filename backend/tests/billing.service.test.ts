@@ -280,11 +280,12 @@ describe('BillingService', () => {
     it('returns sorted plans without trial', () => {
       const plans = billingService.getPlans()
 
-      expect(plans.length).toBe(4)
+      expect(plans.length).toBe(5)
       expect(plans[0].id).toBe('estandar_monthly')
       expect(plans[1].id).toBe('estandar_annual')
       expect(plans[2].id).toBe('premium_monthly')
       expect(plans[3].id).toBe('premium_annual')
+      expect(plans[4].id).toBe('lifetime')
     })
 
     it('has correct pricing structure', () => {

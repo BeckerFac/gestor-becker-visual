@@ -92,11 +92,14 @@ class SecretariaController {
       }
     } catch { /* fallback to default */ }
 
+    const userRole = req.user!.role;
+
     const result = await secretariaService.handleWebChat(
       companyId,
       userId,
       message.trim(),
       userName,
+      userRole,
     );
 
     res.json(result);

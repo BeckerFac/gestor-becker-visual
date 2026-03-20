@@ -30,6 +30,12 @@ import {
   LinkedPhone,
   UsageTracking,
 } from './secretaria.types';
+import { isIntentAllowedForRole, checkDailyLimit, checkMonthlyLimit } from './secretaria.access';
+import { secretariaCredits } from './secretaria.credits';
+import { billingService } from '../billing/billing.service';
+import { getPlanAiFeatures, AiFeatures } from '../billing/plans.config';
+import { secretariaSafety } from './secretaria.safety';
+import { handleFallback } from './secretaria.fallback';
 
 // ── Per-phone concurrency lock ──
 
@@ -171,15 +177,41 @@ class SecretariaService {
       return;
     }
 
-    // Step 2.5: Check usage limits (prevent runaway LLM costs)
-    const usageLimits = await secretariaMemory.checkUsageLimits(companyId);
-    if (!usageLimits.withinLimits) {
+    // Step 2.5: Check plan AI features and limits
+    const aiFeatures = await this.getAiFeatures(companyId);
+
+    if (!aiFeatures.enabled || !aiFeatures.whatsappEnabled) {
       await whatsappClient.sendTextMessage(
         phoneNumber,
-        'Se alcanzo el limite mensual de mensajes para tu empresa. ' +
-        'Contacta a soporte para ampliar tu plan.',
+        'WhatsApp IA no esta disponible en tu plan actual. Actualiza a Premium para acceder a SecretarIA por WhatsApp.',
       );
       return;
+    }
+
+    // Check daily limit
+    const dailyCount = await secretariaMemory.getDailyMessageCount(companyId);
+    const dailyCheck = checkDailyLimit(aiFeatures, dailyCount);
+    if (!dailyCheck.allowed) {
+      await whatsappClient.sendTextMessage(phoneNumber, dailyCheck.reason!);
+      return;
+    }
+
+    // Check monthly limit
+    const monthlyCount = await secretariaMemory.getMonthlyMessageCount(companyId);
+    const availableCredits = await secretariaCredits.getAvailableCredits(companyId);
+    const monthlyCheck = checkMonthlyLimit(aiFeatures, monthlyCount, availableCredits);
+    if (!monthlyCheck.allowed) {
+      // Fallback: use rule-based responses without LLM
+      const fallbackResult = await handleFallback(companyId, message.text || '');
+      await whatsappClient.sendTextMessage(phoneNumber, fallbackResult.formatted);
+      return;
+    }
+
+    // If over monthly plan limit but has credits, deduct a credit
+    const overMonthlyPlanLimit = isFinite(aiFeatures.chatMessagesPerMonth) &&
+      monthlyCount >= aiFeatures.chatMessagesPerMonth;
+    if (overMonthlyPlanLimit && availableCredits > 0) {
+      await secretariaCredits.consumeCredit(companyId);
     }
 
     // Step 3: Mark as read
@@ -233,6 +265,51 @@ class SecretariaService {
     // Step 5: Save incoming message
     await this.saveConversationMessage(companyId, phoneNumber, 'user', textContent);
 
+    // Step 5.1: Safety — check for human escalation request
+    if (secretariaSafety.isEscalationRequest(textContent)) {
+      await secretariaSafety.escalateToHuman(companyId, userId, 'user_requested', textContent, 'whatsapp', phoneNumber);
+      const escMsg = 'Entiendo, voy a derivar tu consulta a un humano. Te van a contactar pronto.';
+      await whatsappClient.sendTextMessage(phoneNumber, escMsg);
+      await this.saveConversationMessage(companyId, phoneNumber, 'assistant', escMsg);
+      return;
+    }
+
+    // Step 5.2: Safety — check for pending action confirmation/cancellation
+    const pendingAction = await secretariaSafety.getPendingAction(companyId, phoneNumber);
+    if (pendingAction) {
+      if (secretariaSafety.isConfirmation(textContent)) {
+        await secretariaSafety.confirmPendingAction(pendingAction.id);
+        const confirmMsg = `Listo! La operacion "${pendingAction.actionType}" fue confirmada y ejecutada.`;
+        await whatsappClient.sendTextMessage(phoneNumber, confirmMsg);
+        await this.saveConversationMessage(companyId, phoneNumber, 'assistant', confirmMsg);
+        return;
+      }
+      if (secretariaSafety.isCancellation(textContent)) {
+        await secretariaSafety.cancelPendingAction(pendingAction.id);
+        const cancelMsg = 'Operacion cancelada. Si necesitas otra cosa, escribime.';
+        await whatsappClient.sendTextMessage(phoneNumber, cancelMsg);
+        await this.saveConversationMessage(companyId, phoneNumber, 'assistant', cancelMsg);
+        return;
+      }
+      // Not a confirmation/cancellation — expire old action and continue
+      await secretariaSafety.cancelPendingAction(pendingAction.id);
+    }
+
+    // Step 5.3: Safety — track corrections for escalation triggers
+    const channelKey = `${companyId}:${phoneNumber}`;
+    if (secretariaSafety.isCorrection(textContent)) {
+      secretariaSafety.trackCorrection(channelKey, true);
+      const lastMsgs = await this.loadRecentMessages(companyId, phoneNumber, 2);
+      const lastAiResponse = lastMsgs.find(m => m.role === 'assistant')?.content || '';
+      await secretariaSafety.logAIError(companyId, userId, 'user_correction', {
+        userMessage: textContent,
+        aiResponse: lastAiResponse,
+        correction: textContent,
+      });
+    } else {
+      secretariaSafety.trackCorrection(channelKey, false);
+    }
+
     // Step 6: Load context (last N messages + memory)
     const recentMessages = await this.loadRecentMessages(
       companyId,
@@ -256,11 +333,75 @@ class SecretariaService {
       // Step 7: Classify intent
       const intentResult = await classifyIntent(textContent, context);
 
+      // Step 7.1: Safety — track low confidence for escalation triggers
+      secretariaSafety.trackLowConfidence(channelKey, intentResult.confidence);
+
+      // Step 7.2: Safety — pre-execution check
+      const safetyCheck = await secretariaSafety.checkSafety({
+        companyId,
+        userId,
+        intent: intentResult.intent,
+        entities: intentResult.entities,
+      });
+
+      if (!safetyCheck.safe) {
+        if (safetyCheck.escalateToHuman) {
+          await secretariaSafety.escalateToHuman(
+            companyId, userId, safetyCheck.reason || 'safety_check', textContent, 'whatsapp', phoneNumber,
+          );
+          const escMsg = safetyCheck.reason || 'Voy a derivar tu consulta a un humano. Te van a contactar pronto.';
+          await whatsappClient.sendTextMessage(phoneNumber, escMsg);
+          await this.saveConversationMessage(companyId, phoneNumber, 'assistant', escMsg);
+          return;
+        }
+
+        if (safetyCheck.requiresConfirmation) {
+          await secretariaSafety.createPendingAction({
+            companyId,
+            userId,
+            channel: 'whatsapp',
+            channelId: phoneNumber,
+            actionType: intentResult.intent,
+            actionData: { entities: intentResult.entities, originalText: textContent },
+          });
+          const confirmMsg = `${safetyCheck.reason}\n\nConfirmas? (si/no)`;
+          await whatsappClient.sendTextMessage(phoneNumber, confirmMsg);
+          await this.saveConversationMessage(companyId, phoneNumber, 'assistant', confirmMsg);
+          return;
+        }
+
+        const blockMsg = safetyCheck.reason || 'No puedo procesar esa consulta por razones de seguridad.';
+        await whatsappClient.sendTextMessage(phoneNumber, blockMsg);
+        await this.saveConversationMessage(companyId, phoneNumber, 'assistant', blockMsg);
+        return;
+      }
+
+      // Step 7.5: Role-based intent filtering (look up user role from DB)
+      const userRole = await this.getUserRole(userId);
+      if (!isIntentAllowedForRole(userRole, intentResult.intent)) {
+        const blockedMsg = 'No tenes permiso para acceder a esa informacion. Contacta a tu administrador.';
+        await whatsappClient.sendTextMessage(phoneNumber, blockedMsg);
+        await this.saveConversationMessage(companyId, phoneNumber, 'assistant', blockedMsg);
+        return;
+      }
+
       // Step 8: Execute tool based on intent
       const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId, phoneNumber);
 
       // Step 9: Generate natural language response
-      const responseText = await generateResponse(toolResult, context, companyName);
+      let responseText = await generateResponse(toolResult, context, companyName);
+
+      // Step 9.1: Safety — post-execution response validation
+      const responseValidation = await secretariaSafety.validateResponse(responseText, companyId);
+      if (!responseValidation.safe && responseValidation.sanitizedResponse) {
+        responseText = responseValidation.sanitizedResponse;
+      }
+
+      // Step 9.2: Safety — validate tool result consistency (hallucination detection)
+      const consistency = secretariaSafety.validateToolResultConsistency(toolResult, responseText);
+      if (!consistency.consistent && consistency.warning) {
+        responseText += `\n\n_${consistency.warning}_`;
+      }
 
       // Step 10: Send response via WhatsApp
       await whatsappClient.sendTextMessage(phoneNumber, responseText);
@@ -279,6 +420,12 @@ class SecretariaService {
     } catch (error: any) {
       logger.error({ err: error, companyId, phoneNumber }, 'SecretarIA: error in message pipeline');
 
+      // Safety — log AI errors for learning
+      await secretariaSafety.logAIError(companyId, userId, 'pipeline_error', {
+        userMessage: textContent,
+        correction: error?.message || 'Unknown error',
+      }).catch(() => {});
+
       await whatsappClient.sendTextMessage(
         phoneNumber,
         'Perdon, tuve un problema procesando tu consulta. Intenta de nuevo en unos segundos.',
@@ -295,6 +442,7 @@ class SecretariaService {
     userId: string,
     message: string,
     displayName: string,
+    userRole?: string,
   ): Promise<{ response: string; intent: string; attachments?: { type: string; url: string; name: string }[] }> {
     const channelId = `web-${userId}`;
 
@@ -307,13 +455,44 @@ class SecretariaService {
       };
     }
 
-    // Step 2: Check usage limits
-    const usageLimits = await secretariaMemory.checkUsageLimits(companyId);
-    if (!usageLimits.withinLimits) {
+    // Step 2: Get plan AI features and check limits
+    const aiFeatures = await this.getAiFeatures(companyId);
+
+    if (!aiFeatures.enabled) {
       return {
-        response: 'Se alcanzo el limite mensual de mensajes. Contacta a soporte para ampliar tu plan.',
-        intent: 'limit_exceeded',
+        response: 'AI no esta disponible en tu plan actual. Actualiza a Premium para acceder a SecretarIA.',
+        intent: 'plan_blocked',
       };
+    }
+
+    // Step 2a: Check daily limit
+    const dailyCount = await secretariaMemory.getDailyMessageCount(companyId);
+    const dailyCheck = checkDailyLimit(aiFeatures, dailyCount);
+    if (!dailyCheck.allowed) {
+      return {
+        response: dailyCheck.reason!,
+        intent: 'daily_limit_exceeded',
+      };
+    }
+
+    // Step 2b: Check monthly limit
+    const monthlyCount = await secretariaMemory.getMonthlyMessageCount(companyId);
+    const availableCredits = await secretariaCredits.getAvailableCredits(companyId);
+    const monthlyCheck = checkMonthlyLimit(aiFeatures, monthlyCount, availableCredits);
+    if (!monthlyCheck.allowed) {
+      // Fallback: use rule-based responses without LLM
+      const fallbackResult = await handleFallback(companyId, message);
+      return {
+        response: fallbackResult.formatted,
+        intent: 'fallback',
+      };
+    }
+
+    // Step 2c: If over monthly plan limit but has credits, deduct a credit
+    const overMonthlyPlanLimit = isFinite(aiFeatures.chatMessagesPerMonth) &&
+      monthlyCount >= aiFeatures.chatMessagesPerMonth;
+    if (overMonthlyPlanLimit && availableCredits > 0) {
+      await secretariaCredits.consumeCredit(companyId);
     }
 
     // Step 3: Truncate very long messages
@@ -321,6 +500,47 @@ class SecretariaService {
 
     // Step 4: Save user message
     await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
+
+    // Step 4.1: Safety — check for human escalation request
+    if (secretariaSafety.isEscalationRequest(truncatedMessage)) {
+      await secretariaSafety.escalateToHuman(companyId, userId, 'user_requested', truncatedMessage, 'web', channelId);
+      const escResponse = 'Entiendo, voy a derivar tu consulta a un humano. Te van a contactar pronto.';
+      await this.saveConversationMessage(companyId, channelId, 'assistant', escResponse);
+      return { response: escResponse, intent: 'human_escalation' };
+    }
+
+    // Step 4.2: Safety — check for pending action confirmation/cancellation
+    const pendingAction = await secretariaSafety.getPendingAction(companyId, channelId);
+    if (pendingAction) {
+      if (secretariaSafety.isConfirmation(truncatedMessage)) {
+        await secretariaSafety.confirmPendingAction(pendingAction.id);
+        const confirmResponse = `Listo! La operacion "${pendingAction.actionType}" fue confirmada y ejecutada.`;
+        await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResponse);
+        return { response: confirmResponse, intent: 'action_confirmed' };
+      }
+      if (secretariaSafety.isCancellation(truncatedMessage)) {
+        await secretariaSafety.cancelPendingAction(pendingAction.id);
+        const cancelResponse = 'Operacion cancelada. Si necesitas otra cosa, escribime.';
+        await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
+        return { response: cancelResponse, intent: 'action_cancelled' };
+      }
+      await secretariaSafety.cancelPendingAction(pendingAction.id);
+    }
+
+    // Step 4.3: Safety — track corrections
+    const webChannelKey = `${companyId}:${channelId}`;
+    if (secretariaSafety.isCorrection(truncatedMessage)) {
+      secretariaSafety.trackCorrection(webChannelKey, true);
+      const lastMsgs = await this.loadRecentMessages(companyId, channelId, 2);
+      const lastAiResp = lastMsgs.find(m => m.role === 'assistant')?.content || '';
+      await secretariaSafety.logAIError(companyId, userId, 'user_correction', {
+        userMessage: truncatedMessage,
+        aiResponse: lastAiResp,
+        correction: truncatedMessage,
+      });
+    } else {
+      secretariaSafety.trackCorrection(webChannelKey, false);
+    }
 
     // Step 5: Load context
     const recentMessages = await this.loadRecentMessages(
@@ -345,11 +565,74 @@ class SecretariaService {
       // Step 6: Classify intent
       const intentResult = await classifyIntent(truncatedMessage, context);
 
+      // Step 6.1: Safety — track low confidence
+      secretariaSafety.trackLowConfidence(webChannelKey, intentResult.confidence);
+
+      // Step 6.2: Safety — pre-execution check
+      const safetyCheck = await secretariaSafety.checkSafety({
+        companyId,
+        userId,
+        intent: intentResult.intent,
+        entities: intentResult.entities,
+      });
+
+      if (!safetyCheck.safe) {
+        if (safetyCheck.escalateToHuman) {
+          await secretariaSafety.escalateToHuman(
+            companyId, userId, safetyCheck.reason || 'safety_check', truncatedMessage, 'web', channelId,
+          );
+          const escResp = safetyCheck.reason || 'Voy a derivar tu consulta a un humano. Te van a contactar pronto.';
+          await this.saveConversationMessage(companyId, channelId, 'assistant', escResp);
+          return { response: escResp, intent: 'human_escalation' };
+        }
+
+        if (safetyCheck.requiresConfirmation) {
+          await secretariaSafety.createPendingAction({
+            companyId,
+            userId,
+            channel: 'web',
+            channelId,
+            actionType: intentResult.intent,
+            actionData: { entities: intentResult.entities, originalText: truncatedMessage },
+          });
+          const confirmResp = `${safetyCheck.reason}\n\nConfirmas? (si/no)`;
+          await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResp);
+          return { response: confirmResp, intent: 'confirmation_required' };
+        }
+
+        const blockResp = safetyCheck.reason || 'No puedo procesar esa consulta por razones de seguridad.';
+        await this.saveConversationMessage(companyId, channelId, 'assistant', blockResp);
+        return { response: blockResp, intent: 'safety_blocked' };
+      }
+
+      // Step 6.5: Role-based intent filtering
+      const effectiveRole = userRole || 'viewer';
+      if (!isIntentAllowedForRole(effectiveRole, intentResult.intent)) {
+        const blockedResponse = 'No tenes permiso para acceder a esa informacion. Contacta a tu administrador.';
+        await this.saveConversationMessage(companyId, channelId, 'assistant', blockedResponse);
+        return {
+          response: blockedResponse,
+          intent: 'permission_denied',
+        };
+      }
+
       // Step 7: Execute tool
       const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId);
 
       // Step 8: Generate response
-      const responseText = await generateResponse(toolResult, context, companyName);
+      let responseText = await generateResponse(toolResult, context, companyName);
+
+      // Step 8.1: Safety — post-execution response validation
+      const responseValidation = await secretariaSafety.validateResponse(responseText, companyId);
+      if (!responseValidation.safe && responseValidation.sanitizedResponse) {
+        responseText = responseValidation.sanitizedResponse;
+      }
+
+      // Step 8.2: Safety — validate tool result consistency (hallucination detection)
+      const consistency = secretariaSafety.validateToolResultConsistency(toolResult, responseText);
+      if (!consistency.consistent && consistency.warning) {
+        responseText += `\n\n_${consistency.warning}_`;
+      }
 
       // Step 9: Save assistant message
       await this.saveConversationMessage(companyId, channelId, 'assistant', responseText);
@@ -369,6 +652,13 @@ class SecretariaService {
       };
     } catch (error: any) {
       logger.error({ err: error, companyId, userId }, 'SecretarIA: error in web chat pipeline');
+
+      // Safety — log AI errors for learning
+      await secretariaSafety.logAIError(companyId, userId, 'pipeline_error', {
+        userMessage: truncatedMessage,
+        correction: error?.message || 'Unknown error',
+      }).catch(() => {});
+
       return {
         response: 'Perdon, tuve un problema procesando tu consulta. Intenta de nuevo en unos segundos.',
         intent: 'error',
@@ -607,6 +897,26 @@ class SecretariaService {
   // --------------------------------------------------------------------------
   // Private helpers
   // --------------------------------------------------------------------------
+
+  private async getAiFeatures(companyId: string): Promise<AiFeatures> {
+    try {
+      const subscription = await billingService.getSubscription(companyId);
+      return getPlanAiFeatures(subscription.plan);
+    } catch {
+      // Fallback: if billing check fails, use trial features (conservative)
+      return getPlanAiFeatures('trial');
+    }
+  }
+
+  private async getUserRole(userId: string): Promise<string> {
+    try {
+      const result = await db.execute(sql`SELECT role FROM users WHERE id = ${userId} LIMIT 1`);
+      const rows = (result as any).rows || result || [];
+      return rows.length > 0 ? (rows[0] as any).role || 'viewer' : 'viewer';
+    } catch {
+      return 'viewer';
+    }
+  }
 
   private async saveConversationMessage(
     companyId: string,

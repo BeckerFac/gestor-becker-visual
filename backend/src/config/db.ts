@@ -602,6 +602,40 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE secretaria_config ADD COLUMN IF NOT EXISTS last_brief_date DATE`);
     await pool.query(`ALTER TABLE secretaria_config ADD COLUMN IF NOT EXISTS brief_sections TEXT[] DEFAULT ARRAY['ventas','pedidos','cobros','stock']`);
 
+    // ===== SecretarIA: Safety guardrails tables =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_pending_actions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        channel VARCHAR(20) NOT NULL DEFAULT 'web',
+        channel_id VARCHAR(100) NOT NULL DEFAULT '',
+        action_type VARCHAR(50) NOT NULL,
+        action_data JSONB NOT NULL DEFAULT '{}',
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '5 minutes'
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_pending_company ON secretaria_pending_actions(company_id, status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_pending_channel ON secretaria_pending_actions(company_id, channel_id, status)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS secretaria_ai_errors (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        user_message TEXT,
+        ai_response TEXT,
+        correction TEXT,
+        error_type VARCHAR(50) NOT NULL DEFAULT 'unknown',
+        resolved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_ai_errors_company ON secretaria_ai_errors(company_id, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_ai_errors_type ON secretaria_ai_errors(error_type, resolved)`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -657,6 +691,8 @@ async function applyRowLevelSecurity() {
     'secretaria_conversations',
     'secretaria_memory',
     'secretaria_usage',
+    'secretaria_pending_actions',
+    'secretaria_ai_errors',
   ];
 
   for (const table of tablesWithCompanyId) {

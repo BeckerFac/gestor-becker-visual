@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
+import { useBilling } from '@/hooks/useBilling'
 
 // ── Types ──
 
@@ -39,12 +40,14 @@ export const SecretarIAChatPanel: React.FC = () => {
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [configChecked, setConfigChecked] = useState(false)
   const [isEnabled, setIsEnabled] = useState(false)
+  const [limitReached, setLimitReached] = useState<'daily' | 'monthly' | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const messageQueueRef = useRef<string[]>([])
   const processingRef = useRef(false)
 
   const isModuleEnabled = useAuthStore((s) => s.isModuleEnabled)
+  const { hasFeature, loading: billingLoading } = useBilling()
 
   // Check if secretaria module is available
   useEffect(() => {
@@ -115,6 +118,14 @@ export const SecretarIAChatPanel: React.FC = () => {
 
       try {
         const response = await api.secretariaChat(nextMessage)
+
+        // Detect limit responses from backend
+        if (response.intent === 'daily_limit_exceeded') {
+          setLimitReached('daily')
+        } else if (response.intent === 'monthly_limit_exceeded') {
+          setLimitReached('monthly')
+        }
+
         const assistantMessage: ChatMessage = {
           id: `assistant_${Date.now()}`,
           role: 'assistant',
@@ -167,8 +178,49 @@ export const SecretarIAChatPanel: React.FC = () => {
   }
 
   // Don't render if not configured or module not enabled
-  if (!configChecked) return null
+  if (!configChecked || billingLoading) return null
   if (!isEnabled) return null
+
+  // If plan doesn't include AI chat, show upgrade prompt
+  const planHasAiChat = hasFeature('ai_chat')
+
+  if (!planHasAiChat && !isOpen) {
+    // Don't show the button at all if plan doesn't have AI
+    return null
+  }
+
+  if (!planHasAiChat && isOpen) {
+    return (
+      <>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="fixed bottom-24 right-6 z-[60] w-14 h-14 bg-gradient-to-br from-purple-600 to-violet-700 text-white rounded-full shadow-lg flex items-center justify-center"
+          title="SecretarIA"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <div className="fixed bottom-[10.5rem] right-6 z-[60] w-[400px] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-6 text-center">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+            <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">SecretarIA no disponible</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            El chat IA requiere el plan Premium. Actualiza tu plan para acceder a SecretarIA.
+          </p>
+          <a
+            href="/settings?tab=billing"
+            className="inline-block px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            Ver planes
+          </a>
+        </div>
+      </>
+    )
+  }
 
   return (
     <>
@@ -285,6 +337,28 @@ export const SecretarIAChatPanel: React.FC = () => {
 
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Limit reached banners */}
+          {limitReached === 'daily' && (
+            <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800 text-center">
+              <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                Limite diario alcanzado. Intenta manana.
+              </p>
+            </div>
+          )}
+          {limitReached === 'monthly' && (
+            <div className="px-3 py-2 bg-red-50 dark:bg-red-950/30 border-t border-red-200 dark:border-red-800 text-center">
+              <p className="text-xs text-red-700 dark:text-red-300 font-medium mb-1">
+                Limite mensual alcanzado.
+              </p>
+              <a
+                href="/settings?tab=billing"
+                className="text-xs font-medium text-purple-600 dark:text-purple-400 hover:underline"
+              >
+                Comprar creditos
+              </a>
+            </div>
+          )}
 
           {/* Input Area */}
           <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">

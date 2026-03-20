@@ -2,9 +2,21 @@
 // Prices in ARS (Argentine Pesos)
 // Restructured: 2026-03-19
 
-export type BillingPeriod = 'monthly' | 'annual';
+export type BillingPeriod = 'monthly' | 'annual' | 'lifetime';
 export type AiLevel = 'none' | 'basic' | 'full';
 export type SupportLevel = 'community' | 'email' | 'priority' | 'dedicated';
+
+export interface AiFeatures {
+  readonly enabled: boolean;
+  readonly chatMessagesPerDay: number;    // 0 = disabled, Infinity = unlimited
+  readonly chatMessagesPerMonth: number;
+  readonly whatsappEnabled: boolean;
+  readonly morningBriefEnabled: boolean;
+  readonly voiceEnabled: boolean;
+  readonly documentSendEnabled: boolean;
+  readonly insightsPerDay: number;
+  readonly narrativesEnabled: boolean;
+}
 
 export interface PlanFeatures {
   readonly facturacion: boolean;
@@ -40,6 +52,7 @@ export interface PlanDefinition {
   readonly description: string;
   readonly limits: PlanLimits;
   readonly features: PlanFeatures;
+  readonly ai: AiFeatures;
   readonly popular: boolean;
   readonly order: number;
   readonly basePlanGroup: string;         // groups monthly/annual variants together
@@ -61,6 +74,49 @@ const PREMIUM_ANNUAL_PRICE = Math.round(PREMIUM_MONTHLY_PRICE * 12 * (1 - ANNUAL
 // Effective monthly for annual plans
 const ESTANDAR_ANNUAL_MONTHLY = Math.round(ESTANDAR_ANNUAL_PRICE / 12);
 const PREMIUM_ANNUAL_MONTHLY = Math.round(PREMIUM_ANNUAL_PRICE / 12);
+
+// --- AI feature sets ---
+
+const TRIAL_AI: AiFeatures = {
+  enabled: true,
+  chatMessagesPerDay: 10,
+  chatMessagesPerMonth: 300,
+  whatsappEnabled: false,
+  morningBriefEnabled: false,
+  voiceEnabled: false,
+  documentSendEnabled: false,
+  insightsPerDay: 3,
+  narrativesEnabled: false,
+};
+
+const ESTANDAR_AI: AiFeatures = {
+  enabled: false,
+  chatMessagesPerDay: 0,
+  chatMessagesPerMonth: 0,
+  whatsappEnabled: false,
+  morningBriefEnabled: false,
+  voiceEnabled: false,
+  documentSendEnabled: false,
+  insightsPerDay: 0,
+  narrativesEnabled: false,
+};
+
+const PREMIUM_AI: AiFeatures = {
+  enabled: true,
+  chatMessagesPerDay: 50,
+  chatMessagesPerMonth: 1000,
+  whatsappEnabled: true,
+  morningBriefEnabled: true,
+  voiceEnabled: true,
+  documentSendEnabled: true,
+  insightsPerDay: Infinity,
+  narrativesEnabled: true,
+};
+
+const LIFETIME_AI: AiFeatures = {
+  ...PREMIUM_AI,
+  chatMessagesPerMonth: 500,
+};
 
 // --- Feature sets ---
 
@@ -130,6 +186,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       supportLevel: 'email',
     },
     features: TRIAL_FEATURES,
+    ai: TRIAL_AI,
     popular: false,
     order: 0,
     basePlanGroup: 'trial',
@@ -152,6 +209,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       supportLevel: 'email',
     },
     features: ESTANDAR_FEATURES,
+    ai: ESTANDAR_AI,
     popular: true,
     order: 1,
     basePlanGroup: 'estandar',
@@ -174,6 +232,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       supportLevel: 'email',
     },
     features: ESTANDAR_FEATURES,
+    ai: ESTANDAR_AI,
     popular: false,
     order: 2,
     basePlanGroup: 'estandar',
@@ -196,6 +255,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       supportLevel: 'priority',
     },
     features: PREMIUM_FEATURES,
+    ai: PREMIUM_AI,
     popular: false,
     order: 3,
     basePlanGroup: 'premium',
@@ -218,9 +278,33 @@ export const PLANS: Record<string, PlanDefinition> = {
       supportLevel: 'priority',
     },
     features: PREMIUM_FEATURES,
+    ai: PREMIUM_AI,
     popular: false,
     order: 4,
     basePlanGroup: 'premium',
+  },
+  lifetime: {
+    id: 'lifetime',
+    name: 'lifetime',
+    displayName: 'Lifetime',
+    billingPeriod: 'lifetime',
+    priceArs: 0, // one-time payment handled separately
+    priceArsMonthly: 0,
+    priceMpItemId: '',
+    description: 'Acceso de por vida al plan Premium con IA incluida',
+    limits: {
+      invoicesPerMonth: Infinity,
+      usersMax: Infinity,
+      aiEnabled: true,
+      aiLevel: 'full',
+      storageMb: Infinity,
+      supportLevel: 'priority',
+    },
+    features: PREMIUM_FEATURES,
+    ai: LIFETIME_AI,
+    popular: false,
+    order: 5,
+    basePlanGroup: 'lifetime',
   },
 } as const;
 
@@ -256,6 +340,17 @@ export function isEstandarPlan(planId: string): boolean {
 // Check if a plan is in the "premium" tier
 export function isPremiumPlan(planId: string): boolean {
   return planId.startsWith('premium_');
+}
+
+// Check if a plan is the lifetime tier
+export function isLifetimePlan(planId: string): boolean {
+  return planId === 'lifetime';
+}
+
+// Get AI features for a plan
+export function getPlanAiFeatures(planId: string): AiFeatures {
+  const plan = getPlan(planId);
+  return plan.ai;
 }
 
 // Get the base plan group from a plan ID

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { api } from '@/services/api'
+import { useBilling } from '@/hooks/useBilling'
 
 interface Props {
   reportType: 'ventas' | 'rentabilidad' | 'clientes' | 'cobranzas' | 'inventario' | 'conversion'
@@ -12,8 +13,16 @@ export const AIReportNarrative: React.FC<Props> = ({ reportType, reportData }) =
   const [hasAccess, setHasAccess] = useState<boolean | null>(null)
   const [error, setError] = useState(false)
   const lastDataHash = useRef<string>('')
+  const { hasFeature } = useBilling()
+
+  // Plan-level gate: if plan doesn't include narratives, don't render at all
+  const planHasNarratives = hasFeature('ai_narratives')
 
   useEffect(() => {
+    if (!planHasNarratives) {
+      setHasAccess(false)
+      return
+    }
     // Check AI access once
     const checkAccess = async () => {
       try {
@@ -24,7 +33,7 @@ export const AIReportNarrative: React.FC<Props> = ({ reportType, reportData }) =
       }
     }
     checkAccess()
-  }, [])
+  }, [planHasNarratives])
 
   useEffect(() => {
     if (!reportData || hasAccess !== true) {
