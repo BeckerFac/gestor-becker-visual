@@ -322,12 +322,27 @@ class SecretariaService {
   // --------------------------------------------------------------------------
 
   async getConfig(companyId: string): Promise<SecretariaConfig> {
-    const result = await db.execute(sql`
-      SELECT company_id, enabled, morning_brief_enabled, morning_brief_time, timezone,
-             last_brief_date, COALESCE(brief_sections, ARRAY['ventas','pedidos','cobros','stock']) AS brief_sections
-      FROM secretaria_config
-      WHERE company_id = ${companyId}
-    `);
+    let result: any;
+    try {
+      result = await db.execute(sql`
+        SELECT company_id, enabled, morning_brief_enabled, morning_brief_time, timezone,
+               last_brief_date, COALESCE(brief_sections, ARRAY['ventas','pedidos','cobros','stock']) AS brief_sections
+        FROM secretaria_config
+        WHERE company_id = ${companyId}
+      `);
+    } catch {
+      // Columns might not exist yet, try minimal query
+      try {
+        result = await db.execute(sql`
+          SELECT company_id, enabled, morning_brief_enabled, morning_brief_time, timezone
+          FROM secretaria_config
+          WHERE company_id = ${companyId}
+        `);
+      } catch {
+        // Table might not exist at all
+        result = { rows: [] };
+      }
+    }
 
     const rows = (result as any).rows || result || [];
 
