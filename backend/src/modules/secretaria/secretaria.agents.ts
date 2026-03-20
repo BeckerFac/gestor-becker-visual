@@ -60,7 +60,7 @@ async function llmChat(systemPrompt: string, userMessage: string, maxTokens: num
     }
     logger.info({ model: 'claude-haiku-4-5-20250315', maxTokens, promptLength: systemPrompt.length }, 'SecretarIA: calling Anthropic');
     const response = await anthropicClient.messages.create({
-      model: 'claude-haiku-4-5-20250315',
+      model: 'claude-3-haiku-20240307',
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [
