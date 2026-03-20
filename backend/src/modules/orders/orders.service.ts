@@ -131,8 +131,8 @@ export class OrdersService {
           COUNT(*) FILTER (WHERE status = 'en_produccion') as en_produccion,
           COUNT(*) FILTER (WHERE status = 'terminado') as terminados,
           COUNT(*) FILTER (WHERE status = 'entregado') as entregados,
-          COALESCE(SUM(total_amount), 0) as total_facturado,
-          COALESCE(SUM(estimated_profit), 0) as ganancia_total
+          COALESCE((SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.company_id = ${companyId} AND i.status = 'authorized' AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)), 0) as total_facturado,
+          COALESCE(SUM(total_amount), 0) as total_pedidos
         FROM orders
         WHERE company_id = ${companyId}
       `);
