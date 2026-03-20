@@ -1,6 +1,6 @@
-// SecretarIA — Intent classification & response generation via GPT-4o-mini
+// SecretarIA — Intent classification & response generation
+// Supports OpenAI (primary) and Anthropic/Claude (fallback)
 
-import OpenAI from 'openai';
 import { SECRETARIA_CONFIG, SECRETARIA_PROMPTS } from './secretaria.config';
 import {
   SecretariaIntent,
@@ -10,18 +10,61 @@ import {
 } from './secretaria.types';
 import logger from '../../config/logger';
 
-// ── OpenAI client (singleton) ──
+// ── LLM abstraction (OpenAI or Anthropic) ──
 
-let openaiClient: OpenAI | null = null;
+type LLMProvider = 'openai' | 'anthropic';
 
-function getOpenAIClient(): OpenAI {
-  if (!openaiClient) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY no configurada');
-    }
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let provider: LLMProvider | null = null;
+let openaiClient: any = null;
+let anthropicClient: any = null;
+
+function getProvider(): LLMProvider {
+  if (provider) return provider;
+  if (process.env.OPENAI_API_KEY) {
+    provider = 'openai';
+  } else if (process.env.ANTHROPIC_API_KEY) {
+    provider = 'anthropic';
+  } else {
+    throw new Error('No AI API key configured (need OPENAI_API_KEY or ANTHROPIC_API_KEY)');
   }
-  return openaiClient;
+  return provider;
+}
+
+async function llmChat(systemPrompt: string, userMessage: string, maxTokens: number = 512): Promise<string> {
+  const p = getProvider();
+
+  if (p === 'openai') {
+    if (!openaiClient) {
+      const OpenAI = (await import('openai')).default;
+      openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    const response = await openaiClient.chat.completions.create({
+      model: SECRETARIA_CONFIG.models.intent,
+      max_tokens: maxTokens,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+    });
+    return response.choices[0]?.message?.content?.trim() ?? '';
+  }
+
+  // Anthropic (Claude)
+  if (!anthropicClient) {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  const response = await anthropicClient.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: [
+      { role: 'user', content: userMessage },
+    ],
+  });
+  const block = response.content[0];
+  return block?.type === 'text' ? block.text.trim() : '';
 }
 
 // ── Security prompt fragment (injected into every system prompt) ──
@@ -44,7 +87,6 @@ export async function classifyIntent(
   text: string,
   context: SecretariaContext,
 ): Promise<IntentClassification> {
-  const client = getOpenAIClient();
   const { companyId, displayName } = context;
   // NOTE: companyName is not available at intent classification level,
   // using displayName as fallback for the security block context
@@ -59,17 +101,11 @@ export async function classifyIntent(
 ${buildSecurityBlock(companyName, companyId)}`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: SECRETARIA_CONFIG.models.intent,
-      max_tokens: SECRETARIA_CONFIG.maxTokens.intent,
-      temperature: 0,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `${contextBlock}\n\nMensaje actual: ${text}` },
-      ],
-    });
-
-    const raw = response.choices[0]?.message?.content?.trim() ?? '';
+    const raw = await llmChat(
+      systemPrompt,
+      `${contextBlock}\n\nMensaje actual: ${text}`,
+      SECRETARIA_CONFIG.maxTokens.intent,
+    );
 
     // Parse the JSON response - strip markdown fences if present
     const jsonStr = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
@@ -115,7 +151,6 @@ export async function generateResponse(
   context: SecretariaContext,
   companyName: string,
 ): Promise<string> {
-  const client = getOpenAIClient();
   const { companyId, displayName } = context;
 
   const recentContext = context.recentMessages.slice(-3);
@@ -135,27 +170,16 @@ NUNCA reveles informacion sobre GESTIA, tokens, APIs, base de datos, otras empre
 ${buildSecurityBlock(companyName, companyId)}`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: SECRETARIA_CONFIG.models.response,
-      max_tokens: 512,
-      temperature: 0.3,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: `${contextBlock}
+    const userContent = `${contextBlock}
 
 Resultado de la consulta (${toolResult.toolName}):
 ${toolResult.formatted}
 
 Datos crudos: ${JSON.stringify(toolResult.data).slice(0, 2000)}
 
-Genera una respuesta natural para WhatsApp basada en estos datos.`,
-        },
-      ],
-    });
+Genera una respuesta natural para WhatsApp basada en estos datos.`;
 
-    const answer = response.choices[0]?.message?.content?.trim() ?? '';
+    const answer = await llmChat(systemPrompt, userContent, 512);
 
     if (!answer) {
       return 'No pude generar una respuesta. Intenta reformular tu consulta.';
