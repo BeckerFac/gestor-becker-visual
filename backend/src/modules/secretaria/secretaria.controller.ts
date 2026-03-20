@@ -66,43 +66,50 @@ class SecretariaController {
   // --------------------------------------------------------------------------
 
   async chat(req: AuthRequest, res: Response): Promise<void> {
-    const companyId = req.user!.company_id;
-    const userId = req.user!.id;
-    const { message, type } = req.body;
-
-    if (!message || typeof message !== 'string') {
-      throw new ApiError(400, 'El campo "message" es requerido');
-    }
-
-    if (message.trim().length === 0) {
-      throw new ApiError(400, 'El mensaje no puede estar vacio');
-    }
-
-    if (message.length > 2000) {
-      throw new ApiError(400, 'El mensaje es demasiado largo (maximo 2000 caracteres)');
-    }
-
-    // Get user display name from DB (not in JWT payload)
-    let userName = 'Usuario';
     try {
-      const userResult = await db.execute(sql`SELECT name FROM users WHERE id = ${userId} LIMIT 1`);
-      const userRows = (userResult as any).rows || userResult || [];
-      if (userRows.length > 0 && userRows[0].name) {
-        userName = userRows[0].name;
+      const companyId = req.user!.company_id;
+      const userId = req.user!.id;
+      const { message } = req.body;
+
+      if (!message || typeof message !== 'string' || message.trim().length === 0) {
+        res.status(400).json({ error: 'El campo "message" es requerido' });
+        return;
       }
-    } catch { /* fallback to default */ }
 
-    const userRole = req.user!.role;
+      if (message.length > 2000) {
+        res.status(400).json({ error: 'El mensaje es demasiado largo (maximo 2000 caracteres)' });
+        return;
+      }
 
-    const result = await secretariaService.handleWebChat(
-      companyId,
-      userId,
-      message.trim(),
-      userName,
-      userRole,
-    );
+      // Get user display name from DB
+      let userName = 'Usuario';
+      try {
+        const userResult = await db.execute(sql`SELECT name FROM users WHERE id = ${userId} LIMIT 1`);
+        const userRows = (userResult as any).rows || userResult || [];
+        if (userRows.length > 0 && userRows[0].name) {
+          userName = userRows[0].name;
+        }
+      } catch { /* fallback to default */ }
 
-    res.json(result);
+      const userRole = req.user!.role;
+
+      const result = await secretariaService.handleWebChat(
+        companyId,
+        userId,
+        message.trim(),
+        userName,
+        userRole,
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      logger.error({ err: error }, 'SecretarIA chat error');
+      // NEVER return 500 - always return a usable response
+      res.json({
+        response: 'Perdon, tuve un problema procesando tu consulta. Intenta de nuevo.',
+        intent: 'error',
+      });
+    }
   }
 
   // --------------------------------------------------------------------------
