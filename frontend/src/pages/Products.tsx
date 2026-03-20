@@ -11,6 +11,7 @@ import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 
 import { ProductTable } from '@/components/products/ProductTable'
+import { ProductTreeView } from '@/components/products/ProductTreeView'
 import { ProductDetailPanel } from '@/components/products/ProductDetailPanel'
 import { ProductForm } from '@/components/products/ProductForm'
 import { ProductFilters } from '@/components/products/ProductFilters'
@@ -58,6 +59,11 @@ export const Products: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingForm, setEditingForm] = useState(emptyForm)
+
+  // Tree view
+  const [treeViewKey, setTreeViewKey] = useState(0)
+  const [preselectedCategoryId, setPreselectedCategoryId] = useState<string | undefined>(undefined)
+  const useTreeView = categories.length > 0
 
   // Detail panel
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
@@ -141,6 +147,30 @@ export const Products: React.FC = () => {
     else setSelectedIds(new Set(products.map(p => p.id)))
   }
 
+  const selectMultiple = (ids: string[]) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  const deselectMultiple = (ids: string[]) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.delete(id))
+      return next
+    })
+  }
+
+  // Open product form with pre-selected category (from tree view)
+  const handleAddProductWithCategory = (categoryId?: string) => {
+    setEditingForm(emptyForm)
+    setEditingId(null)
+    setPreselectedCategoryId(categoryId)
+    setShowForm(true)
+  }
+
   // Edit handler
   const handleEdit = (product: Product) => {
     const pricing = product.pricing
@@ -165,6 +195,7 @@ export const Products: React.FC = () => {
       await api.deleteProduct(deleteTarget.id)
       toast.success('Producto eliminado')
       await loadProducts()
+      setTreeViewKey(k => k + 1)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -250,12 +281,25 @@ export const Products: React.FC = () => {
       {showForm && (
         <ProductForm
           editingId={editingId}
-          initialForm={editingForm}
+          initialForm={preselectedCategoryId && !editingId
+            ? { ...editingForm, category_id: preselectedCategoryId } as any
+            : editingForm}
           productTypes={productTypes}
           products={products}
           categories={categories}
-          onSaved={() => { setShowForm(false); setEditingId(null); loadProducts(); loadMetadata() }}
-          onCancel={() => { setShowForm(false); setEditingId(null) }}
+          onSaved={() => {
+            setShowForm(false)
+            setEditingId(null)
+            setPreselectedCategoryId(undefined)
+            loadProducts()
+            loadMetadata()
+            setTreeViewKey(k => k + 1)
+          }}
+          onCancel={() => {
+            setShowForm(false)
+            setEditingId(null)
+            setPreselectedCategoryId(undefined)
+          }}
         />
       )}
 
@@ -282,9 +326,9 @@ export const Products: React.FC = () => {
           <ProductFilters
             search={search}
             onSearchChange={handleSearchChange}
-            filterCategory={filterCategory}
+            filterCategory={useTreeView ? '' : filterCategory}
             onFilterCategoryChange={handleCategoryChange}
-            categories={categories}
+            categories={useTreeView ? [] : categories}
             selectedCount={selectedIds.size}
             onBulkPrice={() => setShowBulkModal(true)}
             hasStockProducts={hasStockProducts}
@@ -296,34 +340,54 @@ export const Products: React.FC = () => {
             <BulkPriceModal
               selectedIds={selectedIds}
               onClose={() => { setShowBulkModal(false) }}
-              onUpdated={() => { setSelectedIds(new Set()); setShowBulkModal(false); loadProducts() }}
+              onUpdated={() => { setSelectedIds(new Set()); setShowBulkModal(false); loadProducts(); setTreeViewKey(k => k + 1) }}
             />
           )}
 
-          {loading ? (
-            <SkeletonTable rows={6} cols={6} />
-          ) : products.length === 0 ? (
-            <EmptyState
-              title={search ? 'Sin resultados' : 'Sin productos'}
-              description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
-              actionLabel={!search ? '+ Nuevo Producto' : undefined}
-              onAction={!search ? () => { setEditingForm(emptyForm); setEditingId(null); setShowForm(true) } : undefined}
-            />
-          ) : (
-            <ProductTable
-              products={products}
+          {useTreeView ? (
+            <ProductTreeView
+              key={treeViewKey}
+              search={search}
+              stockStatusFilter={stockStatusFilter}
+              hasStockProducts={hasStockProducts}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
-              onToggleSelectAll={toggleSelectAll}
+              onSelectMultiple={selectMultiple}
+              onDeselectMultiple={deselectMultiple}
               onRowClick={(product) => setSelectedProduct(product)}
               onEdit={handleEdit}
               onDelete={(product) => setDeleteTarget(product)}
-              hasStockProducts={hasStockProducts}
-              page={page}
-              totalPages={totalPages}
-              total={total}
-              onPageChange={setPage}
+              onAddProduct={handleAddProductWithCategory}
+              onReload={() => { loadProducts(); loadMetadata() }}
             />
+          ) : (
+            <>
+              {loading ? (
+                <SkeletonTable rows={6} cols={6} />
+              ) : products.length === 0 ? (
+                <EmptyState
+                  title={search ? 'Sin resultados' : 'Sin productos'}
+                  description={search ? `No se encontraron productos para "${search}"` : 'Crea tu primer producto para empezar.'}
+                  actionLabel={!search ? '+ Nuevo Producto' : undefined}
+                  onAction={!search ? () => { setEditingForm(emptyForm); setEditingId(null); setShowForm(true) } : undefined}
+                />
+              ) : (
+                <ProductTable
+                  products={products}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onToggleSelectAll={toggleSelectAll}
+                  onRowClick={(product) => setSelectedProduct(product)}
+                  onEdit={handleEdit}
+                  onDelete={(product) => setDeleteTarget(product)}
+                  hasStockProducts={hasStockProducts}
+                  page={page}
+                  totalPages={totalPages}
+                  total={total}
+                  onPageChange={setPage}
+                />
+              )}
+            </>
           )}
         </>
       )}

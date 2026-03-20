@@ -508,6 +508,185 @@ export class ProductsService {
     }
   }
 
+  async getProductsByCategory(companyId: string, { category_id, skip = 0, limit = 50, search = '', stock_status = 'all' } = {} as any) {
+    await this.ensureMigrations();
+    try {
+      const conditions: string[] = ['p.company_id = $1'];
+      const params: any[] = [companyId];
+      let paramIdx = 2;
+
+      if (category_id === 'uncategorized') {
+        conditions.push('p.category_id IS NULL');
+      } else if (category_id) {
+        conditions.push(`p.category_id = $${paramIdx}`);
+        params.push(category_id);
+        paramIdx++;
+      }
+
+      if (search) {
+        const searchPattern = `%${search}%`;
+        conditions.push(`(p.name ILIKE $${paramIdx} OR p.sku ILIKE $${paramIdx} OR p.barcode ILIKE $${paramIdx})`);
+        params.push(searchPattern);
+        paramIdx++;
+      }
+
+      let stockHaving = '';
+      if (stock_status === 'in_stock') {
+        stockHaving = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0`;
+      } else if (stock_status === 'low') {
+        stockHaving = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0 AND COALESCE(CAST(s.quantity AS decimal), 0) <= COALESCE(NULLIF(CAST(p.low_stock_threshold AS decimal), 0), NULLIF(CAST(s.min_level AS decimal), 0), 0)`;
+      } else if (stock_status === 'out') {
+        stockHaving = `AND p.controls_stock = true AND COALESCE(CAST(s.quantity AS decimal), 0) <= 0`;
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50;
+      const safeSkip = Number.isFinite(skip) && skip >= 0 ? skip : 0;
+
+      const countResult = await pool.query(`
+        SELECT COUNT(*) as total FROM products p
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE ${whereClause} ${stockHaving}
+      `, params);
+      const total = parseInt(countResult.rows?.[0]?.total || '0', 10);
+
+      const mainParams = [...params, safeLimit, safeSkip];
+      const result = await pool.query(`
+        SELECT p.*,
+          CASE WHEN pp.id IS NOT NULL THEN
+            json_build_object('cost', pp.cost, 'margin_percent', pp.margin_percent, 'vat_rate', pp.vat_rate, 'final_price', pp.final_price)
+          ELSE NULL END as pricing,
+          COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE ${whereClause} ${stockHaving}
+        ORDER BY p.name ASC
+        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+      `, mainParams);
+
+      return { items: result.rows || [], total, skip: safeSkip, limit: safeLimit };
+    } catch (error) {
+      console.error('Get products by category error:', error);
+      throw new ApiError(500, 'Failed to get products by category');
+    }
+  }
+
+  async getCategoryTree(companyId: string, { search = '', stock_status = 'all' } = {} as any) {
+    await this.ensureMigrations();
+    try {
+      // Get all categories with counts
+      const catsResult = await pool.query(`
+        SELECT c.*,
+          c.default_vat_rate, c.default_margin_percent, c.default_supplier_id, c.sort_order, c.color,
+          (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.company_id = $1) as product_count,
+          COALESCE((SELECT SUM(COALESCE(CAST(pp.final_price AS decimal), 0) * COALESCE(CAST(s.quantity AS decimal), 0))
+            FROM products p
+            LEFT JOIN product_pricing pp ON pp.product_id = p.id
+            LEFT JOIN stock s ON s.product_id = p.id
+            WHERE p.category_id = c.id AND p.company_id = $1), 0) as stock_value
+        FROM categories c
+        WHERE c.company_id = $1 AND c.active = true
+        ORDER BY c.sort_order ASC, c.parent_id NULLS FIRST, c.name ASC
+      `, [companyId]);
+
+      const cats = catsResult.rows || [];
+
+      // Get uncategorized count
+      const uncatResult = await pool.query(`
+        SELECT COUNT(*) as count,
+          COALESCE(SUM(COALESCE(CAST(pp.final_price AS decimal), 0) * COALESCE(CAST(s.quantity AS decimal), 0)), 0) as stock_value
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE p.company_id = $1 AND p.category_id IS NULL
+      `, [companyId]);
+
+      const uncategorizedCount = parseInt(uncatResult.rows?.[0]?.count || '0', 10);
+      const uncategorizedStockValue = parseFloat(uncatResult.rows?.[0]?.stock_value || '0');
+
+      // Check if any product has controls_stock
+      const hasStockResult = await pool.query(
+        `SELECT EXISTS(SELECT 1 FROM products WHERE company_id = $1 AND controls_stock = true) as has_stock`,
+        [companyId]
+      );
+      const has_stock_products = hasStockResult.rows?.[0]?.has_stock || false;
+
+      // If searching, find which categories have matching products
+      let matchingCategoryIds: Set<string> | null = null;
+      if (search) {
+        const searchPattern = `%${search}%`;
+        let stockFilter = '';
+        if (stock_status === 'in_stock') {
+          stockFilter = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0`;
+        } else if (stock_status === 'low') {
+          stockFilter = `AND COALESCE(CAST(s.quantity AS decimal), 0) > 0 AND COALESCE(CAST(s.quantity AS decimal), 0) <= COALESCE(NULLIF(CAST(p.low_stock_threshold AS decimal), 0), 0)`;
+        } else if (stock_status === 'out') {
+          stockFilter = `AND p.controls_stock = true AND COALESCE(CAST(s.quantity AS decimal), 0) <= 0`;
+        }
+        const matchResult = await pool.query(`
+          SELECT DISTINCT p.category_id FROM products p
+          LEFT JOIN stock s ON s.product_id = p.id
+          WHERE p.company_id = $1 AND (p.name ILIKE $2 OR p.sku ILIKE $2 OR p.barcode ILIKE $2)
+          AND p.category_id IS NOT NULL ${stockFilter}
+        `, [companyId, searchPattern]);
+        matchingCategoryIds = new Set((matchResult.rows || []).map((r: any) => r.category_id));
+      }
+
+      // Build tree with recursive child_product_count and child_stock_value
+      const catMap = new Map<string, any>();
+      for (const cat of cats) {
+        catMap.set(cat.id, {
+          ...cat,
+          product_count: parseInt(cat.product_count || '0', 10),
+          stock_value: parseFloat(cat.stock_value || '0'),
+          children: [],
+          total_product_count: 0,
+          total_stock_value: 0,
+          has_search_match: matchingCategoryIds ? matchingCategoryIds.has(cat.id) : false,
+        });
+      }
+
+      const roots: any[] = [];
+      for (const cat of catMap.values()) {
+        if (cat.parent_id && catMap.has(cat.parent_id)) {
+          catMap.get(cat.parent_id).children.push(cat);
+        } else {
+          roots.push(cat);
+        }
+      }
+
+      // Calculate totals bottom-up
+      const calcTotals = (node: any): { count: number; value: number; hasMatch: boolean } => {
+        let totalCount = node.product_count;
+        let totalValue = node.stock_value;
+        let hasMatch = node.has_search_match;
+        for (const child of node.children) {
+          const childTotals = calcTotals(child);
+          totalCount += childTotals.count;
+          totalValue += childTotals.value;
+          if (childTotals.hasMatch) hasMatch = true;
+        }
+        node.total_product_count = totalCount;
+        node.total_stock_value = totalValue;
+        node.has_search_match = hasMatch;
+        return { count: totalCount, value: totalValue, hasMatch };
+      };
+      roots.forEach(calcTotals);
+
+      return {
+        categories: roots,
+        uncategorized_count: uncategorizedCount,
+        uncategorized_stock_value: uncategorizedStockValue,
+        has_stock_products,
+      };
+    } catch (error) {
+      console.error('Get category tree error:', error);
+      throw new ApiError(500, 'Failed to get category tree');
+    }
+  }
+
   async getCategories(companyId: string) {
     await this.ensureMigrations();
     try {

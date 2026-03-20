@@ -294,6 +294,24 @@ export const api = {
     const { data } = await client.post('/products/types/reorder', { ordered_ids: orderedIds })
     return data
   },
+  getCategoryTree: async (filters?: { search?: string; stock_status?: string }) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/products/category-tree?${params.toString()}`)
+    return data
+  },
+  getProductsByCategory: async (filters: { category_id: string; skip?: number; limit?: number; search?: string; stock_status?: string }) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+    })
+    const { data } = await client.get(`/products/by-category?${params.toString()}`)
+    return data
+  },
   getCategories: async () => {
     const { data } = await client.get('/products/categories')
     return data

@@ -417,7 +417,7 @@ describe('SecretarIA Tools', () => {
     // Test help
     const helpResult = await executeTool('help', {}, 'company-1')
     expect(helpResult.toolName).toBe('help')
-    expect(helpResult.formatted).toContain('Clientes')
+    expect(helpResult.formatted).toContain('quien me debe')
   })
 
   // -- Test 20: executeTool unknown intent returns help response --
@@ -847,7 +847,7 @@ describe('SecretarIA Security', () => {
     // Check that the security block function exists and produces anti-injection text
     // by verifying the prompt templates + the security block builder
     const responsePrompt = SECRETARIA_PROMPTS.responseGeneration
-    expect(responsePrompt).toContain('NUNCA inventes datos')
+    expect(responsePrompt).toContain('NUNCA inventes numeros')
     expect(responsePrompt).toContain('NUNCA menciones SQL')
   })
 

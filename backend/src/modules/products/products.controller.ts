@@ -83,6 +83,39 @@ export class ProductsController {
     }
   }
 
+  async getCategoryTree(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { search = '', stock_status = 'all' } = req.query;
+      const tree = await productsService.getCategoryTree(req.user.company_id, {
+        search: search as string,
+        stock_status: stock_status as string,
+      });
+      res.json(tree);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get category tree' });
+    }
+  }
+
+  async getProductsByCategory(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { category_id, skip = '0', limit = '50', search = '', stock_status = 'all' } = req.query;
+      const result = await productsService.getProductsByCategory(req.user.company_id, {
+        category_id: category_id as string,
+        skip: parseInt(skip as string, 10),
+        limit: parseInt(limit as string, 10),
+        search: search as string,
+        stock_status: stock_status as string,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get products by category' });
+    }
+  }
+
   async getCategories(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
