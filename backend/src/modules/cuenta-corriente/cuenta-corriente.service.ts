@@ -90,58 +90,73 @@ export class CuentaCorrienteService {
       const enterprise = entRows[0];
 
       // Facturado AFIP (facturas autorizadas) -- nos deben
-      const ordersResult = await db.execute(sql`
-        SELECT i.id, 'factura' as tipo, i.invoice_date as fecha,
-          'Factura ' || COALESCE(i.invoice_type, '') || ' ' ||
-            LPAD(CAST(COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 1) AS TEXT), 5, '0') || '-' ||
-            LPAD(CAST(i.invoice_number AS TEXT), 8, '0') || ' — $' ||
-            TRIM(TO_CHAR(CAST(i.total_amount AS decimal), '999G999G999D00')) as descripcion,
-          CAST(i.total_amount AS decimal) as monto
-        FROM invoices i
-        LEFT JOIN customers c ON i.customer_id = c.id
-        WHERE i.company_id = ${companyId}
-          AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-          AND i.status = 'authorized'
-          AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
-      `);
+      let ordersResult: any = { rows: [] };
+      try {
+        ordersResult = await db.execute(sql`
+          SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
+            'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' ||
+              LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
+            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE i.company_id = ${companyId}
+            AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+            AND i.status = 'authorized'
+            AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+        `);
+      } catch (e) {
+        console.error('Cuenta corriente: invoices query failed, falling back to empty', (e as any)?.message);
+      }
 
       // Cobros -- nos pagaron
-      const cobrosResult = await db.execute(sql`
-        SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
-          'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
-          CAST(co.amount AS decimal) as monto
-        FROM cobros co
-        WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
-      `);
+      let cobrosResult: any = { rows: [] };
+      try {
+        cobrosResult = await db.execute(sql`
+          SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
+            'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
+            CAST(co.amount AS decimal) as monto
+          FROM cobros co
+          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('Cuenta corriente: cobros query failed', (e as any)?.message); }
 
       // Ajustes manuales
-      const adjustmentsResult = await db.execute(sql`
-        SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
-          'Ajuste — ' || aa.reason as descripcion,
-          CAST(ABS(aa.amount) AS decimal) as monto,
-          aa.adjustment_type
-        FROM account_adjustments aa
-        WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
-      `);
+      let adjustmentsResult: any = { rows: [] };
+      try {
+        adjustmentsResult = await db.execute(sql`
+          SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
+            'Ajuste — ' || aa.reason as descripcion,
+            CAST(ABS(aa.amount) AS decimal) as monto,
+            aa.adjustment_type
+          FROM account_adjustments aa
+          WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('Cuenta corriente: adjustments query failed', (e as any)?.message); }
 
       // Compras -- les debemos
-      const purchasesResult = await db.execute(sql`
-        SELECT p.id, 'compra' as tipo, p.date as fecha,
-          'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
-          CAST(p.total_amount AS decimal) as monto
-        FROM purchases p
-        WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
-          AND p.status != 'cancelada'
-      `);
+      let purchasesResult: any = { rows: [] };
+      try {
+        purchasesResult = await db.execute(sql`
+          SELECT p.id, 'compra' as tipo, p.date as fecha,
+            'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
+            CAST(p.total_amount AS decimal) as monto
+          FROM purchases p
+          WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
+            AND p.status != 'cancelada'
+        `);
+      } catch (e) { console.error('Cuenta corriente: purchases query failed', (e as any)?.message); }
 
       // Pagos -- les pagamos
-      const pagosResult = await db.execute(sql`
-        SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
-          'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
-          CAST(pa.amount AS decimal) as monto
-        FROM pagos pa
-        WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
-      `);
+      let pagosResult: any = { rows: [] };
+      try {
+        pagosResult = await db.execute(sql`
+          SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
+            'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
+            CAST(pa.amount AS decimal) as monto
+          FROM pagos pa
+          WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('Cuenta corriente: pagos query failed', (e as any)?.message); }
 
       const orders = ((ordersResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
       const cobros = ((cobrosResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
