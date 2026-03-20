@@ -35,6 +35,8 @@ export class ReceiptsService {
       await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
       await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id)`);
       await db.execute(sql`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS reference VARCHAR(255)`);
+      // Add cobro_id to cheques table for linking
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`);
       this.migrationsRun = true;
     } catch (error) {
       console.error('Receipts migrations error:', error);
@@ -83,7 +85,7 @@ export class ReceiptsService {
   async createReceipt(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
     try {
-      const { receipt_date, payment_method, notes, items, enterprise_id, amount, bank_id, reference } = data;
+      const { receipt_date, payment_method, notes, items, enterprise_id, amount, bank_id, reference, cheque_data } = data;
 
       const hasItems = Array.isArray(items) && items.length > 0;
 
@@ -152,6 +154,30 @@ export class ReceiptsService {
             INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
             VALUES (${cobroId}, ${companyId}, ${enterprise_id || null}, ${totalAmount.toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${reference || `Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
           `);
+
+          // If cheque_data is provided, create a cheque linked to this cobro
+          if (cheque_data && payment_method === 'cheque') {
+            const chequeId = uuid();
+            await db.execute(sql`
+              INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, notes, created_by)
+              VALUES (
+                ${chequeId},
+                ${companyId},
+                ${cheque_data.number},
+                ${cheque_data.bank},
+                ${cheque_data.drawer},
+                ${cheque_data.drawer_cuit || null},
+                ${cheque_data.cheque_type || 'comun'},
+                ${totalAmount.toFixed(2)},
+                ${new Date(cheque_data.issue_date)},
+                ${new Date(cheque_data.due_date)},
+                'a_cobrar',
+                ${cobroId},
+                ${notes || null},
+                ${userId}
+              )
+            `);
+          }
         }
 
         await db.execute(sql`COMMIT`);

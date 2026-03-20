@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Card, CardContent, CardHeader } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
+import { useNavigate } from 'react-router-dom'
+import { Card, CardContent } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
@@ -29,12 +28,12 @@ interface Cheque {
   customer_id: string | null
   customer_name: string | null
   order_number: number | null
+  cobro_id: string | null
+  cobro_reference: string | null
   notes: string | null
   collected_date: string | null
   created_at: string
 }
-
-interface Customer { id: string; name: string }
 
 const STATUS_LABELS: Record<string, string> = {
   a_cobrar: 'A Cobrar',
@@ -82,20 +81,12 @@ function getDueDateAlert(dueDate: string, status: string): { label: string; clas
   return null
 }
 
-const emptyForm = {
-  number: '', bank: '', drawer: '', drawer_cuit: '', cheque_type: 'comun',
-  amount: '', issue_date: '', due_date: '', customer_id: '',
-  order_id: '', notes: '',
-}
-
 export const Cheques: React.FC = () => {
+  const navigate = useNavigate()
   const [cheques, setCheques] = useState<Cheque[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [showForm, setShowForm] = useState(false)
   const [filterStatus, setFilterStatus] = useState<string>('')
-  const [customers, setCustomers] = useState<Customer[]>([])
   const [summary, setSummary] = useState({
     total_a_cobrar: 0, total_cobrado: 0, count_a_cobrar: 0, count_cobrado: 0,
     total_endosado: 0, total_depositado: 0, total_rechazado: 0,
@@ -104,10 +95,6 @@ export const Cheques: React.FC = () => {
     vencen_semana_count: 0, vencen_semana_amount: 0,
   })
 
-  const [form, setForm] = useState(emptyForm)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<Cheque | null>(null)
-  const [deleting, setDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [chequeHistory, setChequeHistory] = useState<any[]>([])
@@ -119,7 +106,7 @@ export const Cheques: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [chequesRes, summaryRes, custRes] = await Promise.all([
+      const [chequesRes, summaryRes] = await Promise.all([
         api.getCheques({
           status: filterStatus || undefined,
           search: search || undefined,
@@ -136,11 +123,9 @@ export const Cheques: React.FC = () => {
           vencidos_count: 0, vencidos_amount: 0,
           vencen_semana_count: 0, vencen_semana_amount: 0,
         })),
-        api.getCustomers().catch(() => ({ items: [] })),
       ])
       setCheques(Array.isArray(chequesRes) ? chequesRes : chequesRes.items || [])
       setSummary(summaryRes)
-      setCustomers(custRes.items || custRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -160,75 +145,6 @@ export const Cheques: React.FC = () => {
       if (searchTimeout.current) clearTimeout(searchTimeout.current)
     }
   }, [search, dueDateFrom, dueDateTo])
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    setError(null)
-    try {
-      const payload = {
-        number: form.number,
-        bank: form.bank,
-        drawer: form.drawer,
-        drawer_cuit: form.drawer_cuit || null,
-        cheque_type: form.cheque_type || 'comun',
-        amount: parseFloat(form.amount),
-        issue_date: form.issue_date,
-        due_date: form.due_date,
-        customer_id: form.customer_id || null,
-        order_id: form.order_id || null,
-        notes: form.notes || null,
-      }
-      if (editingId) {
-        await api.updateCheque(editingId, payload)
-        toast.success('Cheque actualizado correctamente')
-      } else {
-        await api.createCheque(payload)
-        toast.success('Cheque cargado correctamente')
-      }
-      setShowForm(false)
-      setEditingId(null)
-      setForm(emptyForm)
-      await loadData()
-    } catch (e: any) {
-      toast.error(e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleEdit = (cheque: Cheque) => {
-    setForm({
-      number: cheque.number,
-      bank: cheque.bank,
-      drawer: cheque.drawer,
-      drawer_cuit: cheque.drawer_cuit || '',
-      cheque_type: cheque.cheque_type || 'comun',
-      amount: cheque.amount,
-      issue_date: cheque.issue_date?.split('T')[0] || '',
-      due_date: cheque.due_date?.split('T')[0] || '',
-      customer_id: cheque.customer_id || '',
-      order_id: '',
-      notes: cheque.notes || '',
-    })
-    setEditingId(cheque.id)
-    setShowForm(true)
-  }
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return
-    setDeleting(true)
-    try {
-      await api.deleteCheque(deleteTarget.id)
-      toast.success('Cheque eliminado')
-      setDeleteTarget(null)
-      await loadData()
-    } catch (e: any) {
-      toast.error(e.message)
-    } finally {
-      setDeleting(false)
-    }
-  }
 
   const handleStatusChange = async (chequeId: string, newStatus: string) => {
     try {
@@ -270,7 +186,6 @@ export const Cheques: React.FC = () => {
     { key: 'amount' as const, label: 'Monto', render: (v: any) => (
       <span className="font-bold text-green-700">{formatCurrency(parseFloat(v || '0'))}</span>
     )},
-    { key: 'issue_date' as const, label: 'Emision', render: (v: any) => formatDate(v) },
     { key: 'due_date' as const, label: 'Cobro', render: (v: any, row: Cheque) => {
       const alert = getDueDateAlert(v, row.status)
       return (
@@ -281,7 +196,21 @@ export const Cheques: React.FC = () => {
       )
     }},
     { key: 'customer_name' as const, label: 'Cliente', render: (v: any) => v || '-' },
-    { key: 'id' as const, label: 'Estado / Acciones', render: (_: any, row: Cheque) => (
+    { key: 'cobro_id' as const, label: 'Cobro', render: (_: any, row: Cheque) => (
+      <div onClick={e => e.stopPropagation()}>
+        {row.cobro_id ? (
+          <button
+            onClick={() => navigate('/cobros')}
+            className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium transition-colors"
+          >
+            {row.cobro_reference || 'Ver cobro'}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">-</span>
+        )}
+      </div>
+    )},
+    { key: 'id' as const, label: 'Estado', render: (_: any, row: Cheque) => (
       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
         <PermissionGate module="cheques" action="edit">
           <select
@@ -295,16 +224,6 @@ export const Cheques: React.FC = () => {
             ))}
           </select>
         </PermissionGate>
-        {row.status === 'a_cobrar' && (
-          <>
-            <PermissionGate module="cheques" action="edit">
-              <button onClick={e => { e.stopPropagation(); handleEdit(row) }} className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">Editar</button>
-            </PermissionGate>
-            <PermissionGate module="cheques" action="delete">
-              <button onClick={e => { e.stopPropagation(); setDeleteTarget(row) }} className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200">Eliminar</button>
-            </PermissionGate>
-          </>
-        )}
       </div>
     )},
   ]
@@ -375,11 +294,6 @@ export const Cheques: React.FC = () => {
             ]}
             filename="cheques"
           />
-          <PermissionGate module="cheques" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
-              {showForm ? 'Cancelar' : '+ Nuevo Cheque'}
-            </Button>
-          </PermissionGate>
         </div>
       </div>
 
@@ -473,45 +387,6 @@ export const Cheques: React.FC = () => {
         ))}
       </div>
 
-      {/* Create/Edit form */}
-      {showForm && (
-        <Card>
-          <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Cheque' : 'Nuevo Cheque'}</h3></CardHeader>
-          <CardContent>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Input label="Numero de Cheque *" placeholder="Ej: 12345678" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} required />
-                <Input label="Banco *" placeholder="Ej: Banco Nacion" value={form.bank} onChange={e => setForm({ ...form, bank: e.target.value })} required />
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Cheque</label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.cheque_type} onChange={e => setForm({ ...form, cheque_type: e.target.value })}>
-                    {CHEQUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
-                <Input label="Monto *" type="number" step="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Input label="Librador *" placeholder="Nombre del emisor" value={form.drawer} onChange={e => setForm({ ...form, drawer: e.target.value })} required />
-                <Input label="CUIT del Librador" placeholder="20-12345678-9" value={form.drawer_cuit} onChange={e => setForm({ ...form, drawer_cuit: e.target.value })} />
-                <Input label="Fecha de Emision *" type="date" value={form.issue_date} onChange={e => setForm({ ...form, issue_date: e.target.value })} required />
-                <Input label="Fecha de Cobro *" type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} required />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cliente (opcional)</label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}>
-                    <option value="">Sin cliente asociado</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <Input label="Notas" placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-              </div>
-              <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Cargar Cheque'}</Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Table */}
       {loading ? (
         <Card><CardContent><SkeletonTable rows={5} cols={4} /></CardContent></Card>
@@ -519,9 +394,7 @@ export const Cheques: React.FC = () => {
         <Card><CardContent>
           <EmptyState
             title="Sin cheques registrados"
-            description="Carga el primer cheque para empezar a gestionarlos"
-            actionLabel="+ Nuevo Cheque"
-            onAction={() => { setForm(emptyForm); setEditingId(null); setShowForm(true) }}
+            description="Los cheques se crean automaticamente desde Cobros cuando el metodo de pago es cheque"
           />
         </CardContent></Card>
       ) : (
@@ -542,16 +415,69 @@ export const Cheques: React.FC = () => {
                         {cheque.bank} - {cheque.drawer}
                         {cheque.drawer_cuit && <span className="font-mono text-gray-400 ml-1">({cheque.drawer_cuit})</span>}
                       </p>
-                      {cheque.cheque_type && cheque.cheque_type !== 'comun' && (
-                        <span className="inline-block mt-1 px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-700 font-medium">{CHEQUE_TYPE_LABELS[cheque.cheque_type] || cheque.cheque_type}</span>
-                      )}
-                      {cheque.notes && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Notas: {cheque.notes}</p>}
-                      {cheque.collected_date && (
-                        <p className="text-sm text-green-700 mt-1">Cobrado el: {formatDate(cheque.collected_date)}</p>
-                      )}
                     </div>
                     <button onClick={() => { setExpandedId(null); setChequeHistory([]) }} className="text-gray-400 hover:text-gray-600 text-lg">x</button>
                   </div>
+
+                  {/* Cheque details grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm">
+                    <div>
+                      <span className="text-xs text-gray-500 block">Tipo</span>
+                      <span className="font-medium">{CHEQUE_TYPE_LABELS[cheque.cheque_type] || cheque.cheque_type || 'Comun'}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Monto</span>
+                      <span className="font-bold text-green-700">{formatCurrency(parseFloat(cheque.amount || '0'))}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Emision</span>
+                      <span className="font-medium">{formatDate(cheque.issue_date)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Vencimiento</span>
+                      <span className="font-medium">{formatDate(cheque.due_date)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Librador</span>
+                      <span className="font-medium">{cheque.drawer}</span>
+                      {cheque.drawer_cuit && <span className="block text-xs font-mono text-gray-400">{cheque.drawer_cuit}</span>}
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Estado</span>
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[cheque.status] || 'bg-gray-100 text-gray-700'}`}>
+                        {STATUS_LABELS[cheque.status] || cheque.status}
+                      </span>
+                    </div>
+                    {cheque.collected_date && (
+                      <div>
+                        <span className="text-xs text-gray-500 block">Cobrado el</span>
+                        <span className="font-medium text-green-700">{formatDate(cheque.collected_date)}</span>
+                      </div>
+                    )}
+                    {cheque.customer_name && (
+                      <div>
+                        <span className="text-xs text-gray-500 block">Cliente</span>
+                        <span className="font-medium">{cheque.customer_name}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {cheque.notes && (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Notas: {cheque.notes}</p>
+                  )}
+
+                  {/* Link to cobro */}
+                  {cheque.cobro_id && (
+                    <div className="mb-4 p-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg inline-flex items-center gap-2">
+                      <span className="text-sm text-blue-700 dark:text-blue-300">Vinculado a cobro:</span>
+                      <button
+                        onClick={() => navigate('/cobros')}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800 underline transition-colors"
+                      >
+                        {cheque.cobro_reference || 'Ver cobro'}
+                      </button>
+                    </div>
+                  )}
 
                   {chequeHistory.length > 0 ? (
                     <div>
@@ -585,17 +511,6 @@ export const Cheques: React.FC = () => {
         </>
       )}
 
-      {/* Confirm delete dialog */}
-      <ConfirmDialog
-        open={!!deleteTarget}
-        title="Eliminar Cheque"
-        message={`Eliminar cheque N. ${deleteTarget?.number} por ${formatCurrency(parseFloat(deleteTarget?.amount || '0'))}?`}
-        confirmLabel="Eliminar"
-        variant="danger"
-        loading={deleting}
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
     </div>
   )
 }

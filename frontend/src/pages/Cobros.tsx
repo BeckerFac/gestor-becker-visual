@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { DateInput } from '@/components/ui/DateInput'
+import { BankSelector } from '@/components/ui/BankSelector'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Pagination } from '@/components/shared/Pagination'
@@ -142,6 +144,23 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   tarjeta: 'Tarjeta',
 }
 
+const CHEQUE_TYPES = [
+  { value: 'comun', label: 'Comun' },
+  { value: 'cruzado', label: 'Cruzado' },
+  { value: 'no_a_la_orden', label: 'No a la orden' },
+  { value: 'diferido', label: 'Diferido' },
+]
+
+const INITIAL_CHEQUE_FORM = {
+  number: '',
+  bank: '',
+  cheque_type: 'comun',
+  drawer: '',
+  drawer_cuit: '',
+  issue_date: new Date().toISOString().split('T')[0],
+  due_date: '',
+}
+
 const DISMISSED_PENDING_COBROS_KEY = 'gestia_dismissed_pending_cobros'
 
 function getDismissedPendingCobros(): string[] {
@@ -174,7 +193,7 @@ export const Cobros: React.FC = () => {
   const [cobros, setCobros] = useState<Cobro[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [aging, setAging] = useState<AgingData | null>(null)
-  const [agingCollapsed, setAgingCollapsed] = useState(false)
+  const [agingCollapsed, setAgingCollapsed] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -194,13 +213,16 @@ export const Cobros: React.FC = () => {
     notes: '',
   })
 
+  // Cheque form state
+  const [chequeForm, setChequeForm] = useState({ ...INITIAL_CHEQUE_FORM })
+
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   // Pending orders state
   const [dismissedPendingCobros, setDismissedPendingCobros] = useState<string[]>(getDismissedPendingCobros())
-  const [pendingCollapsed, setPendingCollapsed] = useState(false)
+  const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
   // Filter state
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -376,6 +398,7 @@ export const Cobros: React.FC = () => {
       receipt_date: new Date().toISOString().split('T')[0],
       notes: '',
     })
+    setChequeForm({ ...INITIAL_CHEQUE_FORM })
     setInvoiceItems({})
     setShowInvoiceSection(false)
   }
@@ -406,10 +429,18 @@ export const Cobros: React.FC = () => {
       return
     }
 
+    // Validate cheque fields if payment method is cheque
+    if (form.payment_method === 'cheque') {
+      if (!chequeForm.number || !chequeForm.bank || !chequeForm.drawer || !chequeForm.issue_date || !chequeForm.due_date) {
+        toast.error('Completa todos los campos obligatorios del cheque')
+        return
+      }
+    }
+
     setSaving(true)
     setError(null)
     try {
-      await api.createReceipt({
+      const receiptPayload: any = {
         receipt_date: form.receipt_date,
         payment_method: form.payment_method,
         notes: form.notes || null,
@@ -420,10 +451,26 @@ export const Cobros: React.FC = () => {
           ? { items }
           : { amount: directAmount }
         ),
-      })
+      }
+
+      // Attach cheque data if payment method is cheque
+      if (form.payment_method === 'cheque') {
+        receiptPayload.cheque_data = {
+          number: chequeForm.number,
+          bank: chequeForm.bank,
+          cheque_type: chequeForm.cheque_type,
+          drawer: chequeForm.drawer,
+          drawer_cuit: chequeForm.drawer_cuit || null,
+          issue_date: chequeForm.issue_date,
+          due_date: chequeForm.due_date,
+        }
+      }
+
+      await api.createReceipt(receiptPayload)
       setShowForm(false)
       setInvoiceItems({})
       setShowInvoiceSection(false)
+      setChequeForm({ ...INITIAL_CHEQUE_FORM })
       toast.success('Cobro registrado correctamente')
       await loadData()
     } catch (e: any) {
@@ -867,17 +914,40 @@ export const Cobros: React.FC = () => {
                   </select>
                 </div>
                 {showBankSelector && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco</label>
-                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
-                      <option value="">Seleccionar banco...</option>
-                      {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
-                    </select>
-                  </div>
+                  <BankSelector
+                    banks={banks}
+                    value={form.bank_id}
+                    onChange={bankId => setForm({ ...form, bank_id: bankId })}
+                    onBanksChange={setBanks}
+                    label="Banco"
+                  />
                 )}
                 <Input label="Referencia" placeholder="N transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
-                <Input label="Fecha" type="date" value={form.receipt_date} onChange={e => setForm({ ...form, receipt_date: e.target.value })} />
+                <DateInput label="Fecha" value={form.receipt_date} onChange={val => setForm({ ...form, receipt_date: val })} />
               </div>
+
+              {/* Cheque inline form */}
+              {form.payment_method === 'cheque' && (
+                <div className="border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-4 space-y-3">
+                  <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200">Datos del Cheque</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Input label="Numero de cheque *" placeholder="Ej: 12345678" value={chequeForm.number} onChange={e => setChequeForm({ ...chequeForm, number: e.target.value })} required />
+                    <Input label="Banco *" placeholder="Ej: Banco Nacion" value={chequeForm.bank} onChange={e => setChequeForm({ ...chequeForm, bank: e.target.value })} required />
+                    <div className="flex flex-col gap-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de cheque *</label>
+                      <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={chequeForm.cheque_type} onChange={e => setChequeForm({ ...chequeForm, cheque_type: e.target.value })}>
+                        {CHEQUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </div>
+                    <Input label="Librador *" placeholder="Nombre del emisor" value={chequeForm.drawer} onChange={e => setChequeForm({ ...chequeForm, drawer: e.target.value })} required />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input label="CUIT del librador" placeholder="20-12345678-9" value={chequeForm.drawer_cuit} onChange={e => setChequeForm({ ...chequeForm, drawer_cuit: e.target.value })} />
+                    <DateInput label="Fecha de emision *" value={chequeForm.issue_date} onChange={val => setChequeForm({ ...chequeForm, issue_date: val })} required />
+                    <DateInput label="Fecha de cobro *" value={chequeForm.due_date} onChange={val => setChequeForm({ ...chequeForm, due_date: val })} required />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>

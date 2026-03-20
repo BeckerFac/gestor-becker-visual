@@ -19,6 +19,7 @@ export class ChequesService {
     try {
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cheque_type VARCHAR(50) DEFAULT 'comun'`).catch(() => {});
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS drawer_cuit VARCHAR(20)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`).catch(() => {});
       this.migrationsRun = true;
     } catch (error) {
       console.error('Cheques migrations error:', error);
@@ -44,10 +45,12 @@ export class ChequesService {
       }
 
       const result = await db.execute(sql`
-        SELECT c.*, c.customer_id, cu.name as customer_name, o.order_number
+        SELECT c.*, c.customer_id, cu.name as customer_name, o.order_number,
+          co.id as cobro_id, co.reference as cobro_reference
         FROM cheques c
         LEFT JOIN customers cu ON c.customer_id = cu.id
         LEFT JOIN orders o ON c.order_id = o.id
+        LEFT JOIN cobros co ON c.cobro_id = co.id
         WHERE ${whereClause}
         ORDER BY c.due_date ASC
       `);
@@ -201,6 +204,24 @@ export class ChequesService {
       if (error instanceof ApiError) throw error;
       console.error('Get status history error:', error);
       throw new ApiError(500, 'Failed to get cheque status history');
+    }
+  }
+
+  async getChequeByCobro(companyId: string, cobroId: string) {
+    await this.ensureMigrations();
+    try {
+      const result = await db.execute(sql`
+        SELECT c.*, cu.name as customer_name
+        FROM cheques c
+        LEFT JOIN customers cu ON c.customer_id = cu.id
+        WHERE c.company_id = ${companyId} AND c.cobro_id = ${cobroId}
+        LIMIT 1
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows[0] || null;
+    } catch (error) {
+      console.error('Get cheque by cobro error:', error);
+      return null;
     }
   }
 

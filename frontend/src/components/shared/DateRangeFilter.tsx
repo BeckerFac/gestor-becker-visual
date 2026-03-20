@@ -1,4 +1,5 @@
 import React from 'react'
+import { DateInput } from '@/components/ui/DateInput'
 
 interface DateRangeFilterProps {
   dateFrom: string
@@ -11,10 +12,10 @@ interface DateRangeFilterProps {
 
 /**
  * Edge cases:
- * - dateFrom > dateTo → visually warn (red border on dateTo)
- * - Only one date set → still valid (acts as "from" or "until" filter)
- * - Both empty → no filter applied
- * - Future dates → allowed (for estimated delivery etc.)
+ * - dateFrom > dateTo -> visually warn (red border on dateTo)
+ * - Only one date set -> still valid (acts as "from" or "until" filter)
+ * - Both empty -> no filter applied
+ * - Future dates -> allowed (for estimated delivery etc.)
  */
 export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   dateFrom,
@@ -30,22 +31,18 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</label>
       <div className="flex items-center gap-1">
-        <input
-          type="date"
-          className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-lg text-sm flex-1 min-w-0"
+        <DateInput
           value={dateFrom}
-          onChange={e => onDateFromChange(e.target.value)}
-          placeholder="Desde"
+          onChange={onDateFromChange}
+          className="text-sm py-1.5 flex-1 min-w-0"
         />
-        <span className="text-gray-400 text-xs">—</span>
-        <input
-          type="date"
-          className={`px-2 py-1.5 border rounded-lg text-sm flex-1 min-w-0 dark:bg-gray-700 dark:text-gray-200 ${
-            isInvalidRange ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-gray-300 dark:border-gray-600'
-          }`}
+        <span className="text-gray-400 text-xs">--</span>
+        <DateInput
           value={dateTo}
-          onChange={e => onDateToChange(e.target.value)}
-          placeholder="Hasta"
+          onChange={onDateToChange}
+          className={`text-sm py-1.5 flex-1 min-w-0 ${
+            isInvalidRange ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : ''
+          }`}
         />
         {(dateFrom || dateTo) && onClear && (
           <button
@@ -53,7 +50,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             className="text-gray-400 hover:text-gray-600 text-sm px-1"
             title="Limpiar fechas"
           >
-            ×
+            x
           </button>
         )}
       </div>

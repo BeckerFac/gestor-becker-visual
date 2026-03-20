@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { DateInput } from '@/components/ui/DateInput'
+import { BankSelector } from '@/components/ui/BankSelector'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Pagination } from '@/components/shared/Pagination'
@@ -451,16 +453,16 @@ export const Pagos: React.FC = () => {
                 </select>
               </div>
               {showBankSelector && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco *</label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
-                    <option value="">Seleccionar banco...</option>
-                    {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
-                  </select>
-                </div>
+                <BankSelector
+                  banks={banks}
+                  value={form.bank_id}
+                  onChange={bankId => setForm({ ...form, bank_id: bankId })}
+                  onBanksChange={setBanks}
+                  label="Banco *"
+                />
               )}
               <Input label="Referencia" placeholder="N° transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
-              <Input label="Fecha" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} />
+              <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
