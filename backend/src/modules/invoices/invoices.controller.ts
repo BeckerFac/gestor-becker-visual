@@ -105,6 +105,19 @@ export class InvoicesController {
     }
   }
 
+  async importInvoice(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id || !req.user.id) throw new ApiError(401, 'Unauthorized');
+      const invoice = await invoicesService.importInvoice(req.user.company_id, req.user.id, req.body);
+      res.status(201).json(invoice);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Failed to import invoice' });
+    }
+  }
+
   async authorizeInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');

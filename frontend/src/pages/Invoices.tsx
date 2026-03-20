@@ -164,6 +164,22 @@ export const Invoices: React.FC = () => {
   const [productSearch, setProductSearch] = useState('')
   const [productSearchIdx, setProductSearchIdx] = useState<number | null>(null)
 
+  // Import modal
+  const [showImportForm, setShowImportForm] = useState(false)
+  const [importSaving, setImportSaving] = useState(false)
+  const [importData, setImportData] = useState({
+    invoice_type: 'A' as InvoiceType,
+    invoice_number_full: '',
+    invoice_date: '',
+    cae: '',
+    cae_expiry_date: '',
+    enterprise_id: '',
+    customer_id: '',
+    customer_cuit: '',
+    observations: '',
+  })
+  const [importItems, setImportItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
+
   // Confirm dialog for unlink
   const [unlinkTarget, setUnlinkTarget] = useState<string | null>(null)
   const [unlinking, setUnlinking] = useState(false)
@@ -419,6 +435,86 @@ export const Invoices: React.FC = () => {
     }
   }
 
+  // ---- Import Handlers ----
+
+  const openImportForm = async () => {
+    setImportData({
+      invoice_type: 'A',
+      invoice_number_full: '',
+      invoice_date: '',
+      cae: '',
+      cae_expiry_date: '',
+      enterprise_id: '',
+      customer_id: '',
+      customer_cuit: '',
+      observations: '',
+    })
+    setImportItems([EMPTY_FORM_ITEM()])
+    setShowImportForm(true)
+    await loadFormData()
+  }
+
+  const closeImportForm = () => {
+    setShowImportForm(false)
+  }
+
+  const handleImportItemChange = (idx: number, field: keyof InvoiceItem, value: string | number) => {
+    setImportItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const updated = { ...item, [field]: value }
+      updated.subtotal = calcItemSubtotal(
+        field === 'unit_price' ? Number(value) : updated.unit_price,
+        field === 'quantity' ? Number(value) : updated.quantity,
+      )
+      return updated
+    }))
+  }
+
+  const importTotals = useMemo(() => {
+    const total = importItems.reduce((sum, item) => sum + item.subtotal, 0)
+    const neto = importItems.reduce((sum, item) => sum + item.subtotal / (1 + item.vat_rate / 100), 0)
+    const iva = total - neto
+    return { neto, iva, total }
+  }, [importItems])
+
+  const isImportValid = !!(
+    importData.invoice_type &&
+    /^\d{5}-\d{8}$/.test(importData.invoice_number_full) &&
+    importData.invoice_date &&
+    /^\d{14}$/.test(importData.cae) &&
+    importData.cae_expiry_date &&
+    importData.enterprise_id &&
+    /^\d{11}$/.test(importData.customer_cuit.replace(/-/g, '')) &&
+    importItems.length > 0 &&
+    importItems.every(i => i.product_name.trim() && i.unit_price >= 0 && i.quantity > 0)
+  )
+
+  const handleImportInvoice = async () => {
+    if (!isImportValid) return
+    setImportSaving(true)
+    setError(null)
+    try {
+      await api.importInvoice({
+        ...importData,
+        items: importItems.map(item => ({
+          product_id: item.product_id || null,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          vat_rate: item.vat_rate,
+        })),
+      })
+      toast.success('Factura importada correctamente')
+      closeImportForm()
+      await loadInvoices()
+    } catch (e: any) {
+      toast.error(e.message)
+      setError(e.message)
+    } finally {
+      setImportSaving(false)
+    }
+  }
+
   // ---- Filters ----
 
   const clearFilters = () => {
@@ -558,6 +654,11 @@ export const Invoices: React.FC = () => {
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
+            {vistaMode === 'fiscal' && !showForm && (
+              <Button variant="outline" onClick={showImportForm ? closeImportForm : openImportForm}>
+                {showImportForm ? 'Cancelar importacion' : 'Importar factura manual'}
+              </Button>
+            )}
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
               {showForm ? 'Cancelar' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
             </Button>
@@ -962,6 +1063,266 @@ export const Invoices: React.FC = () => {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Form */}
+      {showImportForm && (
+        <Card className="animate-fadeIn">
+          <CardHeader>
+            <h3 className="text-lg font-semibold">Importar Factura Manual</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Importe una factura ya autorizada externamente en AFIP. Se creara con estado "Autorizada".
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-5">
+              {/* Row 1: Type + Number + Date */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Tipo de comprobante <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {INVOICE_TYPES.map(t => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setImportData(prev => ({ ...prev, invoice_type: t }))}
+                        className={`px-3 py-2 rounded-lg border-2 text-center font-bold transition-colors ${
+                          importData.invoice_type === t
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
+                            : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Numero de comprobante <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="00003-00000001"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={importData.invoice_number_full}
+                    onChange={e => setImportData(prev => ({ ...prev, invoice_number_full: e.target.value }))}
+                  />
+                  {importData.invoice_number_full && !/^\d{5}-\d{8}$/.test(importData.invoice_number_full) && (
+                    <p className="text-xs text-red-500">Formato: PV-Nro (ej: 00003-00000001)</p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Fecha de emision <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={importData.invoice_date}
+                    onChange={e => setImportData(prev => ({ ...prev, invoice_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: CAE + CAE Expiry */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    CAE <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="14 digitos"
+                    maxLength={14}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 font-mono"
+                    value={importData.cae}
+                    onChange={e => setImportData(prev => ({ ...prev, cae: e.target.value.replace(/\D/g, '').slice(0, 14) }))}
+                  />
+                  {importData.cae && importData.cae.length !== 14 && (
+                    <p className="text-xs text-red-500">El CAE debe tener 14 digitos ({importData.cae.length}/14)</p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Fecha vencimiento CAE <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={importData.cae_expiry_date}
+                    onChange={e => setImportData(prev => ({ ...prev, cae_expiry_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Row 3: Enterprise + Customer CUIT */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Cliente / Empresa <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={importData.enterprise_id}
+                    onChange={e => setImportData(prev => ({ ...prev, enterprise_id: e.target.value }))}
+                  >
+                    <option value="">Seleccionar...</option>
+                    {enterprises.map(ent => (
+                      <option key={ent.id} value={ent.id}>{ent.name}{ent.cuit ? ` (${ent.cuit})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    CUIT cliente <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="20123456789"
+                    maxLength={13}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 font-mono"
+                    value={importData.customer_cuit}
+                    onChange={e => setImportData(prev => ({ ...prev, customer_cuit: e.target.value.replace(/[^\d-]/g, '') }))}
+                  />
+                </div>
+              </div>
+
+              {/* Items table */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                  Items <span className="text-red-500">*</span>
+                </label>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600 w-64">Producto / Servicio</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-20">Cant.</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">P. Unitario</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-24">IVA %</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">Subtotal</th>
+                        <th className="px-3 py-2 w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importItems.map((item, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="px-3 py-2">
+                            <input
+                              type="text"
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              placeholder="Nombre del producto..."
+                              value={item.product_name}
+                              onChange={e => handleImportItemChange(idx, 'product_name', e.target.value)}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number" min="1"
+                              className="w-full text-center px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={item.quantity}
+                              onChange={e => handleImportItemChange(idx, 'quantity', parseInt(e.target.value) || 1)}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number" min="0" step="0.01"
+                              className="w-full text-right px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={item.unit_price}
+                              onChange={e => handleImportItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number" step="0.01"
+                              list={`import-vat-list-${idx}`}
+                              className="w-full text-center px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={item.vat_rate}
+                              onChange={e => handleImportItemChange(idx, 'vat_rate', parseFloat(e.target.value))}
+                            />
+                            <datalist id={`import-vat-list-${idx}`}>
+                              {VAT_RATES.map(r => (
+                                <option key={r} value={r}>{r}%</option>
+                              ))}
+                            </datalist>
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-200">
+                            {formatCurrency(item.subtotal)}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setImportItems(prev => prev.filter((_, i) => i !== idx))}
+                              disabled={importItems.length === 1}
+                              className="text-red-400 hover:text-red-700 font-bold text-lg leading-none disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              x
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportItems(prev => [...prev, EMPTY_FORM_ITEM()])}
+                  className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1 mt-2"
+                >
+                  + Agregar item
+                </button>
+              </div>
+
+              {/* Totals */}
+              <div className="flex justify-end">
+                <div className="w-64 space-y-1 text-sm">
+                  <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                    <span>Neto gravado:</span>
+                    <span>{formatCurrency(importTotals.neto)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                    <span>IVA:</span>
+                    <span>{formatCurrency(importTotals.iva)}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-bold border-t border-gray-200 dark:border-gray-700 pt-2 mt-2">
+                    <span>Total:</span>
+                    <span className="text-green-700 dark:text-green-400">{formatCurrency(importTotals.total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Observations */}
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Observaciones <span className="text-xs text-gray-400">(opcional)</span>
+                </label>
+                <textarea
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                  rows={2}
+                  placeholder="Notas adicionales..."
+                  value={importData.observations}
+                  onChange={e => setImportData(prev => ({ ...prev, observations: e.target.value }))}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={closeImportForm}>Cancelar</Button>
+                <Button
+                  variant="primary"
+                  loading={importSaving}
+                  disabled={!isImportValid || importSaving}
+                  onClick={handleImportInvoice}
+                >
+                  Importar Factura
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

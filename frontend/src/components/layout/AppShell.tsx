@@ -4,6 +4,7 @@ import { Header } from './Header'
 import { useUIStore } from '@/stores/uiStore'
 import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner'
 import { AIChatPanel } from '@/components/ai/AIChatPanel'
+import { SecretarIAChatPanel } from '@/components/secretaria/SecretarIAChatPanel'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -35,6 +36,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
       {/* AI Chat Panel - floating button (Premium only, auto-hides if no access) */}
       <AIChatPanel />
+
+      {/* SecretarIA Chat Panel - floating button (visible if SecretarIA enabled) */}
+      <SecretarIAChatPanel />
     </div>
   )
 }

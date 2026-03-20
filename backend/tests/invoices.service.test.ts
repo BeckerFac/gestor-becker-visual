@@ -18,7 +18,7 @@ describe('InvoicesService', () => {
   describe('createInvoice', () => {
     it('creates fiscal invoice in draft status', async () => {
       // migrations
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       // next number query
       mockDbRows([{ next_number: '10' }])
       // customer enterprise lookup
@@ -38,7 +38,7 @@ describe('InvoicesService', () => {
     })
 
     it('creates no_fiscal invoice with status emitido', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       // next number for no_fiscal
       mockDbRows([{ next_number: '1' }])
       // customer enterprise
@@ -57,7 +57,7 @@ describe('InvoicesService', () => {
     })
 
     it('creates interno invoice', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // raw INSERT
@@ -71,7 +71,7 @@ describe('InvoicesService', () => {
     })
 
     it('creates invoice with items and calculates totals', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // no customer enterprise
       mockDbVoid() // INSERT invoice
@@ -95,7 +95,7 @@ describe('InvoicesService', () => {
     })
 
     it('validates quantity is greater than zero', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // INSERT invoice
@@ -111,7 +111,7 @@ describe('InvoicesService', () => {
     })
 
     it('validates unit_price max boundary', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
@@ -127,7 +127,7 @@ describe('InvoicesService', () => {
     })
 
     it('resolves enterprise_id from customer when not provided', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       // customer enterprise lookup returns enterprise
       mockDbRows([{ enterprise_id: 'resolved-ent' }])
@@ -146,7 +146,7 @@ describe('InvoicesService', () => {
 
   describe('getInvoices', () => {
     it('returns invoices with correct format', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid() // migrations
+      for (let i = 0; i < 6; i++) mockDbVoid() // migrations
       // main query
       mockDbRows([{ id: 'inv-1', invoice_number: 1, status: 'draft', total_amount: '1000' }])
       // count query
@@ -161,7 +161,7 @@ describe('InvoicesService', () => {
     })
 
     it('filters by fiscal_type interno', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
       mockDbRows([{ total: '0' }])
 
@@ -170,7 +170,7 @@ describe('InvoicesService', () => {
     })
 
     it('filters by fiscal_type no_fiscal', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
       mockDbRows([{ total: '0' }])
 
@@ -179,7 +179,7 @@ describe('InvoicesService', () => {
     })
 
     it('filters by enterprise_id', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
       mockDbRows([{ total: '0' }])
 
@@ -188,7 +188,7 @@ describe('InvoicesService', () => {
     })
 
     it('clamps skip and limit to safe ranges', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
       mockDbRows([{ total: '0' }])
 
@@ -218,7 +218,7 @@ describe('InvoicesService', () => {
 
   describe('updateDraftInvoice', () => {
     it('only works on draft or emitido invoices', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid() // migrations
+      for (let i = 0; i < 6; i++) mockDbVoid() // migrations
       // Invoice is 'authorized' - not editable
       mockDbRows([{ id: 'inv-1', status: 'authorized' }])
 
@@ -228,7 +228,7 @@ describe('InvoicesService', () => {
     })
 
     it('throws 404 when invoice not found', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
 
       await expect(
@@ -239,7 +239,7 @@ describe('InvoicesService', () => {
 
   describe('deleteDraftInvoice', () => {
     it('only works on draft or emitido invoices', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ id: 'inv-1', status: 'authorized', order_id: null }])
 
       await expect(
@@ -248,7 +248,7 @@ describe('InvoicesService', () => {
     })
 
     it('deletes draft invoice and recalculates order has_invoice', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ id: 'inv-1', status: 'draft', order_id: 'order-1' }])
       // Count remaining invoices for the order
       mockDbRows([{ cnt: '0' }])
@@ -260,7 +260,7 @@ describe('InvoicesService', () => {
     })
 
     it('throws 404 when invoice not found', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbEmpty()
 
       await expect(
@@ -271,7 +271,7 @@ describe('InvoicesService', () => {
 
   describe('edge cases', () => {
     it('handles invoice with negative amount in validation', async () => {
-      for (let i = 0; i < 5; i++) mockDbVoid()
+      for (let i = 0; i < 6; i++) mockDbVoid()
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()

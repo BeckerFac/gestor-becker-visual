@@ -6,6 +6,8 @@ import { secretariaService } from './secretaria.service';
 import { whatsappClient } from './secretaria.whatsapp';
 import { secretariaScheduler, isValidTimeFormat, isValidTimezone, isValidBriefSections } from './secretaria.scheduler';
 import { ApiError } from '../../middlewares/errorHandler';
+import { db } from '../../config/db';
+import { sql } from 'drizzle-orm';
 import logger from '../../config/logger';
 
 class SecretariaController {
@@ -57,6 +59,59 @@ class SecretariaController {
         logger.error({ err }, 'SecretarIA: unhandled error in webhook processing');
       });
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // POST /chat — In-app web chat (JWT auth, no WhatsApp)
+  // --------------------------------------------------------------------------
+
+  async chat(req: AuthRequest, res: Response): Promise<void> {
+    const companyId = req.user!.company_id;
+    const userId = req.user!.id;
+    const { message, type } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      throw new ApiError(400, 'El campo "message" es requerido');
+    }
+
+    if (message.trim().length === 0) {
+      throw new ApiError(400, 'El mensaje no puede estar vacio');
+    }
+
+    if (message.length > 2000) {
+      throw new ApiError(400, 'El mensaje es demasiado largo (maximo 2000 caracteres)');
+    }
+
+    // Get user display name from DB (not in JWT payload)
+    let userName = 'Usuario';
+    try {
+      const userResult = await db.execute(sql`SELECT name FROM users WHERE id = ${userId} LIMIT 1`);
+      const userRows = (userResult as any).rows || userResult || [];
+      if (userRows.length > 0 && userRows[0].name) {
+        userName = userRows[0].name;
+      }
+    } catch { /* fallback to default */ }
+
+    const result = await secretariaService.handleWebChat(
+      companyId,
+      userId,
+      message.trim(),
+      userName,
+    );
+
+    res.json(result);
+  }
+
+  // --------------------------------------------------------------------------
+  // GET /chat/history — Load web chat history for current user
+  // --------------------------------------------------------------------------
+
+  async getChatHistory(req: AuthRequest, res: Response): Promise<void> {
+    const companyId = req.user!.company_id;
+    const userId = req.user!.id;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const messages = await secretariaService.getWebChatHistory(companyId, userId, limit);
+    res.json({ messages });
   }
 
   // --------------------------------------------------------------------------

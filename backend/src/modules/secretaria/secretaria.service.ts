@@ -287,6 +287,125 @@ class SecretariaService {
   }
 
   // --------------------------------------------------------------------------
+  // handleWebChat — In-app chat entry point (no WhatsApp, uses JWT identity)
+  // --------------------------------------------------------------------------
+
+  async handleWebChat(
+    companyId: string,
+    userId: string,
+    message: string,
+    displayName: string,
+  ): Promise<{ response: string; intent: string; attachments?: { type: string; url: string; name: string }[] }> {
+    const channelId = `web-${userId}`;
+
+    // Step 1: Check if SecretarIA is enabled
+    const config = await this.getConfig(companyId);
+    if (!config.enabled) {
+      return {
+        response: 'SecretarIA esta desactivada. Activa SecretarIA desde Configuracion > SecretarIA.',
+        intent: 'disabled',
+      };
+    }
+
+    // Step 2: Check usage limits
+    const usageLimits = await secretariaMemory.checkUsageLimits(companyId);
+    if (!usageLimits.withinLimits) {
+      return {
+        response: 'Se alcanzo el limite mensual de mensajes. Contacta a soporte para ampliar tu plan.',
+        intent: 'limit_exceeded',
+      };
+    }
+
+    // Step 3: Truncate very long messages
+    const truncatedMessage = message.slice(0, 2000);
+
+    // Step 4: Save user message
+    await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
+
+    // Step 5: Load context
+    const recentMessages = await this.loadRecentMessages(
+      companyId,
+      channelId,
+      SECRETARIA_CONFIG.context.recentMessagesCount,
+    );
+    const companyName = await this.getCompanyName(companyId);
+    const memoryContext = await secretariaMemory.getMemoryContext(companyId, userId);
+    const memory: Record<string, string> = memoryContext ? { context: memoryContext } : {};
+
+    const context: SecretariaContext = {
+      companyId,
+      userId,
+      phoneNumber: channelId,
+      displayName,
+      recentMessages,
+      memory,
+    };
+
+    try {
+      // Step 6: Classify intent
+      const intentResult = await classifyIntent(truncatedMessage, context);
+
+      // Step 7: Execute tool
+      const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId);
+
+      // Step 8: Generate response
+      const responseText = await generateResponse(toolResult, context, companyName);
+
+      // Step 9: Save assistant message
+      await this.saveConversationMessage(companyId, channelId, 'assistant', responseText);
+
+      // Step 10: Track usage
+      await secretariaMemory.trackUsage(companyId, {
+        messages_received: 1,
+        messages_sent: 1,
+      });
+
+      // Step 11: Detect and save memory
+      await secretariaMemory.detectAndSaveMemory(companyId, userId, truncatedMessage, responseText);
+
+      return {
+        response: responseText,
+        intent: intentResult.intent,
+      };
+    } catch (error: any) {
+      logger.error({ err: error, companyId, userId }, 'SecretarIA: error in web chat pipeline');
+      return {
+        response: 'Perdon, tuve un problema procesando tu consulta. Intenta de nuevo en unos segundos.',
+        intent: 'error',
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // getWebChatHistory — Load recent web chat messages for a user
+  // --------------------------------------------------------------------------
+
+  async getWebChatHistory(
+    companyId: string,
+    userId: string,
+    limit: number = 50,
+  ): Promise<readonly ConversationMessage[]> {
+    const channelId = `web-${userId}`;
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+
+    const result = await db.execute(sql`
+      SELECT role, content, created_at
+      FROM secretaria_conversations
+      WHERE company_id = ${companyId} AND phone_number = ${channelId}
+      ORDER BY created_at DESC
+      LIMIT ${safeLimit}
+    `);
+
+    const rows = (result as any).rows || result || [];
+    // Reverse to get chronological order
+    return rows.reverse().map((row: any) => ({
+      role: row.role,
+      content: row.content,
+      created_at: new Date(row.created_at),
+    }));
+  }
+
+  // --------------------------------------------------------------------------
   // Phone linking
   // --------------------------------------------------------------------------
 

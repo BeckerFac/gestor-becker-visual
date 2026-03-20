@@ -19,6 +19,21 @@ secretariaRouter.post('/webhook', (req, res) => secretariaController.handleWebho
 
 const auth = [authMiddleware];
 
+// In-app web chat
+secretariaRouter.post(
+  '/chat',
+  ...auth,
+  authorize('secretaria', 'view'),
+  (req, res) => secretariaController.chat(req as any, res),
+);
+
+secretariaRouter.get(
+  '/chat/history',
+  ...auth,
+  authorize('secretaria', 'view'),
+  (req, res) => secretariaController.getChatHistory(req as any, res),
+);
+
 secretariaRouter.get(
   '/config',
   ...auth,

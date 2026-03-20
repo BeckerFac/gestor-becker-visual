@@ -213,6 +213,7 @@ export const Dashboard: React.FC = () => {
   const allKpis = [
     {
       label: `Facturado ${periodLabel}`,
+      helpTip: 'Total de facturas autorizadas con AFIP en el periodo seleccionado. No incluye borradores ni facturas no fiscales.',
       value: formatCurrency(dashboard?.sales_month || 0),
       color: 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40',
       textColor: 'text-blue-800 dark:text-blue-300',
@@ -222,6 +223,7 @@ export const Dashboard: React.FC = () => {
     },
     {
       label: 'Por Cobrar',
+      helpTip: 'Facturas autorizadas que aun no fueron cobradas. Solo incluye facturas con CAE de AFIP, no pedidos sin facturar.',
       value: formatCurrency(dashboard?.collections_pending || 0),
       color: 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/40',
       textColor: 'text-orange-800 dark:text-orange-300',
@@ -231,6 +233,7 @@ export const Dashboard: React.FC = () => {
     },
     {
       label: `Cheques a Cobrar (${dashboard?.cheques_pending_count || 0})`,
+      helpTip: 'Cheques registrados con estado \'A Cobrar\'. Muestra cantidad y monto total.',
       value: formatCurrency(dashboard?.cheques_pending_amount || 0),
       color: 'border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/40',
       textColor: 'text-purple-800 dark:text-purple-300',
@@ -240,6 +243,7 @@ export const Dashboard: React.FC = () => {
     },
     {
       label: `Pedidos sin Pagar (${dashboard?.orders_unpaid_count || 0})`,
+      helpTip: 'Pedidos con estado de pago \'pendiente\' o \'parcial\'. Incluye todos los pedidos sin importar si fueron facturados o no.',
       value: formatCurrency(dashboard?.orders_unpaid_amount || 0),
       color: 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40',
       textColor: 'text-red-800 dark:text-red-300',
@@ -407,7 +411,10 @@ export const Dashboard: React.FC = () => {
             onClick={kpi.onClick}
           >
             <CardContent className="pt-5 pb-4">
-              <p className={`text-sm font-medium ${kpi.labelColor} truncate`}>{kpi.label}</p>
+              <p className={`text-sm font-medium ${kpi.labelColor} flex items-center`}>
+                <span className="truncate">{kpi.label}</span>
+                <HelpTip text={kpi.helpTip} />
+              </p>
               <p className={`text-lg md:text-2xl font-bold mt-1 ${kpi.textColor} truncate`}>{kpi.value}</p>
             </CardContent>
           </Card>

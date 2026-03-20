@@ -496,6 +496,10 @@ export const api = {
     const { data } = await client.post('/invoices', invoiceData)
     return data
   },
+  importInvoice: async (importData: any) => {
+    const { data } = await client.post('/invoices/import', importData)
+    return data
+  },
   getInvoice: async (id: string) => {
     const { data } = await client.get(`/invoices/${id}`)
     return data
@@ -1308,7 +1312,18 @@ export const api = {
     return data
   },
 
-  // SecretarIA (WhatsApp Assistant)
+  // SecretarIA (WhatsApp Assistant + In-App Chat)
+  secretariaChat: async (message: string) => {
+    const { data } = await client.post('/secretaria/chat', { message, type: 'text' })
+    return data
+  },
+  secretariaChatHistory: async (limit?: number) => {
+    const params = new URLSearchParams()
+    if (limit) params.append('limit', String(limit))
+    const { data } = await client.get(`/secretaria/chat/history?${params.toString()}`)
+    return data
+  },
+
   getSecretariaConfig: async () => {
     const { data } = await client.get('/secretaria/config')
     return data

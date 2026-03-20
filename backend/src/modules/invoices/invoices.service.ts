@@ -25,6 +25,7 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);
       await db.execute(sql`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS order_item_id UUID REFERENCES order_items(id)`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source VARCHAR(30) DEFAULT 'system'`);
       // Add 'emitido' status value for internal vouchers
       await db.execute(sql`ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'emitido'`).catch(() => {});
       this.migrationsRun = true;
@@ -506,6 +507,131 @@ export class InvoicesService {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Error al eliminar borrador');
+    }
+  }
+
+  async importInvoice(companyId: string, userId: string, data: any) {
+    await this.ensureMigrations();
+    try {
+      // Validate required fields
+      if (!data.invoice_type || !['A', 'B', 'C'].includes(data.invoice_type)) {
+        throw new ApiError(400, 'Tipo de comprobante invalido (debe ser A, B o C)');
+      }
+      if (!data.invoice_number_full || !/^\d{5}-\d{8}$/.test(data.invoice_number_full)) {
+        throw new ApiError(400, 'Numero de comprobante invalido (formato: 00003-00000001)');
+      }
+      if (!data.invoice_date) {
+        throw new ApiError(400, 'Fecha de emision es requerida');
+      }
+      if (!data.cae || !/^\d{14}$/.test(data.cae)) {
+        throw new ApiError(400, 'CAE invalido (debe ser de 14 digitos)');
+      }
+      if (!data.cae_expiry_date) {
+        throw new ApiError(400, 'Fecha de vencimiento del CAE es requerida');
+      }
+      if (!data.enterprise_id) {
+        throw new ApiError(400, 'Cliente/Empresa es requerido');
+      }
+      if (!data.customer_cuit || !/^\d{11}$/.test(data.customer_cuit.replace(/-/g, ''))) {
+        throw new ApiError(400, 'CUIT del cliente invalido (debe ser de 11 digitos)');
+      }
+      if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+        throw new ApiError(400, 'Debe incluir al menos un item');
+      }
+
+      // Parse invoice number parts
+      const [pvStr, nroStr] = data.invoice_number_full.split('-');
+      const puntoVenta = parseInt(pvStr);
+      const invoiceNumber = parseInt(nroStr);
+
+      // Check for duplicate CAE
+      const dupCheck = await db.execute(sql`
+        SELECT id FROM invoices WHERE company_id = ${companyId} AND cae = ${data.cae}
+      `);
+      if (((dupCheck as any).rows || []).length > 0) {
+        throw new ApiError(400, 'Ya existe una factura con este CAE');
+      }
+
+      const invoiceId = uuid();
+
+      // Resolve enterprise_id and customer_id
+      let enterpriseId = data.enterprise_id || null;
+      let customerId = data.customer_id || null;
+
+      // Calculate totals from items
+      let subtotal = 0;
+      let vatAmount = 0;
+
+      for (const item of data.items) {
+        const unitPrice = validateNumeric(item.unit_price || 0, 'Precio unitario', { min: 0, max: 999999999 });
+        const vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
+        const qty = validateNumeric(item.quantity, 'Cantidad', { min: 0.001, max: 999999, allowZero: false });
+        const itemSubtotal = unitPrice * qty;
+        const itemVat = itemSubtotal * (vatRate / 100);
+        subtotal += itemSubtotal;
+        vatAmount += itemVat;
+      }
+
+      const total = subtotal + vatAmount;
+
+      // Create invoice with status 'authorized' directly
+      await db.insert(invoices).values({
+        id: invoiceId,
+        company_id: companyId,
+        customer_id: customerId,
+        invoice_type: data.invoice_type,
+        invoice_number: invoiceNumber,
+        invoice_date: new Date(data.invoice_date),
+        subtotal: subtotal.toString(),
+        vat_amount: vatAmount.toString(),
+        total_amount: total.toString(),
+        cae: data.cae,
+        cae_expiry_date: new Date(data.cae_expiry_date),
+        status: 'authorized',
+        created_by: userId,
+      }).returning();
+
+      // Set enterprise_id, fiscal_type, and source via raw SQL (migration columns)
+      await db.execute(sql`
+        UPDATE invoices SET
+          enterprise_id = ${enterpriseId},
+          fiscal_type = 'fiscal',
+          source = 'manual_import',
+          afip_response = ${JSON.stringify({ PuntoVenta: puntoVenta, ManualImport: true })}::jsonb
+        WHERE id = ${invoiceId}
+      `);
+
+      // Add items
+      for (const item of data.items) {
+        const unitPrice = validateNumeric(item.unit_price || 0, 'Precio unitario', { min: 0, max: 999999999 });
+        const vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
+        const qty = validateNumeric(item.quantity, 'Cantidad', { min: 0.001, max: 999999, allowZero: false });
+        const itemSubtotal = unitPrice * qty;
+
+        const itemId = uuid();
+        await db.insert(invoice_items).values({
+          id: itemId,
+          invoice_id: invoiceId,
+          product_id: item.product_id || null,
+          product_name: item.product_name || '',
+          quantity: qty.toString(),
+          unit_price: unitPrice.toString(),
+          vat_rate: vatRate.toString(),
+          subtotal: itemSubtotal.toString(),
+        });
+      }
+
+      return {
+        id: invoiceId,
+        enterprise_id: enterpriseId,
+        fiscal_type: 'fiscal',
+        source: 'manual_import',
+        status: 'authorized',
+      };
+    } catch (error) {
+      console.error('Import invoice error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Error al importar factura');
     }
   }
 
