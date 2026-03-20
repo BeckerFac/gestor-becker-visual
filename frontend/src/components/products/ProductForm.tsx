@@ -35,6 +35,12 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [categoryId, setCategoryId] = useState<string>((initialForm as any)?.category_id || '')
   const [categoryDefaultApplied, setCategoryDefaultApplied] = useState<string | null>(null)
 
+  // Price criteria state
+  const [priceCriteria, setPriceCriteria] = useState<{ id: string; name: string; sort_order: number }[]>([])
+  const [criteriaProductPrices, setCriteriaProductPrices] = useState<Record<string, string>>({})
+  const [newCriteriaName, setNewCriteriaName] = useState('')
+  const [creatingCriteria, setCreatingCriteria] = useState(false)
+
   // BOM state
   const [bomComponents, setBomComponents] = useState<any[]>([])
   const [bomCost, setBomCost] = useState<number | null>(null)
@@ -57,9 +63,29 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     finally { setBomLoading(false) }
   }, [])
 
+  const loadPriceCriteria = useCallback(async (productId?: string) => {
+    try {
+      const criteria = await api.getPriceCriteria().catch(() => [])
+      setPriceCriteria(Array.isArray(criteria) ? criteria : [])
+      if (productId) {
+        const productPrices = await api.getProductPrices(productId).catch(() => [])
+        const priceMap: Record<string, string> = {}
+        for (const pp of (Array.isArray(productPrices) ? productPrices : [])) {
+          priceMap[pp.criteria_name] = String(pp.price)
+        }
+        setCriteriaProductPrices(priceMap)
+      }
+    } catch { setPriceCriteria([]); setCriteriaProductPrices({}) }
+  }, [])
+
   useEffect(() => {
-    if (editingId) loadBOM(editingId)
-  }, [editingId, loadBOM])
+    if (editingId) {
+      loadBOM(editingId)
+      loadPriceCriteria(editingId)
+    } else {
+      loadPriceCriteria()
+    }
+  }, [editingId, loadBOM, loadPriceCriteria])
 
   const recalcFrom = useCallback((field: string, value: string, currentForm: ProductFormType) => {
     const cost = field === 'cost' ? (parseFloat(value) || 0) : (parseFloat(currentForm.cost) || 0)
@@ -162,13 +188,28 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         controls_stock: form.controls_stock,
         low_stock_threshold: form.controls_stock ? parseFloat(form.low_stock_threshold) || 0 : 0,
       }
+      let productId = editingId
       if (editingId) {
         await api.updateProduct(editingId, payload)
-        toast.success('Producto actualizado')
       } else {
-        await api.createProduct(payload)
-        toast.success('Producto creado')
+        const created = await api.createProduct(payload)
+        productId = created?.id || created?.product?.id
       }
+
+      // Save criteria prices if any
+      if (productId) {
+        const pricesObj: Record<string, number> = {}
+        for (const [name, val] of Object.entries(criteriaProductPrices)) {
+          if (val !== '' && val !== undefined) {
+            pricesObj[name] = parseFloat(val) || 0
+          }
+        }
+        if (Object.keys(pricesObj).length > 0) {
+          await api.setProductPrices(productId, pricesObj).catch(() => {})
+        }
+      }
+
+      toast.success(editingId ? 'Producto actualizado' : 'Producto creado')
       onSaved()
     } catch (e: any) {
       toast.error(e.message)
@@ -345,6 +386,88 @@ export const ProductForm: React.FC<ProductFormProps> = ({
               </div>
             </div>
             <p className="text-xs text-gray-400 mt-2">Modifica cualquier campo y los otros se recalculan automaticamente</p>
+          </div>
+
+          {/* Price Criteria Section */}
+          <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Precios por lista</h4>
+
+            {/* Base price (read-only) */}
+            <div className="flex items-center justify-between py-2 px-3 bg-green-50 dark:bg-green-900/20 rounded-lg mb-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Base</span>
+              <span className="text-sm font-bold text-green-700 dark:text-green-400">
+                {formatCurrency(parseFloat(form.final_price) || 0)}
+              </span>
+            </div>
+
+            {/* Criteria rows */}
+            {priceCriteria.map(c => (
+              <div key={c.id} className="flex items-center gap-2 py-1.5 px-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg mb-1">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">{c.name}</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-400">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Usar precio base"
+                    className="w-32 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-right"
+                    value={criteriaProductPrices[c.name] ?? ''}
+                    onChange={e => setCriteriaProductPrices(prev => ({ ...prev, [c.name]: e.target.value }))}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCriteriaProductPrices(prev => {
+                      const next = { ...prev }
+                      delete next[c.name]
+                      return next
+                    })
+                  }}
+                  className="text-red-400 hover:text-red-600 text-xs px-1"
+                  title="Quitar precio (usar base)"
+                >
+                  x
+                </button>
+              </div>
+            ))}
+
+            {/* Add criteria inline */}
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                className="flex-1 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                placeholder="Nuevo criterio (ej: Mayorista)"
+                value={newCriteriaName}
+                onChange={e => setNewCriteriaName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (!newCriteriaName.trim()) return
+                    setCreatingCriteria(true)
+                    api.createPriceCriteria(newCriteriaName.trim())
+                      .then(() => { setNewCriteriaName(''); loadPriceCriteria(editingId || undefined) })
+                      .catch((err: any) => toast.error(err.message || 'Error al crear criterio'))
+                      .finally(() => setCreatingCriteria(false))
+                  }
+                }}
+              />
+              <button
+                type="button"
+                disabled={creatingCriteria || !newCriteriaName.trim()}
+                onClick={() => {
+                  if (!newCriteriaName.trim()) return
+                  setCreatingCriteria(true)
+                  api.createPriceCriteria(newCriteriaName.trim())
+                    .then(() => { setNewCriteriaName(''); loadPriceCriteria(editingId || undefined) })
+                    .catch((err: any) => toast.error(err.message || 'Error al crear criterio'))
+                    .finally(() => setCreatingCriteria(false))
+                }}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {creatingCriteria ? '...' : '+ Agregar criterio'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Los precios por lista se guardan junto con el producto</p>
           </div>
 
           {/* BOM Section */}

@@ -63,6 +63,13 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
   // Price lists for this product
   const [productPriceLists, setProductPriceLists] = useState<any[]>([])
 
+  // Price criteria
+  const [priceCriteria, setPriceCriteria] = useState<{ id: string; name: string; sort_order: number }[]>([])
+  const [criteriaProductPrices, setCriteriaProductPrices] = useState<Record<string, string>>({})
+  const [newCriteriaName, setNewCriteriaName] = useState('')
+  const [creatingCriteria, setCreatingCriteria] = useState(false)
+  const [savingCriteriaPrices, setSavingCriteriaPrices] = useState(false)
+
   // Price history
   const [priceHistory, setPriceHistory] = useState<any[]>([])
   const [priceHistoryTotal, setPriceHistoryTotal] = useState(0)
@@ -91,6 +98,22 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
       setBomCost(costData?.bom_cost ? parseFloat(costData.bom_cost) : null)
     } catch { setBomComponents([]); setBomCost(null) }
     finally { setBomLoading(false) }
+  }, [product.id])
+
+  // Load price criteria and product prices
+  const loadPriceCriteria = useCallback(async () => {
+    try {
+      const [criteria, productPrices] = await Promise.all([
+        api.getPriceCriteria().catch(() => []),
+        api.getProductPrices(product.id).catch(() => []),
+      ])
+      setPriceCriteria(Array.isArray(criteria) ? criteria : [])
+      const priceMap: Record<string, string> = {}
+      for (const pp of (Array.isArray(productPrices) ? productPrices : [])) {
+        priceMap[pp.criteria_name] = String(pp.price)
+      }
+      setCriteriaProductPrices(priceMap)
+    } catch { setPriceCriteria([]); setCriteriaProductPrices({}) }
   }, [product.id])
 
   // Load price lists
@@ -128,8 +151,9 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
     if (activeTab === 'precios') {
       loadPriceLists()
       loadPriceHistory(10)
+      loadPriceCriteria()
     }
-  }, [activeTab, loadMovements, loadBOM, loadPriceLists, loadPriceHistory])
+  }, [activeTab, loadMovements, loadBOM, loadPriceLists, loadPriceHistory, loadPriceCriteria])
 
   // Close on Escape
   useEffect(() => {
@@ -396,6 +420,115 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({
                 </div>
               </div>
               <Button variant="success" onClick={handleSavePricing} loading={saving}>Guardar Precios</Button>
+
+              {/* Precios por lista (criteria) */}
+              <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Precios por lista</h4>
+
+                {/* Base price row (read-only) */}
+                <div className="flex items-center justify-between py-2 px-3 bg-green-50 dark:bg-green-900/20 rounded-lg mb-2">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Base</span>
+                  <span className="text-sm font-bold text-green-700 dark:text-green-400">
+                    {formatCurrency(parseFloat(pricingForm.final_price) || 0)}
+                  </span>
+                </div>
+
+                {/* Criteria rows */}
+                {priceCriteria.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 py-1.5 px-3 bg-gray-50 dark:bg-gray-800 rounded-lg mb-1">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">{c.name}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-400">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Usar precio base"
+                        className="w-32 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-right"
+                        value={criteriaProductPrices[c.name] ?? ''}
+                        onChange={e => setCriteriaProductPrices(prev => ({ ...prev, [c.name]: e.target.value }))}
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        setCriteriaProductPrices(prev => {
+                          const next = { ...prev }
+                          delete next[c.name]
+                          return next
+                        })
+                      }}
+                      className="text-red-400 hover:text-red-600 text-xs px-1"
+                      title="Quitar precio (usar base)"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add criteria inline */}
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    className="flex-1 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                    placeholder="Nuevo criterio (ej: Mayorista)"
+                    value={newCriteriaName}
+                    onChange={e => setNewCriteriaName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (!newCriteriaName.trim()) return
+                        setCreatingCriteria(true)
+                        api.createPriceCriteria(newCriteriaName.trim())
+                          .then(() => { setNewCriteriaName(''); loadPriceCriteria() })
+                          .catch((err: any) => toast.error(err.message || 'Error al crear criterio'))
+                          .finally(() => setCreatingCriteria(false))
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={creatingCriteria || !newCriteriaName.trim()}
+                    onClick={() => {
+                      if (!newCriteriaName.trim()) return
+                      setCreatingCriteria(true)
+                      api.createPriceCriteria(newCriteriaName.trim())
+                        .then(() => { setNewCriteriaName(''); loadPriceCriteria() })
+                        .catch((err: any) => toast.error(err.message || 'Error al crear criterio'))
+                        .finally(() => setCreatingCriteria(false))
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {creatingCriteria ? '...' : '+ Agregar criterio'}
+                  </button>
+                </div>
+
+                {/* Save criteria prices */}
+                {priceCriteria.length > 0 && (
+                  <div className="mt-3">
+                    <Button
+                      variant="success"
+                      loading={savingCriteriaPrices}
+                      onClick={async () => {
+                        setSavingCriteriaPrices(true)
+                        try {
+                          const pricesObj: Record<string, number> = {}
+                          for (const [name, val] of Object.entries(criteriaProductPrices)) {
+                            if (val !== '' && val !== undefined) {
+                              pricesObj[name] = parseFloat(val) || 0
+                            }
+                          }
+                          await api.setProductPrices(product.id, pricesObj)
+                          toast.success('Precios por lista guardados')
+                        } catch (err: any) {
+                          toast.error(err.message || 'Error al guardar precios')
+                        } finally {
+                          setSavingCriteriaPrices(false)
+                        }
+                      }}
+                    >
+                      Guardar precios por lista
+                    </Button>
+                  </div>
+                )}
+              </div>
 
               {/* Price lists for this product */}
               {productPriceLists.length > 0 && (

@@ -712,6 +712,8 @@ async function applyRowLevelSecurity() {
     'secretaria_pending_actions',
     'secretaria_ai_errors',
     'account_adjustments',
+    'price_criteria',
+    'product_prices',
   ];
 
   for (const table of tablesWithCompanyId) {
@@ -814,6 +816,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'warehouses', fk: 'company_id' },
     { name: 'suppliers', fk: 'company_id' },
     { name: 'account_adjustments', fk: 'company_id' },
+    { name: 'price_criteria', fk: 'company_id' },
+    { name: 'product_prices', fk: 'company_id' },
   ];
 
   // Child tables accessed via parent FK (no direct company_id)

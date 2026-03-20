@@ -125,6 +125,11 @@ export const Quotes: React.FC = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
 
+  // Price criteria
+  const [priceCriteriaList, setPriceCriteriaList] = useState<{ id: string; name: string }[]>([])
+  const [selectedPriceCriteria, setSelectedPriceCriteria] = useState('')
+  const [criteriaProductPricesCache, setCriteriaProductPricesCache] = useState<Record<string, Record<string, number>>>({})
+
   // Form state
   const [form, setForm] = useState({
     title: '',
@@ -168,14 +173,16 @@ export const Quotes: React.FC = () => {
   }, [filterEnterprise, filterStatus, filterSearch, filterDateFrom, filterDateTo])
 
   const loadStaticData = useCallback(async () => {
-    const [custRes, prodRes, entRes] = await Promise.all([
+    const [custRes, prodRes, entRes, criteriaRes] = await Promise.all([
       api.getCustomers().catch(() => ({ items: [] })),
       api.getProducts().catch(() => ({ items: [] })),
       api.getEnterprises().catch(() => []),
+      api.getPriceCriteria().catch(() => []),
     ])
     setCustomers(custRes.items || custRes || [])
     setProducts(prodRes.items || prodRes || [])
     setEnterprises(Array.isArray(entRes) ? entRes : (entRes.items || []))
+    setPriceCriteriaList(Array.isArray(criteriaRes) ? criteriaRes : [])
   }, [])
 
   useEffect(() => {
@@ -221,6 +228,29 @@ export const Quotes: React.FC = () => {
         updated[idx].product_name = prod.name
         if (prod.pricing?.final_price) updated[idx].unit_price = prod.pricing.final_price
         if (prod.pricing?.vat_rate) updated[idx].vat_rate = prod.pricing.vat_rate
+
+        // If a price criteria is selected, use criteria price
+        if (selectedPriceCriteria) {
+          const cached = criteriaProductPricesCache[value]
+          if (cached && cached[selectedPriceCriteria] !== undefined) {
+            updated[idx].unit_price = String(cached[selectedPriceCriteria])
+          } else {
+            api.getProductPrices(value).then(prices => {
+              const priceMap: Record<string, number> = {}
+              for (const pp of (Array.isArray(prices) ? prices : [])) {
+                priceMap[pp.criteria_name] = parseFloat(pp.price) || 0
+              }
+              setCriteriaProductPricesCache(prev => ({ ...prev, [value]: priceMap }))
+              if (priceMap[selectedPriceCriteria] !== undefined) {
+                setItems(prev => {
+                  const newItems = [...prev]
+                  newItems[idx] = { ...newItems[idx], unit_price: String(priceMap[selectedPriceCriteria]) }
+                  return newItems
+                })
+              }
+            }).catch(() => {})
+          }
+        }
       }
     }
 
@@ -480,6 +510,67 @@ export const Quotes: React.FC = () => {
                 onEnterpriseChange={id => setFormEnterpriseId(id)}
                 onCustomerChange={id => setForm({ ...form, customer_id: id })}
               />
+
+              {/* Price criteria selector */}
+              {priceCriteriaList.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Lista de precios<HelpTip text="Al seleccionar una lista, los precios de los productos se ajustan automaticamente. Si un producto no tiene precio en esa lista, usa el precio base." /></label>
+                  <select
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs"
+                    value={selectedPriceCriteria}
+                    onChange={e => {
+                      const criteria = e.target.value
+                      setSelectedPriceCriteria(criteria)
+                      // Re-apply prices to existing items
+                      if (criteria) {
+                        setItems(prevItems => {
+                          return prevItems.map((item, idx) => {
+                            if (!item.product_id) return item
+                            const prod = products.find(p => p.id === item.product_id)
+                            const cached = criteriaProductPricesCache[item.product_id]
+                            if (cached && cached[criteria] !== undefined) {
+                              return { ...item, unit_price: String(cached[criteria]) }
+                            }
+                            // Load from API
+                            api.getProductPrices(item.product_id).then(prices => {
+                              const priceMap: Record<string, number> = {}
+                              for (const pp of (Array.isArray(prices) ? prices : [])) {
+                                priceMap[pp.criteria_name] = parseFloat(pp.price) || 0
+                              }
+                              setCriteriaProductPricesCache(prev => ({ ...prev, [item.product_id]: priceMap }))
+                              if (priceMap[criteria] !== undefined) {
+                                setItems(prev => {
+                                  const updated = [...prev]
+                                  updated[idx] = { ...updated[idx], unit_price: String(priceMap[criteria]) }
+                                  return updated
+                                })
+                              }
+                            }).catch(() => {})
+                            return item
+                          })
+                        })
+                      } else {
+                        // Revert to base prices
+                        setItems(prevItems => {
+                          return prevItems.map(item => {
+                            if (!item.product_id) return item
+                            const prod = products.find(p => p.id === item.product_id)
+                            if (prod?.pricing?.final_price) {
+                              return { ...item, unit_price: prod.pricing.final_price }
+                            }
+                            return item
+                          })
+                        })
+                      }
+                    }}
+                  >
+                    <option value="">Base (precio por defecto)</option>
+                    {priceCriteriaList.map(c => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Items section */}
               <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">

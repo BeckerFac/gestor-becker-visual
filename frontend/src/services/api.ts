@@ -415,6 +415,28 @@ export const api = {
     return data
   },
 
+  // Price Criteria
+  getPriceCriteria: async () => {
+    const { data } = await client.get('/price-criteria')
+    return data
+  },
+  createPriceCriteria: async (name: string) => {
+    const { data } = await client.post('/price-criteria', { name })
+    return data
+  },
+  deletePriceCriteria: async (id: string) => {
+    const { data } = await client.delete(`/price-criteria/${id}`)
+    return data
+  },
+  getProductPrices: async (productId: string) => {
+    const { data } = await client.get(`/products/${productId}/prices`)
+    return data
+  },
+  setProductPrices: async (productId: string, prices: Record<string, number>) => {
+    const { data } = await client.put(`/products/${productId}/prices`, { prices })
+    return data
+  },
+
   // Product Components (BOM)
   getProductComponents: async (productId: string) => {
     const { data } = await client.get(`/products/${productId}/components`)

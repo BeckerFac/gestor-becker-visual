@@ -287,8 +287,8 @@ export const Products: React.FC = () => {
     { key: 'productos', label: 'Productos', show: true },
     { key: 'movimientos', label: 'Stock / Movimientos', show: true },
     { key: 'tipos', label: 'Tipos', show: true },
-    { key: 'categorias', label: 'Categorias', show: true },
-    { key: 'listas', label: 'Listas de Precios', show: true },
+    { key: 'categorias', label: 'Categorias', show: false },
+    { key: 'listas', label: 'Listas de Precios', show: false },
   ]
 
   return (

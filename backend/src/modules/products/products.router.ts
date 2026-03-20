@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { productsController } from './products.controller';
 import { productComponentsController } from '../product-components/product-components.controller';
+import { priceCriteriaController } from '../price-criteria/price-criteria.controller';
 import { authorize } from '../../middlewares/authorize';
 
 export const productsRouter = Router();
@@ -25,6 +26,10 @@ productsRouter.post('/', authorize('products', 'create'), (req, res) => products
 productsRouter.get('/:id', authorize('products', 'view'), (req, res) => productsController.getProduct(req, res));
 productsRouter.put('/:id', authorize('products', 'edit'), (req, res) => productsController.updateProduct(req, res));
 productsRouter.delete('/:id', authorize('products', 'delete'), (req, res) => productsController.deleteProduct(req, res));
+
+// Product prices (per criteria)
+productsRouter.get('/:id/prices', authorize('products', 'view'), (req, res) => priceCriteriaController.getProductPrices(req as any, res));
+productsRouter.put('/:id/prices', authorize('products', 'edit'), (req, res) => priceCriteriaController.setProductPrices(req as any, res));
 
 // Product components (BOM)
 productsRouter.get('/:id/components', authorize('products', 'view'), (req, res) => productComponentsController.getComponents(req as any, res));

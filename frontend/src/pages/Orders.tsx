@@ -188,6 +188,11 @@ export const Orders: React.FC = () => {
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
   const [hasDraft, setHasDraft] = useState(false)
 
+  // Price criteria
+  const [priceCriteriaList, setPriceCriteriaList] = useState<{ id: string; name: string }[]>([])
+  const [selectedPriceCriteria, setSelectedPriceCriteria] = useState('')
+  const [criteriaProductPricesCache, setCriteriaProductPricesCache] = useState<Record<string, Record<string, number>>>({})
+
   // Persist form draft to localStorage (only if form has meaningful content)
   useEffect(() => {
     if (showForm && !editingOrderId) {
@@ -235,7 +240,7 @@ export const Orders: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [ordersRes, custRes, prodRes, entRes, banksRes, typesRes] = await Promise.all([
+      const [ordersRes, custRes, prodRes, entRes, banksRes, typesRes, criteriaRes] = await Promise.all([
         api.getOrders({
           status: filterStatus.length === 1 ? filterStatus[0] : undefined,
           product_type: filterType.length === 1 ? filterType[0] : undefined,
@@ -251,6 +256,7 @@ export const Orders: React.FC = () => {
         api.getEnterprises().catch(() => []),
         api.getBanks().catch(() => []),
         api.getProductTypes().catch(() => []),
+        api.getPriceCriteria().catch(() => []),
       ])
       setOrders(ordersRes.items || [])
       setSummary(ordersRes.summary || {})
@@ -263,6 +269,7 @@ export const Orders: React.FC = () => {
       setProducts(prodRes.items || prodRes || [])
       setEnterprises(entRes || [])
       setBanks(banksRes || [])
+      setPriceCriteriaList(Array.isArray(criteriaRes) ? criteriaRes : [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -334,16 +341,41 @@ export const Orders: React.FC = () => {
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).product_type || 'otro'
             setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
-            // Try to resolve price from enterprise's price list
-            resolveProductPrice(productId, item.quantity || 1, idx).then(resolution => {
-              if (resolution && resolution.resolved_price > 0) {
-                setFormItems(prevItems => {
-                  const newItems = [...prevItems]
-                  newItems[idx] = { ...newItems[idx], unit_price: resolution.resolved_price }
-                  return newItems
-                })
+
+            // If a price criteria is selected, try to use criteria price
+            if (selectedPriceCriteria) {
+              const cached = criteriaProductPricesCache[productId]
+              if (cached && cached[selectedPriceCriteria] !== undefined) {
+                item.unit_price = cached[selectedPriceCriteria]
+              } else {
+                // Load from API
+                api.getProductPrices(productId).then(prices => {
+                  const priceMap: Record<string, number> = {}
+                  for (const pp of (Array.isArray(prices) ? prices : [])) {
+                    priceMap[pp.criteria_name] = parseFloat(pp.price) || 0
+                  }
+                  setCriteriaProductPricesCache(prev => ({ ...prev, [productId]: priceMap }))
+                  if (priceMap[selectedPriceCriteria] !== undefined) {
+                    setFormItems(prevItems => {
+                      const newItems = [...prevItems]
+                      newItems[idx] = { ...newItems[idx], unit_price: priceMap[selectedPriceCriteria] }
+                      return newItems
+                    })
+                  }
+                }).catch(() => {})
               }
-            })
+            } else {
+              // Try to resolve price from enterprise's price list
+              resolveProductPrice(productId, item.quantity || 1, idx).then(resolution => {
+                if (resolution && resolution.resolved_price > 0) {
+                  setFormItems(prevItems => {
+                    const newItems = [...prevItems]
+                    newItems[idx] = { ...newItems[idx], unit_price: resolution.resolved_price }
+                    return newItems
+                  })
+                }
+              })
+            }
             // Load quantity tiers
             loadQuantityTiers(productId, idx, formEnterpriseId)
           }
@@ -960,12 +992,71 @@ export const Orders: React.FC = () => {
                 enterpriseHelpText="Selecciona la empresa cliente. Si no aparece, creala desde Empresas."
               />
 
-              {/* Title */}
-              <div className="grid grid-cols-1 gap-4">
+              {/* Title + Price Criteria */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Nombre del pedido<HelpTip text="Un nombre descriptivo para identificar este trabajo. Ej: 'Carteleria evento corporativo'." /></label>
                   <Input placeholder="Ej: Carteleria evento, Ploteo vehicular..." value={formTitle} onChange={e => setFormTitle(e.target.value)} />
                 </div>
+                {priceCriteriaList.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Lista de precios<HelpTip text="Al seleccionar una lista, los precios de los productos se ajustan automaticamente segun la lista elegida. Si no tiene precio en esa lista, usa el precio base." /></label>
+                    <select
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={selectedPriceCriteria}
+                      onChange={e => {
+                        const criteria = e.target.value
+                        setSelectedPriceCriteria(criteria)
+                        // Re-apply prices to existing items
+                        if (criteria) {
+                          setFormItems(prevItems => {
+                            return prevItems.map((item, idx) => {
+                              if (!item.product_id || item.product_id === 'custom' || manualPriceOverride[idx]) return item
+                              const cached = criteriaProductPricesCache[item.product_id]
+                              if (cached && cached[criteria] !== undefined) {
+                                return { ...item, unit_price: cached[criteria] }
+                              }
+                              // Fallback: load from API
+                              const product = products.find(p => p.id === item.product_id)
+                              api.getProductPrices(item.product_id).then(prices => {
+                                const priceMap: Record<string, number> = {}
+                                for (const pp of (Array.isArray(prices) ? prices : [])) {
+                                  priceMap[pp.criteria_name] = parseFloat(pp.price) || 0
+                                }
+                                setCriteriaProductPricesCache(prev => ({ ...prev, [item.product_id]: priceMap }))
+                                if (priceMap[criteria] !== undefined) {
+                                  setFormItems(prev => {
+                                    const updated = [...prev]
+                                    updated[idx] = { ...updated[idx], unit_price: priceMap[criteria] }
+                                    return updated
+                                  })
+                                }
+                              }).catch(() => {})
+                              return item
+                            })
+                          })
+                        } else {
+                          // Revert to base prices
+                          setFormItems(prevItems => {
+                            return prevItems.map((item, idx) => {
+                              if (!item.product_id || item.product_id === 'custom' || manualPriceOverride[idx]) return item
+                              const product = products.find(p => p.id === item.product_id)
+                              if (product) {
+                                return { ...item, unit_price: parseFloat(product.pricing?.final_price || '0') || 0 }
+                              }
+                              return item
+                            })
+                          })
+                        }
+                      }}
+                    >
+                      <option value="">Base (precio por defecto)</option>
+                      {priceCriteriaList.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Description */}
@@ -1053,7 +1144,12 @@ export const Orders: React.FC = () => {
                             onChange={e => updateFormItem(idx, 'unit_price', e.target.value)}
                             required
                           />
-                          {priceResolutions[idx]?.price_list_name && (
+                          {selectedPriceCriteria && item.product_id && item.product_id !== 'custom' && !manualPriceOverride[idx] && (
+                            <p className="text-xs text-purple-600 dark:text-purple-400">
+                              Precio {selectedPriceCriteria}
+                            </p>
+                          )}
+                          {!selectedPriceCriteria && priceResolutions[idx]?.price_list_name && (
                             <p className="text-xs text-blue-600 dark:text-blue-400">
                               {priceResolutions[idx].discount_percent !== 0
                                 ? `Base: ${formatCurrency(priceResolutions[idx].base_price)} -> ${priceResolutions[idx].price_list_name}: ${formatCurrency(priceResolutions[idx].resolved_price)} (${priceResolutions[idx].discount_percent > 0 ? '-' : '+'}${Math.abs(priceResolutions[idx].discount_percent).toFixed(1)}%)`
