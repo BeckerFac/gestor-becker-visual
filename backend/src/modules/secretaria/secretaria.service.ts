@@ -654,16 +654,33 @@ class SecretariaService {
         intent: intentResult.intent,
       };
     } catch (error: any) {
-      logger.error({ err: error, companyId, userId }, 'SecretarIA: error in web chat pipeline');
+      logger.error({ err: error, message: error?.message, stack: error?.stack, companyId, userId }, 'SecretarIA: error in web chat pipeline');
 
-      // Safety — log AI errors for learning
-      await secretariaSafety.logAIError(companyId, userId, 'pipeline_error', {
-        userMessage: truncatedMessage,
-        correction: error?.message || 'Unknown error',
-      }).catch(() => {});
+      // Try fallback rule-based response (no LLM needed)
+      try {
+        const { handleFallback, canHandleFallback } = await import('./secretaria.fallback');
+        if (canHandleFallback(truncatedMessage)) {
+          const fallbackResult = await handleFallback(truncatedMessage, companyId);
+          const fallbackResponse = fallbackResult.formatted || fallbackResult.data?.toString() || 'No pude procesar tu consulta.';
+          await this.saveConversationMessage(companyId, channelId, 'assistant', fallbackResponse);
+          return { response: fallbackResponse, intent: 'fallback' };
+        }
+      } catch (fallbackErr) {
+        logger.error({ err: fallbackErr }, 'SecretarIA: fallback also failed');
+      }
 
+      // Log AI error for learning
+      try {
+        await secretariaSafety.logAIError(companyId, userId, 'pipeline_error', {
+          userMessage: truncatedMessage,
+          errorMessage: error?.message || 'Unknown error',
+        });
+      } catch {}
+
+      // Return user-friendly error with the actual error detail for debugging
+      const errorDetail = error?.message || 'Error desconocido';
       return {
-        response: 'Perdon, tuve un problema procesando tu consulta. Intenta de nuevo en unos segundos.',
+        response: `Disculpa, no pude procesar tu consulta. Error: ${errorDetail.slice(0, 100)}. Intenta de nuevo.`,
         intent: 'error',
       };
     }
