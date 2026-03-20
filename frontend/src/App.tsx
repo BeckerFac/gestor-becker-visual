@@ -36,6 +36,7 @@ const Users = React.lazy(() => import('@/pages/Users').then(m => ({ default: m.U
 const Global = React.lazy(() => import('@/pages/Global').then(m => ({ default: m.Global })))
 const Reportes = React.lazy(() => import('@/pages/Reportes').then(m => ({ default: m.Reportes })))
 const Oportunidades = React.lazy(() => import('@/pages/Oportunidades').then(m => ({ default: m.Oportunidades })))
+const SecretarIAPage = React.lazy(() => import('@/pages/SecretarIA'))
 const Admin = React.lazy(() => import('@/pages/Admin').then(m => ({ default: m.Admin })))
 const NotFound = React.lazy(() => import('@/pages/NotFound').then(m => ({ default: m.NotFound })))
 const LegalTerminos = React.lazy(() => import('@/pages/LegalTerminos').then(m => ({ default: m.LegalTerminos })))
@@ -247,6 +248,7 @@ function App() {
         <Route path="/reportes" element={<ProtectedRoute module="reports"><Reportes /></ProtectedRoute>} />
         <Route path="/remitos" element={<ProtectedRoute module="remitos"><Remitos /></ProtectedRoute>} />
         <Route path="/oportunidades" element={<ProtectedRoute module="crm"><Oportunidades /></ProtectedRoute>} />
+        <Route path="/secretaria" element={<ProtectedRoute><SecretarIAPage /></ProtectedRoute>} />
         <Route path="/bancos" element={<ProtectedRoute module="banks"><Banks /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute module="users"><Users /></ProtectedRoute>} />

@@ -40,6 +40,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: '📊' },
       { href: '/global', label: 'Busqueda Global', icon: '🔍' },
+      { href: '/secretaria', label: 'SecretarIA', icon: '🤖', premiumFeature: 'secretaria' },
     ],
   },
   {
