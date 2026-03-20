@@ -194,6 +194,22 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_company_idx ON invoices(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_status_idx ON invoices(company_id, status)`);
 
+    // --- Account adjustments (manual balance adjustments for cuenta corriente) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS account_adjustments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        enterprise_id UUID NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+        amount DECIMAL(12,2) NOT NULL,
+        reason TEXT NOT NULL,
+        adjustment_type VARCHAR(20) NOT NULL,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_adjustments_company ON account_adjustments(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_adjustments_enterprise ON account_adjustments(company_id, enterprise_id)`);
+
     // --- Cobros table ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cobros (
@@ -695,6 +711,7 @@ async function applyRowLevelSecurity() {
     'secretaria_usage',
     'secretaria_pending_actions',
     'secretaria_ai_errors',
+    'account_adjustments',
   ];
 
   for (const table of tablesWithCompanyId) {
@@ -796,6 +813,7 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'crm_stages', fk: 'company_id' },
     { name: 'warehouses', fk: 'company_id' },
     { name: 'suppliers', fk: 'company_id' },
+    { name: 'account_adjustments', fk: 'company_id' },
   ];
 
   // Child tables accessed via parent FK (no direct company_id)

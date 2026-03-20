@@ -4,6 +4,7 @@ import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
+import { DateInput } from '@/components/ui/DateInput'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -53,6 +54,7 @@ const tipoColors: Record<string, string> = {
   cobro: 'bg-green-100 text-green-700',
   compra: 'bg-orange-100 text-orange-700',
   pago: 'bg-red-100 text-red-700',
+  ajuste: 'bg-purple-100 text-purple-700',
 }
 
 const tipoLabels: Record<string, string> = {
@@ -60,6 +62,7 @@ const tipoLabels: Record<string, string> = {
   cobro: 'Cobro',
   compra: 'Compra',
   pago: 'Pago',
+  ajuste: 'Ajuste',
 }
 
 interface MovimientosTableProps {
@@ -129,6 +132,133 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
   </table>
 )
 
+interface AdjustmentFormProps {
+  enterpriseId: string
+  onCreated: () => void
+}
+
+const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated }) => {
+  const [open, setOpen] = useState(false)
+  const [tipo, setTipo] = useState<'credit' | 'debit'>('credit')
+  const [monto, setMonto] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const amount = parseFloat(monto)
+    if (!amount || amount === 0) {
+      toast.error('El monto debe ser mayor a 0')
+      return
+    }
+    if (!motivo.trim()) {
+      toast.error('El motivo es obligatorio')
+      return
+    }
+
+    if (amount > 1000000) {
+      const confirmed = window.confirm(
+        `El monto es ${formatCurrency(amount)}. Confirma que desea crear este ajuste?`
+      )
+      if (!confirmed) return
+    }
+
+    try {
+      setSubmitting(true)
+      await api.createCuentaCorrienteAdjustment(enterpriseId, {
+        amount,
+        reason: motivo.trim(),
+        adjustment_type: tipo,
+      })
+      toast.success('Ajuste creado correctamente')
+      setMonto('')
+      setMotivo('')
+      setTipo('credit')
+      setOpen(false)
+      onCreated()
+    } catch (err: any) {
+      toast.error(err.message || 'Error al crear ajuste')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(true) }}
+        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+      >
+        + Ajuste
+      </button>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between">
+        <h5 className="font-medium text-purple-800 text-sm">Nuevo ajuste manual</h5>
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">
+          x
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Tipo</label>
+          <select
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value as 'credit' | 'debit')}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent"
+          >
+            <option value="credit">A favor del cliente (credito)</option>
+            <option value="debit">A cargo del cliente (debito)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Monto ($)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+            placeholder="0.00"
+            required
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Motivo</label>
+          <input
+            type="text"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Ej: Bonificacion pronto pago"
+            required
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:border-transparent"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 justify-end">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="px-4 py-1.5 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? 'Guardando...' : 'Guardar ajuste'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 export const CuentaCorriente: React.FC = () => {
   const [resumen, setResumen] = useState<EnterpriseSaldo[]>([])
   const [loading, setLoading] = useState(true)
@@ -136,6 +266,13 @@ export const CuentaCorriente: React.FC = () => {
   const [selectedEnterprise, setSelectedEnterprise] = useState<string | null>(null)
   const [detalle, setDetalle] = useState<Detalle | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
+  const [pdfDateFrom, setPdfDateFrom] = useState<string>(() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - 1)
+    return d.toISOString().split('T')[0]
+  })
+  const [pdfDateTo, setPdfDateTo] = useState<string>(() => new Date().toISOString().split('T')[0])
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   const loadResumen = async () => {
     try {
@@ -170,6 +307,41 @@ export const CuentaCorriente: React.FC = () => {
       setError(e.message)
     } finally {
       setLoadingDetalle(false)
+    }
+  }
+
+  const handleDownloadPdf = async (enterpriseId: string, enterpriseName: string) => {
+    if (!pdfDateFrom || !pdfDateTo) {
+      toast.error('Selecciona un rango de fechas')
+      return
+    }
+    try {
+      setDownloadingPdf(true)
+      const blob = await api.downloadCuentaCorrientePdf(enterpriseId, pdfDateFrom, pdfDateTo)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `cuenta_corriente_${enterpriseName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e: any) {
+      toast.error(e.message || 'Error al generar PDF')
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleAdjustmentCreated = async () => {
+    loadResumen()
+    if (selectedEnterprise) {
+      try {
+        const data = await api.getCuentaCorrienteDetalle(selectedEnterprise)
+        setDetalle(data)
+      } catch (e: any) {
+        toast.error(e.message)
+      }
     }
   }
 
@@ -355,6 +527,12 @@ export const CuentaCorriente: React.FC = () => {
                             <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
                             <div className="space-y-6">
+                              {/* Adjustment form */}
+                              <AdjustmentForm
+                                enterpriseId={r.id}
+                                onCreated={handleAdjustmentCreated}
+                              />
+
                               {/* Mini summary cards */}
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
@@ -373,6 +551,47 @@ export const CuentaCorriente: React.FC = () => {
                                   <span className="text-xs text-orange-600 block">Total Pagado</span>
                                   <span className="text-base font-bold text-orange-700">{fmt(detalle.cuentas_a_pagar.total_pagos)}</span>
                                 </div>
+                              </div>
+
+                              {/* Date range filter & PDF download */}
+                              <div className="flex flex-wrap items-end gap-3 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg">
+                                <DateInput
+                                  label="Desde"
+                                  value={pdfDateFrom}
+                                  onChange={setPdfDateFrom}
+                                  className="w-36"
+                                />
+                                <DateInput
+                                  label="Hasta"
+                                  value={pdfDateTo}
+                                  onChange={setPdfDateTo}
+                                  className="w-36"
+                                />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDownloadPdf(r.id, r.name)
+                                  }}
+                                  disabled={downloadingPdf || !pdfDateFrom || !pdfDateTo}
+                                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-2"
+                                >
+                                  {downloadingPdf ? (
+                                    <>
+                                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                      </svg>
+                                      Generando...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                      </svg>
+                                      Descargar PDF
+                                    </>
+                                  )}
+                                </button>
                               </div>
 
                               {/* Cuentas a Cobrar */}

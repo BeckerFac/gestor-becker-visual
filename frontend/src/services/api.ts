@@ -936,6 +936,25 @@ export const api = {
     const { data } = await client.get(`/cuenta-corriente/${enterpriseId}`)
     return data
   },
+  downloadCuentaCorrientePdf: async (enterpriseId: string, dateFrom: string, dateTo: string): Promise<Blob> => {
+    const response = await client.get(`/cuenta-corriente/${enterpriseId}/pdf`, {
+      params: { date_from: dateFrom, date_to: dateTo },
+      responseType: 'blob',
+    })
+    return response.data
+  },
+  createCuentaCorrienteAdjustment: async (enterpriseId: string, data: { amount: number; reason: string; adjustment_type: 'credit' | 'debit' }) => {
+    const { data: result } = await client.post(`/cuenta-corriente/${enterpriseId}/adjustment`, data)
+    return result
+  },
+  getCuentaCorrienteAdjustments: async (enterpriseId: string) => {
+    const { data } = await client.get(`/cuenta-corriente/${enterpriseId}/adjustments`)
+    return data
+  },
+  deleteCuentaCorrienteAdjustment: async (enterpriseId: string, adjustmentId: string) => {
+    const { data } = await client.delete(`/cuenta-corriente/${enterpriseId}/adjustment/${adjustmentId}`)
+    return data
+  },
 
   // Banks
   getBanks: async () => {

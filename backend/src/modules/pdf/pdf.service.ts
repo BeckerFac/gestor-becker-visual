@@ -610,6 +610,189 @@ export class PdfService {
     `
   }
 
+  async generateCuentaCorrientePdf(data: {
+    company: { name: string; cuit: string };
+    enterprise: { name: string; cuit: string | null };
+    dateFrom: string;
+    dateTo: string;
+    movimientos: Array<{
+      fecha: string;
+      tipo: string;
+      descripcion: string;
+      debe: number;
+      haber: number;
+      saldo: number;
+      isPagar?: boolean;
+    }>;
+    totalBalance: number;
+    totalMovimientos: number;
+  }): Promise<Buffer> {
+    try {
+      await this.initialize();
+
+      const html = this.generateCuentaCorrienteHtml(data);
+
+      if (!this.browser) {
+        throw new Error('Browser not initialized');
+      }
+
+      const page = await this.browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+      });
+
+      await page.close();
+
+      return pdf;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Cuenta corriente PDF generation failed');
+    }
+  }
+
+  private generateCuentaCorrienteHtml(data: {
+    company: { name: string; cuit: string };
+    enterprise: { name: string; cuit: string | null };
+    dateFrom: string;
+    dateTo: string;
+    movimientos: Array<{
+      fecha: string;
+      tipo: string;
+      descripcion: string;
+      debe: number;
+      haber: number;
+      saldo: number;
+      isPagar?: boolean;
+    }>;
+    totalBalance: number;
+    totalMovimientos: number;
+  }): string {
+    const esc = this.escapeHtml.bind(this);
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('es-AR');
+    const timeStr = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+    const formatDateStr = (d: string) => {
+      try {
+        return new Date(d).toLocaleDateString('es-AR');
+      } catch {
+        return d;
+      }
+    };
+
+    const formatMoney = (n: number) => {
+      return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const tipoLabels: Record<string, string> = {
+      venta: 'Venta',
+      cobro: 'Cobro',
+      compra: 'Compra',
+      pago: 'Pago',
+    };
+
+    const tipoColors: Record<string, string> = {
+      venta: 'background: #dbeafe; color: #1d4ed8;',
+      cobro: 'background: #dcfce7; color: #15803d;',
+      compra: 'background: #ffedd5; color: #c2410c;',
+      pago: 'background: #fee2e2; color: #dc2626;',
+    };
+
+    const companyCuit = this.formatCuit(data.company.cuit || '');
+    const enterpriseCuit = data.enterprise.cuit ? this.formatCuit(data.enterprise.cuit) : 'No registrado';
+    const balanceColor = data.totalBalance >= 0 ? '#2E7D32' : '#c62828';
+    const truncatedNote = data.totalMovimientos > 500
+      ? `<p style="font-size: 11px; color: #e65100; margin-top: 10px;">Nota: Se muestran los 500 movimientos mas recientes de ${data.totalMovimientos} totales en el periodo.</p>`
+      : '';
+
+    const rowsHtml = data.movimientos.length > 0
+      ? data.movimientos.map((m, idx) => {
+          const bgColor = idx % 2 === 0 ? '#fff' : '#fafafa';
+          const tipoStyle = tipoColors[m.tipo] || 'background: #f3f4f6; color: #374151;';
+          const saldoColor = m.saldo >= 0 ? '#15803d' : '#dc2626';
+          // For display: ventas/cobros show as Facturado/Cobrado, compras/pagos as Comprado/Pagado
+          const facturado = !m.isPagar && m.debe > 0 ? formatMoney(m.debe) : (m.isPagar && m.debe > 0 ? formatMoney(m.debe) : '');
+          const cobrado = !m.isPagar && m.haber > 0 ? formatMoney(m.haber) : (m.isPagar && m.haber > 0 ? formatMoney(m.haber) : '');
+
+          return `<tr style="background: ${bgColor};">
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">${formatDateStr(m.fecha)}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb;">
+              <span style="padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; ${tipoStyle}">${esc(tipoLabels[m.tipo] || m.tipo)}</span>
+            </td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; color: #374151;">${esc(m.descripcion)}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #15803d;">${facturado ? '$ ' + facturado : ''}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #dc2626;">${cobrado ? '$ ' + cobrado : ''}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: 600; color: ${saldoColor};">$ ${formatMoney(m.saldo)}</td>
+          </tr>`;
+        }).join('')
+      : `<tr><td colspan="6" style="padding: 30px; text-align: center; color: #9ca3af; font-style: italic;">Sin movimientos en el periodo seleccionado</td></tr>`;
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Estado de Cuenta - ${esc(data.enterprise.name)}</title>
+</head>
+<body>
+<div style="font-family: Inter, Arial, sans-serif; padding: 40px; color: #111;">
+
+  <!-- Header -->
+  <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 20px;">
+    <div>
+      <h1 style="margin: 0 0 4px 0; font-size: 24px;">${esc(data.company.name)}</h1>
+      <p style="margin: 0; color: #555; font-size: 13px;">CUIT: ${esc(companyCuit)}</p>
+    </div>
+    <div style="text-align: right;">
+      <h2 style="margin: 0 0 4px 0; font-size: 20px; color: #333;">Estado de Cuenta</h2>
+      <p style="margin: 0; color: #555; font-size: 13px;">Periodo: ${formatDateStr(data.dateFrom)} al ${formatDateStr(data.dateTo)}</p>
+      <p style="margin: 0; color: #555; font-size: 13px;">Fecha emision: ${todayStr}</p>
+    </div>
+  </div>
+
+  <!-- Enterprise info -->
+  <div style="margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+    <h3 style="margin: 0 0 4px 0; font-size: 16px;">${esc(data.enterprise.name)}</h3>
+    <p style="margin: 0; color: #555; font-size: 13px;">CUIT: ${esc(enterpriseCuit)}</p>
+  </div>
+
+  ${truncatedNote}
+
+  <!-- Transactions table -->
+  <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px;">
+    <thead>
+      <tr style="background: #333; color: white;">
+        <th style="padding: 10px 12px; text-align: left; font-weight: 600;">Fecha</th>
+        <th style="padding: 10px 12px; text-align: left; font-weight: 600;">Tipo</th>
+        <th style="padding: 10px 12px; text-align: left; font-weight: 600;">Descripcion</th>
+        <th style="padding: 10px 12px; text-align: right; font-weight: 600;">Facturado</th>
+        <th style="padding: 10px 12px; text-align: right; font-weight: 600;">Cobrado</th>
+        <th style="padding: 10px 12px; text-align: right; font-weight: 600;">Saldo</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+
+  <!-- Balance box -->
+  <div style="margin-top: 30px; padding: 20px; background: ${data.totalBalance >= 0 ? '#e8f5e9' : '#ffebee'}; border: 2px solid ${data.totalBalance >= 0 ? '#4CAF50' : '#e53935'}; border-radius: 8px; text-align: right;">
+    <p style="font-size: 14px; color: #666; margin: 0 0 8px 0;">Balance total historico (todas las transacciones)</p>
+    <p style="font-size: 28px; font-weight: bold; color: ${balanceColor}; margin: 0;">$ ${formatMoney(data.totalBalance)}</p>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999;">
+    <p style="margin: 0 0 4px 0;">Generado por GESTIA - ${todayStr} ${timeStr}</p>
+    <p style="margin: 0;">Este documento es un resumen del periodo seleccionado. El balance final refleja el total historico.</p>
+  </div>
+</div>
+</body>
+</html>`;
+  }
+
   async close() {
     if (this.browser) {
       await this.browser.close()

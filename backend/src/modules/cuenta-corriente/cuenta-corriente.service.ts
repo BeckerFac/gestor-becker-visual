@@ -31,7 +31,19 @@ export class CuentaCorrienteService {
             SELECT SUM(CAST(pa.amount AS decimal))
             FROM pagos pa
             WHERE pa.company_id = ${companyId} AND pa.enterprise_id = e.id
-          ), 0) as total_pagos
+          ), 0) as total_pagos,
+          COALESCE((
+            SELECT SUM(CAST(aa.amount AS decimal))
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'debit'
+          ), 0) as total_ajustes_debit,
+          COALESCE((
+            SELECT SUM(ABS(CAST(aa.amount AS decimal)))
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'credit'
+          ), 0) as total_ajustes_credit
         FROM enterprises e
         WHERE e.company_id = ${companyId}
         ORDER BY e.name ASC
@@ -43,7 +55,10 @@ export class CuentaCorrienteService {
         const cobros = parseFloat(r.total_cobros || '0');
         const compras = parseFloat(r.total_compras || '0');
         const pagos = parseFloat(r.total_pagos || '0');
-        const aCobrar = ventas - cobros;
+        const ajustesDebit = parseFloat(r.total_ajustes_debit || '0');
+        const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
+        // Debit adjustments increase "nos deben", credit adjustments decrease it (like cobros)
+        const aCobrar = ventas + ajustesDebit - cobros - ajustesCredit;
         const aPagar = compras - pagos;
         const balance = aCobrar - aPagar;
         return {
@@ -72,7 +87,7 @@ export class CuentaCorrienteService {
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entRows[0];
 
-      // Ventas (pedidos) — nos deben
+      // Ventas (pedidos) -- nos deben
       const ordersResult = await db.execute(sql`
         SELECT o.id, 'venta' as tipo, o.created_at as fecha,
           'Pedido #' || LPAD(CAST(o.order_number AS TEXT), 4, '0') || ' — ' || COALESCE(o.title, '') as descripcion,
@@ -84,7 +99,7 @@ export class CuentaCorrienteService {
           AND o.status != 'cancelado'
       `);
 
-      // Cobros — nos pagaron
+      // Cobros -- nos pagaron
       const cobrosResult = await db.execute(sql`
         SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
           'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
@@ -93,7 +108,17 @@ export class CuentaCorrienteService {
         WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
       `);
 
-      // Compras — les debemos
+      // Ajustes manuales
+      const adjustmentsResult = await db.execute(sql`
+        SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
+          'Ajuste — ' || aa.reason as descripcion,
+          CAST(ABS(aa.amount) AS decimal) as monto,
+          aa.adjustment_type
+        FROM account_adjustments aa
+        WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+      `);
+
+      // Compras -- les debemos
       const purchasesResult = await db.execute(sql`
         SELECT p.id, 'compra' as tipo, p.date as fecha,
           'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
@@ -103,7 +128,7 @@ export class CuentaCorrienteService {
           AND p.status != 'cancelada'
       `);
 
-      // Pagos — les pagamos
+      // Pagos -- les pagamos
       const pagosResult = await db.execute(sql`
         SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
           'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
@@ -114,13 +139,19 @@ export class CuentaCorrienteService {
 
       const orders = ((ordersResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
       const cobros = ((cobrosResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
+      const adjustments = ((adjustmentsResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
       const purchases = ((purchasesResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
       const pagos = ((pagosResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
 
-      // Cuentas a Cobrar: Ventas (+) y Cobros (-)
+      // Cuentas a Cobrar: Ventas (+), Cobros (-), Ajustes debit (+) / credit (-)
       const movsCobrar = [
         ...orders.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
+        ...adjustments.map((a: any) => ({
+          ...a,
+          debe: a.adjustment_type === 'debit' ? a.monto : 0,
+          haber: a.adjustment_type === 'credit' ? a.monto : 0,
+        })),
       ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
       let saldoCobrar = 0;
@@ -161,6 +192,219 @@ export class CuentaCorrienteService {
       if (error instanceof ApiError) throw error;
       console.error('Get cuenta corriente detalle error:', error);
       throw new ApiError(500, 'Failed to get cuenta corriente detalle');
+    }
+  }
+
+  async getPdfData(companyId: string, enterpriseId: string, dateFrom: string, dateTo: string) {
+    try {
+      // Validate enterprise belongs to company
+      const entCheck = await db.execute(sql`
+        SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
+      `);
+      const entRows = (entCheck as any).rows || entCheck || [];
+      if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
+      const enterprise = entRows[0];
+
+      // Get company info
+      const compCheck = await db.execute(sql`
+        SELECT name, cuit FROM companies WHERE id = ${companyId}
+      `);
+      const compRows = (compCheck as any).rows || compCheck || [];
+      if (compRows.length === 0) throw new ApiError(404, 'Company not found');
+      const company = compRows[0];
+
+      // ALL transactions (for total balance)
+      const allOrders = await db.execute(sql`
+        SELECT o.id, 'venta' as tipo, o.created_at as fecha,
+          'Pedido #' || LPAD(CAST(o.order_number AS TEXT), 4, '0') || ' — ' || COALESCE(o.title, '') as descripcion,
+          CAST(o.total_amount AS decimal) as monto
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        WHERE o.company_id = ${companyId}
+          AND (o.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+          AND o.status != 'cancelado'
+      `);
+      const allCobros = await db.execute(sql`
+        SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
+          'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
+          CAST(co.amount AS decimal) as monto
+        FROM cobros co
+        WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+      `);
+      const allAdjustments = await db.execute(sql`
+        SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
+          'Ajuste — ' || aa.reason as descripcion,
+          CAST(ABS(aa.amount) AS decimal) as monto,
+          aa.adjustment_type
+        FROM account_adjustments aa
+        WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+      `);
+      const allPurchases = await db.execute(sql`
+        SELECT p.id, 'compra' as tipo, p.date as fecha,
+          'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
+          CAST(p.total_amount AS decimal) as monto
+        FROM purchases p
+        WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
+          AND p.status != 'cancelada'
+      `);
+      const allPagos = await db.execute(sql`
+        SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
+          'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
+          CAST(pa.amount AS decimal) as monto
+        FROM pagos pa
+        WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+      `);
+
+      const parseRows = (result: any) =>
+        ((result as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
+
+      const orders = parseRows(allOrders);
+      const cobros = parseRows(allCobros);
+      const adjustments = parseRows(allAdjustments);
+      const purchases = parseRows(allPurchases);
+      const pagos = parseRows(allPagos);
+
+      // Build ALL movimientos sorted by date (for running saldo)
+      const allMovimientos = [
+        ...orders.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
+        ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
+        ...adjustments.map((a: any) => ({
+          ...a,
+          debe: a.adjustment_type === 'debit' ? a.monto : 0,
+          haber: a.adjustment_type === 'credit' ? a.monto : 0,
+        })),
+        ...purchases.map((p: any) => ({ ...p, debe: p.monto, haber: 0, isPagar: true })),
+        ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto, isPagar: true })),
+      ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+
+      // Calculate running saldo and total balance
+      // Saldo = (ventas + debit_adjustments - cobros - credit_adjustments) - (compras - pagos)
+      // Positive = nos deben, Negative = les debemos
+      let runningBalance = 0;
+      const allWithSaldo = allMovimientos.map((m: any) => {
+        if (m.isPagar) {
+          // Compras increase debt (negative), pagos decrease it
+          runningBalance -= (m.debe - m.haber);
+        } else {
+          // Ventas/adjustments increase receivable (positive), cobros decrease it
+          runningBalance += (m.debe - m.haber);
+        }
+        return { ...m, saldo: runningBalance };
+      });
+
+      const totalBalance = runningBalance;
+
+      // Filter movimientos by date range for the table
+      const fromDate = new Date(dateFrom + 'T00:00:00');
+      const toDate = new Date(dateTo + 'T23:59:59');
+
+      const filteredMovimientos = allWithSaldo.filter((m: any) => {
+        const fecha = new Date(m.fecha);
+        return fecha >= fromDate && fecha <= toDate;
+      });
+
+      // Limit to 500 most recent if too many
+      const limitedMovimientos = filteredMovimientos.length > 500
+        ? filteredMovimientos.slice(filteredMovimientos.length - 500)
+        : filteredMovimientos;
+
+      return {
+        company,
+        enterprise,
+        dateFrom,
+        dateTo,
+        movimientos: limitedMovimientos,
+        totalBalance,
+        totalMovimientos: filteredMovimientos.length,
+      };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Get cuenta corriente PDF data error:', error);
+      throw new ApiError(500, 'Failed to get cuenta corriente PDF data');
+    }
+  }
+
+  async createAdjustment(companyId: string, enterpriseId: string, data: {
+    amount: number;
+    reason: string;
+    adjustment_type: 'credit' | 'debit';
+    created_by?: string;
+  }) {
+    try {
+      // Validate enterprise belongs to company
+      const entCheck = await db.execute(sql`
+        SELECT id FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
+      `);
+      const entRows = (entCheck as any).rows || entCheck || [];
+      if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
+
+      if (!data.amount || data.amount === 0) {
+        throw new ApiError(400, 'Amount must be non-zero');
+      }
+      if (!data.reason || data.reason.trim().length === 0) {
+        throw new ApiError(400, 'Reason is required');
+      }
+      if (!['credit', 'debit'].includes(data.adjustment_type)) {
+        throw new ApiError(400, 'adjustment_type must be "credit" or "debit"');
+      }
+
+      // Store amount: positive for debit, negative for credit
+      const storedAmount = data.adjustment_type === 'credit'
+        ? -Math.abs(data.amount)
+        : Math.abs(data.amount);
+
+      const result = await db.execute(sql`
+        INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by)
+        VALUES (${companyId}, ${enterpriseId}, ${storedAmount}, ${data.reason.trim()}, ${data.adjustment_type}, ${data.created_by || null})
+        RETURNING *
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows[0];
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Create adjustment error:', error);
+      throw new ApiError(500, 'Failed to create adjustment');
+    }
+  }
+
+  async getAdjustments(companyId: string, enterpriseId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT aa.*, u.name as created_by_name
+        FROM account_adjustments aa
+        LEFT JOIN users u ON aa.created_by = u.id
+        WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+        ORDER BY aa.created_at DESC
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows.map((r: any) => ({
+        ...r,
+        amount: parseFloat(r.amount || '0'),
+      }));
+    } catch (error) {
+      console.error('Get adjustments error:', error);
+      throw new ApiError(500, 'Failed to get adjustments');
+    }
+  }
+
+  async deleteAdjustment(companyId: string, enterpriseId: string, adjustmentId: string) {
+    try {
+      const check = await db.execute(sql`
+        SELECT id FROM account_adjustments
+        WHERE id = ${adjustmentId} AND company_id = ${companyId} AND enterprise_id = ${enterpriseId}
+      `);
+      const checkRows = (check as any).rows || check || [];
+      if (checkRows.length === 0) throw new ApiError(404, 'Adjustment not found');
+
+      await db.execute(sql`
+        DELETE FROM account_adjustments
+        WHERE id = ${adjustmentId} AND company_id = ${companyId} AND enterprise_id = ${enterpriseId}
+      `);
+      return { deleted: true };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Delete adjustment error:', error);
+      throw new ApiError(500, 'Failed to delete adjustment');
     }
   }
 }
