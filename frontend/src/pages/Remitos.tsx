@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { DateInput } from '@/components/ui/DateInput'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -631,11 +632,10 @@ export const Remitos: React.FC = () => {
                     ))}
                   </select>
                 </div>
-                <Input
+                <DateInput
                   label="Fecha"
-                  type="date"
                   value={form.date}
-                  onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))}
+                  onChange={val => setForm(prev => ({ ...prev, date: val }))}
                 />
               </div>
 

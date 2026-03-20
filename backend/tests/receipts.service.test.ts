@@ -11,13 +11,14 @@ describe('ReceiptsService', () => {
     service = new ReceiptsService()
   })
 
-  // Helper: mock the 5 migration calls (CREATE TABLE x2 + ALTER TABLE x3)
+  // Helper: mock the 6 migration calls (CREATE TABLE x2 + ALTER TABLE x4)
   function mockMigrations() {
     mockDbVoid() // CREATE TABLE receipts
     mockDbVoid() // CREATE TABLE receipt_items
     mockDbVoid() // ALTER TABLE enterprise_id
     mockDbVoid() // ALTER TABLE bank_id
     mockDbVoid() // ALTER TABLE reference
+    mockDbVoid() // ALTER TABLE cheques cobro_id
   }
 
   describe('createReceipt', () => {

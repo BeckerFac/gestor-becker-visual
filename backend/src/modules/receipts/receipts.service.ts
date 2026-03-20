@@ -85,20 +85,27 @@ export class ReceiptsService {
   async createReceipt(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
     try {
-      const { receipt_date, payment_method, notes, items, enterprise_id, amount, bank_id, reference, cheque_data } = data;
+      const { receipt_date, payment_method, notes, items, order_items, enterprise_id, amount, bank_id, reference, cheque_data } = data;
 
       const hasItems = Array.isArray(items) && items.length > 0;
+      const hasOrderItems = Array.isArray(order_items) && order_items.length > 0;
 
-      // Validate: either items with invoices OR a direct amount
-      if (!hasItems) {
+      // Validate: either items with invoices, order_items, OR a direct amount
+      if (!hasItems && !hasOrderItems) {
         if (!amount || parseFloat(amount) <= 0) {
           throw new ApiError(400, 'El recibo debe tener un monto mayor a 0');
         }
-      } else {
-        // Validate all items have invoice_id and amount > 0
+      }
+      if (hasItems) {
         for (const item of items) {
           if (!item.invoice_id) throw new ApiError(400, 'Cada item debe tener una factura asociada');
           if (!item.amount || parseFloat(item.amount) <= 0) throw new ApiError(400, 'Cada item debe tener un monto mayor a 0');
+        }
+      }
+      if (hasOrderItems) {
+        for (const item of order_items) {
+          if (!item.order_id) throw new ApiError(400, 'Cada item de pedido debe tener un pedido asociado');
+          if (!item.amount || parseFloat(item.amount) <= 0) throw new ApiError(400, 'Cada item de pedido debe tener un monto mayor a 0');
         }
       }
 
@@ -111,8 +118,14 @@ export class ReceiptsService {
       const receiptNumber = parseInt(rows[0]?.next_number || '1');
 
       // Calculate total: from items if present, otherwise from direct amount
-      const totalAmount = hasItems
+      const invoiceItemsTotal = hasItems
         ? items.reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0)
+        : 0;
+      const orderItemsTotal = hasOrderItems
+        ? order_items.reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0)
+        : 0;
+      const totalAmount = (hasItems || hasOrderItems)
+        ? invoiceItemsTotal + orderItemsTotal
         : parseFloat(amount);
 
       const receiptId = uuid();
@@ -147,8 +160,35 @@ export class ReceiptsService {
               VALUES (${cobroId}, ${companyId}, ${invEnterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
             `);
           }
-        } else {
-          // Simple receipt without invoices - create a single cobro
+        }
+        if (hasOrderItems) {
+          // Receipt with order items (pedidos sin facturar)
+          for (const item of order_items) {
+            const cobroId = uuid();
+            // Get enterprise_id from the order
+            const orderResult = await db.execute(sql`
+              SELECT o.id, COALESCE(e.id, c2.enterprise_id) as enterprise_id
+              FROM orders o
+              LEFT JOIN enterprises e ON o.enterprise_id = e.id
+              LEFT JOIN customers c2 ON o.customer_id = c2.id
+              WHERE o.id = ${item.order_id}
+            `);
+            const orderRows = (orderResult as any).rows || orderResult || [];
+            const orderEnterpriseId = orderRows[0]?.enterprise_id || enterprise_id || null;
+
+            await db.execute(sql`
+              INSERT INTO cobros (id, company_id, enterprise_id, order_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
+              VALUES (${cobroId}, ${companyId}, ${orderEnterpriseId}, ${item.order_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
+            `);
+
+            // Recalculate payment status for linked order
+            const { cobrosService } = await import('../cobros/cobros.service');
+            await cobrosService.recalculateOrderPaymentStatus(item.order_id);
+          }
+        }
+
+        if (!hasItems && !hasOrderItems) {
+          // Simple receipt without invoices or orders - create a single cobro
           const cobroId = uuid();
           await db.execute(sql`
             INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)

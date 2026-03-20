@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { DateInput } from '@/components/ui/DateInput'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { Pagination } from '@/components/shared/Pagination'
@@ -464,7 +465,7 @@ export const Quotes: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700">Valida hasta<HelpTip text="Cantidad de dias que la cotizacion es valida. Despues de este plazo, se marca como vencida." /></label>
-                    <Input type="date" value={form.valid_until} onChange={e => setForm({ ...form, valid_until: e.target.value })} />
+                    <DateInput value={form.valid_until} onChange={val => setForm({ ...form, valid_until: val })} />
                   </div>
                   <Input label="Notas / Observaciones" placeholder="Tiempo de produccion, condiciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                 </div>

@@ -14,6 +14,7 @@ describe('ChequesService', () => {
   function mockMigrations() {
     mockDbVoid() // ALTER TABLE cheque_type
     mockDbVoid() // ALTER TABLE drawer_cuit
+    mockDbVoid() // ALTER TABLE cobro_id
   }
 
   describe('createCheque', () => {

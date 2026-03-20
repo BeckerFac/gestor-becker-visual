@@ -1,8 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { formatCurrency } from '@/lib/utils'
-import type { Product } from './types'
+import { toast } from '@/hooks/useToast'
+import { api } from '@/services/api'
+import type { Product, Category } from './types'
 
 interface ProductTableProps {
   products: Product[]
@@ -13,6 +15,8 @@ interface ProductTableProps {
   onEdit: (product: Product) => void
   onDelete: (product: Product) => void
   hasStockProducts: boolean
+  categories?: Category[]
+  onCategoryChanged?: () => void
   // Pagination
   page: number
   totalPages: number
@@ -39,11 +43,51 @@ const getStockIndicator = (product: Product) => {
   </span>
 }
 
-const getPriceWithoutVat = (pricing: Product['pricing']) => {
-  if (!pricing) return null
-  const final_price = parseFloat(pricing.final_price)
-  const vat = parseFloat(pricing.vat_rate) || 0
-  return final_price / (1 + vat / 100)
+const CategoryDropdown: React.FC<{
+  product: Product
+  categories: Category[]
+  onCategoryChanged?: () => void
+}> = ({ product, categories, onCategoryChanged }) => {
+  const [updating, setUpdating] = useState(false)
+
+  const handleChange = async (categoryId: string) => {
+    setUpdating(true)
+    try {
+      await api.updateProduct(product.id, { category_id: categoryId || null })
+      toast.success('Categoria actualizada')
+      onCategoryChanged?.()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al actualizar categoria')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const currentCategory = categories.find(c => c.id === product.category_id)
+
+  return (
+    <select
+      value={product.category_id || ''}
+      onChange={(e) => handleChange(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      disabled={updating}
+      className={`text-xs border rounded px-1.5 py-0.5 font-medium max-w-[120px] truncate transition-colors ${
+        currentCategory
+          ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-700'
+          : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
+      } ${updating ? 'opacity-50' : ''}`}
+    >
+      <option value="">Sin categoria</option>
+      {categories.filter(c => !c.parent_id).map(c => (
+        <React.Fragment key={c.id}>
+          <option value={c.id}>{c.name}</option>
+          {categories.filter(sub => sub.parent_id === c.id).map(sub => (
+            <option key={sub.id} value={sub.id}>&nbsp;&nbsp;{sub.name}</option>
+          ))}
+        </React.Fragment>
+      ))}
+    </select>
+  )
 }
 
 export const ProductTable: React.FC<ProductTableProps> = ({
@@ -55,6 +99,8 @@ export const ProductTable: React.FC<ProductTableProps> = ({
   onEdit,
   onDelete,
   hasStockProducts,
+  categories = [],
+  onCategoryChanged,
   page,
   totalPages,
   total,
@@ -147,7 +193,16 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-right">
-                    <div className="flex gap-2 justify-end">
+                    <div className="flex gap-2 justify-end items-center">
+                      {categories.length > 0 && (
+                        <PermissionGate module="products" action="edit">
+                          <CategoryDropdown
+                            product={product}
+                            categories={categories}
+                            onCategoryChanged={onCategoryChanged}
+                          />
+                        </PermissionGate>
+                      )}
                       <PermissionGate module="products" action="edit">
                         <button
                           onClick={(e) => { e.stopPropagation(); onEdit(product) }}

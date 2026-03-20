@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { DateInput } from '@/components/ui/DateInput'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
 import { InvoicePreviewModal } from '@/components/shared/InvoicePreviewModal'
 import { Pagination } from '@/components/shared/Pagination'
@@ -1116,17 +1117,11 @@ export const Invoices: React.FC = () => {
                     <p className="text-xs text-red-500">Formato: PV-Nro (ej: 00003-00000001)</p>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Fecha de emision <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                    value={importData.invoice_date}
-                    onChange={e => setImportData(prev => ({ ...prev, invoice_date: e.target.value }))}
-                  />
-                </div>
+                <DateInput
+                  label="Fecha de emision *"
+                  value={importData.invoice_date}
+                  onChange={val => setImportData(prev => ({ ...prev, invoice_date: val }))}
+                />
               </div>
 
               {/* Row 2: CAE + CAE Expiry */}

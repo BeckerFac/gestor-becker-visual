@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { DateInput } from '@/components/ui/DateInput'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -431,7 +432,7 @@ export const Purchases: React.FC = () => {
                     {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name} {ent.cuit ? `(${ent.cuit})` : ''}</option>)}
                   </select>
                 </div>
-                <Input label="Fecha" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                <DateInput label="Fecha" value={form.date} onChange={val => setForm({ ...form, date: val })} />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Método de Pago</label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>

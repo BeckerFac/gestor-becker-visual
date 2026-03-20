@@ -1189,7 +1189,7 @@ export const Orders: React.FC = () => {
                     </select>
                   </div>
                 )}
-                <Input label="Fecha Estimada de Entrega" type="date" value={form.estimated_delivery} onChange={e => setForm({ ...form, estimated_delivery: e.target.value })} />
+                <DateInput label="Fecha Estimada de Entrega" value={form.estimated_delivery} onChange={val => setForm({ ...form, estimated_delivery: val })} />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Prioridad<HelpTip text="Urgente sube el pedido en la cola de produccion." /></label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
