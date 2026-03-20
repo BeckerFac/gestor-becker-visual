@@ -359,6 +359,10 @@ export const Cobros: React.FC = () => {
     setInvoiceItems({})
     setShowInvoiceSection(false)
     setShowForm(true)
+    // Auto-scroll to the form so the user sees it
+    setTimeout(() => {
+      document.getElementById('registrar-cobro-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
   }, [])
 
   const handleOpenForm = async () => {
@@ -839,7 +843,7 @@ export const Cobros: React.FC = () => {
 
       {/* Form */}
       {showForm && (
-        <Card className="animate-fadeIn">
+        <Card id="registrar-cobro-form" className="animate-fadeIn">
           <CardHeader><h3 className="text-lg font-semibold">Registrar Cobro</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
