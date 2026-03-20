@@ -501,45 +501,47 @@ class SecretariaService {
     // Step 4: Save user message
     await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
 
-    // Step 4.1: Safety — check for human escalation request
-    if (secretariaSafety.isEscalationRequest(truncatedMessage)) {
-      await secretariaSafety.escalateToHuman(companyId, userId, 'user_requested', truncatedMessage, 'web', channelId);
-      const escResponse = 'Entiendo, voy a derivar tu consulta a un humano. Te van a contactar pronto.';
-      await this.saveConversationMessage(companyId, channelId, 'assistant', escResponse);
-      return { response: escResponse, intent: 'human_escalation' };
-    }
-
-    // Step 4.2: Safety — check for pending action confirmation/cancellation
-    const pendingAction = await secretariaSafety.getPendingAction(companyId, channelId);
-    if (pendingAction) {
-      if (secretariaSafety.isConfirmation(truncatedMessage)) {
-        await secretariaSafety.confirmPendingAction(pendingAction.id);
-        const confirmResponse = `Listo! La operacion "${pendingAction.actionType}" fue confirmada y ejecutada.`;
-        await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResponse);
-        return { response: confirmResponse, intent: 'action_confirmed' };
+    // Step 4.1-4.3: Safety checks (wrapped defensively - tables may not exist yet)
+    try {
+      if (secretariaSafety.isEscalationRequest(truncatedMessage)) {
+        await secretariaSafety.escalateToHuman(companyId, userId, 'user_requested', truncatedMessage, 'web', channelId);
+        const escResponse = 'Entiendo, voy a derivar tu consulta a un humano. Te van a contactar pronto.';
+        await this.saveConversationMessage(companyId, channelId, 'assistant', escResponse);
+        return { response: escResponse, intent: 'human_escalation' };
       }
-      if (secretariaSafety.isCancellation(truncatedMessage)) {
+
+      const pendingAction = await secretariaSafety.getPendingAction(companyId, channelId);
+      if (pendingAction) {
+        if (secretariaSafety.isConfirmation(truncatedMessage)) {
+          await secretariaSafety.confirmPendingAction(pendingAction.id);
+          const confirmResponse = `Listo! La operacion "${pendingAction.actionType}" fue confirmada y ejecutada.`;
+          await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResponse);
+          return { response: confirmResponse, intent: 'action_confirmed' };
+        }
+        if (secretariaSafety.isCancellation(truncatedMessage)) {
+          await secretariaSafety.cancelPendingAction(pendingAction.id);
+          const cancelResponse = 'Operacion cancelada. Si necesitas otra cosa, escribime.';
+          await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
+          return { response: cancelResponse, intent: 'action_cancelled' };
+        }
         await secretariaSafety.cancelPendingAction(pendingAction.id);
-        const cancelResponse = 'Operacion cancelada. Si necesitas otra cosa, escribime.';
-        await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
-        return { response: cancelResponse, intent: 'action_cancelled' };
       }
-      await secretariaSafety.cancelPendingAction(pendingAction.id);
-    }
 
-    // Step 4.3: Safety — track corrections
-    const webChannelKey = `${companyId}:${channelId}`;
-    if (secretariaSafety.isCorrection(truncatedMessage)) {
-      secretariaSafety.trackCorrection(webChannelKey, true);
-      const lastMsgs = await this.loadRecentMessages(companyId, channelId, 2);
-      const lastAiResp = lastMsgs.find(m => m.role === 'assistant')?.content || '';
-      await secretariaSafety.logAIError(companyId, userId, 'user_correction', {
-        userMessage: truncatedMessage,
-        aiResponse: lastAiResp,
-        correction: truncatedMessage,
-      });
-    } else {
-      secretariaSafety.trackCorrection(webChannelKey, false);
+      const webChannelKey = `${companyId}:${channelId}`;
+      if (secretariaSafety.isCorrection(truncatedMessage)) {
+        secretariaSafety.trackCorrection(webChannelKey, true);
+        const lastMsgs = await this.loadRecentMessages(companyId, channelId, 2);
+        const lastAiResp = lastMsgs.find(m => m.role === 'assistant')?.content || '';
+        await secretariaSafety.logAIError(companyId, userId, 'user_correction', {
+          userMessage: truncatedMessage,
+          aiResponse: lastAiResp,
+          correction: truncatedMessage,
+        });
+      } else {
+        secretariaSafety.trackCorrection(webChannelKey, false);
+      }
+    } catch (safetyErr) {
+      logger.error({ err: safetyErr }, 'SecretarIA: safety check failed (non-blocking)');
     }
 
     // Step 5: Load context
@@ -566,7 +568,8 @@ class SecretariaService {
       const intentResult = await classifyIntent(truncatedMessage, context);
 
       // Step 6.1: Safety — track low confidence
-      secretariaSafety.trackLowConfidence(webChannelKey, intentResult.confidence);
+      const safetyKey = `${companyId}:${channelId}`;
+      try { secretariaSafety.trackLowConfidence(safetyKey, intentResult.confidence); } catch {}
 
       // Step 6.2: Safety — pre-execution check
       const safetyCheck = await secretariaSafety.checkSafety({
@@ -924,10 +927,14 @@ class SecretariaService {
     role: 'user' | 'assistant',
     content: string,
   ): Promise<void> {
-    await db.execute(sql`
-      INSERT INTO secretaria_conversations (company_id, phone_number, role, content)
-      VALUES (${companyId}, ${phoneNumber}, ${role}, ${content})
-    `);
+    try {
+      await db.execute(sql`
+        INSERT INTO secretaria_conversations (company_id, phone_number, role, content)
+        VALUES (${companyId}, ${phoneNumber}, ${role}, ${content})
+      `);
+    } catch (err) {
+      logger.error({ err }, 'SecretarIA: failed to save conversation message (table may not exist)');
+    }
   }
 
   private async loadRecentMessages(
@@ -935,30 +942,37 @@ class SecretariaService {
     phoneNumber: string,
     limit: number,
   ): Promise<ConversationMessage[]> {
-    const result = await db.execute(sql`
-      SELECT role, content, created_at
-      FROM secretaria_conversations
-      WHERE company_id = ${companyId} AND phone_number = ${phoneNumber}
-      ORDER BY created_at DESC
-      LIMIT ${limit}
-    `);
+    try {
+      const result = await db.execute(sql`
+        SELECT role, content, created_at
+        FROM secretaria_conversations
+        WHERE company_id = ${companyId} AND phone_number = ${phoneNumber}
+        ORDER BY created_at DESC
+        LIMIT ${limit}
+      `);
 
-    const rows = (result as any).rows || result || [];
-    // Reverse to get chronological order
-    return rows.reverse().map((row: any) => ({
-      role: row.role as 'user' | 'assistant',
-      content: row.content as string,
-      created_at: new Date(row.created_at),
-    }));
+      const rows = (result as any).rows || result || [];
+      return rows.reverse().map((row: any) => ({
+        role: row.role as 'user' | 'assistant',
+        content: row.content as string,
+        created_at: new Date(row.created_at),
+      }));
+    } catch (err) {
+      logger.error({ err }, 'SecretarIA: failed to load recent messages');
+      return [];
+    }
   }
 
   private async getCompanyName(companyId: string): Promise<string> {
-    const result = await db.execute(sql`
-      SELECT name FROM companies WHERE id = ${companyId} LIMIT 1
-    `);
-
-    const rows = (result as any).rows || result || [];
-    return rows.length > 0 ? (rows[0] as any).name : 'tu empresa';
+    try {
+      const result = await db.execute(sql`
+        SELECT name FROM companies WHERE id = ${companyId} LIMIT 1
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows.length > 0 ? (rows[0] as any).name : 'tu empresa';
+    } catch {
+      return 'tu empresa';
+    }
   }
 }
 

@@ -51,20 +51,30 @@ async function llmChat(systemPrompt: string, userMessage: string, maxTokens: num
   }
 
   // Anthropic (Claude)
-  if (!anthropicClient) {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  try {
+    if (!anthropicClient) {
+      const AnthropicModule = await import('@anthropic-ai/sdk');
+      const Anthropic = AnthropicModule.default || AnthropicModule;
+      anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      logger.info('SecretarIA: Anthropic client initialized successfully');
+    }
+    logger.info({ model: 'claude-haiku-4-5-20250315', maxTokens, promptLength: systemPrompt.length }, 'SecretarIA: calling Anthropic');
+    const response = await anthropicClient.messages.create({
+      model: 'claude-haiku-4-5-20250315',
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: userMessage },
+      ],
+    });
+    const block = response.content[0];
+    const result = block?.type === 'text' ? block.text.trim() : '';
+    logger.info({ responseLength: result.length }, 'SecretarIA: Anthropic response received');
+    return result;
+  } catch (error: any) {
+    logger.error({ err: error, message: error?.message, status: error?.status, type: error?.type }, 'SecretarIA: Anthropic API error');
+    throw error;
   }
-  const response = await anthropicClient.messages.create({
-    model: 'claude-haiku-4-5-20250315',
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: [
-      { role: 'user', content: userMessage },
-    ],
-  });
-  const block = response.content[0];
-  return block?.type === 'text' ? block.text.trim() : '';
 }
 
 // ── Security prompt fragment (injected into every system prompt) ──
