@@ -56,7 +56,7 @@ async function llmChat(systemPrompt: string, userMessage: string, maxTokens: num
     anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   }
   const response = await anthropicClient.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-haiku-4-5-20250315',
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [
