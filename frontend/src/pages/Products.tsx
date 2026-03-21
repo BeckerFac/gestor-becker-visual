@@ -262,7 +262,7 @@ export const Products: React.FC = () => {
   const exportData = products.map(p => ({
     sku: p.sku,
     nombre: p.name,
-    tipo: p.product_type || '-',
+    tipo: p.category_name || p.product_type || '-',
     costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
     margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
     iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
@@ -286,7 +286,7 @@ export const Products: React.FC = () => {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'productos', label: 'Productos', show: true },
     { key: 'movimientos', label: 'Stock / Movimientos', show: true },
-    { key: 'tipos', label: 'Tipos', show: true },
+    { key: 'tipos', label: 'Tipos', show: false },
     { key: 'categorias', label: 'Categorias', show: false },
     { key: 'listas', label: 'Listas de Precios', show: false },
   ]
@@ -545,6 +545,7 @@ export const Products: React.FC = () => {
         <StockMovements
           products={products}
           onDataChanged={() => { loadProducts(); loadMetadata() }}
+          onSwitchToProducts={() => handleTabChange('productos')}
         />
       )}
 

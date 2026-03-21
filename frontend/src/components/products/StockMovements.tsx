@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
@@ -14,6 +13,7 @@ import type { Product, StockMovement } from './types'
 interface StockMovementsProps {
   products: Product[]
   onDataChanged: () => void
+  onSwitchToProducts?: () => void
 }
 
 interface StockItem {
@@ -26,7 +26,7 @@ interface StockItem {
   used_in_products?: { name: string; sku: string }[]
 }
 
-export const StockMovements: React.FC<StockMovementsProps> = ({ products, onDataChanged }) => {
+export const StockMovements: React.FC<StockMovementsProps> = ({ products, onDataChanged, onSwitchToProducts }) => {
   const [stock, setStock] = useState<StockItem[]>([])
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [loading, setLoading] = useState(true)
@@ -325,94 +325,21 @@ export const StockMovements: React.FC<StockMovementsProps> = ({ products, onData
 
       <Input placeholder="Buscar por producto o SKU..." value={search} onChange={e => setSearch(e.target.value)} />
 
-      {/* Stock view */}
+      {/* Stock view - summary + link to products tab */}
       {view === 'stock' && (
-        loading ? <SkeletonTable rows={5} cols={6} /> : filteredStock.length === 0 ? (
-          <EmptyState
-            title={search ? 'Sin resultados' : 'Sin productos en stock'}
-            description={search ? 'No se encontraron productos con esa busqueda' : 'Registra un movimiento de stock para empezar'}
-            actionLabel={!search ? '+ Movimiento de Stock' : undefined}
-            onAction={!search ? () => setShowForm(true) : undefined}
-          />
-        ) : (
-          <Card>
-            <CardContent className="overflow-x-auto p-0">
-              <table className="min-w-full border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">SKU</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Producto</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Deposito</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Cantidad</th>
-                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Min.</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Usado en</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredStock.map((s) => {
-                    const qty = parseFloat(s.quantity || '0')
-                    const threshold = getProductThreshold(s.product?.id)
-                    const isBelowThreshold = threshold > 0 && qty <= threshold && qty > 0
-                    const min = parseFloat(s.min_level || '0')
-                    return (
-                      <tr key={s.id} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                        <td className="px-4 py-3 text-sm font-mono text-gray-500 dark:text-gray-400">{s.product?.sku || '-'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{s.product?.name || '-'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{s.warehouse?.name || 'Principal'}</td>
-                        <td className="px-4 py-3 text-sm text-right">
-                          <span className={`font-bold ${qty <= 0 ? 'text-red-600 dark:text-red-400' : isBelowThreshold ? 'text-orange-500 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}>
-                            {qty}
-                            {isBelowThreshold && <span className="ml-1 text-xs font-normal text-orange-600 dark:text-orange-400">(bajo)</span>}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right">
-                          {editingThreshold === s.product?.id ? (
-                            <input
-                              type="number" step="0.01"
-                              className="w-20 px-1 py-0.5 border border-blue-300 rounded text-sm text-right bg-white dark:bg-gray-800 dark:text-gray-100"
-                              value={thresholdValue}
-                              onChange={e => setThresholdValue(e.target.value)}
-                              onBlur={() => handleSaveThreshold(s.product?.id)}
-                              onKeyDown={e => e.key === 'Enter' && handleSaveThreshold(s.product?.id)}
-                              autoFocus
-                            />
-                          ) : (
-                            <span
-                              className="cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 px-1 py-0.5 rounded text-gray-600 dark:text-gray-400"
-                              onClick={() => { setEditingThreshold(s.product?.id); setThresholdValue(String(threshold)) }}
-                              title="Click para editar umbral"
-                            >
-                              {threshold || '0'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {(s.used_in_products || []).length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {(s.used_in_products || []).map((p: any, i: number) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded text-xs border border-amber-200 dark:border-amber-800">{p.name}</span>
-                              ))}
-                            </div>
-                          ) : <span className="text-gray-300 dark:text-gray-600 text-xs">-</span>}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {qty <= 0 ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">Sin Stock</span>
-                          ) : (threshold > 0 && qty <= threshold) || qty <= min ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300">Stock Bajo</span>
-                          ) : (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300">OK</span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        )
+        <div className="text-center py-4">
+          {onSwitchToProducts && (
+            <button
+              onClick={onSwitchToProducts}
+              className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+            >
+              Ver stock en tabla de productos
+            </button>
+          )}
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            El detalle de stock por producto se muestra en la tabla principal de Productos.
+          </p>
+        </div>
       )}
 
       {/* Movements view */}

@@ -168,10 +168,12 @@ export class ProductsService {
             )
           ELSE NULL END as pricing,
           COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
-          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level,
+          c.name as category_name
         FROM products p
         LEFT JOIN product_pricing pp ON pp.product_id = p.id
         LEFT JOIN stock s ON s.product_id = p.id
+        LEFT JOIN categories c ON c.id = p.category_id
         WHERE ${whereClause} ${stockHaving}
         ORDER BY p.name ASC
         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
@@ -557,10 +559,12 @@ export class ProductsService {
             json_build_object('cost', pp.cost, 'margin_percent', pp.margin_percent, 'vat_rate', pp.vat_rate, 'final_price', pp.final_price)
           ELSE NULL END as pricing,
           COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
-          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level,
+          cat.name as category_name
         FROM products p
         LEFT JOIN product_pricing pp ON pp.product_id = p.id
         LEFT JOIN stock s ON s.product_id = p.id
+        LEFT JOIN categories cat ON cat.id = p.category_id
         WHERE ${whereClause} ${stockHaving}
         ORDER BY p.name ASC
         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}

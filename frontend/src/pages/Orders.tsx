@@ -339,7 +339,7 @@ export const Orders: React.FC = () => {
             item.product_name = product.name
             item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
-            item.product_type = (product as any).product_type || 'otro'
+            item.product_type = (product as any).category_name || (product as any).product_type || 'otro'
             setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
 
             // If a price criteria is selected, try to use criteria price

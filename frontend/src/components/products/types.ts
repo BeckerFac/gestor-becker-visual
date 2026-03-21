@@ -13,6 +13,7 @@ export interface Product {
   description: string | null
   product_type: string | null
   category_id: string | null
+  category_name?: string | null
   active: boolean
   controls_stock?: boolean
   low_stock_threshold?: string | number

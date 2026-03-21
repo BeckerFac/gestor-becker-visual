@@ -263,19 +263,18 @@ export const ProductForm: React.FC<ProductFormProps> = ({
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Codigo de Barras<HelpTip text="Opcional. Escaneable desde lectores de barras." /></label>
               <Input placeholder="7790001234567" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Producto<HelpTip text="Categoria del producto. Configura los tipos disponibles en 'Gestionar tipos' mas abajo." /></label>
-              <input
-                list="product-types-list"
-                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={form.product_type}
-                onChange={e => setForm({ ...form, product_type: e.target.value })}
-                placeholder="Escribir o elegir tipo..."
-              />
-              <datalist id="product-types-list">
-                {allTypes.map(t => <option key={t} value={t}>{t}</option>)}
-              </datalist>
-            </div>
+            {/* Tipo is now determined by category - shown as read-only info if category is selected */}
+            {categoryId && categories.length > 0 && (() => {
+              const cat = categories.find(c => c.id === categoryId)
+              return cat ? (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
+                  <div className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-base bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                    {cat.name}
+                  </div>
+                </div>
+              ) : null
+            })()}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Descripcion" placeholder="Descripcion del producto" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />

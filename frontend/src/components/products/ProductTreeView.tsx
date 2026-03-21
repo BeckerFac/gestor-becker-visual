@@ -142,9 +142,19 @@ const ProductRow: React.FC<{
         {highlightText(product.name)}
       </td>
       <td className="px-4 py-3 text-sm">
-        <span className="px-2 py-0.5 rounded text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
-          {product.product_type || '-'}
-        </span>
+        {product.category_name ? (
+          <span className="px-2 py-0.5 rounded text-xs bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium">
+            {product.category_name}
+          </span>
+        ) : product.product_type ? (
+          <span className="px-2 py-0.5 rounded text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">
+            {product.product_type}
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 rounded text-xs bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500 font-medium">
+            Sin categoria
+          </span>
+        )}
       </td>
       <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
         {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
