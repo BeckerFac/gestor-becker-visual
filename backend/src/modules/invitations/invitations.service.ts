@@ -68,7 +68,7 @@ export class InvitationsService {
 
   async getInvitations(companyId: string) {
     const result = await db.execute(sql`
-      SELECT pi.id, pi.email, pi.name, pi.role, pi.status, pi.expires_at, pi.created_at,
+      SELECT pi.id, pi.email, pi.name, pi.role, pi.status, pi.token, pi.expires_at, pi.created_at,
              u.name as invited_by_name
       FROM pending_invitations pi
       LEFT JOIN users u ON u.id = pi.invited_by

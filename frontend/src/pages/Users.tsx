@@ -28,6 +28,7 @@ interface InvitationRecord {
   name: string | null
   role: string
   status: string
+  token: string
   expires_at: string
   created_at: string
   invited_by_name: string | null
@@ -617,6 +618,15 @@ export const Users: React.FC = () => {
                     <td className="px-4 py-3">
                       {inv.status === 'pending' && (
                         <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              const link = `${window.location.origin}/accept-invite?token=${inv.token}`
+                              navigator.clipboard.writeText(link).then(() => toast.success('Link copiado al portapapeles'))
+                            }}
+                            className="text-purple-600 hover:underline text-sm"
+                          >
+                            Copiar link
+                          </button>
                           <button
                             onClick={() => handleResendInvitation(inv.id)}
                             className="text-blue-600 hover:underline text-sm"
