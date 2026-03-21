@@ -29,6 +29,7 @@ interface ProductTreeViewProps {
   onDelete: (product: Product) => void
   onAddProduct: (categoryId?: string) => void
   onReload: () => void
+  hideCosts?: boolean
 }
 
 // Load expanded state from localStorage
@@ -65,7 +66,8 @@ const ProductRow: React.FC<{
   categories?: CategoryTreeNode[]
   onMoveToCategory?: (productId: string, categoryId: string | null) => void
   onContextMenu?: (e: React.MouseEvent, product: Product) => void
-}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory, onContextMenu }) => {
+  hideCosts?: boolean
+}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory, onContextMenu, hideCosts = false }) => {
   const paddingLeft = depth * 24
   const [showMoveMenu, setShowMoveMenu] = useState(false)
 
@@ -156,12 +158,16 @@ const ProductRow: React.FC<{
           </span>
         )}
       </td>
-      <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
-        {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
-      </td>
-      <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
-        {product.pricing ? `${product.pricing.margin_percent}%` : '-'}
-      </td>
+      {!hideCosts && (
+        <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+          {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
+        </td>
+      )}
+      {!hideCosts && (
+        <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+          {product.pricing ? `${product.pricing.margin_percent}%` : '-'}
+        </td>
+      )}
       <td className="px-4 py-3 text-sm text-right">
         {product.pricing ? (
           <span className="font-bold text-green-700 dark:text-green-400">
@@ -262,7 +268,8 @@ const CategoryProducts: React.FC<{
   allCategories?: CategoryTreeNode[]
   onMoveToCategory?: (productId: string, categoryId: string | null) => void
   onProductContextMenu?: (e: React.MouseEvent, product: Product) => void
-}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory, onProductContextMenu }) => {
+  hideCosts?: boolean
+}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory, onProductContextMenu, hideCosts = false }) => {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -350,11 +357,12 @@ const CategoryProducts: React.FC<{
           categories={allCategories}
           onMoveToCategory={onMoveToCategory}
           onContextMenu={onProductContextMenu}
+          hideCosts={hideCosts}
         />
       ))}
       {hasMore && (
         <tr>
-          <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-2" style={{ paddingLeft: depth * 24 + 24 }}>
+          <td colSpan={(hasStockProducts ? 10 : 9) - (hideCosts ? 2 : 0)} className="px-4 py-2" style={{ paddingLeft: depth * 24 + 24 }}>
             <button
               onClick={handleLoadMore}
               disabled={loading}
@@ -382,6 +390,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
   onDelete,
   onAddProduct,
   onReload,
+  hideCosts = false,
 }) => {
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded)
   const [treeData, setTreeData] = useState<{
@@ -616,6 +625,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
               onProductContextMenu={(e, product) => {
                 setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
               }}
+              hideCosts={hideCosts}
             />
           )}
         </React.Fragment>
@@ -707,8 +717,8 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">SKU</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Producto</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Costo</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Margen%</th>
+                {!hideCosts && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Costo</th>}
+                {!hideCosts && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Margen%</th>}
                 <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Precio</th>
                 {hasStockProducts && (
                   <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Stock</th>
@@ -781,6 +791,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                       onProductContextMenu={(e, product) => {
                         setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
                       }}
+                      hideCosts={hideCosts}
                     />
                   )}
                 </>

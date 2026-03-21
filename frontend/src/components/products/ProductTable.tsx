@@ -17,6 +17,7 @@ interface ProductTableProps {
   hasStockProducts: boolean
   categories?: Category[]
   onCategoryChanged?: () => void
+  hideCosts?: boolean
   // Pagination
   page: number
   totalPages: number
@@ -101,6 +102,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
   hasStockProducts,
   categories = [],
   onCategoryChanged,
+  hideCosts = false,
   page,
   totalPages,
   total,
@@ -123,8 +125,8 @@ export const ProductTable: React.FC<ProductTableProps> = ({
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">SKU</th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Producto</th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Costo</th>
-              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Margen%</th>
+              {!hideCosts && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Costo</th>}
+              {!hideCosts && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Margen%</th>}
               <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Precio</th>
               {hasStockProducts && (
                 <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Stock</th>
@@ -136,7 +138,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
           <tbody>
             {products.length === 0 ? (
               <tr>
-                <td colSpan={hasStockProducts ? 10 : 9} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                <td colSpan={(hasStockProducts ? 10 : 9) - (hideCosts ? 2 : 0)} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                   No hay productos
                 </td>
               </tr>
@@ -173,12 +175,16 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
-                    {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
-                    {product.pricing ? `${product.pricing.margin_percent}%` : '-'}
-                  </td>
+                  {!hideCosts && (
+                    <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+                      {product.pricing ? formatCurrency(parseFloat(product.pricing.cost)) : '-'}
+                    </td>
+                  )}
+                  {!hideCosts && (
+                    <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-300">
+                      {product.pricing ? `${product.pricing.margin_percent}%` : '-'}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-sm text-right">
                     {product.pricing ? (
                       <span className="font-bold text-green-700 dark:text-green-400">

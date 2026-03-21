@@ -5,7 +5,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
-import { PermissionGate } from '@/components/shared/PermissionGate'
+import { PermissionGate, useCan } from '@/components/shared/PermissionGate'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { toast } from '@/hooks/useToast'
@@ -259,13 +259,17 @@ export const Products: React.FC = () => {
 
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE) || 1
 
+  const canViewCosts = useCan('products', 'view_costs')
+
   // Export data
   const exportData = products.map(p => ({
     sku: p.sku,
     nombre: p.name,
     tipo: p.category_name || p.product_type || '-',
-    costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
-    margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
+    ...(canViewCosts ? {
+      costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
+      margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
+    } : {}),
     iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
     precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
     stock: hasStockProducts && p.controls_stock ? parseFloat(String(p.stock_quantity ?? 0)) : '-',
@@ -276,17 +280,21 @@ export const Products: React.FC = () => {
     { key: 'sku', label: 'SKU' },
     { key: 'nombre', label: 'Producto' },
     { key: 'tipo', label: 'Tipo' },
-    { key: 'costo', label: 'Costo' },
-    { key: 'margen', label: 'Margen' },
+    ...(canViewCosts ? [
+      { key: 'costo', label: 'Costo' },
+      { key: 'margen', label: 'Margen' },
+    ] : []),
     { key: 'iva', label: 'IVA' },
     { key: 'precio_final', label: 'Precio Final' },
     ...(hasStockProducts ? [{ key: 'stock', label: 'Stock' }] : []),
     { key: 'estado', label: 'Estado' },
   ]
 
+  const canManageMaterials = useCan('products', 'manage_materials')
+
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'productos', label: 'Productos', show: true },
-    { key: 'materiales', label: 'Materiales', show: true },
+    { key: 'materiales', label: 'Materiales', show: canManageMaterials },
     { key: 'movimientos', label: 'Stock / Movimientos', show: true },
     { key: 'tipos', label: 'Tipos', show: false },
     { key: 'categorias', label: 'Categorias', show: false },
@@ -507,6 +515,7 @@ export const Products: React.FC = () => {
               onDelete={(product) => setDeleteTarget(product)}
               onAddProduct={handleAddProductWithCategory}
               onReload={() => { loadProducts(); loadMetadata() }}
+              hideCosts={!canViewCosts}
             />
           ) : (
             <>
@@ -531,6 +540,7 @@ export const Products: React.FC = () => {
                   hasStockProducts={hasStockProducts}
                   categories={categories}
                   onCategoryChanged={handleCategoryChanged}
+                  hideCosts={!canViewCosts}
                   page={page}
                   totalPages={totalPages}
                   total={total}

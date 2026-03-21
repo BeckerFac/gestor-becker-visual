@@ -7,6 +7,7 @@ import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
 import { formatDate } from '@/lib/utils'
 import { useBilling } from '@/hooks/useBilling'
+import { useCan } from '@/components/shared/PermissionGate'
 import { UpgradePrompt } from '@/components/shared/UpgradePrompt'
 import { LibroIVAVentasTab } from '@/components/reportes/LibroIVAVentasTab'
 import { LibroIVAComprasTab } from '@/components/reportes/LibroIVAComprasTab'
@@ -135,6 +136,7 @@ const PREMIUM_TABS: TabKey[] = ['biz_rentabilidad', 'biz_clientes', 'biz_cobranz
 export const Reportes: React.FC = () => {
   const { hasFeature } = useBilling()
   const canAccessAdvanced = hasFeature('advanced_reports')
+  const canViewFinancial = useCan('reports', 'view_financial')
 
   const [activeTab, setActiveTab] = useState<TabKey>('biz_ventas')
   const [loading, setLoading] = useState(false)
@@ -463,17 +465,21 @@ export const Reportes: React.FC = () => {
           </div>
 
           {/* Separator */}
-          <div className="mx-1.5 self-stretch flex items-end pb-2">
-            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
-          </div>
+          {canViewFinancial && (
+            <div className="mx-1.5 self-stretch flex items-end pb-2">
+              <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
+            </div>
+          )}
 
-          {/* Accounting group */}
-          <div className="flex items-center">
-            <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 px-2 py-2 self-end select-none">
-              Contable
-            </span>
-            {ACCOUNTING_TABS.map(renderTabButton)}
-          </div>
+          {/* Accounting group - hidden if user lacks view_financial permission */}
+          {canViewFinancial && (
+            <div className="flex items-center">
+              <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 px-2 py-2 self-end select-none">
+                Contable
+              </span>
+              {ACCOUNTING_TABS.map(renderTabButton)}
+            </div>
+          )}
         </nav>
       </div>
 

@@ -1518,7 +1518,7 @@ export const Invoices: React.FC = () => {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-2">
                           {vistaMode === 'fiscal' && invoice.status === 'draft' && (
-                            <PermissionGate module="invoices" action="edit">
+                            <PermissionGate module="invoices" action="authorize_afip">
                               <button
                                 onClick={() => handleAuthorize(invoice)}
                                 disabled={authorizing === invoice.id}
