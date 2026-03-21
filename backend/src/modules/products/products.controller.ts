@@ -260,6 +260,20 @@ export class ProductsController {
     }
   }
 
+  async duplicateProduct(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');
+
+      const product = await productsService.duplicateProduct(req.user.company_id, req.params.id);
+      res.status(201).json(product);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Failed to duplicate product' });
+    }
+  }
+
   async deleteProduct(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');

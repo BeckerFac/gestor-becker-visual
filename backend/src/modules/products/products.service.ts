@@ -991,6 +991,114 @@ export class ProductsService {
     }
   }
 
+  async duplicateProduct(companyId: string, productId: string) {
+    await this.ensureMigrations();
+    try {
+      // Get the original product with all data
+      const originalResult = await pool.query(`
+        SELECT p.*,
+          CASE WHEN pp.id IS NOT NULL THEN
+            json_build_object('cost', pp.cost, 'margin_percent', pp.margin_percent, 'vat_rate', pp.vat_rate, 'final_price', pp.final_price)
+          ELSE NULL END as pricing
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        WHERE p.id = $1 AND p.company_id = $2
+      `, [productId, companyId]);
+
+      if (!originalResult.rows || originalResult.rows.length === 0) {
+        throw new ApiError(404, 'Producto no encontrado');
+      }
+
+      const original = originalResult.rows[0];
+      const newId = uuid();
+
+      // Generate unique SKU: append "-COPIA", or increment number if already exists
+      let newSku = `${original.sku}-COPIA`;
+      let skuAttempt = 1;
+      while (true) {
+        const skuCheck = await pool.query(
+          'SELECT id FROM products WHERE company_id = $1 AND sku = $2',
+          [companyId, newSku]
+        );
+        if (!skuCheck.rows || skuCheck.rows.length === 0) break;
+        skuAttempt++;
+        newSku = `${original.sku}-COPIA-${skuAttempt}`;
+        if (skuAttempt > 100) throw new ApiError(500, 'No se pudo generar un SKU unico');
+      }
+
+      // Insert the new product
+      await db.insert(products).values({
+        id: newId,
+        company_id: companyId,
+        sku: newSku,
+        name: `${original.name} (Copia)`,
+        description: original.description || null,
+        barcode: null, // Don't copy barcode (must be unique)
+        category_id: original.category_id || null,
+      });
+
+      // Copy extra fields via raw SQL
+      await pool.query(
+        'UPDATE products SET product_type = $1, controls_stock = $2, low_stock_threshold = $3, active = $4 WHERE id = $5',
+        [original.product_type, !!original.controls_stock, Number(original.low_stock_threshold) || 0, true, newId]
+      );
+
+      // Copy pricing
+      if (original.pricing) {
+        await db.insert(product_pricing).values({
+          id: uuid(),
+          product_id: newId,
+          cost: original.pricing.cost,
+          margin_percent: original.pricing.margin_percent,
+          vat_rate: original.pricing.vat_rate,
+          final_price: original.pricing.final_price,
+        });
+      }
+
+      // Copy price criteria prices
+      try {
+        await pool.query(`
+          INSERT INTO product_criteria_prices (id, product_id, criteria_id, cost, margin_percent, vat_rate, final_price, created_at, updated_at)
+          SELECT gen_random_uuid(), $1, criteria_id, cost, margin_percent, vat_rate, final_price, NOW(), NOW()
+          FROM product_criteria_prices WHERE product_id = $2
+        `, [newId, productId]);
+      } catch {
+        // Table may not exist - non-blocking
+      }
+
+      // Copy BOM components
+      try {
+        await pool.query(`
+          INSERT INTO product_components (id, parent_product_id, component_product_id, quantity, unit, notes, created_at)
+          SELECT gen_random_uuid(), $1, component_product_id, quantity, unit, notes, NOW()
+          FROM product_components WHERE parent_product_id = $2
+        `, [newId, productId]);
+      } catch {
+        // Table may not exist - non-blocking
+      }
+
+      // Return the new product with pricing
+      const newProductResult = await pool.query(`
+        SELECT p.*,
+          CASE WHEN pp.id IS NOT NULL THEN
+            json_build_object('cost', pp.cost, 'margin_percent', pp.margin_percent, 'vat_rate', pp.vat_rate, 'final_price', pp.final_price)
+          ELSE NULL END as pricing,
+          COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE p.id = $1
+      `, [newId]);
+
+      return newProductResult.rows[0];
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Duplicate product error:', error);
+      throw new ApiError(500, 'Error al duplicar producto');
+    }
+  }
+
   async deleteProduct(companyId: string, productId: string) {
     try {
       const product = await this.getProduct(companyId, productId);

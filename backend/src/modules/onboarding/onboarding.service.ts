@@ -19,7 +19,8 @@ export class OnboardingService {
 
     // Check if company already has data (existing company that got the migration)
     // If they have products or invoices, auto-complete onboarding
-    if (!company.onboarding_completed) {
+    // BUT: don't auto-complete if onboarding_current_step = 0 (means it was intentionally reset)
+    if (!company.onboarding_completed && company.onboarding_current_step !== 0) {
       const dataCheck = await pool.query(
         `SELECT
           (SELECT COUNT(*) FROM products WHERE company_id = $1)::int as products_count,

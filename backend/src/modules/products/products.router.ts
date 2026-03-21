@@ -25,6 +25,7 @@ productsRouter.post('/bulk-price-preview', authorize('products', 'view'), (req, 
 productsRouter.post('/', authorize('products', 'create'), (req, res) => productsController.createProduct(req, res));
 productsRouter.get('/:id', authorize('products', 'view'), (req, res) => productsController.getProduct(req, res));
 productsRouter.put('/:id', authorize('products', 'edit'), (req, res) => productsController.updateProduct(req, res));
+productsRouter.post('/:id/duplicate', authorize('products', 'create'), (req, res) => productsController.duplicateProduct(req, res));
 productsRouter.delete('/:id', authorize('products', 'delete'), (req, res) => productsController.deleteProduct(req, res));
 
 // Product prices (per criteria)

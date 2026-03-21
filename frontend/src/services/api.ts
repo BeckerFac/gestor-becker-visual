@@ -274,6 +274,10 @@ export const api = {
     const { data } = await client.delete(`/products/${id}`)
     return data
   },
+  duplicateProduct: async (id: string) => {
+    const { data } = await client.post(`/products/${id}/duplicate`)
+    return data
+  },
   getProductTypes: async () => {
     const { data } = await client.get('/products/types')
     return data
