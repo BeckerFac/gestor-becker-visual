@@ -68,7 +68,7 @@ const ProductRow: React.FC<{
   onContextMenu?: (e: React.MouseEvent, product: Product) => void
   hideCosts?: boolean
 }> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory, onContextMenu, hideCosts = false }) => {
-  const paddingLeft = depth * 24
+  const paddingLeft = depth * 40
   const [showMoveMenu, setShowMoveMenu] = useState(false)
 
   const highlightText = (text: string) => {
@@ -104,7 +104,7 @@ const ProductRow: React.FC<{
 
   return (
     <tr
-      className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''} ${depth > 0 ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''}`}
+      className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''} ${depth > 1 ? 'bg-blue-50/40 dark:bg-blue-900/10' : depth > 0 ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''}`}
       onClick={() => onRowClick(product)}
       onContextMenu={onContextMenu ? (e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, product) } : undefined}
       draggable={!isTouchDevice}
@@ -115,8 +115,8 @@ const ProductRow: React.FC<{
       <td className="px-4 py-3 relative" style={{ paddingLeft: paddingLeft + 16 }}>
         {/* Vertical indent line for nested products */}
         {depth > 0 && (
-          <div className="absolute left-0 top-0 bottom-0" style={{ left: `${depth * 12}px` }}>
-            <div className="w-0.5 h-full bg-gray-200 dark:bg-gray-700" />
+          <div className="absolute left-0 top-0 bottom-0" style={{ left: `${(depth - 1) * 40 + 20}px` }}>
+            <div className="w-1 h-full bg-indigo-300 dark:bg-indigo-700 rounded-full" />
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -317,7 +317,7 @@ const CategoryProducts: React.FC<{
   if (loading && products.length === 0) {
     return (
       <tr>
-        <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-3" style={{ paddingLeft: depth * 24 + 24 }}>
+        <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-3" style={{ paddingLeft: depth * 40 + 40 }}>
           <span className="text-sm text-gray-400 dark:text-gray-500 animate-pulse">Cargando productos...</span>
         </td>
       </tr>
@@ -327,7 +327,7 @@ const CategoryProducts: React.FC<{
   if (products.length === 0 && !loading) {
     return (
       <tr>
-        <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-3" style={{ paddingLeft: depth * 24 + 24 }}>
+        <td colSpan={hasStockProducts ? 10 : 9} className="px-4 py-3" style={{ paddingLeft: depth * 40 + 40 }}>
           <span className="text-sm text-gray-400 dark:text-gray-500 italic">
             {search ? 'Sin resultados en esta categoria' : 'Sin productos en esta categoria'}
           </span>
@@ -362,7 +362,7 @@ const CategoryProducts: React.FC<{
       ))}
       {hasMore && (
         <tr>
-          <td colSpan={(hasStockProducts ? 10 : 9) - (hideCosts ? 2 : 0)} className="px-4 py-2" style={{ paddingLeft: depth * 24 + 24 }}>
+          <td colSpan={(hasStockProducts ? 10 : 9) - (hideCosts ? 2 : 0)} className="px-4 py-2" style={{ paddingLeft: depth * 40 + 40 }}>
             <button
               onClick={handleLoadMore}
               disabled={loading}
