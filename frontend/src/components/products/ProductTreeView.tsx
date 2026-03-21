@@ -9,6 +9,8 @@ import { api } from '@/services/api'
 import { useProductDragDrop } from '@/hooks/useProductDragDrop'
 import { CategoryRow } from './CategoryRow'
 import type { CategoryTreeNode } from './CategoryRow'
+import { ContextMenu } from './ContextMenu'
+import type { ContextMenuState } from './ContextMenu'
 import type { Product } from './types'
 
 const STORAGE_KEY = 'gestia-product-tree-expanded'
@@ -62,7 +64,8 @@ const ProductRow: React.FC<{
   isTouchDevice?: boolean
   categories?: CategoryTreeNode[]
   onMoveToCategory?: (productId: string, categoryId: string | null) => void
-}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory }) => {
+  onContextMenu?: (e: React.MouseEvent, product: Product) => void
+}> = ({ product, depth, isSelected, onToggleSelect, onRowClick, onEdit, onDelete, hasStockProducts, highlight, onDragStart, onDragEnd, isDraggedOver, isTouchDevice, categories, onMoveToCategory, onContextMenu }) => {
   const paddingLeft = depth * 24
   const [showMoveMenu, setShowMoveMenu] = useState(false)
 
@@ -101,6 +104,7 @@ const ProductRow: React.FC<{
     <tr
       className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''} ${depth > 0 ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''}`}
       onClick={() => onRowClick(product)}
+      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, product) } : undefined}
       draggable={!isTouchDevice}
       onDragStart={onDragStart ? (e) => onDragStart(e, product.id, product.name, product.category_id) : undefined}
       onDragEnd={onDragEnd}
@@ -247,7 +251,8 @@ const CategoryProducts: React.FC<{
   isTouchDevice?: boolean
   allCategories?: CategoryTreeNode[]
   onMoveToCategory?: (productId: string, categoryId: string | null) => void
-}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory }) => {
+  onProductContextMenu?: (e: React.MouseEvent, product: Product) => void
+}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory, onProductContextMenu }) => {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -334,6 +339,7 @@ const CategoryProducts: React.FC<{
           isTouchDevice={isTouchDevice}
           categories={allCategories}
           onMoveToCategory={onMoveToCategory}
+          onContextMenu={onProductContextMenu}
         />
       ))}
       {hasMore && (
@@ -382,6 +388,9 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
   const [showNewRootForm, setShowNewRootForm] = useState(false)
   const [newRootName, setNewRootName] = useState('')
   const [creatingRoot, setCreatingRoot] = useState(false)
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const loadTree = useCallback(async () => {
     try {
@@ -562,6 +571,9 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
             onDragLeave={dnd.handleCategoryDragLeave}
             onDrop={(e) => dnd.handleCategoryDrop(e, cat.id)}
             isDraggingActive={dnd.isDragging}
+            onContextMenu={(e, category) => {
+              setContextMenu({ x: e.clientX, y: e.clientY, type: 'category', item: category })
+            }}
           />
           {isExp && cat.children.length > 0 && renderCategoryTree(cat.children, depth + 1)}
           {isExp && (
@@ -583,6 +595,9 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
               isTouchDevice={dnd.isTouchDevice}
               allCategories={allFlatCategories}
               onMoveToCategory={dnd.handleMoveToCategory}
+              onProductContextMenu={(e, product) => {
+                setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
+              }}
             />
           )}
         </React.Fragment>
@@ -655,7 +670,17 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
       {/* Tree table */}
       <Card>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-full border-collapse">
+          <table
+            className="min-w-full border-collapse"
+            onContextMenu={(e) => {
+              // Only trigger if clicking on empty space (not on a row)
+              const target = e.target as HTMLElement
+              if (target.tagName === 'TABLE' || target.tagName === 'TBODY' || target.tagName === 'THEAD') {
+                e.preventDefault()
+                setContextMenu({ x: e.clientX, y: e.clientY, type: 'empty', item: null })
+              }
+            }}
+          >
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100 w-10">
@@ -692,6 +717,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                 <>
                   <tr
                     className={`bg-gray-50/50 dark:bg-gray-800/40 transition-colors ${dnd.isDropTargetActive(null) ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20' : ''}`}
+                    onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, type: 'empty', item: null }) }}
                     onDragOver={(e) => dnd.handleCategoryDragOver(e, null)}
                     onDragLeave={dnd.handleCategoryDragLeave}
                     onDrop={(e) => dnd.handleCategoryDrop(e, null)}
@@ -734,6 +760,9 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                       isTouchDevice={dnd.isTouchDevice}
                       allCategories={allFlatCategories}
                       onMoveToCategory={dnd.handleMoveToCategory}
+                      onProductContextMenu={(e, product) => {
+                        setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
+                      }}
                     />
                   )}
                 </>
@@ -763,6 +792,39 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
         onCancel={() => setDeleteTarget(null)}
         loading={deleting}
       />
+
+      {/* Context menu */}
+      {contextMenu && treeData && (
+        <ContextMenu
+          menu={contextMenu}
+          categories={treeData.categories}
+          onClose={() => setContextMenu(null)}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onDeleteCategory={(catId) => setDeleteTarget(catId)}
+          onAddProduct={(catId) => onAddProduct(catId)}
+          onAddSubcategory={(parentId) => {
+            if (!parentId) {
+              // Root category - use the existing form
+              setShowNewRootForm(true)
+            } else {
+              // Expand the parent category and let CategoryRow handle subcategory creation
+              setExpanded(prev => {
+                const next = new Set(prev)
+                next.add(parentId)
+                saveExpanded(next)
+                return next
+              })
+              // Trigger a reload to refresh the UI - the CategoryRow inline form will open via its own state
+              // For now, just expand the category
+            }
+          }}
+          onToggleExpand={toggleExpand}
+          isExpanded={(catId) => expanded.has(catId)}
+          onReload={handleFullReload}
+          onRowClick={onRowClick}
+        />
+      )}
     </>
   )
 }

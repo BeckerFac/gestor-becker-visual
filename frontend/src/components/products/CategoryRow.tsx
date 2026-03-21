@@ -40,6 +40,8 @@ interface CategoryRowProps {
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
   isDraggingActive?: boolean
+  // Context menu
+  onContextMenu?: (e: React.MouseEvent, category: CategoryTreeNode) => void
 }
 
 function formatCompactCurrency(value: number): string {
@@ -64,6 +66,7 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
   onDragLeave,
   onDrop,
   isDraggingActive,
+  onContextMenu: onContextMenuProp,
 }) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState({
@@ -181,6 +184,7 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
       <tr
         className={`border-b border-gray-100 dark:border-gray-700/50 bg-gray-50/80 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer transition-colors group ${isDropTarget ? 'ring-2 ring-inset ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''} ${isDraggingActive ? 'transition-all duration-150' : ''}`}
         onClick={onToggle}
+        onContextMenu={onContextMenuProp ? (e) => { e.preventDefault(); e.stopPropagation(); onContextMenuProp(e, category) } : undefined}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
