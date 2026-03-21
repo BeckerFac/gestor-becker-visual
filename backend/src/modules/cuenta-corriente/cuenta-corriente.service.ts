@@ -234,51 +234,67 @@ export class CuentaCorrienteService {
       if (compRows.length === 0) throw new ApiError(404, 'Company not found');
       const company = compRows[0];
 
-      // ALL transactions (for total balance)
-      const allOrders = await db.execute(sql`
-        SELECT i.id, 'factura' as tipo, i.invoice_date as fecha,
-          'Factura ' || COALESCE(i.invoice_type, '') || ' ' ||
-            LPAD(CAST(COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 1) AS TEXT), 5, '0') || '-' ||
-            LPAD(CAST(i.invoice_number AS TEXT), 8, '0') || ' — $' ||
-            TRIM(TO_CHAR(CAST(i.total_amount AS decimal), '999G999G999D00')) as descripcion,
-          CAST(i.total_amount AS decimal) as monto
-        FROM invoices i
-        LEFT JOIN customers c ON i.customer_id = c.id
-        WHERE i.company_id = ${companyId}
-          AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-          AND i.status = 'authorized'
-          AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
-      `);
-      const allCobros = await db.execute(sql`
-        SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
-          'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
-          CAST(co.amount AS decimal) as monto
-        FROM cobros co
-        WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
-      `);
-      const allAdjustments = await db.execute(sql`
-        SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
-          'Ajuste — ' || aa.reason as descripcion,
-          CAST(ABS(aa.amount) AS decimal) as monto,
-          aa.adjustment_type
-        FROM account_adjustments aa
-        WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
-      `);
-      const allPurchases = await db.execute(sql`
-        SELECT p.id, 'compra' as tipo, p.date as fecha,
-          'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
-          CAST(p.total_amount AS decimal) as monto
-        FROM purchases p
-        WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
-          AND p.status != 'cancelada'
-      `);
-      const allPagos = await db.execute(sql`
-        SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
-          'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
-          CAST(pa.amount AS decimal) as monto
-        FROM pagos pa
-        WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
-      `);
+      // ALL transactions (for total balance) - each query wrapped defensively
+      let allOrders: any = { rows: [] };
+      try {
+        allOrders = await db.execute(sql`
+          SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
+            'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
+            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE i.company_id = ${companyId}
+            AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+            AND i.status = 'authorized'
+            AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+        `);
+      } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
+
+      let allCobros: any = { rows: [] };
+      try {
+        allCobros = await db.execute(sql`
+          SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
+            'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
+            CAST(co.amount AS decimal) as monto
+          FROM cobros co
+          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('PDF: cobros query failed', (e as any)?.message); }
+
+      let allAdjustments: any = { rows: [] };
+      try {
+        allAdjustments = await db.execute(sql`
+          SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
+            'Ajuste — ' || aa.reason as descripcion,
+            CAST(ABS(aa.amount) AS decimal) as monto,
+            aa.adjustment_type
+          FROM account_adjustments aa
+          WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('PDF: adjustments query failed', (e as any)?.message); }
+
+      let allPurchases: any = { rows: [] };
+      try {
+        allPurchases = await db.execute(sql`
+          SELECT p.id, 'compra' as tipo, p.date as fecha,
+            'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
+            CAST(p.total_amount AS decimal) as monto
+          FROM purchases p
+          WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
+            AND p.status != 'cancelada'
+        `);
+      } catch (e) { console.error('PDF: purchases query failed', (e as any)?.message); }
+
+      let allPagos: any = { rows: [] };
+      try {
+        allPagos = await db.execute(sql`
+          SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
+            'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
+            CAST(pa.amount AS decimal) as monto
+          FROM pagos pa
+          WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+        `);
+      } catch (e) { console.error('PDF: pagos query failed', (e as any)?.message); }
 
       const parseRows = (result: any) =>
         ((result as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));

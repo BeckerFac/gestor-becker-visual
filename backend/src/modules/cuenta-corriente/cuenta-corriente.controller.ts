@@ -16,32 +16,38 @@ export class CuentaCorrienteController {
   }
 
   async getPdf(req: AuthRequest, res: Response) {
-    const { enterpriseId } = req.params;
-    const dateFrom = req.query.date_from as string;
-    const dateTo = req.query.date_to as string;
+    try {
+      const { enterpriseId } = req.params;
+      const dateFrom = req.query.date_from as string;
+      const dateTo = req.query.date_to as string;
 
-    if (!dateFrom || !dateTo) {
-      throw new ApiError(400, 'date_from and date_to query parameters are required');
+      if (!dateFrom || !dateTo) {
+        res.status(400).json({ error: 'date_from and date_to son requeridos' });
+        return;
+      }
+
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(dateFrom) || !dateRegex.test(dateTo)) {
+        res.status(400).json({ error: 'Formato de fecha invalido. Usar YYYY-MM-DD' });
+        return;
+      }
+
+      const data = await cuentaCorrienteService.getPdfData(
+        req.user!.company_id,
+        enterpriseId,
+        dateFrom,
+        dateTo
+      );
+
+      const pdf = await pdfService.generateCuentaCorrientePdf(data);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="cuenta_corriente_${(data.enterprise?.name || 'empresa').replace(/[^a-zA-Z0-9]/g, '_')}.pdf"`);
+      res.send(pdf);
+    } catch (error: any) {
+      console.error('Cuenta corriente PDF error:', error?.message, error?.stack);
+      res.status(500).json({ error: 'Error al generar PDF: ' + (error?.message || 'Error desconocido').slice(0, 200) });
     }
-
-    // Validate date format (YYYY-MM-DD)
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(dateFrom) || !dateRegex.test(dateTo)) {
-      throw new ApiError(400, 'Invalid date format. Use YYYY-MM-DD');
-    }
-
-    const data = await cuentaCorrienteService.getPdfData(
-      req.user!.company_id,
-      enterpriseId,
-      dateFrom,
-      dateTo
-    );
-
-    const pdf = await pdfService.generateCuentaCorrientePdf(data);
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="cuenta_corriente_${data.enterprise.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf"`);
-    res.send(pdf);
   }
 
   async createAdjustment(req: AuthRequest, res: Response) {
