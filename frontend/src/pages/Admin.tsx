@@ -1137,24 +1137,37 @@ const SystemTab: React.FC = () => {
   if (loading) return <div className="text-gray-500">Cargando salud del sistema...</div>
   if (!health) return <div className="text-red-500">Error al cargar salud del sistema</div>
 
+  // Ensure nested objects have defaults to prevent "Cannot read properties of undefined"
+  const h = {
+    ...health,
+    uptime_formatted: health.uptime_formatted || '-',
+    node_version: health.node_version || '-',
+    memory: health.memory || { rss_mb: 0, heap_used_mb: 0, heap_total_mb: 0, external_mb: 0 },
+    database: {
+      size_mb: health.database?.size_mb ?? '?',
+      connection_pool: health.database?.connection_pool || { totalCount: 0, idleCount: 0, waitingCount: 0 },
+      table_counts: health.database?.table_counts || {},
+    },
+  }
+
   return (
     <div className="space-y-6">
       {/* Uptime & Node */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Uptime" value={health.uptime_formatted} color="green" />
-        <StatCard label="Node.js" value={health.node_version} />
-        <StatCard label="DB Size" value={`${health.database.size_mb} MB`} />
-        <StatCard label="Sesiones activas" value={health.database.table_counts.active_sessions ?? 0} />
+        <StatCard label="Uptime" value={h.uptime_formatted || '-'} color="green" />
+        <StatCard label="Node.js" value={h.node_version || '-'} />
+        <StatCard label="DB Size" value={`${h.database.size_mb} MB`} />
+        <StatCard label="Sesiones activas" value={h.database.table_counts.active_sessions ?? 0} />
       </div>
 
       {/* Memory */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">Memoria</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MiniStat label="RSS" value={`${health.memory.rss_mb} MB`} />
-          <MiniStat label="Heap usado" value={`${health.memory.heap_used_mb} MB`} />
-          <MiniStat label="Heap total" value={`${health.memory.heap_total_mb} MB`} />
-          <MiniStat label="External" value={`${health.memory.external_mb} MB`} />
+          <MiniStat label="RSS" value={`${h.memory.rss_mb} MB`} />
+          <MiniStat label="Heap usado" value={`${h.memory.heap_used_mb} MB`} />
+          <MiniStat label="Heap total" value={`${h.memory.heap_total_mb} MB`} />
+          <MiniStat label="External" value={`${h.memory.external_mb} MB`} />
         </div>
       </div>
 
@@ -1162,9 +1175,9 @@ const SystemTab: React.FC = () => {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">Connection Pool</h3>
         <div className="grid grid-cols-3 gap-4">
-          <MiniStat label="Total" value={health.database.connection_pool.totalCount} />
-          <MiniStat label="Idle" value={health.database.connection_pool.idleCount} />
-          <MiniStat label="Waiting" value={health.database.connection_pool.waitingCount} />
+          <MiniStat label="Total" value={h.database.connection_pool.totalCount} />
+          <MiniStat label="Idle" value={h.database.connection_pool.idleCount} />
+          <MiniStat label="Waiting" value={h.database.connection_pool.waitingCount} />
         </div>
       </div>
 
@@ -1172,7 +1185,7 @@ const SystemTab: React.FC = () => {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">Registros por tabla</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          {Object.entries(health.database.table_counts).map(([table, count]) => (
+          {Object.entries(h.database.table_counts).map(([table, count]) => (
             <MiniStat key={table} label={table} value={count} />
           ))}
         </div>
