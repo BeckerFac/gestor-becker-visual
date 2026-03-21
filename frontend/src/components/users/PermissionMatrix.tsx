@@ -5,6 +5,7 @@ import {
   MODULE_ACTIONS,
   ACTION_LABELS,
   ROLE_TEMPLATES,
+  SUB_ACTIONS,
 } from '@/shared/permissions.constants'
 
 interface PermissionMatrixProps {
@@ -55,7 +56,17 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
   saving,
 }) => {
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
   const grouped = getGroupedModules()
+
+  const toggleExpand = (moduleKey: string) => {
+    setExpandedModules(prev => {
+      const next = new Set(prev)
+      if (next.has(moduleKey)) next.delete(moduleKey)
+      else next.add(moduleKey)
+      return next
+    })
+  }
 
   const isChecked = (moduleKey: string, action: string): boolean => {
     return permissions[moduleKey]?.includes(action) ?? false
@@ -98,6 +109,28 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
       next[moduleKey] = unique
     }
     onChange(next)
+  }
+
+  const isSubActionChecked = (moduleKey: string, subActionKey: string): boolean => {
+    const key = `${moduleKey}:${subActionKey}`
+    return permissions[key]?.includes('allowed') ?? false
+  }
+
+  const handleSubActionToggle = (moduleKey: string, subActionKey: string) => {
+    const key = `${moduleKey}:${subActionKey}`
+    const current = permissions[key] ?? []
+    const next = { ...permissions }
+    if (current.includes('allowed')) {
+      delete next[key]
+    } else {
+      next[key] = ['allowed']
+    }
+    onChange(next)
+  }
+
+  // Check if parent module has 'view' permission (sub-actions disabled without it)
+  const hasModuleView = (moduleKey: string): boolean => {
+    return permissions[moduleKey]?.includes('view') ?? false
   }
 
   const handleApplyTemplate = () => {
@@ -164,32 +197,86 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
                   </td>
                 </tr>
                 {/* Module rows */}
-                {group.modules.map(mod => (
-                  <tr
-                    key={mod.key}
-                    className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors"
-                  >
-                    <td className="px-4 py-2.5 pl-8 text-gray-700">{mod.label}</td>
-                    {ALL_ACTIONS.map(action => {
-                      const supported = isActionSupported(mod.key, action)
-                      const checked = isChecked(mod.key, action)
-                      return (
-                        <td key={action} className="text-center px-4 py-2.5">
-                          {supported ? (
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => handleToggle(mod.key, action)}
-                              className="w-4 h-4 accent-indigo-600 cursor-pointer"
-                            />
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
+                {group.modules.map(mod => {
+                  const subActions = SUB_ACTIONS[mod.key] || []
+                  const hasSubActions = subActions.length > 0
+                  const isExpanded = expandedModules.has(mod.key)
+                  const parentHasView = hasModuleView(mod.key)
+
+                  return (
+                    <React.Fragment key={mod.key}>
+                      <tr
+                        className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors"
+                      >
+                        <td className="px-4 py-2.5 pl-8 text-gray-700">
+                          <div className="flex items-center gap-1.5">
+                            {hasSubActions && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpand(mod.key)}
+                                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors text-xs font-bold"
+                                title={isExpanded ? 'Colapsar sub-acciones' : 'Expandir sub-acciones'}
+                              >
+                                {isExpanded ? '-' : '+'}
+                              </button>
+                            )}
+                            {!hasSubActions && <span className="w-5" />}
+                            {mod.label}
+                          </div>
                         </td>
-                      )
-                    })}
-                  </tr>
-                ))}
+                        {ALL_ACTIONS.map(action => {
+                          const supported = isActionSupported(mod.key, action)
+                          const checked = isChecked(mod.key, action)
+                          return (
+                            <td key={action} className="text-center px-4 py-2.5">
+                              {supported ? (
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => handleToggle(mod.key, action)}
+                                  className="w-4 h-4 accent-indigo-600 cursor-pointer"
+                                />
+                              ) : (
+                                <span className="text-gray-300">-</span>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                      {/* Sub-actions rows (expandable) */}
+                      {hasSubActions && isExpanded && subActions.map(sub => (
+                        <tr
+                          key={`${mod.key}:${sub.key}`}
+                          className="border-b border-gray-50 bg-gray-50/50"
+                        >
+                          <td className="px-4 py-2 pl-16 text-gray-500 text-xs" colSpan={1}>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                checked={isSubActionChecked(mod.key, sub.key)}
+                                onChange={() => handleSubActionToggle(mod.key, sub.key)}
+                                disabled={!parentHasView}
+                                className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              />
+                              <span className={!parentHasView ? 'opacity-40' : ''}>
+                                {sub.label}
+                              </span>
+                              <span
+                                className="text-gray-400 cursor-help"
+                                title={sub.description}
+                              >
+                                ?
+                              </span>
+                            </div>
+                          </td>
+                          <td colSpan={4} className="px-4 py-2 text-xs text-gray-400">
+                            {sub.description}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  )
+                })}
               </React.Fragment>
             ))}
           </tbody>

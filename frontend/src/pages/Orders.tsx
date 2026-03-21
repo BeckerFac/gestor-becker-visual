@@ -1396,7 +1396,15 @@ export const Orders: React.FC = () => {
                       </td>
                       <td className="px-4 py-2 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          <PermissionGate module="orders" action="edit">
+                          <PermissionGate module="orders" action="change_status"
+                            fallback={
+                              <span className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
+                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {STATUS_OPTIONS.find(s => s.value === order.status)?.label || order.status}
+                              </span>
+                            }
+                          >
                             <select
                               className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
                                 STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'

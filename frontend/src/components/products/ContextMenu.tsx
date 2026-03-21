@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
@@ -29,6 +28,13 @@ interface ContextMenuProps {
   isExpanded: (categoryId: string) => boolean
   onReload: () => void
   onRowClick: (product: Product) => void
+  // Modal callbacks - modals are rendered in the parent, not here
+  onAdjustStock: (product: Product) => void
+  onAdjustPrice: (product: Product) => void
+  onViewPriceHistory: (product: Product) => void
+  onChangeColor: (category: CategoryTreeNode) => void
+  onBulkPrice: (category: CategoryTreeNode) => void
+  onConfirmDelete: (type: 'product' | 'category', item: Product | CategoryTreeNode) => void
 }
 
 // --- Preset colors ---
@@ -542,17 +548,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   isExpanded,
   onReload,
   onRowClick,
+  onAdjustStock,
+  onAdjustPrice,
+  onViewPriceHistory,
+  onChangeColor,
+  onBulkPrice,
+  onConfirmDelete,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ x: menu.x, y: menu.y })
-
-  // Sub-modals
-  const [stockModal, setStockModal] = useState<Product | null>(null)
-  const [priceModal, setPriceModal] = useState<Product | null>(null)
-  const [bulkPriceModal, setBulkPriceModal] = useState<CategoryTreeNode | null>(null)
-  const [historyModal, setHistoryModal] = useState<Product | null>(null)
-  const [colorModal, setColorModal] = useState<CategoryTreeNode | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'product' | 'category'; item: any } | null>(null)
 
   // Rename inline
   const [renaming, setRenaming] = useState(false)
@@ -683,38 +687,6 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     }
   }
 
-  const handleConfirmDelete = async () => {
-    if (!confirmDelete) return
-    if (confirmDelete.type === 'product') {
-      onDelete(confirmDelete.item as Product)
-    } else {
-      onDeleteCategory(confirmDelete.item.id)
-    }
-    setConfirmDelete(null)
-    onClose()
-  }
-
-  // --- Render sub-modals (portalled, not inside the menu) ---
-  const modals = (
-    <>
-      {stockModal && <StockAdjustModal product={stockModal} onClose={() => setStockModal(null)} onDone={() => { setStockModal(null); onReload() }} />}
-      {priceModal && <PriceAdjustModal product={priceModal} onClose={() => setPriceModal(null)} onDone={() => { setPriceModal(null); onReload() }} />}
-      {bulkPriceModal && <BulkPriceAdjustModal category={bulkPriceModal} onClose={() => setBulkPriceModal(null)} onDone={() => { setBulkPriceModal(null); onReload() }} />}
-      {historyModal && <PriceHistoryModal product={historyModal} onClose={() => setHistoryModal(null)} />}
-      {colorModal && <ColorPickerInline category={colorModal} onClose={() => setColorModal(null)} onDone={() => { setColorModal(null); onReload() }} />}
-      <ConfirmDialog
-        open={!!confirmDelete}
-        title={confirmDelete?.type === 'product' ? 'Eliminar producto' : 'Eliminar categoria'}
-        message={confirmDelete?.type === 'product'
-          ? `Seguro que queres eliminar "${(confirmDelete?.item as Product)?.name}"?`
-          : `Seguro que queres eliminar "${(confirmDelete?.item as CategoryTreeNode)?.name}"?`}
-        confirmLabel="Eliminar"
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setConfirmDelete(null)}
-      />
-    </>
-  )
-
   // --- Render menu items based on type ---
 
   const renderContent = () => {
@@ -756,7 +728,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           <MenuItem icon={icons.addProduct} label="Agregar producto" onClick={() => closeAndDo(() => onAddProduct(cat.id))} />
           <MenuSeparator />
           <MenuItem icon={icons.rename} label="Renombrar" onClick={() => { setRenameValue(cat.name); setRenaming(true) }} />
-          <MenuItem icon={icons.color} label="Cambiar color" onClick={() => { onClose(); setColorModal(cat) }} />
+          <MenuItem icon={icons.color} label="Cambiar color" onClick={() => { onChangeColor(cat); onClose() }} />
           <MenuSeparator />
           <MenuItem icon={icons.move} label="Mover todos los productos a..." hasSubmenu>
             <button
@@ -775,7 +747,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               </button>
             ))}
           </MenuItem>
-          <MenuItem icon={icons.price} label="Ajustar precio masivo (%)" onClick={() => { onClose(); setBulkPriceModal(cat) }} />
+          <MenuItem icon={icons.price} label="Ajustar precio masivo (%)" onClick={() => { onBulkPrice(cat); onClose() }} />
           <MenuSeparator />
           <MenuItem
             icon={expanded ? icons.collapse : icons.expand}
@@ -783,7 +755,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onClick={() => closeAndDo(() => onToggleExpand(cat.id))}
           />
           <MenuSeparator />
-          <MenuItem icon={icons.trash} label="Eliminar" danger onClick={() => { onClose(); setConfirmDelete({ type: 'category', item: cat }) }} />
+          <MenuItem icon={icons.trash} label="Eliminar" danger onClick={() => { onConfirmDelete('category', cat); onClose() }} />
         </>
       )
     }
@@ -813,11 +785,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             ))}
           </MenuItem>
           <MenuSeparator />
-          <MenuItem icon={icons.stock} label="Ajustar stock" onClick={() => { onClose(); setStockModal(product) }} />
-          <MenuItem icon={icons.price} label="Ajustar precio" onClick={() => { onClose(); setPriceModal(product) }} />
-          <MenuItem icon={icons.history} label="Ver historial de precios" onClick={() => { onClose(); setHistoryModal(product) }} />
+          <MenuItem icon={icons.stock} label="Ajustar stock" onClick={() => { onAdjustStock(product); onClose() }} />
+          <MenuItem icon={icons.price} label="Ajustar precio" onClick={() => { onAdjustPrice(product); onClose() }} />
+          <MenuItem icon={icons.history} label="Ver historial de precios" onClick={() => { onViewPriceHistory(product); onClose() }} />
           <MenuSeparator />
-          <MenuItem icon={icons.trash} label="Eliminar" danger onClick={() => { onClose(); setConfirmDelete({ type: 'product', item: product }) }} />
+          <MenuItem icon={icons.trash} label="Eliminar" danger onClick={() => { onConfirmDelete('product', product); onClose() }} />
         </>
       )
     }
@@ -831,21 +803,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     )
   }
 
-  return (
-    <>
-      {createPortal(
-        <div
-          ref={menuRef}
-          className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-1.5 px-1 min-w-[200px] animate-in fade-in duration-150"
-          style={{ left: position.x, top: position.y }}
-          onContextMenu={e => e.preventDefault()}
-        >
-          {renderContent()}
-        </div>,
-        document.body
-      )}
-      {modals}
-    </>
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-1.5 px-1 min-w-[200px] animate-in fade-in duration-150"
+      style={{ left: position.x, top: position.y }}
+      onContextMenu={e => e.preventDefault()}
+    >
+      {renderContent()}
+    </div>,
+    document.body
   )
 }
 
@@ -862,4 +829,5 @@ function flattenCategories(cats: CategoryTreeNode[]): CategoryTreeNode[] {
   return result
 }
 
+export { StockAdjustModal, PriceAdjustModal, BulkPriceAdjustModal, PriceHistoryModal, ColorPickerInline, MiniModal, PRESET_COLORS }
 export type { ContextMenuState }

@@ -77,6 +77,38 @@ export const requireMinRole = (minRole: string) => {
   };
 };
 
+// Authorize a sub-action (e.g., orders:view_costs)
+export const authorizeSubAction = (module: string, subAction: string) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        throw new ApiError(401, 'No autenticado');
+      }
+
+      // Owner and Admin always have full access
+      if (FULL_ACCESS_ROLES.includes(req.user.role as any)) {
+        return next();
+      }
+
+      // Load permissions once per request (cached on req object)
+      if (!(req as any)._userPermissions) {
+        (req as any)._userPermissions = await loadUserPermissions(req.user.id);
+      }
+
+      const perms: Map<string, Set<string>> = (req as any)._userPermissions;
+      const subActionKey = `${module}:${subAction}`;
+      const subPerms = perms.get(subActionKey);
+      if (!subPerms || !subPerms.has('allowed')) {
+        throw new ApiError(403, 'No tiene permisos para esta sub-accion');
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
 // Helper: check if user has ANY permission on a module (for filtering)
 export async function userCanAccessModule(userId: string, role: string, module: string): Promise<boolean> {
   if (FULL_ACCESS_ROLES.includes(role as any)) return true;

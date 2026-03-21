@@ -9,7 +9,7 @@ import { api } from '@/services/api'
 import { useProductDragDrop } from '@/hooks/useProductDragDrop'
 import { CategoryRow } from './CategoryRow'
 import type { CategoryTreeNode } from './CategoryRow'
-import { ContextMenu } from './ContextMenu'
+import { ContextMenu, StockAdjustModal, PriceAdjustModal, BulkPriceAdjustModal, PriceHistoryModal, ColorPickerInline } from './ContextMenu'
 import type { ContextMenuState } from './ContextMenu'
 import type { Product } from './types'
 
@@ -401,6 +401,14 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
+  // Modal state (owned by parent so they survive context menu unmount)
+  const [stockAdjustProduct, setStockAdjustProduct] = useState<Product | null>(null)
+  const [priceAdjustProduct, setPriceAdjustProduct] = useState<Product | null>(null)
+  const [priceHistoryProduct, setPriceHistoryProduct] = useState<Product | null>(null)
+  const [colorPickerCategory, setColorPickerCategory] = useState<CategoryTreeNode | null>(null)
+  const [bulkPriceCategory, setBulkPriceCategory] = useState<CategoryTreeNode | null>(null)
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<{ type: 'product' | 'category'; item: Product | CategoryTreeNode } | null>(null)
 
   const loadTree = useCallback(async () => {
     try {
@@ -825,16 +833,74 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                 saveExpanded(next)
                 return next
               })
-              // Trigger a reload to refresh the UI - the CategoryRow inline form will open via its own state
-              // For now, just expand the category
             }
           }}
           onToggleExpand={toggleExpand}
           isExpanded={(catId) => expanded.has(catId)}
           onReload={handleFullReload}
           onRowClick={onRowClick}
+          onAdjustStock={(product) => setStockAdjustProduct(product)}
+          onAdjustPrice={(product) => setPriceAdjustProduct(product)}
+          onViewPriceHistory={(product) => setPriceHistoryProduct(product)}
+          onChangeColor={(category) => setColorPickerCategory(category)}
+          onBulkPrice={(category) => setBulkPriceCategory(category)}
+          onConfirmDelete={(type, item) => setConfirmDeleteItem({ type, item })}
         />
       )}
+
+      {/* Modals triggered from context menu (rendered in parent to survive menu unmount) */}
+      {stockAdjustProduct && (
+        <StockAdjustModal
+          product={stockAdjustProduct}
+          onClose={() => setStockAdjustProduct(null)}
+          onDone={() => { setStockAdjustProduct(null); handleFullReload() }}
+        />
+      )}
+      {priceAdjustProduct && (
+        <PriceAdjustModal
+          product={priceAdjustProduct}
+          onClose={() => setPriceAdjustProduct(null)}
+          onDone={() => { setPriceAdjustProduct(null); handleFullReload() }}
+        />
+      )}
+      {priceHistoryProduct && (
+        <PriceHistoryModal
+          product={priceHistoryProduct}
+          onClose={() => setPriceHistoryProduct(null)}
+        />
+      )}
+      {colorPickerCategory && (
+        <ColorPickerInline
+          category={colorPickerCategory}
+          onClose={() => setColorPickerCategory(null)}
+          onDone={() => { setColorPickerCategory(null); handleFullReload() }}
+        />
+      )}
+      {bulkPriceCategory && (
+        <BulkPriceAdjustModal
+          category={bulkPriceCategory}
+          onClose={() => setBulkPriceCategory(null)}
+          onDone={() => { setBulkPriceCategory(null); handleFullReload() }}
+        />
+      )}
+      <ConfirmDialog
+        open={!!confirmDeleteItem}
+        title={confirmDeleteItem?.type === 'product' ? 'Eliminar producto' : 'Eliminar categoria'}
+        message={confirmDeleteItem?.type === 'product'
+          ? `Seguro que queres eliminar "${(confirmDeleteItem?.item as Product)?.name}"?`
+          : `Seguro que queres eliminar "${(confirmDeleteItem?.item as CategoryTreeNode)?.name}"?`}
+        confirmLabel="Eliminar"
+        onConfirm={() => {
+          if (!confirmDeleteItem) return
+          if (confirmDeleteItem.type === 'product') {
+            onDelete(confirmDeleteItem.item as Product)
+          } else {
+            setDeleteTarget((confirmDeleteItem.item as CategoryTreeNode).id)
+          }
+          setConfirmDeleteItem(null)
+        }}
+        onCancel={() => setConfirmDeleteItem(null)}
+      />
     </>
   )
 }

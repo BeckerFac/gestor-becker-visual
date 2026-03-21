@@ -30,6 +30,49 @@ export const ACTIONS = {
 
 export type ActionKey = keyof typeof ACTIONS;
 
+// Sub-actions per module for granular control
+export const SUB_ACTIONS: Record<string, { key: string; label: string; description: string }[]> = {
+  orders: [
+    { key: 'view_costs', label: 'Ver costos/margen', description: 'Puede ver el costo y margen de los productos en pedidos' },
+    { key: 'change_status', label: 'Cambiar estado', description: 'Puede cambiar el estado del pedido (pendiente, produccion, entregado)' },
+    { key: 'authorize_discount', label: 'Autorizar descuentos', description: 'Puede autorizar descuentos mayores al limite configurado' },
+  ],
+  invoices: [
+    { key: 'authorize_afip', label: 'Autorizar AFIP', description: 'Puede autorizar facturas con AFIP (separado de crear borrador)' },
+    { key: 'import_manual', label: 'Importar manual', description: 'Puede importar facturas manuales ya autorizadas' },
+    { key: 'download_pdf', label: 'Descargar PDF', description: 'Puede descargar PDF de facturas autorizadas' },
+  ],
+  products: [
+    { key: 'view_costs', label: 'Ver costos/margen', description: 'Puede ver el costo y margen de los productos' },
+    { key: 'edit_prices', label: 'Modificar precios', description: 'Puede modificar precios (separado de editar producto)' },
+    { key: 'manage_categories', label: 'Gestionar categorias', description: 'Puede crear, editar y eliminar categorias' },
+    { key: 'manage_materials', label: 'Gestionar materiales', description: 'Puede gestionar materiales y BOM' },
+  ],
+  cobros: [
+    { key: 'send_reminders', label: 'Enviar recordatorios', description: 'Puede enviar recordatorios de cobro a clientes' },
+  ],
+  reports: [
+    { key: 'view_financial', label: 'Ver reportes financieros', description: 'Puede ver reportes financieros (IVA, flujo de caja)' },
+    { key: 'view_business', label: 'Ver reportes de negocio', description: 'Puede ver reportes de negocio (ventas, rentabilidad)' },
+    { key: 'export_data', label: 'Exportar datos', description: 'Puede exportar datos en CSV/Excel' },
+  ],
+  crm: [
+    { key: 'manage_stages', label: 'Configurar etapas', description: 'Puede configurar las etapas del pipeline de oportunidades' },
+    { key: 'close_deals', label: 'Cerrar oportunidades', description: 'Puede cerrar o marcar como perdidas las oportunidades' },
+  ],
+  secretaria: [
+    { key: 'configure', label: 'Configurar SecretarIA', description: 'Puede configurar la inteligencia artificial del asistente' },
+    { key: 'use_chat', label: 'Usar chat IA', description: 'Puede usar el chat de inteligencia artificial' },
+  ],
+};
+
+// All sub-action keys for validation
+export const ALL_SUB_ACTION_KEYS: Set<string> = new Set(
+  Object.entries(SUB_ACTIONS).flatMap(([mod, actions]) =>
+    actions.map(a => `${mod}:${a.key}`)
+  )
+);
+
 // Role hierarchy: higher number = higher privilege
 export const ROLE_HIERARCHY: Record<string, number> = {
   viewer: 1,
@@ -113,6 +156,19 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     cheques: ['view', 'create', 'edit', 'delete'],
     enterprises: ['view', 'create', 'edit', 'delete'],
     banks: ['view', 'create', 'edit', 'delete'],
+    // Sub-actions
+    'orders:view_costs': ['allowed'],
+    'orders:change_status': ['allowed'],
+    'invoices:authorize_afip': ['allowed'],
+    'invoices:import_manual': ['allowed'],
+    'invoices:download_pdf': ['allowed'],
+    'products:view_costs': ['allowed'],
+    'products:edit_prices': ['allowed'],
+    'products:manage_categories': ['allowed'],
+    'products:manage_materials': ['allowed'],
+    'cobros:send_reminders': ['allowed'],
+    'reports:view_business': ['allowed'],
+    'reports:export_data': ['allowed'],
   },
   vendedor: {
     dashboard: ['view'],
@@ -123,6 +179,10 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     products: ['view'],
     inventory: ['view'],
     enterprises: ['view'],
+    // Sub-actions: vendedor NO ve costos, NO autoriza AFIP, NO ve financieros
+    'orders:change_status': ['allowed'],
+    'invoices:download_pdf': ['allowed'],
+    'reports:view_business': ['allowed'],
   },
   contable: {
     dashboard: ['view'],
@@ -134,6 +194,16 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     banks: ['view'],
     enterprises: ['view'],
     orders: ['view'],
+    // Sub-actions: contable SI autoriza AFIP, SI ve financieros, NO cambia estado pedido
+    'orders:view_costs': ['allowed'],
+    'invoices:authorize_afip': ['allowed'],
+    'invoices:import_manual': ['allowed'],
+    'invoices:download_pdf': ['allowed'],
+    'products:view_costs': ['allowed'],
+    'cobros:send_reminders': ['allowed'],
+    'reports:view_financial': ['allowed'],
+    'reports:view_business': ['allowed'],
+    'reports:export_data': ['allowed'],
   },
   stock_manager: {
     dashboard: ['view'],
@@ -141,6 +211,11 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     inventory: ['view', 'create', 'edit'],
     purchases: ['view', 'create', 'edit', 'delete'],
     enterprises: ['view'],
+    // Sub-actions
+    'products:view_costs': ['allowed'],
+    'products:edit_prices': ['allowed'],
+    'products:manage_categories': ['allowed'],
+    'products:manage_materials': ['allowed'],
   },
   gerente: {
     dashboard: ['view'],
@@ -159,6 +234,25 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     banks: ['view', 'create', 'edit', 'delete'],
     users: ['view'],
     audit_log: ['view'],
+    // Sub-actions: gerente tiene todo habilitado
+    'orders:view_costs': ['allowed'],
+    'orders:change_status': ['allowed'],
+    'orders:authorize_discount': ['allowed'],
+    'invoices:authorize_afip': ['allowed'],
+    'invoices:import_manual': ['allowed'],
+    'invoices:download_pdf': ['allowed'],
+    'products:view_costs': ['allowed'],
+    'products:edit_prices': ['allowed'],
+    'products:manage_categories': ['allowed'],
+    'products:manage_materials': ['allowed'],
+    'cobros:send_reminders': ['allowed'],
+    'reports:view_financial': ['allowed'],
+    'reports:view_business': ['allowed'],
+    'reports:export_data': ['allowed'],
+    'crm:manage_stages': ['allowed'],
+    'crm:close_deals': ['allowed'],
+    'secretaria:configure': ['allowed'],
+    'secretaria:use_chat': ['allowed'],
   },
   viewer: {
     dashboard: ['view'],
@@ -174,5 +268,8 @@ export const ROLE_TEMPLATES: Record<string, Record<string, string[]>> = {
     cheques: ['view'],
     enterprises: ['view'],
     banks: ['view'],
+    // Sub-actions: viewer solo lectura, sin sub-acciones de escritura
+    'invoices:download_pdf': ['allowed'],
+    'reports:view_business': ['allowed'],
   },
 };

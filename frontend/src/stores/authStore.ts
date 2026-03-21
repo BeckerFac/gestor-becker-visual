@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { SUB_ACTIONS } from '@/shared/permissions.constants'
 
 export interface User {
   id: string
@@ -50,6 +51,13 @@ interface AuthStore {
 }
 
 const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports','crm']
+
+// Build a set of known sub-action keys for quick lookup
+const KNOWN_SUB_ACTIONS: Set<string> = new Set(
+  Object.entries(SUB_ACTIONS).flatMap(([mod, actions]) =>
+    actions.map(a => `${mod}:${a.key}`)
+  )
+)
 
 // Demo credentials for single-company mode
 const DEMO_USER: User = {
@@ -133,6 +141,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (!state.user) return false
     // Owner and Admin have full access
     if (state.user.role === 'owner' || state.user.role === 'admin' || state.permissions === null) return true
+    // Check if this is a sub-action (e.g., can('orders', 'view_costs'))
+    const subActionKey = `${module}:${action}`
+    if (KNOWN_SUB_ACTIONS.has(subActionKey)) {
+      return state.permissions[subActionKey]?.includes('allowed') ?? false
+    }
+    // Regular action
     return state.permissions[module]?.includes(action) ?? false
   },
   canAny: (module) => {
