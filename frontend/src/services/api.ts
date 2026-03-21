@@ -1309,6 +1309,28 @@ export const api = {
     const response = await portalClient.get(`/portal/quotes/${id}/pdf`, { responseType: 'blob' })
     return response.data
   },
+  portalGetPublicConfig: async () => {
+    const { data } = await portalClient.get('/portal/public-config')
+    return data
+  },
+  portalUpdateQuoteStatus: async (id: string, status: 'accepted' | 'rejected', reason?: string) => {
+    const { data } = await portalClient.put(`/portal/quotes/${id}/status`, { status, reason })
+    return data
+  },
+  portalGetRemitos: async () => {
+    const { data } = await portalClient.get('/portal/remitos')
+    return data
+  },
+
+  // Portal Config (admin)
+  getPortalConfig: async () => {
+    const { data } = await client.get('/portal/config')
+    return data
+  },
+  updatePortalConfig: async (config: Record<string, any>) => {
+    const { data } = await client.put('/portal/config', config)
+    return data
+  },
 
   // Billing & Subscriptions
   getBillingSubscription: async () => {

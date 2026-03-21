@@ -703,6 +703,45 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_ai_errors_company ON secretaria_ai_errors(company_id, created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_ai_errors_type ON secretaria_ai_errors(error_type, resolved)`);
 
+    // ===== Portal Config: per-company portal visibility settings =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS portal_config (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        show_orders BOOLEAN DEFAULT true,
+        show_invoices BOOLEAN DEFAULT true,
+        show_quotes BOOLEAN DEFAULT true,
+        show_balance BOOLEAN DEFAULT true,
+        show_remitos BOOLEAN DEFAULT false,
+        orders_show_price BOOLEAN DEFAULT true,
+        orders_show_total BOOLEAN DEFAULT true,
+        orders_show_status BOOLEAN DEFAULT true,
+        orders_show_delivery_date BOOLEAN DEFAULT true,
+        orders_show_payment_status BOOLEAN DEFAULT true,
+        orders_show_payment_method BOOLEAN DEFAULT false,
+        orders_show_notes BOOLEAN DEFAULT false,
+        orders_show_timeline BOOLEAN DEFAULT true,
+        invoices_show_subtotal BOOLEAN DEFAULT true,
+        invoices_show_iva BOOLEAN DEFAULT true,
+        invoices_show_total BOOLEAN DEFAULT true,
+        invoices_show_cae BOOLEAN DEFAULT false,
+        invoices_show_download_pdf BOOLEAN DEFAULT true,
+        quotes_show_price BOOLEAN DEFAULT true,
+        quotes_show_validity BOOLEAN DEFAULT true,
+        quotes_show_download_pdf BOOLEAN DEFAULT true,
+        quotes_show_accept_reject BOOLEAN DEFAULT false,
+        balance_show_total_orders BOOLEAN DEFAULT true,
+        balance_show_total_invoiced BOOLEAN DEFAULT true,
+        balance_show_pending BOOLEAN DEFAULT true,
+        balance_show_payment_detail BOOLEAN DEFAULT false,
+        portal_welcome_message TEXT DEFAULT 'Bienvenido a tu portal de cliente',
+        portal_logo_url TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_portal_config_company ON portal_config(company_id)`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -763,6 +802,7 @@ async function applyRowLevelSecurity() {
     'secretaria_usage',
     'secretaria_pending_actions',
     'secretaria_ai_errors',
+    'portal_config',
     'account_adjustments',
     'price_criteria',
     'product_prices',

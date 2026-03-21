@@ -5,6 +5,45 @@ import { quotesService } from '../quotes/quotes.service';
 import { ApiError } from '../../middlewares/errorHandler';
 
 export class PortalController {
+  // ==================== CONFIG ENDPOINTS (admin) ====================
+
+  async getConfig(req: AuthRequest, res: Response) {
+    try {
+      const companyId = req.user!.company_id;
+      const config = await portalService.getPortalConfig(companyId);
+      res.json(config);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get portal config' });
+    }
+  }
+
+  async updateConfig(req: AuthRequest, res: Response) {
+    try {
+      const companyId = req.user!.company_id;
+      const config = await portalService.updatePortalConfig(companyId, req.body);
+      res.json(config);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update portal config' });
+    }
+  }
+
+  // ==================== PUBLIC CONFIG (customer auth) ====================
+
+  async getPublicConfig(req: AuthRequest, res: Response) {
+    try {
+      const companyId = req.user!.company_id;
+      const config = await portalService.getPublicPortalConfig(companyId);
+      res.json(config);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get portal config' });
+    }
+  }
+
+  // ==================== PORTAL DATA ENDPOINTS ====================
+
   async getSummary(req: AuthRequest, res: Response) {
     try {
       const customerId = (req.user as any)?.customer_id;
@@ -49,9 +88,10 @@ export class PortalController {
   async getOrder(req: AuthRequest, res: Response) {
     try {
       const customerId = (req.user as any)?.customer_id;
+      const companyId = req.user!.company_id;
       if (!customerId) throw new ApiError(403, 'Access denied');
 
-      const order = await portalService.getCustomerOrder(customerId, req.params.id);
+      const order = await portalService.getCustomerOrder(customerId, req.params.id, companyId);
       res.json(order);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -106,6 +146,39 @@ export class PortalController {
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
       res.status(500).json({ error: 'Failed to generate PDF' });
+    }
+  }
+
+  async updateQuoteStatus(req: AuthRequest, res: Response) {
+    try {
+      const customerId = (req.user as any)?.customer_id;
+      const companyId = req.user!.company_id;
+      if (!customerId) throw new ApiError(403, 'Access denied');
+
+      const { status, reason } = req.body;
+      if (!status || !['accepted', 'rejected'].includes(status)) {
+        throw new ApiError(400, 'Invalid status. Must be accepted or rejected');
+      }
+
+      const result = await portalService.updateQuoteStatus(customerId, companyId, req.params.id, status, reason);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update quote status' });
+    }
+  }
+
+  async getRemitos(req: AuthRequest, res: Response) {
+    try {
+      const customerId = (req.user as any)?.customer_id;
+      const companyId = req.user!.company_id;
+      if (!customerId) throw new ApiError(403, 'Access denied');
+
+      const remitos = await portalService.getCustomerRemitos(customerId, companyId);
+      res.json(remitos);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get remitos' });
     }
   }
 }
