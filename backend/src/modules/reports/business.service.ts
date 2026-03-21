@@ -658,6 +658,17 @@ export class BusinessService {
     const aging = await safeQuery(
       'cobranzas_aging',
       async () => {
+        // Use CTE to pre-calculate remaining amounts per order, then bucket
+        const cobrosJoin = cobrosExists
+          ? `LEFT JOIN (SELECT order_id, SUM(CAST(amount AS decimal)) as total_cobrado FROM cobros GROUP BY order_id) cb ON cb.order_id = o.id`
+          : ``;
+        const remainingExpr = cobrosExists
+          ? `CAST(o.total_amount AS decimal) - COALESCE(cb.total_cobrado, 0)`
+          : `CAST(o.total_amount AS decimal)`;
+        const remainingFilter = cobrosExists
+          ? `AND CAST(o.total_amount AS decimal) > COALESCE(cb.total_cobrado, 0)`
+          : ``;
+
         const agingResult = await pool.query(`
           SELECT
             CASE
@@ -668,14 +679,13 @@ export class BusinessService {
               ELSE '90_plus'
             END as bucket,
             COUNT(*) as cantidad,
-            COALESCE(SUM(
-              CAST(o.total_amount AS decimal) - ${cobrosSubquery}
-            ), 0) as monto
+            COALESCE(SUM(${remainingExpr}), 0) as monto
           FROM orders o
+          ${cobrosJoin}
           WHERE o.company_id = $1
             AND ${pendingFilter}
             AND o.status NOT IN ('cancelado', 'cancelled')
-            AND CAST(o.total_amount AS decimal) > ${cobrosSubquery}
+            ${remainingFilter}
           GROUP BY 1
         `, [companyId]);
 
@@ -795,21 +805,30 @@ export class BusinessService {
     const morosos = await safeQuery(
       'cobranzas_morosos',
       async () => {
+        const cobrosJoinM = cobrosExists
+          ? `LEFT JOIN (SELECT order_id, SUM(CAST(amount AS decimal)) as total_cobrado FROM cobros GROUP BY order_id) cb ON cb.order_id = o.id`
+          : ``;
+        const remainingExprM = cobrosExists
+          ? `CAST(o.total_amount AS decimal) - COALESCE(cb.total_cobrado, 0)`
+          : `CAST(o.total_amount AS decimal)`;
+        const remainingFilterM = cobrosExists
+          ? `AND CAST(o.total_amount AS decimal) > COALESCE(cb.total_cobrado, 0)`
+          : ``;
+
         const morososResult = await pool.query(`
           SELECT
             COALESCE(e.name, c.name, 'Sin cliente') as nombre,
-            SUM(
-              CAST(o.total_amount AS decimal) - ${cobrosSubquery}
-            ) as monto_pendiente,
+            SUM(${remainingExprM}) as monto_pendiente,
             COUNT(*) as pedidos_pendientes,
             MAX(CURRENT_DATE - o.created_at::date) as dias_max_atraso
           FROM orders o
+          ${cobrosJoinM}
           LEFT JOIN enterprises e ON o.enterprise_id = e.id
           LEFT JOIN customers c ON o.customer_id = c.id
           WHERE o.company_id = $1
             AND ${pendingFilter}
             AND o.status NOT IN ('cancelado', 'cancelled')
-            AND CAST(o.total_amount AS decimal) > ${cobrosSubquery}
+            ${remainingFilterM}
             AND (o.enterprise_id IS NOT NULL OR o.customer_id IS NOT NULL)
           GROUP BY COALESCE(e.name, c.name, 'Sin cliente')
           ORDER BY monto_pendiente DESC
