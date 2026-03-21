@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middlewares/auth';
 import { adminService, BLOCK_REASON_CATEGORIES, BlockReasonCategory } from './admin.service';
 import { ApiError } from '../../middlewares/errorHandler';
 import { getSecurityDashboard } from '../../lib/security-monitor';
+import { activityService } from '../activity/activity.service';
 
 export class AdminController {
   async getAllCompanies(req: AuthRequest, res: Response) {
@@ -280,6 +281,41 @@ export class AdminController {
 
   async getBlockReasonCategories(_req: AuthRequest, res: Response) {
     res.json({ categories: BLOCK_REASON_CATEGORIES });
+  }
+
+  async getGlobalLogs(req: AuthRequest, res: Response) {
+    try {
+      const { companyId, userId, module, action, dateFrom, dateTo, search, page, limit } = req.query;
+      const logs = await activityService.getAllLogs({
+        companyId: companyId as string,
+        userId: userId as string,
+        module: module as string,
+        action: action as string,
+        dateFrom: dateFrom as string,
+        dateTo: dateTo as string,
+        search: search as string,
+        page: parseInt(page as string) || 1,
+        limit: Math.min(parseInt(limit as string) || 50, 100),
+      });
+      res.json(logs);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Error al obtener logs globales' });
+    }
+  }
+
+  async getLogStats(_req: AuthRequest, res: Response) {
+    try {
+      const stats = await activityService.getLogStats();
+      res.json(stats);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Error al obtener estadisticas de logs' });
+    }
   }
 
   async getSecurityDashboard(_req: AuthRequest, res: Response) {

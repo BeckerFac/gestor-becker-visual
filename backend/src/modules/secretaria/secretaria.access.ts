@@ -9,17 +9,17 @@ import { AiFeatures } from '../billing/plans.config';
 const ROLE_TOOL_MAP: Record<string, readonly SecretariaIntent[]> = {
   owner: [
     'query_clients', 'query_products', 'query_invoices', 'query_balances',
-    'query_orders', 'query_general', 'morning_brief', 'send_document',
+    'query_orders', 'query_general', 'query_activity', 'morning_brief', 'send_document',
     'help', 'greeting', 'unknown',
   ],
   admin: [
     'query_clients', 'query_products', 'query_invoices', 'query_balances',
-    'query_orders', 'query_general', 'morning_brief', 'send_document',
+    'query_orders', 'query_general', 'query_activity', 'morning_brief', 'send_document',
     'help', 'greeting', 'unknown',
   ],
   gerente: [
     'query_clients', 'query_products', 'query_invoices', 'query_balances',
-    'query_orders', 'query_general', 'morning_brief', 'send_document',
+    'query_orders', 'query_general', 'query_activity', 'morning_brief', 'send_document',
     'help', 'greeting', 'unknown',
   ],
   vendedor: [

@@ -14,6 +14,7 @@ import {
   queryBalances,
   queryOrders,
   queryGeneral,
+  queryActivity,
   morningBrief,
   sendDocument,
 } from './secretaria.tools';
@@ -36,6 +37,8 @@ import { billingService } from '../billing/billing.service';
 import { getPlanAiFeatures, AiFeatures } from '../billing/plans.config';
 import { secretariaSafety } from './secretaria.safety';
 import { handleFallback } from './secretaria.fallback';
+import { activityService } from '../activity/activity.service';
+import { SECRETARIA_SYSTEM_USER_ID } from '../../shared/constants';
 
 // ── Per-phone concurrency lock ──
 
@@ -105,6 +108,8 @@ async function executeTool(
       return morningBrief(companyId);
     case 'query_general':
       return queryGeneral(companyId, entities);
+    case 'query_activity':
+      return queryActivity(companyId, entities);
     case 'send_document':
       return sendDocument(companyId, entities, phoneNumber);
     case 'greeting':
@@ -388,6 +393,23 @@ class SecretariaService {
       // Step 8: Execute tool based on intent
       const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId, phoneNumber);
 
+      // Step 8.5: Log SecretarIA activity (fire-and-forget)
+      activityService.log({
+        companyId,
+        userId: SECRETARIA_SYSTEM_USER_ID,
+        action: intentResult.intent || 'query',
+        module: 'secretaria',
+        entityType: 'ai_interaction',
+        entityId: undefined,
+        description: `SecretarIA: ${intentResult.intent} — ${(toolResult?.formatted || '').substring(0, 200)}`,
+        metadata: {
+          ai_intent: intentResult.intent,
+          ai_confidence: intentResult.confidence,
+          channel: 'whatsapp',
+          triggered_by: context.displayName || 'unknown',
+        },
+      }).catch(() => {}); // fire-and-forget
+
       // Step 9: Generate natural language response
       let responseText = await generateResponse(toolResult, context, companyName);
 
@@ -621,6 +643,23 @@ class SecretariaService {
 
       // Step 7: Execute tool
       const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId);
+
+      // Step 7.5: Log SecretarIA activity (fire-and-forget)
+      activityService.log({
+        companyId,
+        userId: SECRETARIA_SYSTEM_USER_ID,
+        action: intentResult.intent || 'query',
+        module: 'secretaria',
+        entityType: 'ai_interaction',
+        entityId: undefined,
+        description: `SecretarIA: ${intentResult.intent} — ${(toolResult?.formatted || '').substring(0, 200)}`,
+        metadata: {
+          ai_intent: intentResult.intent,
+          ai_confidence: intentResult.confidence,
+          channel: 'web',
+          triggered_by: displayName || 'unknown',
+        },
+      }).catch(() => {}); // fire-and-forget
 
       // Step 8: Generate response
       let responseText = await generateResponse(toolResult, context, companyName);

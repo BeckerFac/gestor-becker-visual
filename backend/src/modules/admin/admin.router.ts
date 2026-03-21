@@ -35,5 +35,9 @@ adminRouter.post('/companies/:id/enable', (req, res) => adminController.enableCo
 adminRouter.get('/stats', (req, res) => adminController.getSystemStats(req as any, res));
 adminRouter.get('/health', (req, res) => adminController.getSystemHealth(req as any, res));
 
+// Activity logs (cross-company)
+adminRouter.get('/logs', (req, res) => adminController.getGlobalLogs(req as any, res));
+adminRouter.get('/logs/stats', (req, res) => adminController.getLogStats(req as any, res));
+
 // Security monitoring dashboard
 adminRouter.get('/security', (req, res) => adminController.getSecurityDashboard(req as any, res));

@@ -212,6 +212,7 @@ const VALID_INTENTS: ReadonlyArray<SecretariaIntent> = [
   'query_balances',
   'query_orders',
   'query_general',
+  'query_activity',
   'morning_brief',
   'send_document',
   'help',
@@ -231,7 +232,7 @@ function validateIntent(raw: string | undefined): SecretariaIntent {
 function sanitizeEntities(raw: Record<string, string> | undefined): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
 
-  const allowed = ['client_name', 'product_name', 'date_from', 'date_to', 'period', 'status', 'amount', 'invoice_type', 'document_type', 'document_number', 'report_type', 'send_format'];
+  const allowed = ['client_name', 'product_name', 'date_from', 'date_to', 'period', 'status', 'amount', 'invoice_type', 'document_type', 'document_number', 'report_type', 'send_format', 'user_name'];
   const sanitized: Record<string, string> = {};
 
   for (const key of allowed) {

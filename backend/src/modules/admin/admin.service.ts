@@ -6,6 +6,7 @@ import { PLANS, getPlan, TRIAL_DURATION_DAYS } from '../billing/plans.config';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { activityService } from '../activity/activity.service';
 
 // Block reason categories
 export const BLOCK_REASON_CATEGORIES = [
@@ -162,23 +163,15 @@ export class AdminService {
     );
     const subscription = subResult.rows[0] || null;
 
-    // Audit trail (last 20 entries)
-    const auditResult = await pool.query(
-      `SELECT al.*, u.email as user_email, u.name as user_name
-       FROM audit_log al
-       LEFT JOIN users u ON u.id = al.user_id
-       WHERE al.company_id = $1
-       ORDER BY al.created_at DESC
-       LIMIT 20`,
-      [companyId]
-    );
+    // Audit trail (last 20 entries) via activityService
+    const auditData = await activityService.getLogs(companyId, { page: 1, limit: 20 });
 
     return {
       company,
       users: usersResult.rows,
       stats,
       subscription,
-      audit_trail: auditResult.rows,
+      audit_trail: auditData.items,
     };
   }
 
@@ -224,11 +217,16 @@ export class AdminService {
     );
 
     // Audit log
-    await pool.query(
-      `INSERT INTO audit_log (company_id, user_id, action, resource, new_values)
-       VALUES ($1, $2, 'company_blocked', 'company', $3::jsonb)`,
-      [companyId, superadminUserId, JSON.stringify({ category, reason: reason.trim() })]
-    );
+    await activityService.log({
+      companyId,
+      userId: superadminUserId,
+      action: 'company_blocked',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Empresa bloqueada. Categoria: ${category}. Motivo: ${reason.trim()}`,
+      metadata: { category, reason: reason.trim() },
+    });
 
     return {
       success: true,
@@ -262,11 +260,15 @@ export class AdminService {
       [companyId]
     );
 
-    await pool.query(
-      `INSERT INTO audit_log (company_id, user_id, action, resource)
-       VALUES ($1, $2, 'company_unblocked', 'company')`,
-      [companyId, superadminUserId]
-    );
+    await activityService.log({
+      companyId,
+      userId: superadminUserId,
+      action: 'company_unblocked',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Empresa desbloqueada`,
+    });
 
     return { success: true, message: `Company ${check.rows[0].name} unblocked` };
   }
@@ -288,11 +290,17 @@ export class AdminService {
       UPDATE users SET active = false, updated_at = NOW() WHERE company_id = ${companyId}
     `);
 
-    // Log in audit_log
-    await db.execute(sql`
-      INSERT INTO audit_log (company_id, action, resource, new_values)
-      VALUES (${companyId}, 'company_disabled', 'company', ${JSON.stringify({ reason })}::jsonb)
-    `);
+    // Log via activityService
+    await activityService.log({
+      companyId,
+      userId: 'system',
+      action: 'company_disabled',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Empresa deshabilitada. Motivo: ${reason}`,
+      metadata: { reason },
+    });
 
     return { success: true, message: `Company ${companyId} disabled. Reason: ${reason}` };
   }
@@ -312,10 +320,15 @@ export class AdminService {
       UPDATE users SET active = true, updated_at = NOW() WHERE company_id = ${companyId}
     `);
 
-    await db.execute(sql`
-      INSERT INTO audit_log (company_id, action, resource)
-      VALUES (${companyId}, 'company_enabled', 'company')
-    `);
+    await activityService.log({
+      companyId,
+      userId: 'system',
+      action: 'company_enabled',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: 'Empresa rehabilitada',
+    });
 
     return { success: true, message: `Company ${companyId} re-enabled` };
   }
@@ -369,10 +382,15 @@ export class AdminService {
       { expiresIn: '1h' } as any
     );
 
-    await db.execute(sql`
-      INSERT INTO audit_log (company_id, user_id, action, resource, resource_id)
-      VALUES (${companyId}, ${superadminUserId}, 'impersonate', 'company', ${companyId})
-    `);
+    await activityService.log({
+      companyId,
+      userId: superadminUserId,
+      action: 'impersonate',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Superadmin impersonando empresa`,
+    });
 
     return {
       token: impersonationToken,
@@ -641,16 +659,21 @@ export class AdminService {
     );
 
     // Audit log
-    await pool.query(
-      `INSERT INTO audit_log (company_id, user_id, action, resource, new_values)
-       VALUES ($1, $2, 'company_created_manual', 'company', $3::jsonb)`,
-      [company.id, superadminUserId, JSON.stringify({
+    await activityService.log({
+      companyId: company.id,
+      userId: superadminUserId,
+      action: 'company_created_manual',
+      module: 'admin',
+      entityType: 'company',
+      entityId: company.id,
+      description: `Empresa creada manualmente: ${data.name} (${data.cuit})`,
+      metadata: {
         name: data.name,
         cuit: data.cuit,
         plan: data.plan,
         billing_period: data.billingPeriod,
-      })]
-    );
+      },
+    });
 
     return {
       success: true,
@@ -779,11 +802,20 @@ export class AdminService {
     );
 
     // Audit log
-    await pool.query(
-      `INSERT INTO audit_log (company_id, user_id, action, resource, old_values, new_values)
-       VALUES ($1, $2, 'plan_updated', 'company', $3::jsonb, $4::jsonb)`,
-      [companyId, superadminUserId, JSON.stringify(oldValues), JSON.stringify(data)]
-    );
+    await activityService.log({
+      companyId,
+      userId: superadminUserId,
+      action: 'plan_updated',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Plan actualizado para empresa ${company.name}`,
+      changes: {
+        plan: { old: oldValues.plan, new: data.plan || oldValues.plan },
+        billing_period: { old: oldValues.billing_period, new: data.billingPeriod || oldValues.billing_period },
+      },
+      metadata: data,
+    });
 
     return { success: true, message: `Plan updated for company ${company.name}` };
   }
@@ -830,11 +862,16 @@ export class AdminService {
     }
 
     // Audit log BEFORE restore
-    await pool.query(
-      `INSERT INTO audit_log (company_id, user_id, action, resource, new_values)
-       VALUES ($1, $2, 'backup_restore_initiated', 'company', $3::jsonb)`,
-      [companyId, superadminUserId, JSON.stringify({ backup_id: backupId })]
-    );
+    await activityService.log({
+      companyId,
+      userId: superadminUserId,
+      action: 'backup_restore_initiated',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Restauracion de backup iniciada: ${backupId}`,
+      metadata: { backup_id: backupId },
+    });
 
     // In production, this would trigger the actual restore process.
     // For now, return a status indicating the restore was queued.
@@ -849,16 +886,8 @@ export class AdminService {
    * Get audit trail for a company.
    */
   async getAuditTrail(companyId: string, limit: number = 50) {
-    const result = await pool.query(
-      `SELECT al.*, u.email as user_email, u.name as user_name
-       FROM audit_log al
-       LEFT JOIN users u ON u.id = al.user_id
-       WHERE al.company_id = $1
-       ORDER BY al.created_at DESC
-       LIMIT $2`,
-      [companyId, limit]
-    );
-    return result.rows;
+    const result = await activityService.getLogs(companyId, { page: 1, limit });
+    return result.items;
   }
 
   /**
@@ -896,14 +925,19 @@ export class AdminService {
     }
 
     // Log backup in audit
-    await pool.query(
-      `INSERT INTO audit_log (company_id, action, resource, new_values)
-       VALUES ($1, 'company_backup', 'company', $2::jsonb)`,
-      [companyId, JSON.stringify({
+    await activityService.log({
+      companyId,
+      userId: 'system',
+      action: 'company_backup',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Backup exportado para empresa`,
+      metadata: {
         row_counts: backup.metadata.row_counts,
         exported_at: backup.metadata.exported_at,
-      })]
-    );
+      },
+    });
 
     return backup;
   }
@@ -928,14 +962,19 @@ export class AdminService {
     }
 
     // Log restore start in audit
-    await pool.query(
-      `INSERT INTO audit_log (company_id, action, resource, new_values)
-       VALUES ($1, 'company_restore_started', 'company', $2::jsonb)`,
-      [companyId, JSON.stringify({
+    await activityService.log({
+      companyId,
+      userId: 'system',
+      action: 'company_restore_started',
+      module: 'admin',
+      entityType: 'company',
+      entityId: companyId,
+      description: `Restauracion de empresa iniciada`,
+      metadata: {
         backup_date: backupData.metadata.exported_at,
         row_counts: backupData.metadata.row_counts,
-      })]
-    );
+      },
+    });
 
     // NOTE: Full restore requires careful FK ordering.
     // For MVP, we return the backup data and let the restore script handle it.

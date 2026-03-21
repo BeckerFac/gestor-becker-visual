@@ -1431,6 +1431,14 @@ export const api = {
     const { data } = await client.get('/admin/health')
     return data
   },
+  adminGetLogs: async (params: any) => {
+    const { data } = await client.get('/admin/logs', { params })
+    return data
+  },
+  adminGetLogStats: async () => {
+    const { data } = await client.get('/admin/logs/stats')
+    return data
+  },
 
   // AI Features (Premium)
   getAiStatus: async () => {

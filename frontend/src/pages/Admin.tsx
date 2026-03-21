@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom'
 import { api } from '@/services/api'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { AdminActivityTab } from '@/components/admin/AdminActivityTab'
 
 // ---- Types ----
 
@@ -116,7 +117,7 @@ interface BackupEntry {
   status: string
 }
 
-type Tab = 'dashboard' | 'companies' | 'system'
+type Tab = 'dashboard' | 'companies' | 'activity' | 'system'
 
 const BLOCK_CATEGORIES = [
   { value: 'no_pago', label: 'Falta de pago' },
@@ -152,6 +153,7 @@ export const Admin: React.FC = () => {
         {([
           { key: 'dashboard' as Tab, label: 'Dashboard' },
           { key: 'companies' as Tab, label: 'Empresas' },
+          { key: 'activity' as Tab, label: 'Actividad' },
           { key: 'system' as Tab, label: 'Sistema' },
         ]).map((t) => (
           <button
@@ -171,6 +173,7 @@ export const Admin: React.FC = () => {
 
       {tab === 'dashboard' && <DashboardTab />}
       {tab === 'companies' && <CompaniesTab />}
+      {tab === 'activity' && <AdminActivityTab />}
       {tab === 'system' && <SystemTab />}
     </div>
   )

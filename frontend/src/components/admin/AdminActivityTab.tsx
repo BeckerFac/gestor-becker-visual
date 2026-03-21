@@ -4,12 +4,24 @@ import { Button } from '@/components/ui/Button'
 import { DateInput } from '@/components/ui/DateInput'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
-import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { Pagination } from '@/components/shared/Pagination'
-import { ActivityTimeline, type LogEntry } from '@/components/shared/ActivityTimeline'
 import { api } from '@/services/api'
+import { ActivityTimeline, type LogEntry } from '@/components/shared/ActivityTimeline'
 
-const SECRETARIA_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+interface LogStats {
+  logsPerCompany: Array<{ company_name: string; company_id: string; total: number }>
+  today: number
+  thisWeek: number
+  thisMonth: number
+  activeUsers: Array<{ user_name: string; total: number }>
+  topModules: Array<{ module: string; total: number }>
+  actionsBreakdown: Array<{ action: string; total: number }>
+}
+
+interface CompanyOption {
+  id: string
+  name: string
+}
 
 const MODULE_LABELS: Record<string, string> = {
   orders: 'Pedidos', invoices: 'Facturas', products: 'Productos', quotes: 'Cotizaciones',
@@ -24,21 +36,17 @@ const ACTION_LABELS: Record<string, string> = {
   login: 'Login', logout: 'Logout', download: 'Descarga',
 }
 
-interface UserOption {
-  id: string
-  name: string
-  email: string
-}
-
-export default function ActivityLog() {
+export const AdminActivityTab: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [users, setUsers] = useState<UserOption[]>([])
+  const [stats, setStats] = useState<LogStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(true)
+  const [companies, setCompanies] = useState<CompanyOption[]>([])
 
   // Filters
-  const [filterUser, setFilterUser] = useState('')
+  const [filterCompany, setFilterCompany] = useState('')
   const [filterModule, setFilterModule] = useState('')
   const [filterAction, setFilterAction] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
@@ -48,8 +56,13 @@ export default function ActivityLog() {
   const limit = 50
 
   useEffect(() => {
-    api.getUsers()
-      .then((data: UserOption[]) => setUsers(data || []))
+    api.adminGetLogStats()
+      .then(setStats)
+      .catch(console.error)
+      .finally(() => setStatsLoading(false))
+
+    api.adminGetAllCompanies()
+      .then((data: { companies: CompanyOption[] }) => setCompanies(data.companies || []))
       .catch(console.error)
   }, [])
 
@@ -57,13 +70,13 @@ export default function ActivityLog() {
     setLoading(true)
     try {
       const params: any = { page, limit }
-      if (filterUser) params.userId = filterUser
+      if (filterCompany) params.companyId = filterCompany
       if (filterModule) params.module = filterModule
       if (filterAction) params.action = filterAction
       if (filterDateFrom) params.dateFrom = filterDateFrom
       if (filterDateTo) params.dateTo = filterDateTo
       if (filterSearch) params.search = filterSearch
-      const data = await api.getActivityLogs(params)
+      const data = await api.adminGetLogs(params)
       setLogs(data.items || [])
       setTotal(data.total || 0)
     } catch {
@@ -72,12 +85,12 @@ export default function ActivityLog() {
     } finally {
       setLoading(false)
     }
-  }, [page, filterUser, filterModule, filterAction, filterDateFrom, filterDateTo, filterSearch])
+  }, [page, filterCompany, filterModule, filterAction, filterDateFrom, filterDateTo, filterSearch])
 
   useEffect(() => { loadLogs() }, [loadLogs])
 
   const clearFilters = () => {
-    setFilterUser('')
+    setFilterCompany('')
     setFilterModule('')
     setFilterAction('')
     setFilterDateFrom('')
@@ -88,62 +101,75 @@ export default function ActivityLog() {
 
   const totalPages = Math.ceil(total / limit)
 
+  const mostActiveCompany = stats?.logsPerCompany?.[0]?.company_name || '-'
+  const mostCommonAction = stats?.actionsBreakdown?.[0]?.action || '-'
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Registro de Actividad</h1>
-          <p className="text-gray-500 dark:text-gray-400">Historial de acciones de todos los usuarios</p>
+      {/* Stats cards */}
+      {statsLoading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 animate-pulse">
+              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-20 mb-2" />
+              <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-12" />
+            </div>
+          ))}
         </div>
-        <ExportExcelButton
-          data={logs.map(l => ({
-            fecha: new Date(l.createdAt).toLocaleString('es-AR'),
-            usuario: l.userName,
-            rol: l.userRole,
-            accion: ACTION_LABELS[l.action] || l.action,
-            modulo: MODULE_LABELS[l.module] || l.module,
-            descripcion: l.description,
-            ip: l.ipAddress || '-',
-          }))}
-          columns={[
-            { key: 'fecha', label: 'Fecha' },
-            { key: 'usuario', label: 'Usuario' },
-            { key: 'rol', label: 'Rol' },
-            { key: 'accion', label: 'Accion' },
-            { key: 'modulo', label: 'Modulo' },
-            { key: 'descripcion', label: 'Descripcion' },
-            { key: 'ip', label: 'IP' },
-          ]}
-          filename="actividad"
-        />
-      </div>
+      ) : stats ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-l-blue-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Logs hoy</p>
+            <p className="text-lg font-bold">{stats.today}</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-l-green-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Esta semana</p>
+            <p className="text-lg font-bold">{stats.thisWeek}</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-l-purple-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Empresa mas activa</p>
+            <p className="text-lg font-bold truncate" title={mostActiveCompany}>{mostActiveCompany}</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-l-yellow-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Accion mas comun</p>
+            <p className="text-lg font-bold">{ACTION_LABELS[mostCommonAction] || mostCommonAction}</p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3">
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400">Usuario</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400">Empresa</label>
               <select
                 className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
-                value={filterUser}
-                onChange={e => { setFilterUser(e.target.value); setPage(1) }}
+                value={filterCompany}
+                onChange={e => { setFilterCompany(e.target.value); setPage(1) }}
               >
-                <option value="">Todos los usuarios</option>
-                <option value={SECRETARIA_SYSTEM_USER_ID}>SecretarIA</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+                <option value="">Todas las empresas</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400">Modulo</label>
-              <select className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={filterModule} onChange={e => { setFilterModule(e.target.value); setPage(1) }}>
+              <select
+                className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                value={filterModule}
+                onChange={e => { setFilterModule(e.target.value); setPage(1) }}
+              >
                 <option value="">Todos</option>
                 {Object.entries(MODULE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400">Accion</label>
-              <select className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={filterAction} onChange={e => { setFilterAction(e.target.value); setPage(1) }}>
+              <select
+                className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                value={filterAction}
+                onChange={e => { setFilterAction(e.target.value); setPage(1) }}
+              >
                 <option value="">Todas</option>
                 {Object.entries(ACTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
@@ -158,7 +184,13 @@ export default function ActivityLog() {
             </div>
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400">Buscar</label>
-              <input className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Texto libre..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setPage(1); loadLogs() } }} />
+              <input
+                className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                placeholder="Texto libre..."
+                value={filterSearch}
+                onChange={e => setFilterSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { setPage(1); loadLogs() } }}
+              />
             </div>
             <div className="flex items-end">
               <Button variant="secondary" size="sm" onClick={clearFilters}>Limpiar</Button>
@@ -173,7 +205,7 @@ export default function ActivityLog() {
       ) : logs.length === 0 ? (
         <EmptyState title="Sin actividad registrada" description="No hay registros de actividad para los filtros seleccionados." />
       ) : (
-        <ActivityTimeline logs={logs} />
+        <ActivityTimeline logs={logs} showCompany />
       )}
 
       {totalPages > 1 && (

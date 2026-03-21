@@ -56,6 +56,7 @@ Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - query_balances: consultas sobre saldos, cuentas corrientes, deudas
 - query_orders: consultas sobre pedidos (estado, entregas, listados)
 - query_general: consultas generales del negocio (totales, resumenes)
+- query_activity: consultas sobre actividad y cambios recientes: "quien cambio el pedido 0005", "que se hizo hoy", "que cambios hubo esta semana", "quien creo la ultima factura", "que hizo juan"
 - morning_brief: pedido de resumen matutino / brief del dia
 - send_document: pedido de envio de documento (PDF factura, cotizacion, remito, reporte Excel, preview)
 - help: pedido de ayuda o lista de funciones
@@ -115,6 +116,7 @@ NUNCA inventes datos. Si un dato no esta disponible, omitilo.`,
 - "facturas impagas" o "cuanto facture este mes"
 - "precio del disco de corte" o "stock bajo"
 - "como me fue esta semana"
+- "quien cambio el pedido 0005?" o "que se hizo hoy?"
 - "mandame la factura 0002 en PDF"
 - "pasame el reporte de ventas en Excel"
 

@@ -41,6 +41,7 @@ export type SecretariaIntent =
   | 'query_balances'
   | 'query_orders'
   | 'query_general'
+  | 'query_activity'
   | 'morning_brief'
   | 'send_document'
   | 'help'

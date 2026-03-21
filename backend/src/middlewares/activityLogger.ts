@@ -35,6 +35,90 @@ const METHOD_ACTION_MAP: Record<string, string> = {
   DELETE: 'delete',
 };
 
+// Module-specific enrichment functions for human-readable descriptions
+const DESCRIPTION_ENRICHERS: Record<string, (body: any, action: string, userName: string) => string> = {
+  orders: (body, action, userName) => {
+    const order = body.order || body;
+    const num = order.order_number ? `#${String(order.order_number).padStart(4, '0')}` : '';
+    const enterprise = order.enterprise_name || order.customer_name || '';
+    const total = order.total_amount ? `$${Number(order.total_amount).toLocaleString('es-AR')}` : '';
+    if (action === 'create') return `${userName} creo pedido ${num} ${enterprise ? 'para ' + enterprise : ''} ${total ? 'por ' + total : ''}`.trim();
+    if (action === 'update') return `${userName} modifico pedido ${num}`;
+    if (action === 'delete') return `${userName} elimino pedido ${num}`;
+    return `${userName} ${action} pedido ${num}`;
+  },
+  invoices: (body, action, userName) => {
+    const inv = body.invoice || body;
+    const tipo = inv.invoice_type || '';
+    const num = inv.invoice_number ? String(inv.invoice_number).padStart(8, '0') : '';
+    const pv = inv.punto_venta ? String(inv.punto_venta).padStart(5, '0') : '';
+    const fullNum = pv && num ? `${tipo} ${pv}-${num}` : '';
+    const cae = inv.cae || '';
+    if (action === 'create') return `${userName} creo factura ${fullNum}`;
+    if (cae) return `${userName} autorizo factura ${fullNum} — CAE: ${cae}`;
+    return `${userName} ${action} factura ${fullNum}`;
+  },
+  products: (body, action, userName) => {
+    const prod = body.product || body;
+    const name = prod.name || '';
+    const sku = prod.sku || '';
+    if (action === 'create') return `${userName} creo producto ${name} (${sku})`;
+    if (action === 'update') return `${userName} modifico producto ${name}`;
+    if (action === 'delete') return `${userName} elimino producto ${name}`;
+    return `${userName} ${action} producto ${name}`;
+  },
+  cobros: (body, action, userName) => {
+    const receipt = body.receipt || body.cobro || body;
+    const amount = receipt.amount ? `$${Number(receipt.amount).toLocaleString('es-AR')}` : '';
+    const method = receipt.payment_method || '';
+    if (action === 'create') return `${userName} registro cobro ${amount} ${method ? 'por ' + method : ''}`.trim();
+    return `${userName} ${action} cobro ${amount}`;
+  },
+  purchases: (body, action, userName) => {
+    const purchase = body.purchase || body;
+    const num = purchase.purchase_number ? `#${String(purchase.purchase_number).padStart(4, '0')}` : '';
+    const total = purchase.total_amount ? `$${Number(purchase.total_amount).toLocaleString('es-AR')}` : '';
+    if (action === 'create') return `${userName} registro compra ${num} ${total ? 'por ' + total : ''}`.trim();
+    return `${userName} ${action} compra ${num}`;
+  },
+  quotes: (body, action, userName) => {
+    const quote = body.quote || body;
+    const num = quote.quote_number ? `#${String(quote.quote_number).padStart(4, '0')}` : '';
+    if (action === 'create') return `${userName} creo cotizacion ${num}`;
+    return `${userName} ${action} cotizacion ${num}`;
+  },
+  users: (body, action, userName) => {
+    const user = body.user || body;
+    const targetName = user.name || user.email || '';
+    const role = user.role || '';
+    if (action === 'create') return `${userName} creo usuario ${targetName} ${role ? 'con rol ' + role : ''}`.trim();
+    if (action === 'update') return `${userName} modifico usuario ${targetName}`;
+    if (action === 'delete') return `${userName} desactivo usuario ${targetName}`;
+    return `${userName} ${action} usuario ${targetName}`;
+  },
+  inventory: (body, action, userName) => {
+    return `${userName} ajusto stock`;
+  },
+  materials: (body, action, userName) => {
+    const mat = body.material || body;
+    const name = mat.name || '';
+    if (action === 'create') return `${userName} creo material ${name}`;
+    return `${userName} ${action} material ${name}`;
+  },
+  cheques: (body, action, userName) => {
+    const cheque = body.cheque || body;
+    const num = cheque.cheque_number || '';
+    const amount = cheque.amount ? `$${Number(cheque.amount).toLocaleString('es-AR')}` : '';
+    return `${userName} ${action === 'create' ? 'cargo' : action} cheque ${num} ${amount}`.trim();
+  },
+  enterprises: (body, action, userName) => {
+    const ent = body.enterprise || body;
+    const name = ent.name || '';
+    if (action === 'create') return `${userName} creo empresa ${name}`;
+    return `${userName} ${action} empresa ${name}`;
+  },
+};
+
 function getModuleFromPath(path: string): string | null {
   for (const [route, module] of Object.entries(ROUTE_MODULE_MAP)) {
     if (path.startsWith(route)) return module;
@@ -62,7 +146,26 @@ export function activityLoggerMiddleware(req: AuthRequest, res: Response, next: 
     // Only log successful operations (2xx status)
     if (res.statusCode >= 200 && res.statusCode < 300 && req.user?.company_id) {
       const entityId = req.params?.id || body?.id || body?.user?.id || null;
-      const description = buildDescription(action, module, req, body);
+      const userName = (req.user as any)?.name || req.user?.email || 'Sistema';
+      const simpleDescription = buildDescription(action, module, req, body);
+
+      // Build rich description via enricher (with fallback)
+      let richDescription: string | null = null;
+      try {
+        const enricher = DESCRIPTION_ENRICHERS[module];
+        if (enricher) {
+          richDescription = enricher(body, action, userName);
+        }
+      } catch {
+        // Enrichment failed, fallback to simple description
+      }
+
+      const details: Record<string, any> = {
+        description: simpleDescription,
+      };
+      if (richDescription) {
+        details.description_rich = richDescription;
+      }
 
       activityService.log({
         companyId: req.user.company_id,
@@ -71,9 +174,13 @@ export function activityLoggerMiddleware(req: AuthRequest, res: Response, next: 
         module,
         entityType: module,
         entityId,
-        description,
+        description: simpleDescription,
         ipAddress: req.ip || undefined,
-        metadata: { path: req.path, method: req.method },
+        metadata: {
+          path: req.path,
+          method: req.method,
+          description_rich: richDescription || undefined,
+        },
       }).catch(() => {}); // fire-and-forget
     }
 
@@ -83,7 +190,7 @@ export function activityLoggerMiddleware(req: AuthRequest, res: Response, next: 
   next();
 }
 
-function buildDescription(action: string, module: string, req: AuthRequest, body: any): string {
+function buildDescription(action: string, module: string, _req: AuthRequest, body: any): string {
   const moduleLabels: Record<string, string> = {
     orders: 'pedido', invoices: 'factura', products: 'producto', quotes: 'cotizacion',
     remitos: 'remito', purchases: 'compra', cobros: 'cobro', pagos: 'pago',

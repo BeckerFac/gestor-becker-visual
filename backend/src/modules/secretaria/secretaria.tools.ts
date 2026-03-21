@@ -14,6 +14,8 @@ import { SECRETARIA_PROMPTS } from './secretaria.config';
 import { secretariaMediaService } from './secretaria.media';
 import logger from '../../config/logger';
 
+import { SECRETARIA_SYSTEM_USER_ID } from '../../shared/constants';
+
 // ── Formatting Helpers ──
 
 function formatMoney(amount: number): string {
@@ -891,6 +893,106 @@ async function resolveRemitoId(
   }
 }
 
+// ── Query Activity ──
+
+export async function queryActivity(
+  companyId: string,
+  entities: Record<string, string>,
+): Promise<ToolResult> {
+  try {
+    const conditions: string[] = ['a.company_id = $1'];
+    const params: (string | number)[] = [companyId];
+    let paramIdx = 2;
+
+    // Filter by user name (join with users table)
+    if (entities.client_name || entities.user_name) {
+      const name = entities.client_name || entities.user_name;
+      conditions.push(`(u.name ILIKE $${paramIdx} OR a.details::text ILIKE $${paramIdx})`);
+      params.push(`%${name}%`);
+      paramIdx++;
+    }
+
+    // Filter by entity (e.g., order/document number)
+    if (entities.document_number) {
+      conditions.push(`(a.details->>'description' ILIKE $${paramIdx} OR a.details->>'description_rich' ILIKE $${paramIdx} OR a.entity_id ILIKE $${paramIdx})`);
+      params.push(`%${entities.document_number}%`);
+      paramIdx++;
+    }
+
+    // Filter by module
+    if (entities.report_type) {
+      conditions.push(`a.module = $${paramIdx}`);
+      params.push(entities.report_type);
+      paramIdx++;
+    }
+
+    // Filter by date range
+    if (entities.date_from) {
+      conditions.push(`a.created_at >= $${paramIdx}::timestamp`);
+      params.push(entities.date_from);
+      paramIdx++;
+    }
+
+    if (entities.date_to) {
+      conditions.push(`a.created_at <= ($${paramIdx}::timestamp + interval '1 day')`);
+      params.push(entities.date_to);
+      paramIdx++;
+    }
+
+    // Default: last 24 hours if no date specified
+    if (!entities.date_from && !entities.date_to) {
+      conditions.push(`a.created_at >= NOW() - INTERVAL '24 hours'`);
+    }
+
+    // Exclude SecretarIA's own logs to avoid noise
+    conditions.push(`a.user_id != $${paramIdx}`);
+    params.push(SECRETARIA_SYSTEM_USER_ID);
+    paramIdx++;
+
+    const query = `
+      SELECT a.action, a.module, a.entity_type, a.entity_id,
+             a.details->>'description_rich' as description_rich,
+             a.details->>'description' as description,
+             a.created_at,
+             u.name as user_name
+      FROM audit_log a
+      LEFT JOIN users u ON a.user_id::uuid = u.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY a.created_at DESC
+      LIMIT 10
+    `;
+
+    const result = await pool.query(query, params);
+    const rows = result.rows as any[];
+
+    if (rows.length === 0) {
+      return {
+        toolName: 'queryActivity',
+        data: [],
+        formatted: 'No encontre actividad reciente que coincida con tu consulta.',
+      };
+    }
+
+    // Format for WhatsApp
+    const lines = rows.map((r: any) => {
+      const time = new Date(r.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      const desc = r.description_rich || r.description || `${r.action} ${r.entity_type}`;
+      const who = r.user_name || 'Sistema';
+      return `${time} — ${who}: ${desc}`;
+    });
+
+    return {
+      toolName: 'queryActivity',
+      data: rows,
+      formatted: `*Actividad encontrada (${rows.length} registros):*\n\n${lines.join('\n')}`,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ error: message }, 'SecretarIA queryActivity failed');
+    return { toolName: 'queryActivity', data: null, formatted: 'Error al consultar actividad.' };
+  }
+}
+
 // ── Tool Dispatcher ──
 
 export async function executeTool(
@@ -912,6 +1014,8 @@ export async function executeTool(
       return queryOrders(companyId, entities);
     case 'query_general':
       return queryGeneral(companyId, entities);
+    case 'query_activity':
+      return queryActivity(companyId, entities);
     case 'morning_brief':
       return morningBrief(companyId);
     case 'send_document':

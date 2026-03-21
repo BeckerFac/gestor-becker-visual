@@ -52,7 +52,6 @@ import { crmRouter } from './modules/crm/crm.router';
 import { onboardingRouter } from './modules/onboarding/onboarding.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { billingRouter } from './modules/billing/billing.router';
-import { auditRouter } from './modules/audit/audit.router';
 import { activityRouter } from './modules/activity/activity.router';
 import { invitationsRouter } from './modules/invitations/invitations.router';
 import { accountRouter } from './modules/account/account.router';
@@ -213,8 +212,9 @@ app.use('/api/crm', authMiddleware, crmRouter);
 app.use('/api/onboarding', authMiddleware, onboardingRouter);
 app.use('/api/billing', billingRouter); // Mixed auth: some endpoints public (webhook)
 app.use('/api/admin', authMiddleware, adminRouter);
-app.use('/api/audit', authMiddleware, auditRouter);
 app.use('/api/activity', activityRouter);
+// Legacy /api/audit redirects to activity (backward compatibility)
+app.use('/api/audit', activityRouter);
 app.use('/api/invitations', invitationsRouter); // Mixed auth: validate/accept are public
 app.use('/api/account', authMiddleware, accountRouter); // Data export & deletion (Ley 25.326)
 app.use('/api/ai', authMiddleware, aiRouter); // AI features (Premium)
