@@ -677,14 +677,6 @@ export class BusinessService {
             AND o.status NOT IN ('cancelado', 'cancelled')
             AND CAST(o.total_amount AS decimal) > ${cobrosSubquery}
           GROUP BY 1
-          ORDER BY
-            CASE
-              WHEN CURRENT_DATE - o.created_at::date <= 0 THEN 0
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 1 AND 30 THEN 1
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 31 AND 60 THEN 2
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 61 AND 90 THEN 3
-              ELSE 4
-            END
         `, [companyId]);
 
         const agingMap = new Map<string, { cantidad: number; monto: number }>();
