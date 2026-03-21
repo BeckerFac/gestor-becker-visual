@@ -269,17 +269,17 @@ export const Users: React.FC = () => {
         role: inviteForm.role,
         name: inviteForm.name || undefined,
       })
-      toast.success(`Invitacion enviada a ${inviteForm.email}`)
-      // Show token for development (in production, send via email)
       if (result.token) {
-        const inviteUrl = `${window.location.origin}/invite/${result.token}`
-        console.log('Invitation URL:', inviteUrl)
-        toast.success(`Link de invitacion copiado al portapapeles`)
+        const inviteUrl = `${window.location.origin}/accept-invite?token=${result.token}`
         try { await navigator.clipboard.writeText(inviteUrl) } catch (_) { /* clipboard not available */ }
+        toast.success(`Invitacion creada. Link copiado al portapapeles. Mandalo por WhatsApp si el email no llega.`)
+      } else {
+        toast.success(`Invitacion enviada a ${inviteForm.email}`)
       }
       setShowInviteForm(false)
       setInviteForm(emptyInviteForm)
       await loadInvitations()
+      setActiveTab('invitations')
     } catch (e: any) {
       toast.error(e.message || 'Error al enviar invitacion')
     } finally {
@@ -301,12 +301,13 @@ export const Users: React.FC = () => {
     try {
       const result = await api.resendInvitation(id)
       if (result.token) {
-        const inviteUrl = `${window.location.origin}/invite/${result.token}`
+        const inviteUrl = `${window.location.origin}/accept-invite?token=${result.token}`
         try { await navigator.clipboard.writeText(inviteUrl) } catch (_) { /* clipboard not available */ }
-        toast.success('Invitacion reenviada - link copiado')
+        toast.success('Invitacion reenviada - link copiado al portapapeles')
       } else {
-        toast.success('Invitacion reenviada')
+        toast.success('Invitacion reenviada por email')
       }
+      await loadInvitations()
     } catch (e: any) {
       toast.error(e.message || 'Error al reenviar invitacion')
     }
@@ -617,25 +618,25 @@ export const Users: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       {inv.status === 'pending' && (
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 items-center">
                           <button
                             onClick={() => {
                               const link = `${window.location.origin}/accept-invite?token=${inv.token}`
-                              navigator.clipboard.writeText(link).then(() => toast.success('Link copiado al portapapeles'))
+                              navigator.clipboard.writeText(link).then(() => toast.success('Link copiado al portapapeles. Mandalo por WhatsApp.'))
                             }}
-                            className="text-purple-600 hover:underline text-sm"
+                            className="px-2 py-1 bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded text-xs font-medium hover:bg-purple-200 dark:hover:bg-purple-900/60 transition-colors"
                           >
                             Copiar link
                           </button>
                           <button
                             onClick={() => handleResendInvitation(inv.id)}
-                            className="text-blue-600 hover:underline text-sm"
+                            className="text-blue-600 hover:underline text-xs"
                           >
                             Reenviar
                           </button>
                           <button
                             onClick={() => handleCancelInvitation(inv.id)}
-                            className="text-red-600 hover:underline text-sm"
+                            className="text-red-600 hover:underline text-xs"
                           >
                             Cancelar
                           </button>
