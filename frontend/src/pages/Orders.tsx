@@ -48,6 +48,7 @@ interface Order {
   bank?: { id: string; bank_name: string } | null
   quote?: { id: string; quote_number: number } | null
   cobro?: { id: string; amount: string; payment_method: string } | null
+  invoiced_amount?: string
   created_at: string
 }
 
@@ -797,7 +798,7 @@ export const Orders: React.FC = () => {
       en_produccion: filtered.filter(o => o.status === 'en_produccion').length,
       terminados: filtered.filter(o => o.status === 'terminado').length,
       entregados: filtered.filter(o => o.status === 'entregado').length,
-      total_facturado: filtered.reduce((s, o) => s + (parseFloat(o.total_amount?.toString() || '0')), 0),
+      total_facturado: filtered.reduce((s, o) => s + (parseFloat(o.invoiced_amount?.toString() || '0')), 0),
       total: filtered.length,
     }
   }, [orders, summaryPeriod])

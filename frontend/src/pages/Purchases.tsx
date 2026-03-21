@@ -39,6 +39,7 @@ interface Purchase {
   notes: string | null
   enterprise_tags?: { id: string; name: string; color: string }[]
   status: string
+  stock_added?: boolean
   created_at: string
 }
 
@@ -243,43 +244,44 @@ export const Purchases: React.FC = () => {
   }
 
   const handleAddToInventory = async (purchase: Purchase) => {
-    if (!purchase.items || purchase.items.length === 0) {
-      // Need to fetch detail first
-      try {
-        setAddingToInventory(purchase.id)
-        const detail = await api.getPurchase(purchase.id)
-        const purchaseItems = (detail.items || []).map((i: any) => ({
-          product_id: i.product_id || i.id || '',
-          quantity: parseFloat(i.quantity || '0'),
-        })).filter((i: any) => i.product_id && i.quantity > 0)
-        if (purchaseItems.length === 0) {
-          toast.error('No hay items con productos asociados en esta compra')
-          return
-        }
-        await api.addStockFromPurchase(purchase.id, purchaseItems)
-        toast.success('Stock agregado al inventario desde la compra')
-      } catch (e: any) {
-        toast.error(e.message || 'Error al agregar stock')
-      } finally {
-        setAddingToInventory(null)
-      }
+    if (purchase.stock_added) {
+      toast.error('El stock de esta compra ya fue agregado al inventario')
       return
     }
 
     try {
       setAddingToInventory(purchase.id)
-      const purchaseItems = purchase.items.map(i => ({
-        product_id: (i as any).product_id || '',
-        quantity: parseFloat(String(i.quantity || '0')),
-      })).filter(i => i.product_id && i.quantity > 0)
+      let purchaseItems: { product_id: string; quantity: number }[]
+
+      if (!purchase.items || purchase.items.length === 0) {
+        const detail = await api.getPurchase(purchase.id)
+        purchaseItems = (detail.items || []).map((i: any) => ({
+          product_id: i.product_id || i.id || '',
+          quantity: parseFloat(i.quantity || '0'),
+        })).filter((i: any) => i.product_id && i.quantity > 0)
+      } else {
+        purchaseItems = purchase.items.map(i => ({
+          product_id: (i as any).product_id || '',
+          quantity: parseFloat(String(i.quantity || '0')),
+        })).filter(i => i.product_id && i.quantity > 0)
+      }
+
       if (purchaseItems.length === 0) {
         toast.error('No hay items con productos asociados en esta compra')
         return
       }
+
       await api.addStockFromPurchase(purchase.id, purchaseItems)
       toast.success('Stock agregado al inventario desde la compra')
+      await loadData()
+      // Reload expanded detail if this purchase is expanded
+      if (expandedPurchase === purchase.id) {
+        const detail = await api.getPurchase(purchase.id)
+        setExpandedDetail(detail)
+      }
     } catch (e: any) {
-      toast.error(e.message || 'Error al agregar stock')
+      const msg = e?.response?.data?.error || e.message || 'Error al agregar stock'
+      toast.error(msg)
     } finally {
       setAddingToInventory(null)
     }
@@ -820,13 +822,13 @@ export const Purchases: React.FC = () => {
                                   </div>
                                   <div className="pt-2 border-t border-orange-200">
                                     <PermissionGate module="inventory" action="create">
-                                      {(purchase as any).stock_added ? (
+                                      {purchase.stock_added ? (
                                         <div className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-center">
                                           Agregado al inventario ✓
                                         </div>
                                       ) : (
                                         <button
-                                          onClick={() => handleAddToInventory(purchase)}
+                                          onClick={(e) => { e.stopPropagation(); handleAddToInventory(purchase) }}
                                           disabled={addingToInventory === purchase.id}
                                           className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
                                         >
@@ -834,7 +836,7 @@ export const Purchases: React.FC = () => {
                                         </button>
                                       )}
                                       <p className="text-xs text-gray-400 mt-1">
-                                        {(purchase as any).stock_added ? 'El stock ya fue sumado desde esta compra' : 'Suma stock de los productos que controlan inventario'}
+                                        {purchase.stock_added ? 'El stock ya fue sumado desde esta compra' : 'Suma stock de los productos que controlan inventario'}
                                       </p>
                                     </PermissionGate>
                                   </div>

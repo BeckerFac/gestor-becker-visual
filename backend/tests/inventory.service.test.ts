@@ -159,6 +159,8 @@ describe('InventoryService', () => {
 
   describe('addStockFromPurchase', () => {
     it('only processes controls_stock products', async () => {
+      // stock_added check
+      mockDbRows([{ stock_added: false }])
       // Warehouse lookup
       mockDbRows([{ id: 'wh-1' }])
       // Product 1: has controls_stock=true
@@ -185,6 +187,8 @@ describe('InventoryService', () => {
     })
 
     it('skips non-stock products', async () => {
+      // stock_added check
+      mockDbRows([{ stock_added: false }])
       mockDbRows([{ id: 'wh-1' }])
       // Product has controls_stock=false
       mockDbRows([{ id: 'p1', controls_stock: false }])
@@ -197,6 +201,8 @@ describe('InventoryService', () => {
     })
 
     it('skips products not found in company', async () => {
+      // stock_added check
+      mockDbRows([{ stock_added: false }])
       mockDbRows([{ id: 'wh-1' }])
       // Product not found
       mockDbEmpty()
@@ -209,6 +215,8 @@ describe('InventoryService', () => {
     })
 
     it('creates new stock record for first-time product', async () => {
+      // stock_added check
+      mockDbRows([{ stock_added: false }])
       mockDbRows([{ id: 'wh-1' }])
       mockDbRows([{ id: 'p1', controls_stock: true }])
       mockDbVoid() // INSERT movement
@@ -225,6 +233,8 @@ describe('InventoryService', () => {
     })
 
     it('auto-creates warehouse when none exists', async () => {
+      // stock_added check
+      mockDbRows([{ stock_added: false }])
       mockDbEmpty() // no warehouse
 
       let warehouseCreated = false

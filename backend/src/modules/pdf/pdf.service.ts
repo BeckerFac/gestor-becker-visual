@@ -23,6 +23,16 @@ export class PdfService {
   private browser: any = null
 
   async initialize() {
+    // Recover from disconnected/crashed browser
+    if (this.browser) {
+      try {
+        // Test if browser is still connected
+        await this.browser.version()
+      } catch {
+        console.warn('Browser disconnected, relaunching...')
+        this.browser = null
+      }
+    }
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: 'new',
@@ -627,29 +637,34 @@ export class PdfService {
     totalBalance: number;
     totalMovimientos: number;
   }): Promise<Buffer> {
+    let page: any = null;
     try {
       await this.initialize();
 
       const html = this.generateCuentaCorrienteHtml(data);
 
       if (!this.browser) {
-        throw new Error('Browser not initialized');
+        throw new Error('Browser not initialized after initialize()');
       }
 
-      const page = await this.browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      page = await this.browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 15000 });
 
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
       });
 
-      await page.close();
-
       return pdf;
-    } catch (error) {
+    } catch (error: any) {
+      console.error('generateCuentaCorrientePdf error:', error?.message, error?.stack);
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Cuenta corriente PDF generation failed');
+      throw new ApiError(500, `Cuenta corriente PDF generation failed: ${(error?.message || 'unknown').slice(0, 200)}`);
+    } finally {
+      if (page) {
+        try { await page.close(); } catch { /* ignore close errors */ }
+      }
     }
   }
 
@@ -675,28 +690,36 @@ export class PdfService {
     const todayStr = now.toLocaleDateString('es-AR');
     const timeStr = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
-    const formatDateStr = (d: string) => {
+    const formatDateStr = (d: string | null | undefined) => {
+      if (!d) return '-';
       try {
-        return new Date(d).toLocaleDateString('es-AR');
+        const date = new Date(d);
+        if (isNaN(date.getTime())) return String(d);
+        return date.toLocaleDateString('es-AR');
       } catch {
-        return d;
+        return String(d);
       }
     };
 
-    const formatMoney = (n: number) => {
-      return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formatMoney = (n: number | null | undefined) => {
+      const val = typeof n === 'number' && !isNaN(n) ? n : 0;
+      return val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
     const tipoLabels: Record<string, string> = {
+      factura: 'Factura',
       venta: 'Venta',
       cobro: 'Cobro',
+      ajuste: 'Ajuste',
       compra: 'Compra',
       pago: 'Pago',
     };
 
     const tipoColors: Record<string, string> = {
+      factura: 'background: #dbeafe; color: #1d4ed8;',
       venta: 'background: #dbeafe; color: #1d4ed8;',
       cobro: 'background: #dcfce7; color: #15803d;',
+      ajuste: 'background: #fef3c7; color: #92400e;',
       compra: 'background: #ffedd5; color: #c2410c;',
       pago: 'background: #fee2e2; color: #dc2626;',
     };

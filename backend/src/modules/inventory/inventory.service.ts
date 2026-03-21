@@ -268,6 +268,20 @@ export class InventoryService {
 
   async addStockFromPurchase(companyId: string, userId: string, purchaseId: string, items: { product_id: string; quantity: number }[], customNote?: string) {
     try {
+      // Check if stock was already added for this purchase
+      try {
+        const checkResult = await db.execute(sql`
+          SELECT stock_added FROM purchases WHERE id = ${purchaseId} AND company_id = ${companyId}
+        `);
+        const checkRows = (checkResult as any).rows || checkResult || [];
+        if (checkRows.length > 0 && checkRows[0].stock_added === true) {
+          throw new ApiError(409, 'El stock de esta compra ya fue agregado al inventario');
+        }
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        // Column may not exist yet, continue
+      }
+
       // Get or create default warehouse
       let warehouseResult = await db.execute(sql`
         SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1
@@ -350,7 +364,7 @@ export class InventoryService {
 
       // Mark purchase as stock_added
       try {
-        await pool.query('UPDATE purchases SET stock_added = true WHERE id = $1', [purchaseId]);
+        await db.execute(sql`UPDATE purchases SET stock_added = true WHERE id = ${purchaseId}`);
       } catch { /* column may not exist yet */ }
 
       return { purchase_id: purchaseId, items_processed: results };

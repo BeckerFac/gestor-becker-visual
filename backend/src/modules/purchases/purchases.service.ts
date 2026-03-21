@@ -46,6 +46,7 @@ export class PurchasesService {
         )
       `);
       await db.execute(sql`ALTER TABLE purchase_items ADD COLUMN IF NOT EXISTS product_id UUID REFERENCES products(id) ON DELETE SET NULL`);
+      await db.execute(sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS stock_added BOOLEAN DEFAULT false`);
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure purchases tables error:', error);
@@ -170,7 +171,10 @@ export class PurchasesService {
               stockItems,
               purchaseLabel
             );
+            // Mark purchase as stock_added
+            await db.execute(sql`UPDATE purchases SET stock_added = true WHERE id = ${purchaseId}`);
             (result as any).stock_updated = true;
+            (result as any).stock_added = true;
           } catch (stockError) {
             console.error('Auto stock update on purchase create failed:', stockError);
             (result as any).stock_updated = false;
@@ -270,7 +274,9 @@ export class PurchasesService {
       if (data.add_to_inventory && data.items && Array.isArray(data.items)) {
         try {
           await this.adjustStockForPurchaseEdit(companyId, userId, purchaseId, rows[0].purchase_number, oldItems, data.items);
+          await db.execute(sql`UPDATE purchases SET stock_added = true WHERE id = ${purchaseId}`);
           (result as any).stock_updated = true;
+          (result as any).stock_added = true;
         } catch (stockError) {
           console.error('Stock adjustment on purchase edit failed:', stockError);
           (result as any).stock_updated = false;

@@ -112,9 +112,9 @@ export class CuentaCorrienteService {
       let cobrosResult: any = { rows: [] };
       try {
         cobrosResult = await db.execute(sql`
-          SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
-            'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
-            CAST(co.amount AS decimal) as monto
+          SELECT co.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
+            CAST(COALESCE(co.amount, 0) AS decimal) as monto
           FROM cobros co
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
         `);
@@ -125,8 +125,8 @@ export class CuentaCorrienteService {
       try {
         adjustmentsResult = await db.execute(sql`
           SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
-            'Ajuste — ' || aa.reason as descripcion,
-            CAST(ABS(aa.amount) AS decimal) as monto,
+            'Ajuste' || COALESCE(' — ' || aa.reason, '') as descripcion,
+            CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) as monto,
             aa.adjustment_type
           FROM account_adjustments aa
           WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
@@ -137,9 +137,9 @@ export class CuentaCorrienteService {
       let purchasesResult: any = { rows: [] };
       try {
         purchasesResult = await db.execute(sql`
-          SELECT p.id, 'compra' as tipo, p.date as fecha,
-            'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
-            CAST(p.total_amount AS decimal) as monto
+          SELECT p.id, 'compra' as tipo, COALESCE(p.date, p.created_at) as fecha,
+            'Compra #' || LPAD(CAST(COALESCE(p.purchase_number, 0) AS TEXT), 4, '0') as descripcion,
+            CAST(COALESCE(p.total_amount, 0) AS decimal) as monto
           FROM purchases p
           WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
             AND p.status != 'cancelada'
@@ -150,9 +150,9 @@ export class CuentaCorrienteService {
       let pagosResult: any = { rows: [] };
       try {
         pagosResult = await db.execute(sql`
-          SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
-            'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
-            CAST(pa.amount AS decimal) as monto
+          SELECT pa.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
+            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
+            CAST(COALESCE(pa.amount, 0) AS decimal) as monto
           FROM pagos pa
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
         `);
@@ -253,9 +253,9 @@ export class CuentaCorrienteService {
       let allCobros: any = { rows: [] };
       try {
         allCobros = await db.execute(sql`
-          SELECT co.id, 'cobro' as tipo, co.payment_date as fecha,
-            'Cobro — ' || co.payment_method || COALESCE(' — ' || co.reference, '') as descripcion,
-            CAST(co.amount AS decimal) as monto
+          SELECT co.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
+            CAST(COALESCE(co.amount, 0) AS decimal) as monto
           FROM cobros co
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
         `);
@@ -265,8 +265,8 @@ export class CuentaCorrienteService {
       try {
         allAdjustments = await db.execute(sql`
           SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
-            'Ajuste — ' || aa.reason as descripcion,
-            CAST(ABS(aa.amount) AS decimal) as monto,
+            'Ajuste' || COALESCE(' — ' || aa.reason, '') as descripcion,
+            CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) as monto,
             aa.adjustment_type
           FROM account_adjustments aa
           WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
@@ -276,9 +276,9 @@ export class CuentaCorrienteService {
       let allPurchases: any = { rows: [] };
       try {
         allPurchases = await db.execute(sql`
-          SELECT p.id, 'compra' as tipo, p.date as fecha,
-            'Compra #' || LPAD(CAST(p.purchase_number AS TEXT), 4, '0') as descripcion,
-            CAST(p.total_amount AS decimal) as monto
+          SELECT p.id, 'compra' as tipo, COALESCE(p.date, p.created_at) as fecha,
+            'Compra #' || LPAD(CAST(COALESCE(p.purchase_number, 0) AS TEXT), 4, '0') as descripcion,
+            CAST(COALESCE(p.total_amount, 0) AS decimal) as monto
           FROM purchases p
           WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
             AND p.status != 'cancelada'
@@ -288,16 +288,21 @@ export class CuentaCorrienteService {
       let allPagos: any = { rows: [] };
       try {
         allPagos = await db.execute(sql`
-          SELECT pa.id, 'pago' as tipo, pa.payment_date as fecha,
-            'Pago — ' || pa.payment_method || COALESCE(' — ' || pa.reference, '') as descripcion,
-            CAST(pa.amount AS decimal) as monto
+          SELECT pa.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
+            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
+            CAST(COALESCE(pa.amount, 0) AS decimal) as monto
           FROM pagos pa
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
         `);
       } catch (e) { console.error('PDF: pagos query failed', (e as any)?.message); }
 
       const parseRows = (result: any) =>
-        ((result as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
+        ((result as any).rows || []).map((m: any) => ({
+          ...m,
+          monto: parseFloat(m.monto || '0'),
+          fecha: m.fecha || new Date().toISOString(),
+          descripcion: m.descripcion || 'Sin descripcion',
+        }));
 
       const orders = parseRows(allOrders);
       const cobros = parseRows(allCobros);
