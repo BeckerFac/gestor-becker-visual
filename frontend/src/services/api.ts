@@ -471,6 +471,53 @@ export const api = {
     return data
   },
 
+  // Materials
+  getMaterials: async (search?: string) => {
+    const params = search ? `?search=${encodeURIComponent(search)}` : ''
+    const { data } = await client.get(`/materials${params}`)
+    return data
+  },
+  getMaterial: async (id: string) => {
+    const { data } = await client.get(`/materials/${id}`)
+    return data
+  },
+  createMaterial: async (materialData: any) => {
+    const { data } = await client.post('/materials', materialData)
+    return data
+  },
+  updateMaterial: async (id: string, materialData: any) => {
+    const { data } = await client.put(`/materials/${id}`, materialData)
+    return data
+  },
+  deleteMaterial: async (id: string) => {
+    const { data } = await client.delete(`/materials/${id}`)
+    return data
+  },
+  adjustMaterialStock: async (id: string, adjustData: { quantity_change: number; reason: string }) => {
+    const { data } = await client.post(`/materials/${id}/adjust-stock`, adjustData)
+    return data
+  },
+  getMaterialMovements: async (id: string) => {
+    const { data } = await client.get(`/materials/${id}/movements`)
+    return data
+  },
+  getProductMaterials: async (productId: string) => {
+    const { data } = await client.get(`/materials/product/${productId}/materials`)
+    return data
+  },
+  setProductMaterials: async (productId: string, materials: any[]) => {
+    const { data } = await client.put(`/materials/product/${productId}/materials`, { materials })
+    return data
+  },
+  getProductMaterialBOMCost: async (productId: string) => {
+    const { data } = await client.get(`/materials/product/${productId}/bom-cost`)
+    return data
+  },
+  checkMaterialAvailability: async (productId: string, quantity: number) => {
+    const { data } = await client.get(`/materials/product/${productId}/availability?quantity=${quantity}`)
+    return data
+  },
+
   // Purchases
   getPurchases: async (filters?: any) => {
     const params = new URLSearchParams()

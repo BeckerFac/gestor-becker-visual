@@ -3,6 +3,7 @@ import { stock, stock_movements, products, warehouses } from '../../db/schema';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { materialsService } from '../materials/materials.service';
 
 export class InventoryService {
   async getStock(companyId: string) {
@@ -202,7 +203,25 @@ export class InventoryService {
         `);
       }
 
-      return { id: movementId, product_id: data.product_id, quantity_change: quantityChange, new_quantity: newQty };
+      // Auto-consume materials if stock is INCREASED (production)
+      let materialConsumption: any = null;
+      if (quantityChange > 0) {
+        try {
+          materialConsumption = await materialsService.consumeMaterialsForProduction(
+            companyId, data.product_id, quantityChange, userId
+          );
+        } catch (matErr) {
+          console.error('Material consumption warning (non-blocking):', matErr);
+        }
+      }
+
+      return {
+        id: movementId,
+        product_id: data.product_id,
+        quantity_change: quantityChange,
+        new_quantity: newQty,
+        material_consumption: materialConsumption,
+      };
     } catch (error) {
       console.error('Adjust stock error:', error);
       if (error instanceof ApiError) throw error;
@@ -311,7 +330,22 @@ export class InventoryService {
           `);
         }
 
-        results.push({ product_id: item.product_id, quantity_added: quantity, new_quantity: newQty });
+        // Auto-consume materials for production
+        let materialConsumption: any = null;
+        try {
+          materialConsumption = await materialsService.consumeMaterialsForProduction(
+            companyId, item.product_id, quantity, userId
+          );
+        } catch (matErr) {
+          console.error('Material consumption warning (non-blocking):', matErr);
+        }
+
+        results.push({
+          product_id: item.product_id,
+          quantity_added: quantity,
+          new_quantity: newQty,
+          material_consumption: materialConsumption,
+        });
       }
 
       // Mark purchase as stock_added

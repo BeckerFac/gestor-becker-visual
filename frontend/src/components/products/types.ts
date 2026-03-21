@@ -84,6 +84,45 @@ export interface BulkPreviewItem {
   new_final_price: string
 }
 
+export interface Material {
+  id: string
+  company_id: string
+  name: string
+  sku: string | null
+  unit: string
+  cost: string | number
+  stock: string | number
+  min_stock: string | number
+  description: string | null
+  active: boolean
+  stock_status?: 'ok' | 'bajo' | 'sin_stock'
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductMaterial {
+  id: string
+  product_id: string
+  material_id: string
+  quantity: string | number
+  unit: string
+  notes: string | null
+  material_name: string
+  material_sku: string
+  material_unit: string
+  material_cost: string | number
+  material_stock: string | number
+}
+
+export const MATERIAL_UNITS = [
+  { value: 'unidad', label: 'Unidad' },
+  { value: 'metro', label: 'Metro' },
+  { value: 'kg', label: 'Kilogramo' },
+  { value: 'litro', label: 'Litro' },
+  { value: 'm2', label: 'Metro cuadrado' },
+  { value: 'rollo', label: 'Rollo' },
+]
+
 export const DEFAULT_TYPES = [
   'portabanner', 'bandera', 'ploteo', 'carteleria', 'vinilo',
   'lona', 'backing', 'senaletica', 'vehicular', 'textil', 'otro',

@@ -59,6 +59,7 @@ import { aiRouter } from './modules/ai/ai.router';
 import { apiKeysRouter } from './modules/apikeys/apikeys.router';
 import { secretariaRouter } from './modules/secretaria/secretaria.router';
 import { priceCriteriaRouter } from './modules/price-criteria/price-criteria.router';
+import { materialsRouter } from './modules/materials/materials.router';
 
 export const app = express();
 
@@ -200,6 +201,7 @@ app.use('/api/tags', authMiddleware, tagsRouter);
 app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/price-lists', authMiddleware, priceListsRouter);
 app.use('/api/price-criteria', authMiddleware, priceCriteriaRouter);
+app.use('/api/materials', authMiddleware, materialsRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);

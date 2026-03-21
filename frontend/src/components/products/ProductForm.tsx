@@ -6,7 +6,7 @@ import { HelpTip } from '@/components/shared/HelpTip'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency } from '@/lib/utils'
 import { api } from '@/services/api'
-import type { Product, ProductType, Category, ProductForm as ProductFormType } from './types'
+import type { Product, ProductType, Category, ProductForm as ProductFormType, Material, ProductMaterial } from './types'
 import { VAT_OPTIONS, DEFAULT_TYPES, emptyForm } from './types'
 
 interface ProductFormProps {
@@ -41,11 +41,12 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [newCriteriaName, setNewCriteriaName] = useState('')
   const [creatingCriteria, setCreatingCriteria] = useState(false)
 
-  // BOM state
-  const [bomComponents, setBomComponents] = useState<any[]>([])
+  // BOM state (materials-based)
+  const [bomMaterials, setBomMaterials] = useState<ProductMaterial[]>([])
   const [bomCost, setBomCost] = useState<number | null>(null)
   const [bomLoading, setBomLoading] = useState(false)
-  const [bomNew, setBomNew] = useState({ product_id: '', quantity: '1', unit: 'unidad' })
+  const [bomNew, setBomNew] = useState({ material_id: '', quantity: '1', unit: 'unidad' })
+  const [availableMaterials, setAvailableMaterials] = useState<Material[]>([])
 
   const typeNames = productTypes.map(t => typeof t === 'string' ? t : t.name)
   const allTypes = [...new Set([...DEFAULT_TYPES, ...typeNames])].sort()
@@ -53,13 +54,15 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const loadBOM = useCallback(async (productId: string) => {
     setBomLoading(true)
     try {
-      const [comps, costData] = await Promise.all([
-        api.getProductComponents(productId).catch(() => []),
-        api.getProductBOMCost(productId).catch(() => null),
+      const [mats, costData, allMats] = await Promise.all([
+        api.getProductMaterials(productId).catch(() => []),
+        api.getProductMaterialBOMCost(productId).catch(() => null),
+        api.getMaterials().catch(() => ({ items: [] })),
       ])
-      setBomComponents(comps || [])
+      setBomMaterials(mats || [])
       setBomCost(costData?.bom_cost ? parseFloat(costData.bom_cost) : null)
-    } catch { setBomComponents([]); setBomCost(null) }
+      setAvailableMaterials(allMats?.items || allMats || [])
+    } catch { setBomMaterials([]); setBomCost(null) }
     finally { setBomLoading(false) }
   }, [])
 
@@ -84,6 +87,8 @@ export const ProductForm: React.FC<ProductFormProps> = ({
       loadPriceCriteria(editingId)
     } else {
       loadPriceCriteria()
+      // Load materials list even for new products
+      api.getMaterials().then(res => setAvailableMaterials(res?.items || res || [])).catch(() => {})
     }
   }, [editingId, loadBOM, loadPriceCriteria])
 
@@ -219,27 +224,45 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     }
   }
 
-  const handleAddComponent = async () => {
-    if (!editingId || !bomNew.product_id) return
+  const handleAddMaterial = async () => {
+    if (!editingId || !bomNew.material_id) return
     try {
-      await api.addProductComponent(editingId, {
-        component_product_id: bomNew.product_id,
-        quantity_required: parseFloat(bomNew.quantity) || 1,
+      const currentMats = bomMaterials.map(m => ({
+        material_id: m.material_id,
+        quantity: parseFloat(String(m.quantity)),
+        unit: m.unit,
+      }))
+      // Check if already exists
+      if (currentMats.some(m => m.material_id === bomNew.material_id)) {
+        toast.error('Este material ya esta en la composicion')
+        return
+      }
+      currentMats.push({
+        material_id: bomNew.material_id,
+        quantity: parseFloat(bomNew.quantity) || 1,
         unit: bomNew.unit || 'unidad',
       })
-      setBomNew({ product_id: '', quantity: '1', unit: 'unidad' })
+      await api.setProductMaterials(editingId, currentMats)
+      setBomNew({ material_id: '', quantity: '1', unit: 'unidad' })
       await loadBOM(editingId)
-      toast.success('Componente agregado')
-    } catch (e: any) { toast.error(e.message) }
+      toast.success('Material agregado')
+    } catch (e: any) { toast.error(e.response?.data?.error || e.message) }
   }
 
-  const handleRemoveComponent = async (componentId: string) => {
+  const handleRemoveMaterial = async (materialId: string) => {
     if (!editingId) return
     try {
-      await api.removeProductComponent(editingId, componentId)
+      const updatedMats = bomMaterials
+        .filter(m => m.material_id !== materialId)
+        .map(m => ({
+          material_id: m.material_id,
+          quantity: parseFloat(String(m.quantity)),
+          unit: m.unit,
+        }))
+      await api.setProductMaterials(editingId, updatedMats)
       await loadBOM(editingId)
-      toast.success('Componente eliminado')
-    } catch (e: any) { toast.error(e.message) }
+      toast.success('Material eliminado de la composicion')
+    } catch (e: any) { toast.error(e.response?.data?.error || e.message) }
   }
 
   return (
@@ -469,22 +492,46 @@ export const ProductForm: React.FC<ProductFormProps> = ({
             <p className="text-xs text-gray-400 mt-2">Los precios por lista se guardan junto con el producto</p>
           </div>
 
-          {/* BOM Section */}
+          {/* BOM Section (Materials) */}
           {editingId ? (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-3">Composicion (BOM)<HelpTip text="Lista de materiales necesarios para fabricar este producto. Cuando se produce, estos materiales se descuentan del inventario." /></h4>
+              <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-3">
+                Composicion (BOM)
+                <HelpTip text="Selecciona los materiales necesarios para fabricar 1 unidad de este producto. Al agregar stock del producto, los materiales se descuentan automaticamente." />
+              </h4>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
-                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.product_id} onChange={e => setBomNew({ ...bomNew, product_id: e.target.value })}>
+                <select
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                  value={bomNew.material_id}
+                  onChange={e => setBomNew({ ...bomNew, material_id: e.target.value })}
+                >
                   <option value="">Seleccionar material...</option>
-                  {products.filter(p => p.id !== editingId).map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
+                  {availableMaterials.map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.sku ? `${m.sku} - ` : ''}{m.name} ({m.unit})</option>
+                  ))}
                 </select>
-                <input type="number" step="0.0001" min="0.0001" placeholder="Cantidad" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.quantity} onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })} />
-                <input placeholder="Unidad (unidad, metro, kg...)" className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={bomNew.unit} onChange={e => setBomNew({ ...bomNew, unit: e.target.value })} />
-                <Button type="button" variant="primary" onClick={handleAddComponent} disabled={!bomNew.product_id}>+ Agregar</Button>
+                <input
+                  type="number" step="0.0001" min="0.0001" placeholder="Cantidad"
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                  value={bomNew.quantity}
+                  onChange={e => setBomNew({ ...bomNew, quantity: e.target.value })}
+                />
+                <input
+                  placeholder="Unidad (unidad, metro, kg...)"
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                  value={bomNew.unit}
+                  onChange={e => setBomNew({ ...bomNew, unit: e.target.value })}
+                />
+                <Button type="button" variant="primary" onClick={handleAddMaterial} disabled={!bomNew.material_id}>+ Agregar</Button>
               </div>
+              {availableMaterials.length === 0 && !bomLoading && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                  No hay materiales cargados. Crealos primero en la pestana "Materiales".
+                </p>
+              )}
               {bomLoading ? (
                 <p className="text-xs text-gray-400">Cargando composicion...</p>
-              ) : bomComponents.length > 0 ? (
+              ) : bomMaterials.length > 0 ? (
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-amber-100/50 dark:bg-amber-900/30 text-xs text-amber-700 dark:text-amber-400">
@@ -498,27 +545,41 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {bomComponents.map((comp: any) => (
-                      <tr key={comp.id} className="border-t border-amber-200/50 dark:border-amber-800/50">
-                        <td className="px-3 py-1.5 text-gray-800 dark:text-gray-200">{comp.component_name}</td>
-                        <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{comp.component_sku}</td>
-                        <td className="px-3 py-1.5 text-right dark:text-gray-300">{parseFloat(comp.quantity_required)}</td>
-                        <td className="px-3 py-1.5 text-gray-600 dark:text-gray-400">{comp.unit || 'unidad'}</td>
-                        <td className="px-3 py-1.5 text-right dark:text-gray-300">{formatCurrency(parseFloat(comp.component_cost || '0'))}</td>
-                        <td className="px-3 py-1.5 text-right">
-                          <span className={parseFloat(comp.stock_available || '0') >= parseFloat(comp.quantity_required) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                            {parseFloat(comp.stock_available || '0')}
-                          </span>
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <button type="button" onClick={() => handleRemoveComponent(comp.id)} className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xs">x</button>
-                        </td>
-                      </tr>
-                    ))}
+                    {bomMaterials.map((mat: any) => {
+                      const matCost = parseFloat(mat.material_cost || '0')
+                      const matStock = parseFloat(mat.material_stock || '0')
+                      const qty = parseFloat(mat.quantity || '0')
+                      return (
+                        <tr key={mat.id} className="border-t border-amber-200/50 dark:border-amber-800/50">
+                          <td className="px-3 py-1.5 text-gray-800 dark:text-gray-200">{mat.material_name}</td>
+                          <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{mat.material_sku || '-'}</td>
+                          <td className="px-3 py-1.5 text-right dark:text-gray-300">{qty}</td>
+                          <td className="px-3 py-1.5 text-gray-600 dark:text-gray-400">{mat.material_unit || mat.unit || 'unidad'}</td>
+                          <td className="px-3 py-1.5 text-right dark:text-gray-300">{formatCurrency(matCost)}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <span className={matStock >= qty ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                              {matStock}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <button type="button" onClick={() => handleRemoveMaterial(mat.material_id)} className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xs">x</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-amber-300 dark:border-amber-700">
+                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs font-semibold text-amber-700 dark:text-amber-400">Total BOM:</td>
+                      <td className="px-3 py-1.5 text-right text-xs font-bold text-amber-800 dark:text-amber-300">
+                        {formatCurrency(bomMaterials.reduce((acc: number, m: any) => acc + (parseFloat(m.material_cost || '0') * parseFloat(m.quantity || '0')), 0))}
+                      </td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
                 </table>
               ) : (
-                <p className="text-xs text-gray-400">Sin componentes. Este producto no tiene lista de materiales.</p>
+                <p className="text-xs text-gray-400">Sin materiales. Este producto no tiene lista de materiales.</p>
               )}
               {bomCost !== null && bomCost > 0 && (
                 <div className="mt-2 flex gap-4 text-xs">

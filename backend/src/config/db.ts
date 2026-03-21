@@ -288,6 +288,55 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_product ON product_components(product_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pc_component ON product_components(component_product_id)`);
 
+    // --- Materials (raw materials for production) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS materials (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        sku VARCHAR(100),
+        unit VARCHAR(50) NOT NULL DEFAULT 'unidad',
+        cost DECIMAL(12,2) DEFAULT 0,
+        stock DECIMAL(12,2) DEFAULT 0,
+        min_stock DECIMAL(12,2) DEFAULT 0,
+        description TEXT,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_materials_company ON materials(company_id)`);
+
+    // --- Product materials (BOM with materials) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_materials (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        material_id UUID NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+        quantity DECIMAL(12,4) NOT NULL DEFAULT 1,
+        unit VARCHAR(50) DEFAULT 'unidad',
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(product_id, material_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pm_product ON product_materials(product_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pm_material ON product_materials(material_id)`);
+
+    // --- Material stock movements ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS material_stock_movements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        quantity_change DECIMAL(12,2) NOT NULL,
+        reason TEXT,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_msm_material ON material_stock_movements(material_id)`);
+
     // --- Cheque status history ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cheque_status_history (
@@ -696,6 +745,9 @@ async function applyRowLevelSecurity() {
     'price_lists',
     'product_components',
     'product_types',
+    'materials',
+    'product_materials',
+    'material_stock_movements',
     'subscriptions',
     'usage_tracking',
     'audit_log',
@@ -805,6 +857,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'tags', fk: 'company_id' },
     { name: 'price_lists', fk: 'company_id' },
     { name: 'product_components', fk: 'company_id' },
+    { name: 'materials', fk: 'company_id' },
+    { name: 'material_stock_movements', fk: 'company_id' },
     { name: 'subscriptions', fk: 'company_id' },
     { name: 'usage_tracking', fk: 'company_id' },
     { name: 'audit_log', fk: 'company_id' },
@@ -836,6 +890,7 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'permissions', parentTable: 'users', parentFk: 'user_id' },
     { name: 'sessions', parentTable: 'users', parentFk: 'user_id' },
     { name: 'product_pricing', parentTable: 'products', parentFk: 'product_id' },
+    { name: 'product_materials', parentTable: 'products', parentFk: 'product_id' },
     { name: 'stock', parentTable: 'products', parentFk: 'product_id' },
     { name: 'stock_movements', parentTable: 'products', parentFk: 'product_id' },
     { name: 'payments', parentTable: 'invoices', parentFk: 'invoice_id' },

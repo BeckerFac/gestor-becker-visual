@@ -17,6 +17,7 @@ import { ProductDetailPanel } from '@/components/products/ProductDetailPanel'
 import { ProductForm } from '@/components/products/ProductForm'
 import { ProductFilters } from '@/components/products/ProductFilters'
 import { StockMovements } from '@/components/products/StockMovements'
+import { MaterialsTab } from '@/components/products/MaterialsTab'
 import { BulkPriceModal } from '@/components/products/BulkPriceModal'
 import { TypesManager } from '@/components/products/TypesManager'
 import { CategoriesManager } from '@/components/products/CategoriesManager'
@@ -26,7 +27,7 @@ import { emptyForm } from '@/components/products/types'
 
 const ITEMS_PER_PAGE = 50
 
-const TAB_KEYS = ['productos', 'movimientos', 'tipos', 'categorias', 'listas'] as const
+const TAB_KEYS = ['productos', 'materiales', 'movimientos', 'tipos', 'categorias', 'listas'] as const
 type TabKey = typeof TAB_KEYS[number]
 
 export const Products: React.FC = () => {
@@ -285,6 +286,7 @@ export const Products: React.FC = () => {
 
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'productos', label: 'Productos', show: true },
+    { key: 'materiales', label: 'Materiales', show: true },
     { key: 'movimientos', label: 'Stock / Movimientos', show: true },
     { key: 'tipos', label: 'Tipos', show: false },
     { key: 'categorias', label: 'Categorias', show: false },
@@ -538,6 +540,11 @@ export const Products: React.FC = () => {
             </>
           )}
         </>
+      )}
+
+      {/* Materiales tab */}
+      {activeTab === 'materiales' && (
+        <MaterialsTab />
       )}
 
       {/* Stock / Movimientos tab */}
