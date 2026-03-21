@@ -210,6 +210,13 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_adjustments_company ON account_adjustments(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_account_adjustments_enterprise ON account_adjustments(company_id, enterprise_id)`);
 
+    // --- Activity log columns ---
+    await pool.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS module VARCHAR(50)`).catch(() => {});
+    await pool.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS changes JSONB`).catch(() => {});
+    await pool.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS metadata JSONB`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_company_date ON audit_log(company_id, created_at DESC)`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_module ON audit_log(company_id, module)`).catch(() => {});
+
     // --- Cobros table ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cobros (

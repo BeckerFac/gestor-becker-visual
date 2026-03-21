@@ -53,6 +53,7 @@ import { onboardingRouter } from './modules/onboarding/onboarding.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { billingRouter } from './modules/billing/billing.router';
 import { auditRouter } from './modules/audit/audit.router';
+import { activityRouter } from './modules/activity/activity.router';
 import { invitationsRouter } from './modules/invitations/invitations.router';
 import { accountRouter } from './modules/account/account.router';
 import { aiRouter } from './modules/ai/ai.router';
@@ -167,6 +168,10 @@ app.use(securityAutoBlockCheck);
 // Audit logging for state-changing operations
 app.use(auditLogger);
 
+// Activity logging (exhaustive - logs every CRUD operation)
+import { activityLoggerMiddleware } from './middlewares/activityLogger';
+app.use(activityLoggerMiddleware);
+
 // Health check endpoints (no auth required for /health and /health/detailed)
 // Admin health at /api/admin/health requires auth
 app.use(healthRouter);
@@ -209,6 +214,7 @@ app.use('/api/onboarding', authMiddleware, onboardingRouter);
 app.use('/api/billing', billingRouter); // Mixed auth: some endpoints public (webhook)
 app.use('/api/admin', authMiddleware, adminRouter);
 app.use('/api/audit', authMiddleware, auditRouter);
+app.use('/api/activity', activityRouter);
 app.use('/api/invitations', invitationsRouter); // Mixed auth: validate/accept are public
 app.use('/api/account', authMiddleware, accountRouter); // Data export & deletion (Ley 25.326)
 app.use('/api/ai', authMiddleware, aiRouter); // AI features (Premium)

@@ -1160,6 +1160,12 @@ export const api = {
     return data
   },
 
+  // Activity Logs
+  getActivityLogs: async (params: any) => {
+    const { data } = await client.get('/activity/logs', { params })
+    return data
+  },
+
   // CRM Pipeline
   getCrmDeals: async (filters?: { stage?: string; enterprise_id?: string; priority?: string; search?: string }) => {
     const params = new URLSearchParams()

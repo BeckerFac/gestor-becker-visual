@@ -81,6 +81,7 @@ const navSections: NavSection[] = [
     label: 'Sistema',
     items: [
       { href: '/users', label: 'Usuarios', icon: '👤', module: 'users' },
+      { href: '/activity', label: 'Actividad', icon: '📋', module: 'audit_log' },
       { href: '/settings', label: 'Configuración', icon: '⚙️', module: 'settings' },
     ],
   },
