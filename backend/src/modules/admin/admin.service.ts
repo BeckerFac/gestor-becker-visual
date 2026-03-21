@@ -535,16 +535,27 @@ export class AdminService {
     const memUsage = process.memoryUsage();
     const uptime = process.uptime();
 
-    const tableCountsResult = await pool.query(`
-      SELECT
-        (SELECT COUNT(*)::int FROM companies) AS companies,
-        (SELECT COUNT(*)::int FROM users) AS users,
-        (SELECT COUNT(*)::int FROM invoices) AS invoices,
-        (SELECT COUNT(*)::int FROM orders) AS orders,
-        (SELECT COUNT(*)::int FROM products) AS products,
-        (SELECT COUNT(*)::int FROM sessions) AS active_sessions
-    `);
-    const tableCounts = tableCountsResult.rows[0] || {};
+    let tableCounts: Record<string, number> = {};
+    try {
+      const tableCountsResult = await pool.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM companies) AS companies,
+          (SELECT COUNT(*)::int FROM users) AS users,
+          (SELECT COUNT(*)::int FROM invoices) AS invoices,
+          (SELECT COUNT(*)::int FROM orders) AS orders,
+          (SELECT COUNT(*)::int FROM products) AS products
+      `);
+      tableCounts = tableCountsResult.rows[0] || {};
+      // Sessions table may not exist - query separately
+      try {
+        const sessionsResult = await pool.query(`SELECT COUNT(*)::int AS active_sessions FROM sessions`);
+        tableCounts.active_sessions = sessionsResult.rows[0]?.active_sessions || 0;
+      } catch {
+        tableCounts.active_sessions = 0;
+      }
+    } catch {
+      tableCounts = { companies: 0, users: 0, invoices: 0, orders: 0, products: 0, active_sessions: 0 };
+    }
 
     return {
       database: {
