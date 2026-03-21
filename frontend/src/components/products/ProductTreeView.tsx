@@ -99,14 +99,20 @@ const ProductRow: React.FC<{
 
   return (
     <tr
-      className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''}`}
+      className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${isDraggedOver ? 'opacity-40' : ''} ${depth > 0 ? 'bg-gray-50/50 dark:bg-gray-800/30' : ''}`}
       onClick={() => onRowClick(product)}
       draggable={!isTouchDevice}
       onDragStart={onDragStart ? (e) => onDragStart(e, product.id, product.name, product.category_id) : undefined}
       onDragEnd={onDragEnd}
       style={!isTouchDevice ? { cursor: 'grab' } : undefined}
     >
-      <td className="px-4 py-3" style={{ paddingLeft: paddingLeft + 16 }}>
+      <td className="px-4 py-3 relative" style={{ paddingLeft: paddingLeft + 16 }}>
+        {/* Vertical indent line for nested products */}
+        {depth > 0 && (
+          <div className="absolute left-0 top-0 bottom-0" style={{ left: `${depth * 12}px` }}>
+            <div className="w-0.5 h-full bg-gray-200 dark:bg-gray-700" />
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {/* Drag handle indicator */}
           {!isTouchDevice && (
