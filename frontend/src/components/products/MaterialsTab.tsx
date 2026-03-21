@@ -180,8 +180,7 @@ export const MaterialsTab: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Help tip */}
-      <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-        <span className="text-blue-600 dark:text-blue-400 text-lg mt-0.5">?</span>
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
         <p className="text-sm text-blue-700 dark:text-blue-300">
           Los materiales son la materia prima que usas para fabricar tus productos. Aca podes cargar materiales como lona, canos, pintura, etc. Despues, en cada producto, podes definir que materiales necesitas para fabricarlo (composicion/BOM).
         </p>

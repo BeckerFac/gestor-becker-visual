@@ -269,7 +269,8 @@ const CategoryProducts: React.FC<{
   onMoveToCategory?: (productId: string, categoryId: string | null) => void
   onProductContextMenu?: (e: React.MouseEvent, product: Product) => void
   hideCosts?: boolean
-}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory, onProductContextMenu, hideCosts = false }) => {
+  reloadKey?: number
+}> = ({ categoryId, depth, search, stockStatusFilter, hasStockProducts, selectedIds, onToggleSelect, onSelectMultiple, onRowClick, onEdit, onDelete, onDragStart, onDragEnd, isDraggedProduct, isTouchDevice, allCategories, onMoveToCategory, onProductContextMenu, hideCosts = false, reloadKey = 0 }) => {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -298,7 +299,7 @@ const CategoryProducts: React.FC<{
     } finally {
       setLoading(false)
     }
-  }, [categoryId, search, stockStatusFilter])
+  }, [categoryId, search, stockStatusFilter, reloadKey])
 
   useEffect(() => {
     loadedRef.current = false
@@ -400,6 +401,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
     has_stock_products: boolean
   } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [reloadKey, setReloadKey] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -522,6 +524,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
 
   const handleFullReload = async () => {
     await loadTree()
+    setReloadKey(prev => prev + 1)
     onReload()
   }
 
@@ -626,6 +629,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                 setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
               }}
               hideCosts={hideCosts}
+              reloadKey={reloadKey}
             />
           )}
         </React.Fragment>
@@ -792,6 +796,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
                         setContextMenu({ x: e.clientX, y: e.clientY, type: 'product', item: product })
                       }}
                       hideCosts={hideCosts}
+                      reloadKey={reloadKey}
                     />
                   )}
                 </>
