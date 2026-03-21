@@ -67,7 +67,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
     const loadStatus = async () => {
       try {
         const status = await api.getOnboardingStatus()
-        if (status.completed) {
+        if (status.completed && status.currentStep >= 5) {
+          // Only auto-close if fully completed (step 5), not if it was just marked complete
           onComplete()
           return
         }

@@ -17,31 +17,10 @@ export class OnboardingService {
 
     const company = result.rows[0];
 
-    // Check if company already has data (existing company that got the migration)
-    // If they have products or invoices, auto-complete onboarding
-    // BUT: don't auto-complete if onboarding_current_step = 0 (means it was intentionally reset)
-    if (!company.onboarding_completed && company.onboarding_current_step !== 0) {
-      const dataCheck = await pool.query(
-        `SELECT
-          (SELECT COUNT(*) FROM products WHERE company_id = $1)::int as products_count,
-          (SELECT COUNT(*) FROM invoices WHERE company_id = $1)::int as invoices_count,
-          (SELECT COUNT(*) FROM orders WHERE company_id = $1)::int as orders_count`,
-        [companyId]
-      );
-      const counts = dataCheck.rows[0];
-      if (counts.products_count > 0 || counts.invoices_count > 0 || counts.orders_count > 0) {
-        // Auto-complete onboarding for existing companies
-        await pool.query(
-          `UPDATE companies SET onboarding_completed = true, onboarding_completed_at = NOW() WHERE id = $1`,
-          [companyId]
-        );
-        return {
-          completed: true,
-          currentStep: 5,
-          company: { ...company, onboarding_completed: true },
-        };
-      }
-    }
+    // NOTE: Auto-complete logic was removed from getStatus().
+    // A GET endpoint should NEVER modify the database (side-effect antipattern).
+    // If existing companies need auto-completion, do it via migration in db.ts,
+    // not on every status check.
 
     return {
       completed: company.onboarding_completed || false,
@@ -194,12 +173,16 @@ export class OnboardingService {
   }
 
   async resetOnboarding(companyId: string) {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE companies
        SET onboarding_completed = false, onboarding_completed_at = NULL, onboarding_current_step = 0
        WHERE id = $1`,
       [companyId]
     );
+
+    if (result.rowCount === 0) {
+      throw new ApiError(404, 'Company not found');
+    }
 
     return { success: true, reset: true };
   }
