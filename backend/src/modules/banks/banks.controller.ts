@@ -5,28 +5,53 @@ import { ApiError } from '../../middlewares/errorHandler';
 
 export class BanksController {
   async getBanks(req: AuthRequest, res: Response) {
-    const data = await banksService.getBanks(req.user!.company_id);
-    res.json(data);
+    try {
+      const data = await banksService.getBanks(req.user!.company_id);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get banks' });
+    }
   }
 
   async createBank(req: AuthRequest, res: Response) {
-    const data = await banksService.createBank(req.user!.company_id, req.body);
-    res.status(201).json(data);
+    try {
+      const data = await banksService.createBank(req.user!.company_id, req.body);
+      res.status(201).json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to create bank' });
+    }
   }
 
   async updateBank(req: AuthRequest, res: Response) {
-    const data = await banksService.updateBank(req.user!.company_id, req.params.id, req.body);
-    res.json(data);
+    try {
+      const data = await banksService.updateBank(req.user!.company_id, req.params.id, req.body);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to update bank' });
+    }
   }
 
   async deleteBank(req: AuthRequest, res: Response) {
-    const data = await banksService.deleteBank(req.user!.company_id, req.params.id);
-    res.json(data);
+    try {
+      const data = await banksService.deleteBank(req.user!.company_id, req.params.id);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to delete bank' });
+    }
   }
 
   async getBreakdown(req: AuthRequest, res: Response) {
-    const data = await banksService.getBreakdown(req.user!.company_id);
-    res.json(data);
+    try {
+      const data = await banksService.getBreakdown(req.user!.company_id);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get bank breakdown' });
+    }
   }
 
   async getBankBalances(req: AuthRequest, res: Response) {
