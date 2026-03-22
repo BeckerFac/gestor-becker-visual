@@ -143,7 +143,7 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
     <div className="space-y-4">
       {/* Template selector */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700">Template:</label>
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Template:</label>
         <select
           value={selectedTemplate}
           onChange={e => setSelectedTemplate(e.target.value)}
@@ -171,13 +171,13 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-100 border-b border-gray-200">
-              <th className="text-left px-4 py-3 font-semibold text-gray-700 min-w-[200px]">
+              <th className="text-left px-4 py-3 font-semibold text-gray-700 dark:text-gray-300 min-w-[200px]">
                 Modulo
               </th>
               {ALL_ACTIONS.map(action => (
                 <th
                   key={action}
-                  className="text-center px-4 py-3 font-semibold text-gray-700 w-24"
+                  className="text-center px-4 py-3 font-semibold text-gray-700 dark:text-gray-300 w-24"
                 >
                   {ACTION_LABELS[action]}
                 </th>
@@ -191,7 +191,7 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
                 <tr>
                   <td
                     colSpan={5}
-                    className="px-4 py-2 bg-gray-50 font-bold text-gray-800 text-xs uppercase tracking-wide border-b border-gray-200"
+                    className="px-4 py-2 bg-gray-50 font-bold text-gray-800 dark:text-gray-200 text-xs uppercase tracking-wide border-b border-gray-200"
                   >
                     {group.section}
                   </td>
@@ -208,13 +208,13 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
                       <tr
                         className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors"
                       >
-                        <td className="px-4 py-2.5 pl-8 text-gray-700">
+                        <td className="px-4 py-2.5 pl-8 text-gray-700 dark:text-gray-300">
                           <div className="flex items-center gap-1.5">
                             {hasSubActions && (
                               <button
                                 type="button"
                                 onClick={() => toggleExpand(mod.key)}
-                                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors text-xs font-bold"
+                                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:text-gray-300 hover:bg-gray-100 transition-colors text-xs font-bold"
                                 title={isExpanded ? 'Colapsar sub-acciones' : 'Expandir sub-acciones'}
                               >
                                 {isExpanded ? '-' : '+'}

@@ -515,7 +515,7 @@ export const Quotes: React.FC = () => {
                 <Input label="Titulo" placeholder="Ej: Cotizacion Banners Evento" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700">Valida hasta<HelpTip text="Cantidad de dias que la cotizacion es valida. Despues de este plazo, se marca como vencida." /></label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Valida hasta<HelpTip text="Cantidad de dias que la cotizacion es valida. Despues de este plazo, se marca como vencida." /></label>
                     <DateInput value={form.valid_until} onChange={val => setForm({ ...form, valid_until: val })} />
                   </div>
                   <Input label="Notas / Observaciones" placeholder="Tiempo de produccion, condiciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
@@ -833,10 +833,10 @@ export const Quotes: React.FC = () => {
                         <TagBadges tags={quote.enterprise_tags || []} size="sm" />
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       {formatDate(quote.created_at)}
                     </td>
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       {quote.valid_until ? formatDate(quote.valid_until) : '-'}
                     </td>
                     <td className="px-4 py-3">
@@ -845,7 +845,7 @@ export const Quotes: React.FC = () => {
                     <td className="px-4 py-3">
                       <PermissionGate module="quotes" action="edit">
                         <select
-                          className={`px-2 py-1 rounded-lg text-xs font-medium border cursor-pointer ${STATUS_COLORS[quote.status] || 'bg-gray-100 text-gray-800'}`}
+                          className={`px-2 py-1 rounded-lg text-xs font-medium border cursor-pointer ${STATUS_COLORS[quote.status] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}
                           value={quote.status}
                           onChange={e => handleStatusChange(quote.id, e.target.value)}
                           disabled={updatingStatusId === quote.id}

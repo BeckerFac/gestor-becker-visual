@@ -90,7 +90,7 @@ export function PWAInstallPrompt() {
         </div>
         <button
           onClick={handleDismiss}
-          className="flex-shrink-0 text-gray-600 hover:text-gray-400 transition-colors"
+          className="flex-shrink-0 text-gray-600 dark:text-gray-400 hover:text-gray-400 transition-colors"
           aria-label="Cerrar"
         >
           <X className="h-4 w-4" />

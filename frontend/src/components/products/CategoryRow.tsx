@@ -205,7 +205,7 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
 
               {/* Expand/collapse arrow */}
               <button
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-transform duration-200 flex-shrink-0"
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 transition-transform duration-200 flex-shrink-0"
                 style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
                 onClick={(e) => { e.stopPropagation(); onToggle() }}
               >
@@ -320,7 +320,7 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
               </Button>
               <button
                 onClick={() => setShowSubcatForm(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-xs"
               >
                 Cancelar
               </button>

@@ -93,8 +93,8 @@ export const TypesManager: React.FC<TypesManagerProps> = ({ productTypes, onRelo
                       {t.description && <span className="text-gray-400 text-xs ml-2">({t.description})</span>}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => handleMoveType(t.id, 'up')} disabled={idx === 0} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs disabled:opacity-30" title="Subir">^</button>
-                      <button onClick={() => handleMoveType(t.id, 'down')} disabled={idx === arr.length - 1} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs disabled:opacity-30" title="Bajar">v</button>
+                      <button onClick={() => handleMoveType(t.id, 'up')} disabled={idx === 0} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-xs disabled:opacity-30" title="Subir">^</button>
+                      <button onClick={() => handleMoveType(t.id, 'down')} disabled={idx === arr.length - 1} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-xs disabled:opacity-30" title="Bajar">v</button>
                       <button onClick={() => { setEditingTypeId(t.id); setEditingTypeName(t.name) }} className="text-blue-500 dark:text-blue-400 text-xs hover:underline ml-1">Editar</button>
                       <button onClick={() => handleDeleteType(t.id)} className="text-red-500 dark:text-red-400 text-xs hover:underline">Eliminar</button>
                     </div>

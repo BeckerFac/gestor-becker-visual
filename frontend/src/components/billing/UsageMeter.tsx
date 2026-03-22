@@ -27,10 +27,10 @@ export const UsageMeter: React.FC<UsageMeterProps> = ({
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-sm">
-        <span className="text-gray-600">{label}</span>
+        <span className="text-gray-600 dark:text-gray-400">{label}</span>
         <span className={cn(
           'font-medium',
-          isExceeded ? 'text-red-600' : isWarning ? 'text-yellow-600' : 'text-gray-900'
+          isExceeded ? 'text-red-600' : isWarning ? 'text-yellow-600' : 'text-gray-900 dark:text-gray-100'
         )}>
           {displayCurrent}/{displayLimit} {unit}
         </span>

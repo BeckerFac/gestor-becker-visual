@@ -111,7 +111,7 @@ export function InvoiceTemplate({
               <div className="text-gray-500">{companyAddress}</div>
             )}
             <div className="text-gray-500">
-              Cond. IVA: <span className="text-gray-700 font-medium">{TAX_CONDITION_EMISOR[invoiceType] || 'Monotributo'}</span>
+              Cond. IVA: <span className="text-gray-700 dark:text-gray-300 font-medium">{TAX_CONDITION_EMISOR[invoiceType] || 'Monotributo'}</span>
             </div>
           </div>
 
@@ -122,10 +122,10 @@ export function InvoiceTemplate({
               PV: {ptoVtaStr} &mdash; Nro: {nroStr}
             </div>
             <div className="text-gray-500">
-              Fecha: <span className="text-gray-700">{invoiceDate}</span>
+              Fecha: <span className="text-gray-700 dark:text-gray-300">{invoiceDate}</span>
             </div>
             <div className="text-gray-500">
-              CUIT: <span className="text-gray-700 font-medium">{formatCuit(companyCuit)}</span>
+              CUIT: <span className="text-gray-700 dark:text-gray-300 font-medium">{formatCuit(companyCuit)}</span>
             </div>
           </div>
         </div>
@@ -144,7 +144,7 @@ export function InvoiceTemplate({
               className={`mt-3 ${missingCuit ? 'border border-dashed border-red-400 rounded px-1 py-0.5 bg-red-50/50' : ''}`}
             >
               <span className="text-gray-500">CUIT: </span>
-              <span className={missingCuit ? 'text-red-500 font-medium' : 'text-gray-700 font-medium'}>
+              <span className={missingCuit ? 'text-red-500 font-medium' : 'text-gray-700 dark:text-gray-300 font-medium'}>
                 {customerCuit ? formatCuit(customerCuit) : (missingCuit ? 'Requerido' : '-')}
               </span>
             </div>

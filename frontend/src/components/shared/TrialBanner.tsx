@@ -47,7 +47,7 @@ export const TrialBanner: React.FC = () => {
       {(subscription_status !== 'active') && (
         <a
           href="/settings"
-          className="bg-white text-gray-900 px-3 py-1 rounded text-xs font-semibold hover:bg-gray-100 transition-colors"
+          className="bg-white text-gray-900 dark:text-gray-100 px-3 py-1 rounded text-xs font-semibold hover:bg-gray-100 transition-colors"
         >
           {subscription_is_read_only ? 'Actualizar plan' : 'Ver planes'}
         </a>

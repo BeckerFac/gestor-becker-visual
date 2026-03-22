@@ -425,7 +425,7 @@ export function InvoicePreviewModal({
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100 shrink-0">
               <div>
-                <h3 className="text-lg font-bold text-gray-900">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
                   {authorized ? 'Factura Autorizada' : 'Borrador de Factura'}
                 </h3>
                 <p className="text-sm text-gray-500">
@@ -441,7 +441,7 @@ export function InvoicePreviewModal({
                 )}
                 <button
                   onClick={onClose}
-                  className="text-gray-400 hover:text-gray-600 transition-colors ml-2"
+                  className="text-gray-400 hover:text-gray-600 dark:text-gray-400 transition-colors ml-2"
                   aria-label="Cerrar modal"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -478,7 +478,7 @@ export function InvoicePreviewModal({
                         )}
                       </>
                     ) : (
-                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700">Factura {invoice.invoice_type}</p>
+                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300">Factura {invoice.invoice_type}</p>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
@@ -492,7 +492,7 @@ export function InvoicePreviewModal({
                         onChange={e => onPuntoVentaChange(parseInt(e.target.value) || 1)}
                       />
                     ) : (
-                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700">{invoice.punto_venta || '-'}</p>
+                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300">{invoice.punto_venta || '-'}</p>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
@@ -519,7 +519,7 @@ export function InvoicePreviewModal({
                         )}
                       </>
                     ) : (
-                      <p className="px-2 py-1.5 text-sm text-gray-700">{displayDate}</p>
+                      <p className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300">{displayDate}</p>
                     )}
                   </div>
                   {authorized && invoice.cae && (
@@ -593,7 +593,7 @@ export function InvoicePreviewModal({
                         onChange={e => setLocalCustomerName(e.target.value)}
                       />
                     ) : (
-                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700">{localCustomerName || 'Consumidor Final'}</p>
+                      <p className="px-2 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300">{localCustomerName || 'Consumidor Final'}</p>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
@@ -624,7 +624,7 @@ export function InvoicePreviewModal({
                         )}
                       </div>
                     ) : (
-                      <p className="px-2 py-1.5 text-sm text-gray-700">{localCustomerCuit || '-'}</p>
+                      <p className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300">{localCustomerCuit || '-'}</p>
                     )}
                     {missingCuit && (
                       <p className="text-xs text-red-500">Requerido para Factura A</p>
@@ -651,7 +651,7 @@ export function InvoicePreviewModal({
                         ))}
                       </select>
                     ) : (
-                      <p className="px-2 py-1.5 text-sm text-gray-700">
+                      <p className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300">
                         {CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || localCondicionIva}
                       </p>
                     )}
@@ -669,7 +669,7 @@ export function InvoicePreviewModal({
                         onChange={e => setLocalIsFce(e.target.checked)}
                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-200"
                       />
-                      <span className="text-sm font-medium text-gray-700">FCE MiPyME (Factura de Credito Electronica)</span>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">FCE MiPyME (Factura de Credito Electronica)</span>
                     </label>
                     {localIsFce && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -840,7 +840,7 @@ export function InvoicePreviewModal({
                                   <span>{item.vat_rate}%</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5 text-right font-medium text-gray-700">
+                              <td className="px-2 py-1.5 text-right font-medium text-gray-700 dark:text-gray-300">
                                 {formatCurrency(itemSubtotal)}
                               </td>
                             </tr>
@@ -877,7 +877,7 @@ export function InvoicePreviewModal({
                         <span>{formatCurrency(vatAmount)}</span>
                       </div>
                     )}
-                    <div className={`flex justify-between text-base font-bold pt-1.5 border-t border-gray-200 ${total === 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                    <div className={`flex justify-between text-base font-bold pt-1.5 border-t border-gray-200 ${total === 0 ? 'text-red-500' : 'text-gray-900 dark:text-gray-100'}`}>
                       <span>Total</span>
                       <span>{formatCurrency(total)}</span>
                     </div>
@@ -899,7 +899,7 @@ export function InvoicePreviewModal({
                           {check.ok ? '\u2713' : '\u2717'}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <span className={check.ok ? 'text-gray-700' : 'text-red-700'}>{check.label}</span>
+                          <span className={check.ok ? 'text-gray-700 dark:text-gray-300' : 'text-red-700'}>{check.label}</span>
                           {!check.ok && (
                             <span className="ml-1 text-xs text-red-500">- {check.detail}</span>
                           )}
@@ -959,7 +959,7 @@ export function InvoicePreviewModal({
             {showConfirmAuthorize && !authorized && (
               <div className="px-6 py-3 bg-amber-50 border-t border-amber-200 shrink-0">
                 <p className="text-sm font-semibold text-amber-800 mb-2">Resumen antes de autorizar con AFIP:</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-1 text-xs text-gray-700">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-1 text-xs text-gray-700 dark:text-gray-300">
                   <div><span className="text-gray-400">Cliente:</span> {localCustomerName || 'Consumidor Final'}</div>
                   <div><span className="text-gray-400">CUIT:</span> {localCustomerCuit || '-'}</div>
                   <div><span className="text-gray-400">Tipo:</span> Factura {invoiceType}</div>
@@ -970,7 +970,7 @@ export function InvoicePreviewModal({
                   <div><span className="text-gray-400">IVA:</span> {formatCurrency(vatAmount)}</div>
                   <div><span className="text-gray-400">Concepto:</span> {localConcepto === 1 ? 'Productos' : localConcepto === 2 ? 'Servicios' : 'Prod. y Serv.'}</div>
                   <div><span className="text-gray-400">Cond. IVA Receptor:</span> {CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || localCondicionIva}</div>
-                  <div className="col-span-2 sm:col-span-4 text-sm font-bold text-gray-900 pt-1 border-t border-amber-200 mt-1">
+                  <div className="col-span-2 sm:col-span-4 text-sm font-bold text-gray-900 dark:text-gray-100 pt-1 border-t border-amber-200 mt-1">
                     Total: {formatCurrency(total)}
                   </div>
                 </div>
@@ -1011,7 +1011,7 @@ export function InvoicePreviewModal({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={onClose}
-                        className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
+                        className="px-4 py-2 text-gray-600 dark:text-gray-400 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
                       >
                         Cerrar
                       </button>
@@ -1067,7 +1067,7 @@ export function InvoicePreviewModal({
                   <>
                     <button
                       onClick={onClose}
-                      className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
+                      className="px-4 py-2 text-gray-600 dark:text-gray-400 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
                     >
                       Cerrar
                     </button>

@@ -97,7 +97,7 @@ class ErrorBoundary extends React.Component<
               {this.state.error?.message || 'Error desconocido'}
             </p>
             <details className="text-left mb-6">
-              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-gray-300">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300">
                 Detalles tecnicos
               </summary>
               <pre className="mt-2 text-xs text-gray-400 bg-gray-100 dark:bg-gray-900 p-3 rounded overflow-auto max-h-40">

@@ -482,19 +482,19 @@ export const Users: React.FC = () => {
       {isAdmin && (
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
           <button
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-white text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => setActiveTab('users')}
           >
             Usuarios ({users.length})
           </button>
           <button
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'invitations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'invitations' ? 'bg-white text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => setActiveTab('invitations')}
           >
             Invitaciones ({invitations.filter(i => i.status === 'pending').length})
           </button>
           <button
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'roles' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'roles' ? 'bg-white text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => { setActiveTab('roles'); loadRoleTemplates() }}
           >
             Roles
@@ -641,9 +641,9 @@ export const Users: React.FC = () => {
                 ) : invitations.map(inv => (
                   <tr key={inv.id} className="border-b dark:border-gray-700 hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">{inv.email}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{inv.name || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{inv.name || '-'}</td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGES[inv.role] || 'bg-gray-100 text-gray-800'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGES[inv.role] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
                         {ROLE_LABELS[inv.role] || inv.role}
                       </span>
                     </td>
@@ -656,7 +656,7 @@ export const Users: React.FC = () => {
                         {inv.status === 'pending' ? 'Pendiente' : inv.status === 'accepted' ? 'Aceptada' : 'Cancelada'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{inv.invited_by_name || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{inv.invited_by_name || '-'}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {inv.expires_at ? formatDate(inv.expires_at) : '-'}
                     </td>
@@ -742,10 +742,10 @@ export const Users: React.FC = () => {
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{user.email}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{user.email}</td>
                           <td className="px-4 py-3">
                             <span
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGES[user.role] || 'bg-gray-100 text-gray-800'}`}
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGES[user.role] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}
                             >
                               {ROLE_LABELS[user.role] || user.role}
                             </span>
@@ -798,7 +798,7 @@ export const Users: React.FC = () => {
                                 <button
                                   onClick={() => handleOpenSessions(user.id)}
                                   className={`text-sm hover:underline ${
-                                    sessionsUserId === user.id ? 'text-gray-800 font-semibold' : 'text-gray-600'
+                                    sessionsUserId === user.id ? 'text-gray-800 dark:text-gray-200 font-semibold' : 'text-gray-600'
                                   }`}
                                 >
                                   Sesiones
@@ -837,7 +837,7 @@ export const Users: React.FC = () => {
                             <td colSpan={6} className="px-4 py-4 bg-blue-50/50 border-b">
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between">
-                                  <h4 className="font-medium text-gray-800">
+                                  <h4 className="font-medium text-gray-800 dark:text-gray-200">
                                     Sesiones activas ({sessions.length})
                                   </h4>
                                   {sessions.length > 0 && (
@@ -859,10 +859,10 @@ export const Users: React.FC = () => {
                                     {sessions.map(session => (
                                       <div key={session.id} className="flex items-center justify-between bg-white rounded p-2 border">
                                         <div className="text-sm">
-                                          <span className="text-gray-600">Iniciada: </span>
+                                          <span className="text-gray-600 dark:text-gray-400">Iniciada: </span>
                                           <span className="font-medium">{formatDate(session.created_at)}</span>
                                           <span className="text-gray-400 mx-2">|</span>
-                                          <span className="text-gray-600">Expira: </span>
+                                          <span className="text-gray-600 dark:text-gray-400">Expira: </span>
                                           <span>{formatDate(session.expires_at)}</span>
                                         </div>
                                         <button
@@ -902,7 +902,7 @@ export const Users: React.FC = () => {
                 <h3 className="text-lg font-semibold text-amber-800">Transferir Propiedad</h3>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                   Transferir la propiedad de la empresa a otro Admin. Tu rol pasara a Admin.
                   Esta accion cerrara tu sesion.
                 </p>
@@ -966,10 +966,10 @@ export const Users: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
           <div className="fixed inset-0 bg-black/50" onClick={() => setResetPasswordTarget(null)} />
           <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Restablecer Contrasena
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Ingresa la nueva contrasena para{' '}
               <strong>{users.find(u => u.id === resetPasswordTarget)?.name}</strong>
             </p>

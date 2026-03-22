@@ -173,7 +173,7 @@ export const BillingSection: React.FC = () => {
             {/* Current Plan Info */}
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
               <div>
-                <p className="font-semibold text-gray-900">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
                   Plan {planDisplayName}
                 </p>
                 <p className="text-sm text-gray-500">
@@ -239,7 +239,7 @@ export const BillingSection: React.FC = () => {
             {/* Usage meters - only for Estandar (Premium is unlimited) */}
             {showUsageMeters && (
               <div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Uso este mes</h4>
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Uso este mes</h4>
                 <div className="space-y-3">
                   <UsageMeter
                     label="Comprobantes"
@@ -265,7 +265,7 @@ export const BillingSection: React.FC = () => {
 
             {/* Features */}
             <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">Funciones incluidas</h4>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Funciones incluidas</h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                 {FEATURE_LABELS.map(({ key, label }) => {
                   const included = features[key]

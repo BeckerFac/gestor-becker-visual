@@ -134,7 +134,7 @@ export const ResetPassword: React.FC = () => {
             )}
           </div>
 
-          <div className="text-xs text-gray-600 space-y-1">
+          <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
             <p>La contrasena debe contener:</p>
             <ul className="list-disc pl-4">
               <li>Minimo 8 caracteres</li>

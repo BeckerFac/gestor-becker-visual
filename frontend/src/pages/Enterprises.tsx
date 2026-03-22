@@ -437,7 +437,7 @@ export const Enterprises: React.FC = () => {
 
               {/* Direccion de la empresa */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Direccion de la Empresa</h4>
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Direccion de la Empresa</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Input label="Direccion" placeholder="Av. Ejemplo 1234" value={enterpriseForm.address} onChange={e => setEnterpriseForm({ ...enterpriseForm, address: e.target.value })} />
                   <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.city} onChange={e => setEnterpriseForm({ ...enterpriseForm, city: e.target.value })} />
@@ -481,7 +481,7 @@ export const Enterprises: React.FC = () => {
               </div>
 
               <div className="col-span-full">
-                <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={enterpriseForm.notes} onChange={e => setEnterpriseForm({ ...enterpriseForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
@@ -512,7 +512,7 @@ export const Enterprises: React.FC = () => {
               <Input label="Teléfono" placeholder="+54 11 1234-5678" value={contactForm.phone} onChange={e => setContactForm({ ...contactForm, phone: e.target.value })} />
               <Input label="Email" type="email" placeholder="email@empresa.com" value={contactForm.email} onChange={e => setContactForm({ ...contactForm, email: e.target.value })} />
               <div className="col-span-full">
-                <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={contactForm.notes} onChange={e => setContactForm({ ...contactForm, notes: e.target.value })} />
               </div>
               <div className="flex items-end gap-2">
@@ -633,10 +633,10 @@ export const Enterprises: React.FC = () => {
                         {expandedContacts.map(c => (
                           <tr key={c.id} className="border-b border-gray-100">
                             <td className="py-2 font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
-                            <td className="py-2 font-mono text-gray-600">{c.cuit}</td>
-                            <td className="py-2 text-gray-600">{c.role || '-'}</td>
-                            <td className="py-2 text-gray-600">{c.phone || '-'}</td>
-                            <td className="py-2 text-gray-600">{c.email || '-'}</td>
+                            <td className="py-2 font-mono text-gray-600 dark:text-gray-400">{c.cuit}</td>
+                            <td className="py-2 text-gray-600 dark:text-gray-400">{c.role || '-'}</td>
+                            <td className="py-2 text-gray-600 dark:text-gray-400">{c.phone || '-'}</td>
+                            <td className="py-2 text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
                             <td className="py-2">
                               <div className="flex gap-2">
                                 <PermissionGate module="enterprises" action="edit">
@@ -679,9 +679,9 @@ export const Enterprises: React.FC = () => {
                     {unassignedContacts.map(c => (
                       <tr key={c.id} className="border-b border-gray-100">
                         <td className="py-2 font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
-                        <td className="py-2 font-mono text-gray-600">{c.cuit}</td>
-                        <td className="py-2 text-gray-600">{c.phone || '-'}</td>
-                        <td className="py-2 text-gray-600">{c.email || '-'}</td>
+                        <td className="py-2 font-mono text-gray-600 dark:text-gray-400">{c.cuit}</td>
+                        <td className="py-2 text-gray-600 dark:text-gray-400">{c.phone || '-'}</td>
+                        <td className="py-2 text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
                         <td className="py-2">
                           <div className="flex gap-2">
                             <PermissionGate module="enterprises" action="edit">

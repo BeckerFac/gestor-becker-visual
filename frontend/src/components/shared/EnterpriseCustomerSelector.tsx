@@ -50,7 +50,7 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${className}`}>
       <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium text-gray-700">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {enterpriseLabel} {enterpriseRequired && <span className="text-red-500">*</span>}
           {enterpriseHelpText && <HelpTip text={enterpriseHelpText} />}
         </label>
@@ -67,7 +67,7 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
         </select>
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium text-gray-700">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {customerLabel} {customerRequired && <span className="text-red-500">*</span>}
           {selectedEnterpriseId && (
             <span className="ml-1 text-xs text-gray-400">

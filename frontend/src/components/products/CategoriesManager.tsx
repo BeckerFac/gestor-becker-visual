@@ -151,8 +151,8 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({ categories
                 {cat.default_margin_percent && <span className="text-xs text-gray-400">M: {cat.default_margin_percent}%</span>}
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleMoveUp(cat, siblings)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs px-1" title="Subir">&#9650;</button>
-                <button onClick={() => handleMoveDown(cat, siblings)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs px-1" title="Bajar">&#9660;</button>
+                <button onClick={() => handleMoveUp(cat, siblings)} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-xs px-1" title="Subir">&#9650;</button>
+                <button onClick={() => handleMoveDown(cat, siblings)} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-xs px-1" title="Bajar">&#9660;</button>
                 <button onClick={() => startEdit(cat)} className="text-blue-500 dark:text-blue-400 text-xs hover:underline px-1">Editar</button>
                 <button onClick={() => handleDeleteCategory(cat.id)} className="text-red-500 dark:text-red-400 text-xs hover:underline px-1">Eliminar</button>
               </div>

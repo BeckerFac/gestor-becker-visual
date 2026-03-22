@@ -338,7 +338,7 @@ export const Customers: React.FC = () => {
             return (
               <Card className="border-purple-200">
                 <CardContent className="pt-4">
-                  <p className="text-sm font-medium text-gray-700 mb-2">Etiquetas de {cust.name}</p>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Etiquetas de {cust.name}</p>
                   <TagManager
                     entityId={cust.id}
                     entityType="customer"

@@ -272,8 +272,8 @@ export function RemitoPreviewModal({
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const statusInfo = STATUS_MAP[remito?.status || ''] || { label: remito?.status || '', color: 'bg-gray-100 text-gray-700' }
-  const tipoInfo = TIPO_MAP[remito?.tipo || ''] || { label: remito?.tipo || '', color: 'bg-gray-100 text-gray-700' }
+  const statusInfo = STATUS_MAP[remito?.status || ''] || { label: remito?.status || '', color: 'bg-gray-100 text-gray-700 dark:text-gray-300' }
+  const tipoInfo = TIPO_MAP[remito?.tipo || ''] || { label: remito?.tipo || '', color: 'bg-gray-100 text-gray-700 dark:text-gray-300' }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -306,11 +306,11 @@ export function RemitoPreviewModal({
               <div className="flex items-center gap-3">
                 {/* R badge */}
                 <div className="w-10 h-12 border-2 border-gray-800 flex flex-col items-center justify-center bg-white shrink-0">
-                  <span className="text-lg font-bold text-gray-900 leading-none">R</span>
+                  <span className="text-lg font-bold text-gray-900 dark:text-gray-100 leading-none">R</span>
                   <span className="text-[7px] text-gray-500 border-t border-gray-800 w-full text-center leading-tight pt-0.5">COD. 91</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
                     Remito {fmtRemitoNumber(remito.remito_number)}
                   </h3>
                   <p className="text-sm text-gray-500">
@@ -327,7 +327,7 @@ export function RemitoPreviewModal({
                 </span>
                 <button
                   onClick={onClose}
-                  className="text-gray-400 hover:text-gray-600 transition-colors ml-2"
+                  className="text-gray-400 hover:text-gray-600 dark:text-gray-400 transition-colors ml-2"
                   aria-label="Cerrar modal"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -434,7 +434,7 @@ export function RemitoPreviewModal({
                       <span className="font-mono text-sm bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                         #{String(remito.order.order_number).padStart(4, '0')}
                       </span>
-                      <span className="ml-2 text-sm text-gray-700">{remito.order.title}</span>
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">{remito.order.title}</span>
                     </div>
                   </div>
                 )}
@@ -557,7 +557,7 @@ export function RemitoPreviewModal({
             <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 rounded-b-xl shrink-0 flex items-center justify-between">
               <button
                 onClick={onClose}
-                className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
+                className="px-4 py-2 text-gray-600 dark:text-gray-400 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
               >
                 Cerrar
               </button>

@@ -222,9 +222,9 @@ export const Login: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="mt-6 text-center text-xs text-gray-600 space-x-3">
+        <div className="mt-6 text-center text-xs text-gray-600 dark:text-gray-400 space-x-3">
           <a href="/legal/terminos" className="hover:text-gray-400 transition-colors">Terminos</a>
-          <span className="text-gray-700">|</span>
+          <span className="text-gray-700 dark:text-gray-300">|</span>
           <a href="/legal/privacidad" className="hover:text-gray-400 transition-colors">Privacidad</a>
         </div>
       </div>

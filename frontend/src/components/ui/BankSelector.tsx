@@ -131,7 +131,7 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
             type="button"
             onClick={handleCancelCreate}
             disabled={saving}
-            className="px-2 py-2 text-gray-500 hover:text-gray-700 text-sm transition-colors"
+            className="px-2 py-2 text-gray-500 hover:text-gray-700 dark:text-gray-300 text-sm transition-colors"
           >
             Cancelar
           </button>

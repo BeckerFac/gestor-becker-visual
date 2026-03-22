@@ -811,7 +811,7 @@ export const Invoices: React.FC = () => {
                 {/* Invoice type - only for fiscal invoices */}
                 {vistaMode === 'fiscal' && (
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
                       Tipo de Comprobante <span className="text-red-500">*</span>
                     </label>
                     <div className="grid grid-cols-3 gap-3">
@@ -888,7 +888,7 @@ export const Invoices: React.FC = () => {
                       {formInvoiceType}
                     </span>
                   ) : (
-                    <span className="text-sm font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-800">
+                    <span className="text-sm font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-800 dark:text-gray-200">
                       NF
                     </span>
                   )}
@@ -930,11 +930,11 @@ export const Invoices: React.FC = () => {
                   <table className="w-full border-collapse text-sm">
                     <thead>
                       <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                        <th className="px-3 py-2 text-left font-semibold text-gray-600 w-64">Producto / Servicio</th>
-                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-20">Cant.</th>
-                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">P. Unitario</th>
-                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-24">IVA %</th>
-                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">Subtotal</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-400 w-64">Producto / Servicio</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 dark:text-gray-400 w-20">Cant.</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-400 w-32">P. Unitario</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 dark:text-gray-400 w-24">IVA %</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-400 w-32">Subtotal</th>
                         <th className="px-3 py-2 w-10"></th>
                       </tr>
                     </thead>
@@ -1012,7 +1012,7 @@ export const Invoices: React.FC = () => {
                               ))}
                             </datalist>
                           </td>
-                          <td className="px-3 py-2 text-right font-medium text-gray-800">
+                          <td className="px-3 py-2 text-right font-medium text-gray-800 dark:text-gray-200">
                             {formatCurrency(item.subtotal)}
                           </td>
                           <td className="px-3 py-2 text-center">
@@ -1042,11 +1042,11 @@ export const Invoices: React.FC = () => {
                 {/* Totals */}
                 <div className="flex justify-end">
                   <div className="w-64 space-y-1 text-sm">
-                    <div className="flex justify-between text-gray-600">
+                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
                       <span>Neto gravado:</span>
                       <span>{formatCurrency(formTotals.neto)}</span>
                     </div>
-                    <div className="flex justify-between text-gray-600">
+                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
                       <span>IVA:</span>
                       <span>{formatCurrency(formTotals.iva)}</span>
                     </div>
@@ -1199,11 +1199,11 @@ export const Invoices: React.FC = () => {
                   <table className="w-full border-collapse text-sm">
                     <thead>
                       <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                        <th className="px-3 py-2 text-left font-semibold text-gray-600 w-64">Producto / Servicio</th>
-                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-20">Cant.</th>
-                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">P. Unitario</th>
-                        <th className="px-3 py-2 text-center font-semibold text-gray-600 w-24">IVA %</th>
-                        <th className="px-3 py-2 text-right font-semibold text-gray-600 w-32">Subtotal</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-400 w-64">Producto / Servicio</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 dark:text-gray-400 w-20">Cant.</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-400 w-32">P. Unitario</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-600 dark:text-gray-400 w-24">IVA %</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-400 w-32">Subtotal</th>
                         <th className="px-3 py-2 w-10"></th>
                       </tr>
                     </thead>
@@ -1364,7 +1364,7 @@ export const Invoices: React.FC = () => {
               </thead>
               <tbody>
                 {paginatedInvoices.map(invoice => {
-                  const statusMeta = STATUS_MAP[invoice.status] || { label: invoice.status, color: 'bg-gray-100 text-gray-800' }
+                  const statusMeta = STATUS_MAP[invoice.status] || { label: invoice.status, color: 'bg-gray-100 text-gray-800 dark:text-gray-200' }
                   const isLinkOpen = linkDropdownInvoiceId === invoice.id
 
                   return (
@@ -1372,7 +1372,7 @@ export const Invoices: React.FC = () => {
                       {/* Tipo - only fiscal */}
                       {vistaMode === 'fiscal' && (
                         <td className="px-4 py-3">
-                          <span className={`inline-block px-2.5 py-1 rounded font-bold text-base ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800'}`}>
+                          <span className={`inline-block px-2.5 py-1 rounded font-bold text-base ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
                             {invoice.invoice_type}
                           </span>
                         </td>
@@ -1445,7 +1445,7 @@ export const Invoices: React.FC = () => {
                               </button>
                               {isLinkOpen && (
                                 <div className="absolute z-10 left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72">
-                                  <p className="text-xs font-medium text-gray-600 mb-2">Seleccionar pedido</p>
+                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Seleccionar pedido</p>
                                   <select
                                     className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-xs bg-white dark:bg-gray-700 dark:text-gray-100 mb-2"
                                     value={linkSelectedOrderId}
@@ -1520,7 +1520,7 @@ export const Invoices: React.FC = () => {
                       {vistaMode === 'fiscal' && (
                         <td className="px-4 py-3">
                           {invoice.cae
-                            ? <span className="font-mono text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{invoice.cae}</span>
+                            ? <span className="font-mono text-xs text-gray-600 dark:text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{invoice.cae}</span>
                             : <span className="text-gray-300">-</span>
                           }
                         </td>

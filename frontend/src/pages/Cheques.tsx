@@ -174,7 +174,7 @@ export const Cheques: React.FC = () => {
   const columns = [
     { key: 'number' as const, label: 'Numero', render: (v: any) => <span className="font-mono font-bold">{v}</span> },
     { key: 'cheque_type' as const, label: 'Tipo', render: (v: any) => (
-      <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700 font-medium">{CHEQUE_TYPE_LABELS[v] || v || 'Comun'}</span>
+      <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700 dark:text-gray-300 font-medium">{CHEQUE_TYPE_LABELS[v] || v || 'Comun'}</span>
     )},
     { key: 'bank' as const, label: 'Banco' },
     { key: 'drawer' as const, label: 'Librador', render: (v: any, row: Cheque) => (
@@ -214,7 +214,7 @@ export const Cheques: React.FC = () => {
       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
         <PermissionGate module="cheques" action="edit">
           <select
-            className={`text-xs border rounded px-1 py-0.5 font-medium ${STATUS_COLORS[row.status] || 'bg-gray-100 text-gray-700'}`}
+            className={`text-xs border rounded px-1 py-0.5 font-medium ${STATUS_COLORS[row.status] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}
             value={row.status}
             onChange={e => handleStatusChange(row.id, e.target.value)}
           >
@@ -379,7 +379,7 @@ export const Cheques: React.FC = () => {
         ].map(tab => (
           <button
             key={tab.value}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${filterStatus === tab.value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${filterStatus === tab.value ? 'bg-white text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => setFilterStatus(tab.value)}
           >
             {tab.label}
@@ -411,12 +411,12 @@ export const Cheques: React.FC = () => {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h4 className="font-semibold text-gray-900 dark:text-gray-100">Cheque N. {cheque.number}</h4>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
                         {cheque.bank} - {cheque.drawer}
                         {cheque.drawer_cuit && <span className="font-mono text-gray-400 ml-1">({cheque.drawer_cuit})</span>}
                       </p>
                     </div>
-                    <button onClick={() => { setExpandedId(null); setChequeHistory([]) }} className="text-gray-400 hover:text-gray-600 text-lg">x</button>
+                    <button onClick={() => { setExpandedId(null); setChequeHistory([]) }} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 text-lg">x</button>
                   </div>
 
                   {/* Cheque details grid */}
@@ -444,7 +444,7 @@ export const Cheques: React.FC = () => {
                     </div>
                     <div>
                       <span className="text-xs text-gray-500 block">Estado</span>
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[cheque.status] || 'bg-gray-100 text-gray-700'}`}>
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[cheque.status] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}>
                         {STATUS_LABELS[cheque.status] || cheque.status}
                       </span>
                     </div>
@@ -481,7 +481,7 @@ export const Cheques: React.FC = () => {
 
                   {chequeHistory.length > 0 ? (
                     <div>
-                      <h5 className="text-sm font-semibold text-gray-700 mb-2">Historial de estados</h5>
+                      <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Historial de estados</h5>
                       <div className="space-y-2">
                         {chequeHistory.map((h: any, i: number) => (
                           <div key={h.id || i} className="flex items-center gap-3 text-sm border-l-2 border-blue-300 pl-3 py-1">

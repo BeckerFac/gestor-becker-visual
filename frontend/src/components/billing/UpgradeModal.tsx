@@ -163,14 +163,14 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
         <div className="px-6 py-5 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{headerText}</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{headerText}</h2>
               {message && (
                 <p className="text-sm text-red-600 mt-1">{message}</p>
               )}
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-gray-400 hover:text-gray-600 dark:text-gray-400 transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -182,7 +182,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
           <div className="flex items-center justify-center mt-4 gap-3">
             <span className={cn(
               'text-sm font-medium',
-              billingPeriod === 'monthly' ? 'text-gray-900' : 'text-gray-400'
+              billingPeriod === 'monthly' ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'
             )}>
               Mensual
             </span>
@@ -200,7 +200,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
             </button>
             <span className={cn(
               'text-sm font-medium',
-              billingPeriod === 'annual' ? 'text-gray-900' : 'text-gray-400'
+              billingPeriod === 'annual' ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'
             )}>
               Anual
             </span>
@@ -250,7 +250,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
                     )}
 
                     <div className="text-center mb-4">
-                      <h3 className="text-xl font-bold text-gray-900">{plan.displayName}</h3>
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">{plan.displayName}</h3>
                       <p className="text-xs text-gray-500 mt-1">{plan.description}</p>
                     </div>
 
@@ -261,7 +261,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
                           <div className="text-sm text-gray-400 line-through">
                             {formatPrice(monthlyPlan.priceArs)}/mes
                           </div>
-                          <span className="text-3xl font-bold text-gray-900">
+                          <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">
                             {formatPrice(plan.priceArsMonthly)}
                           </span>
                           <span className="text-sm text-gray-500">/mes</span>
@@ -271,7 +271,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
                         </>
                       ) : (
                         <>
-                          <span className="text-3xl font-bold text-gray-900">
+                          <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">
                             {formatPrice(plan.priceArs)}
                           </span>
                           <span className="text-sm text-gray-500">/mes</span>
@@ -282,21 +282,21 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
                     {/* Limits summary */}
                     <div className="mb-4 p-3 bg-gray-50 rounded-lg space-y-1 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Comprobantes</span>
-                        <span className="font-medium text-gray-900">
+                        <span className="text-gray-600 dark:text-gray-400">Comprobantes</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
                           {isUnlimitedDocs ? 'Ilimitados' : `${plan.limits.invoicesPerMonth}/mes`}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Usuarios</span>
-                        <span className="font-medium text-gray-900">
+                        <span className="text-gray-600 dark:text-gray-400">Usuarios</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
                           {isUnlimitedUsers ? 'Ilimitados' : plan.limits.usersMax}
                         </span>
                       </div>
                       {isPremiumGroup && (
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Soporte</span>
-                          <span className="font-medium text-gray-900">Prioritario</span>
+                          <span className="text-gray-600 dark:text-gray-400">Soporte</span>
+                          <span className="font-medium text-gray-900 dark:text-gray-100">Prioritario</span>
                         </div>
                       )}
                     </div>

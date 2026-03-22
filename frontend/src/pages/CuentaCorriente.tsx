@@ -102,15 +102,15 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
     <tbody>
       {movimientos.map((m, idx) => (
         <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
-          <td className="py-2 text-gray-600">{formatDate(m.fecha)}</td>
+          <td className="py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
           <td className="py-2">
             <span
-              className={`px-2 py-0.5 rounded-full text-xs font-medium ${tipoColors[m.tipo] || 'bg-gray-100 text-gray-700'}`}
+              className={`px-2 py-0.5 rounded-full text-xs font-medium ${tipoColors[m.tipo] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}
             >
               {tipoLabels[m.tipo] || m.tipo}
             </span>
           </td>
-          <td className="py-2 text-gray-700">{m.descripcion}</td>
+          <td className="py-2 text-gray-700 dark:text-gray-300">{m.descripcion}</td>
           <td className="py-2 text-right text-green-700">{m.debe > 0 ? fmt(m.debe) : ''}</td>
           <td className="py-2 text-right text-red-600">{m.haber > 0 ? fmt(m.haber) : ''}</td>
           <td className={`py-2 text-right font-medium ${m.saldo >= 0 ? saldoPositiveColor : 'text-red-600'}`}>
@@ -121,7 +121,7 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
     </tbody>
     <tfoot>
       <tr className="border-t-2 border-gray-300">
-        <td colSpan={5} className="py-3 font-bold text-right text-gray-700">
+        <td colSpan={5} className="py-3 font-bold text-right text-gray-700 dark:text-gray-300">
           {saldoLabel}:
         </td>
         <td
@@ -200,13 +200,13 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
     <form onSubmit={handleSubmit} className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between">
         <h5 className="font-medium text-purple-800 text-sm">Nuevo ajuste manual</h5>
-        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 text-lg leading-none">
           x
         </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="block text-xs text-gray-600 mb-1">Tipo</label>
+          <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Tipo</label>
           <select
             value={tipo}
             onChange={(e) => setTipo(e.target.value as 'credit' | 'debit')}
@@ -217,7 +217,7 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-600 mb-1">Monto ($)</label>
+          <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Monto ($)</label>
           <input
             type="number"
             step="0.01"
@@ -230,7 +230,7 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-600 mb-1">Motivo</label>
+          <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Motivo</label>
           <input
             type="text"
             value={motivo}
@@ -245,7 +245,7 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 dark:text-gray-200"
         >
           Cancelar
         </button>
@@ -647,7 +647,7 @@ export const CuentaCorriente: React.FC = () => {
 
                               {/* Balance Neto */}
                               <div className="border-t-2 border-gray-400 pt-4 flex items-center justify-end gap-4">
-                                <span className="text-base font-bold text-gray-700">
+                                <span className="text-base font-bold text-gray-700 dark:text-gray-300">
                                   Balance Neto:
                                 </span>
                                 <span

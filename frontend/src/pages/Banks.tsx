@@ -360,7 +360,7 @@ export const Banks: React.FC = () => {
       {/* Bank Account Cards */}
       {balances.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Cuentas Bancarias</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">Cuentas Bancarias</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {balances.map((b: any) => (
               <Card
@@ -371,7 +371,7 @@ export const Banks: React.FC = () => {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-semibold text-gray-900 dark:text-gray-100">{b.bank_name}</h3>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:text-gray-400">
                       {b.account_type === 'caja de ahorro' ? 'CA' : 'CC'}
                     </span>
                   </div>
@@ -458,11 +458,11 @@ export const Banks: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-200">
-                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Fecha</th>
-                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Tipo</th>
-                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Detalle</th>
-                      <th className="text-left py-2 px-3 text-gray-600 font-medium">Empresa</th>
-                      <th className="text-right py-2 px-3 text-gray-600 font-medium">Monto</th>
+                      <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Fecha</th>
+                      <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Tipo</th>
+                      <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Detalle</th>
+                      <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Empresa</th>
+                      <th className="text-right py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Monto</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -476,8 +476,8 @@ export const Banks: React.FC = () => {
                               {m.type}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-gray-700">{m.detail || '-'}</td>
-                          <td className="py-2 px-3 text-gray-600">{m.enterprise_name || '-'}</td>
+                          <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{m.detail || '-'}</td>
+                          <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{m.enterprise_name || '-'}</td>
                           <td className={`py-2 px-3 text-right font-medium ${isIncome ? 'text-green-700' : 'text-red-700'}`}>
                             {isIncome ? '+' : '-'}{formatCurrency(parseFloat(m.amount || '0'))}
                           </td>
@@ -512,7 +512,7 @@ export const Banks: React.FC = () => {
               <Input label="Alias" placeholder="mi.alias.banco" value={form.alias} onChange={e => setForm({ ...form, alias: e.target.value })} />
               <Input label="Sucursal" placeholder="Centro, Microcentro, etc." value={form.branch} onChange={e => setForm({ ...form, branch: e.target.value })} />
               <div className="col-span-full">
-                <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                   rows={2}
@@ -543,7 +543,7 @@ export const Banks: React.FC = () => {
         </CardContent></Card>
       ) : (
         <Card>
-          <CardHeader><h3 className="text-base font-semibold text-gray-700">Cuentas Bancarias</h3></CardHeader>
+          <CardHeader><h3 className="text-base font-semibold text-gray-700 dark:text-gray-300">Cuentas Bancarias</h3></CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -562,14 +562,14 @@ export const Banks: React.FC = () => {
                       <p className="font-medium text-gray-900 dark:text-gray-100">{bank.bank_name}</p>
                       {bank.branch && <p className="text-xs text-gray-500">{bank.branch}</p>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{bank.account_holder || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{bank.account_holder || '-'}</td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                         {bank.account_type === 'caja de ahorro' ? 'Caja de Ahorro' : 'Cuenta Corriente'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {bank.cbu && <p className="font-mono text-xs text-gray-600">{bank.cbu}</p>}
+                      {bank.cbu && <p className="font-mono text-xs text-gray-600 dark:text-gray-400">{bank.cbu}</p>}
                       {bank.alias && <p className="font-mono text-sm text-blue-600">{bank.alias}</p>}
                       {!bank.cbu && !bank.alias && <span className="text-gray-400">-</span>}
                     </td>
@@ -605,7 +605,7 @@ export const Banks: React.FC = () => {
       {/* Breakdown by Payment Method */}
       {breakdown && Object.keys(breakdown.methods).length > 0 && (
         <Card>
-          <CardHeader><h3 className="text-base font-semibold text-gray-700">Desglose por Método de Pago</h3></CardHeader>
+          <CardHeader><h3 className="text-base font-semibold text-gray-700 dark:text-gray-300">Desglose por Método de Pago</h3></CardHeader>
           <CardContent>
             <div className="space-y-2">
               {Object.entries(breakdown.methods)
@@ -735,7 +735,7 @@ export const Banks: React.FC = () => {
       {/* Recent Movements */}
       {breakdown && breakdown.recent_movements.length > 0 && (
         <Card>
-          <CardHeader><h3 className="text-base font-semibold text-gray-700">Últimos Movimientos</h3></CardHeader>
+          <CardHeader><h3 className="text-base font-semibold text-gray-700 dark:text-gray-300">Últimos Movimientos</h3></CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -755,17 +755,17 @@ export const Banks: React.FC = () => {
                   return (
                     <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 text-sm">
                       <td className="px-4 py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${MOVEMENT_COLORS[mov.type] || 'bg-gray-100 text-gray-700'}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${MOVEMENT_COLORS[mov.type] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}>
                           {mov.type === 'venta' ? 'Venta' : mov.type === 'cobro' ? 'Cobro' : mov.type === 'compra' ? 'Compra' : 'Pago'}
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-gray-600">{formatDate(mov.date)}</td>
-                      <td className="px-4 py-2 text-gray-800 truncate max-w-[200px]">{mov.detail || '-'}</td>
-                      <td className="px-4 py-2 text-gray-600">{mov.enterprise_name || '-'}</td>
+                      <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(mov.date)}</td>
+                      <td className="px-4 py-2 text-gray-800 dark:text-gray-200 truncate max-w-[200px]">{mov.detail || '-'}</td>
+                      <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{mov.enterprise_name || '-'}</td>
                       <td className="px-4 py-2">
                         <span className="text-xs">{METHOD_LABELS[mov.payment_method]?.label || mov.payment_method || '-'}</span>
                       </td>
-                      <td className="px-4 py-2 text-gray-600 text-xs">{mov.bank_name || '-'}</td>
+                      <td className="px-4 py-2 text-gray-600 dark:text-gray-400 text-xs">{mov.bank_name || '-'}</td>
                       <td className={`px-4 py-2 text-right font-bold ${isIncome ? 'text-green-700' : 'text-red-700'}`}>
                         {isIncome ? '+' : '-'}{formatCurrency(parseFloat(String(mov.amount || '0')))}
                       </td>

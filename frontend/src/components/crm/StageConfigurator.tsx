@@ -239,7 +239,7 @@ export const StageConfigurator: React.FC<StageConfiguratorProps> = ({
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Configurar Etapas del Pipeline</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">Define las etapas por las que pasan las oportunidades</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-200 text-2xl leading-none">&times;</button>
         </div>
 
         {/* Body */}
@@ -315,7 +315,7 @@ export const StageConfigurator: React.FC<StageConfiguratorProps> = ({
                     <button
                       onClick={() => handleMoveUp(index)}
                       disabled={index === 0}
-                      className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="p-1 text-gray-400 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                       title="Subir"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
@@ -323,7 +323,7 @@ export const StageConfigurator: React.FC<StageConfiguratorProps> = ({
                     <button
                       onClick={() => handleMoveDown(index)}
                       disabled={index === stages.length - 1}
-                      className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="p-1 text-gray-400 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                       title="Bajar"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>

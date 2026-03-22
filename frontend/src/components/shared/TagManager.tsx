@@ -136,14 +136,14 @@ export const TagManager: React.FC<TagManagerProps> = ({
           <button onClick={handleCreate} disabled={creating || !newTagName.trim()} className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50">
             {creating ? '...' : 'Crear'}
           </button>
-          <button onClick={() => setShowCreate(false)} className="text-xs text-gray-400 hover:text-gray-600">
+          <button onClick={() => setShowCreate(false)} className="text-xs text-gray-400 hover:text-gray-600 dark:text-gray-400">
             Cancelar
           </button>
         </div>
       ) : (
         <button
           onClick={() => setShowCreate(true)}
-          className="text-xs text-gray-400 hover:text-gray-600"
+          className="text-xs text-gray-400 hover:text-gray-600 dark:text-gray-400"
         >
           + Nueva etiqueta
         </button>

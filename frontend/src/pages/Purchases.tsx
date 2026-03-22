@@ -454,10 +454,10 @@ export const Purchases: React.FC = () => {
 
               {/* Optional Invoice */}
               <div className="border-t pt-4">
-                <p className="text-sm font-medium text-gray-700 mb-2">Factura recibida (opcional)</p>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Factura recibida (opcional)</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm text-gray-600">Tipo</label>
+                    <label className="text-sm text-gray-600 dark:text-gray-400">Tipo</label>
                     <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.invoice_type} onChange={e => setForm({ ...form, invoice_type: e.target.value })}>
                       <option value="">Sin factura</option>
                       <option value="A">Factura A</option>
@@ -542,7 +542,7 @@ export const Purchases: React.FC = () => {
                     onChange={e => setForm({ ...form, add_to_inventory: e.target.checked })}
                     className="rounded border-gray-300"
                   />
-                  <span className="text-sm text-gray-700 font-medium">
+                  <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
                     {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}<HelpTip text="Si esta activo, los items de esta compra se suman automaticamente al stock." />
                   </span>
                 </label>
@@ -564,7 +564,7 @@ export const Purchases: React.FC = () => {
                             onChange={e => updateItem(idx, 'add_to_stock', e.target.checked)}
                             className="rounded border-gray-300"
                           />
-                          <span className="text-xs text-gray-600">
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
                             {prod?.name || item.product_name} - {item.quantity} unid.
                           </span>
                         </label>
@@ -578,7 +578,7 @@ export const Purchases: React.FC = () => {
               <div className="border-t pt-4 flex justify-between items-center">
                 <div className="flex gap-4 items-center">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm text-gray-600">IVA %</label>
+                    <label className="text-sm text-gray-600 dark:text-gray-400">IVA %</label>
                     <input
                       type="number" step="0.01" placeholder="21"
                       list="purchase-vat-rate-list"
@@ -593,7 +593,7 @@ export const Purchases: React.FC = () => {
                       <option value="27">27%</option>
                     </datalist>
                   </div>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
                     <div>Subtotal: <strong>{formatCurrency(calcSubtotal())}</strong></div>
                     <div>IVA: <strong>{formatCurrency(calcVat())}</strong></div>
                     <div className="text-lg text-green-700 font-bold">Total: {formatCurrency(calcTotal())}</div>
@@ -646,7 +646,7 @@ export const Purchases: React.FC = () => {
                       <td className="px-4 py-3">
                         <span className="font-mono font-bold text-orange-700">#{String(purchase.purchase_number || 0).padStart(4, '0')}</span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{formatDate(purchase.date)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(purchase.date)}</td>
                       <td className="px-4 py-3">
                         <div>
                           <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{purchase.enterprise_name || '-'}</p>
@@ -724,10 +724,10 @@ export const Purchases: React.FC = () => {
                                         <div key={idx} className="bg-white rounded px-2 py-1.5 border border-orange-100">
                                           <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.product_name}</p>
                                           {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
-                                          <div className="flex gap-3 text-xs text-gray-600 mt-0.5">
+                                          <div className="flex gap-3 text-xs text-gray-600 dark:text-gray-400 mt-0.5">
                                             <span>Cant: {item.quantity}</span>
                                             <span>P/U: {formatCurrency(parseFloat(item.unit_price || '0'))}</span>
-                                            <span className="font-medium text-gray-800">Sub: {formatCurrency(parseFloat(item.subtotal || '0'))}</span>
+                                            <span className="font-medium text-gray-800 dark:text-gray-200">Sub: {formatCurrency(parseFloat(item.subtotal || '0'))}</span>
                                           </div>
                                         </div>
                                       ))}
@@ -752,18 +752,18 @@ export const Purchases: React.FC = () => {
                                   <h4 className="text-sm font-semibold text-orange-800 border-b border-orange-200 pb-1">Proveedor y Detalles</h4>
                                   <div>
                                     <p className="text-xs text-gray-500">Empresa</p>
-                                    <p className="text-sm text-gray-800 font-medium">{purchase.enterprise_name || 'Sin empresa'}</p>
+                                    <p className="text-sm text-gray-800 dark:text-gray-200 font-medium">{purchase.enterprise_name || 'Sin empresa'}</p>
                                     {purchase.enterprise_cuit && <p className="text-xs text-gray-500 font-mono">{purchase.enterprise_cuit}</p>}
                                     <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-500">Fecha</p>
-                                    <p className="text-sm text-gray-800">{formatDate(purchase.date)}</p>
+                                    <p className="text-sm text-gray-800 dark:text-gray-200">{formatDate(purchase.date)}</p>
                                   </div>
                                   {purchase.notes && (
                                     <div>
                                       <p className="text-xs text-gray-500">Notas</p>
-                                      <p className="text-sm text-gray-700 bg-yellow-50 px-2 py-1 rounded">{purchase.notes}</p>
+                                      <p className="text-sm text-gray-700 dark:text-gray-300 bg-yellow-50 px-2 py-1 rounded">{purchase.notes}</p>
                                     </div>
                                   )}
                                 </div>
@@ -773,14 +773,14 @@ export const Purchases: React.FC = () => {
                                   <h4 className="text-sm font-semibold text-orange-800 border-b border-orange-200 pb-1">Facturación y Pago</h4>
                                   <div>
                                     <p className="text-xs text-gray-500">Método de Pago</p>
-                                    <p className="text-sm font-medium text-gray-800">
+                                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
                                       {PAYMENT_METHODS.find(m => m.value === purchase.payment_method)?.label || 'Sin especificar'}
                                     </p>
                                   </div>
                                   {purchase.bank_name && (
                                     <div>
                                       <p className="text-xs text-gray-500">Banco</p>
-                                      <p className="text-sm text-gray-800">{purchase.bank_name}</p>
+                                      <p className="text-sm text-gray-800 dark:text-gray-200">{purchase.bank_name}</p>
                                     </div>
                                   )}
                                   {purchase.invoice_type ? (
@@ -794,7 +794,7 @@ export const Purchases: React.FC = () => {
                                       {purchase.invoice_cae && (
                                         <div>
                                           <p className="text-xs text-gray-500">CAE</p>
-                                          <p className="font-mono text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded inline-block">{purchase.invoice_cae}</p>
+                                          <p className="font-mono text-xs text-gray-600 dark:text-gray-400 bg-gray-100 px-2 py-0.5 rounded inline-block">{purchase.invoice_cae}</p>
                                         </div>
                                       )}
                                     </div>

@@ -58,7 +58,7 @@ export const ExportCSVButton: React.FC<ExportCSVProps> = ({ data, columns, filen
       className={`px-3 py-1.5 text-sm rounded-lg border transition-colors flex items-center gap-1.5 ${
         disabled
           ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-          : 'border-gray-300 text-gray-700 hover:bg-gray-100'
+          : 'border-gray-300 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
       }`}
       title={disabled ? 'No hay datos para exportar' : 'Exportar a CSV'}
     >

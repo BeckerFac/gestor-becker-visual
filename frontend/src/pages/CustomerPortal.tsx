@@ -74,7 +74,7 @@ const DEFAULT_CONFIG: PortalConfig = {
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }> = {
   pendiente: { label: 'Pendiente', color: 'text-yellow-800', bg: 'bg-yellow-100 border-yellow-300' },
   en_produccion: { label: 'En Produccion', color: 'text-blue-800', bg: 'bg-blue-100 border-blue-300' },
-  en_pausa: { label: 'En Pausa', color: 'text-gray-700', bg: 'bg-gray-100 border-gray-300' },
+  en_pausa: { label: 'En Pausa', color: 'text-gray-700 dark:text-gray-300', bg: 'bg-gray-100 border-gray-300' },
   terminado: { label: 'Terminado', color: 'text-green-800', bg: 'bg-green-100 border-green-300' },
   entregado: { label: 'Entregado', color: 'text-emerald-800', bg: 'bg-emerald-100 border-emerald-300' },
   cancelado: { label: 'Cancelado', color: 'text-red-800', bg: 'bg-red-100 border-red-300' },
@@ -93,7 +93,7 @@ const INVOICE_STATUS_LABELS: Record<string, { label: string; color: string }> = 
 }
 
 const QUOTE_STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  draft: { label: 'Borrador', color: 'bg-gray-100 text-gray-800' },
+  draft: { label: 'Borrador', color: 'bg-gray-100 text-gray-800 dark:text-gray-200' },
   sent: { label: 'Enviada', color: 'bg-blue-100 text-blue-800' },
   accepted: { label: 'Aceptada', color: 'bg-green-100 text-green-800' },
   rejected: { label: 'Rechazada', color: 'bg-red-100 text-red-800' },
@@ -361,7 +361,7 @@ export const CustomerPortal: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900">Portal de Cliente</h1>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Portal de Cliente</h1>
             <p className="text-gray-500 mt-2">Accede a tus pedidos, facturas y cotizaciones</p>
           </div>
           <Card variant="elevated">
@@ -493,7 +493,7 @@ export const CustomerPortal: React.FC = () => {
               <button
                 key={tab.key}
                 onClick={() => { setActiveTab(tab.key); setSelectedOrder(null) }}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.key ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.key ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700 dark:text-gray-300'}`}
               >
                 {tab.label}{tab.count !== null ? ` (${tab.count})` : ''}
               </button>
@@ -540,7 +540,7 @@ export const CustomerPortal: React.FC = () => {
                             <div className="flex-1">
                               <div className="flex items-center gap-2 flex-wrap mb-2">
                                 <span className="text-xs font-mono text-gray-400">#{String(order.order_number || 0).padStart(4, '0')}</span>
-                                <h3 className="font-semibold text-gray-900">{order.title}</h3>
+                                <h3 className="font-semibold text-gray-900 dark:text-gray-100">{order.title}</h3>
                                 {config.orders_show_status && order.status && (
                                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${st.bg} ${st.color}`}>{st.label}</span>
                                 )}
@@ -677,7 +677,7 @@ export const CustomerPortal: React.FC = () => {
                     {/* Status Timeline */}
                     {config.orders_show_timeline && selectedOrder.status && (
                       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-3">Progreso del Pedido</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Progreso del Pedido</h4>
                         <div className="flex items-center gap-1 overflow-x-auto">
                           {['pendiente', 'en_produccion', 'terminado', 'entregado'].map((step, idx, arr) => {
                             const stepLabels: Record<string, string> = { pendiente: 'Pendiente', en_produccion: 'Produccion', terminado: 'Terminado', entregado: 'Entregado' }
@@ -717,7 +717,7 @@ export const CustomerPortal: React.FC = () => {
                           </span>
                           <span>Total: <span className="font-bold">{formatCurrency(parseFloat(selectedOrder.invoice.total_amount || '0'))}</span></span>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            INVOICE_STATUS_LABELS[selectedOrder.invoice.status]?.color || 'bg-gray-100 text-gray-800'
+                            INVOICE_STATUS_LABELS[selectedOrder.invoice.status]?.color || 'bg-gray-100 text-gray-800 dark:text-gray-200'
                           }`}>
                             {INVOICE_STATUS_LABELS[selectedOrder.invoice.status]?.label || selectedOrder.invoice.status}
                           </span>
@@ -727,8 +727,8 @@ export const CustomerPortal: React.FC = () => {
 
                     {config.orders_show_notes && selectedOrder.notes && (
                       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                        <h4 className="text-sm font-semibold text-gray-700 mb-1">Notas</h4>
-                        <p className="text-sm text-gray-600 whitespace-pre-wrap">{selectedOrder.notes}</p>
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Notas</h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{selectedOrder.notes}</p>
                       </div>
                     )}
                   </CardContent>
@@ -786,35 +786,35 @@ export const CustomerPortal: React.FC = () => {
                         <table className="min-w-full border-collapse">
                           <thead>
                             <tr className="border-b border-gray-200 bg-gray-50">
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Tipo</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
-                              {config.invoices_show_subtotal && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Subtotal</th>}
-                              {config.invoices_show_iva && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">IVA</th>}
-                              {config.invoices_show_total && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>}
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                              {config.invoices_show_cae && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">CAE</th>}
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                              {config.invoices_show_subtotal && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Subtotal</th>}
+                              {config.invoices_show_iva && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">IVA</th>}
+                              {config.invoices_show_total && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>}
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                              {config.invoices_show_cae && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">CAE</th>}
                             </tr>
                           </thead>
                           <tbody>
                             {invoices.map((inv: any) => {
-                              const invSt = INVOICE_STATUS_LABELS[inv.status] || { label: inv.status, color: 'bg-gray-100 text-gray-800' }
+                              const invSt = INVOICE_STATUS_LABELS[inv.status] || { label: inv.status, color: 'bg-gray-100 text-gray-800 dark:text-gray-200' }
                               return (
                                 <tr key={inv.id} className="border-b border-gray-200 hover:bg-gray-50">
                                   <td className="px-4 py-3 text-sm">
                                     <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-bold text-xs">{inv.invoice_type}</span>
                                   </td>
                                   <td className="px-4 py-3 text-sm font-mono font-medium">{inv.invoice_number}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-600">{formatDate(inv.invoice_date || inv.created_at)}</td>
-                                  {config.invoices_show_subtotal && <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(parseFloat(inv.subtotal || '0'))}</td>}
-                                  {config.invoices_show_iva && <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(parseFloat(inv.vat_amount || '0'))}</td>}
+                                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(inv.invoice_date || inv.created_at)}</td>
+                                  {config.invoices_show_subtotal && <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-400">{formatCurrency(parseFloat(inv.subtotal || '0'))}</td>}
+                                  {config.invoices_show_iva && <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-400">{formatCurrency(parseFloat(inv.vat_amount || '0'))}</td>}
                                   {config.invoices_show_total && <td className="px-4 py-3 text-sm text-right font-bold text-green-700">{formatCurrency(parseFloat(inv.total_amount || '0'))}</td>}
                                   <td className="px-4 py-3 text-sm">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${invSt.color}`}>
                                       {invSt.label}
                                     </span>
                                   </td>
-                                  {config.invoices_show_cae && <td className="px-4 py-3 text-sm text-gray-600 font-mono text-xs">{inv.cae || '-'}</td>}
+                                  {config.invoices_show_cae && <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 font-mono text-xs">{inv.cae || '-'}</td>}
                                 </tr>
                               )
                             })}
@@ -877,30 +877,30 @@ export const CustomerPortal: React.FC = () => {
                         <table className="min-w-full border-collapse">
                           <thead>
                             <tr className="border-b border-gray-200 bg-gray-50">
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Titulo</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
-                              {config.quotes_show_validity && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Valida hasta</th>}
-                              {config.quotes_show_price && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>}
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
-                              {config.quotes_show_download_pdf && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">PDF</th>}
-                              {config.quotes_show_accept_reject && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Acciones</th>}
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Titulo</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                              {config.quotes_show_validity && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Valida hasta</th>}
+                              {config.quotes_show_price && <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>}
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
+                              {config.quotes_show_download_pdf && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">PDF</th>}
+                              {config.quotes_show_accept_reject && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Acciones</th>}
                             </tr>
                           </thead>
                           <tbody>
                             {quotes.map((q: any) => {
-                              const qSt = QUOTE_STATUS_LABELS[q.status] || { label: q.status, color: 'bg-gray-100 text-gray-800' }
+                              const qSt = QUOTE_STATUS_LABELS[q.status] || { label: q.status, color: 'bg-gray-100 text-gray-800 dark:text-gray-200' }
                               const isExpired = q.valid_until && new Date(q.valid_until) < new Date() && q.status !== 'accepted'
                               const canRespond = config.quotes_show_accept_reject && q.status !== 'accepted' && q.status !== 'rejected' && !isExpired
                               return (
                                 <tr key={q.id} className={`border-b border-gray-200 hover:bg-gray-50 ${isExpired ? 'opacity-60' : ''}`}>
                                   <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">#{String(q.quote_number || 0).padStart(4, '0')}</td>
-                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{q.title || 'Cotizacion'}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-600">{formatDate(q.created_at)}</td>
+                                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{q.title || 'Cotizacion'}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(q.created_at)}</td>
                                   {config.quotes_show_validity && (
                                     <td className="px-4 py-3 text-sm">
                                       {q.valid_until ? (
-                                        <span className={isExpired ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                        <span className={isExpired ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'}>
                                           {formatDate(q.valid_until)}
                                           {isExpired && ' (vencida)'}
                                         </span>
@@ -983,7 +983,7 @@ export const CustomerPortal: React.FC = () => {
                       <CardContent>
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Motivo (opcional)</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Motivo (opcional)</label>
                             <textarea
                               value={rejectReason}
                               onChange={e => setRejectReason(e.target.value)}
@@ -1033,18 +1033,18 @@ export const CustomerPortal: React.FC = () => {
                       <table className="min-w-full border-collapse">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">N</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Fecha</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">N</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado</th>
                           </tr>
                         </thead>
                         <tbody>
                           {remitos.map((r: any) => {
-                            const rSt = REMITO_STATUS_LABELS[r.status] || { label: r.status || 'Pendiente', color: 'bg-gray-100 text-gray-800' }
+                            const rSt = REMITO_STATUS_LABELS[r.status] || { label: r.status || 'Pendiente', color: 'bg-gray-100 text-gray-800 dark:text-gray-200' }
                             return (
                               <tr key={r.id} className="border-b border-gray-200 hover:bg-gray-50">
                                 <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">#{String(r.remito_number || 0).padStart(4, '0')}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{formatDate(r.date || r.created_at)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(r.date || r.created_at)}</td>
                                 <td className="px-4 py-3 text-sm">
                                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${rSt.color}`}>
                                     {rSt.label}
@@ -1111,12 +1111,12 @@ export const CustomerPortal: React.FC = () => {
                         <table className="min-w-full border-collapse">
                           <thead>
                             <tr className="border-b border-gray-200 bg-gray-50">
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Pedido</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Titulo</th>
-                              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Estado Pago</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Forma de Pago</th>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Factura</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Pedido</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Titulo</th>
+                              <th className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">Total</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Estado Pago</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Forma de Pago</th>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Factura</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1127,7 +1127,7 @@ export const CustomerPortal: React.FC = () => {
                                   <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">
                                     #{String(order.order_number || 0).padStart(4, '0')}
                                   </td>
-                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{order.title}</td>
+                                  <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{order.title}</td>
                                   <td className="px-4 py-3 text-sm text-right font-medium">
                                     {formatCurrency(parseFloat(order.total_amount || '0'))}
                                   </td>
@@ -1136,8 +1136,8 @@ export const CustomerPortal: React.FC = () => {
                                       {ps.label}
                                     </span>
                                   </td>
-                                  <td className="px-4 py-3 text-sm text-gray-600">{order.payment_method || '-'}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-600">
+                                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{order.payment_method || '-'}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                     {order.invoice
                                       ? `${order.invoice.invoice_type} #${order.invoice.invoice_number}`
                                       : order.has_invoice ? 'Si' : '-'}

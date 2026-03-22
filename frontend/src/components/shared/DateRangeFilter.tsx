@@ -47,7 +47,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         {(dateFrom || dateTo) && onClear && (
           <button
             onClick={onClear}
-            className="text-gray-400 hover:text-gray-600 text-sm px-1"
+            className="text-gray-400 hover:text-gray-600 dark:text-gray-400 text-sm px-1"
             title="Limpiar fechas"
           >
             x

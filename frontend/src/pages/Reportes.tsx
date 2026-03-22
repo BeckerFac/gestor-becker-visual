@@ -450,7 +450,7 @@ export const Reportes: React.FC = () => {
       {/* Print header (only visible in print) */}
       <div className="hidden print:block print:mb-4">
         <h1 className="text-xl font-bold">{ALL_TABS.find(t => t.key === activeTab)?.label}</h1>
-        <p className="text-sm text-gray-600">{formatDate(dateFrom)} - {formatDate(dateTo)}</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{formatDate(dateFrom)} - {formatDate(dateTo)}</p>
       </div>
 
       {/* Tabs - two groups with visual separator */}

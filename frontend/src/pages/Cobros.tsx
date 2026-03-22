@@ -759,7 +759,7 @@ export const Cobros: React.FC = () => {
                       </PermissionGate>
                       <button
                         onClick={() => handleDismissPendingCobro(order.id)}
-                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-400 transition-colors"
                         title="Ocultar temporalmente"
                       >
                         x
@@ -1219,7 +1219,7 @@ export const Cobros: React.FC = () => {
               )}
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-                <div className="text-sm text-gray-600">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
                   Total: <span className="font-bold text-lg text-green-700 ml-2">
                     {fmt(linkedTotal > 0 ? linkedTotal : parseFloat(form.amount || '0'))}
                   </span>

@@ -246,7 +246,7 @@ export const Global: React.FC = () => {
           {selectedEnterprise && (
             <button
               onClick={clearSelection}
-              className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
             >
               Limpiar
             </button>
@@ -377,7 +377,7 @@ export const Global: React.FC = () => {
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                   activeTab === tab.key
                     ? 'bg-white shadow text-blue-700'
-                    : 'text-gray-500 hover:text-gray-700'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-300'
                 }`}
               >
                 {tab.label}
@@ -419,11 +419,11 @@ export const Global: React.FC = () => {
                           {contacts.map((c: any) => (
                             <tr key={c.id} className="border-b border-gray-200 hover:bg-gray-50">
                               <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{c.contact_name || '-'}</td>
-                              <td className="px-4 py-3 text-sm font-mono text-gray-600">{c.cuit || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{c.email || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{c.phone || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{c.role || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.contact_name || '-'}</td>
+                              <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">{c.cuit || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.phone || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.role || '-'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -469,7 +469,7 @@ export const Global: React.FC = () => {
                                 #{String(o.order_number || 0).padStart(4, '0')}
                               </td>
                               <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{o.title}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {o.customer?.name || o.customer_name || '-'}
                               </td>
                               <td className="px-4 py-3 text-sm">
@@ -484,7 +484,7 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm text-right font-medium">
                                 {formatCurrency(parseFloat(o.total_amount || '0'))}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(o.created_at)}
                               </td>
                             </tr>
@@ -532,7 +532,7 @@ export const Global: React.FC = () => {
                                 #{String(q.quote_number || 0).padStart(4, '0')}
                               </td>
                               <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{q.title || 'Cotizacion'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {q.customer?.name || '-'}
                               </td>
                               <td className="px-4 py-3 text-sm">
@@ -545,10 +545,10 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm text-right font-medium">
                                 {formatCurrency(parseFloat(q.total_amount || '0'))}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {q.valid_until ? formatDate(q.valid_until) : '-'}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(q.created_at)}
                               </td>
                             </tr>
@@ -598,7 +598,7 @@ export const Global: React.FC = () => {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-sm font-mono font-medium">{inv.invoice_number}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {inv.customer?.name || inv.customer_name || '-'}
                               </td>
                               <td className="px-4 py-3 text-sm">
@@ -620,7 +620,7 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm text-right font-medium">
                                 {formatCurrency(parseFloat(inv.total_amount || '0'))}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(inv.invoice_date || inv.created_at)}
                               </td>
                             </tr>
@@ -662,7 +662,7 @@ export const Global: React.FC = () => {
                         <tbody>
                           {cobros.map((c: any) => (
                             <tr key={c.id} className="border-b border-gray-200 hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(c.payment_date || c.created_at)}
                               </td>
                               <td className="px-4 py-3 text-sm">
@@ -672,8 +672,8 @@ export const Global: React.FC = () => {
                                   color="blue"
                                 />
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{c.reference || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.reference || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {c.order_number ? `#${String(c.order_number).padStart(4, '0')}` : '-'}
                               </td>
                               <td className="px-4 py-3 text-sm text-right font-bold text-green-700">
@@ -718,7 +718,7 @@ export const Global: React.FC = () => {
                         <tbody>
                           {pagos.map((p: any) => (
                             <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(p.payment_date || p.created_at)}
                               </td>
                               <td className="px-4 py-3 text-sm">
@@ -728,8 +728,8 @@ export const Global: React.FC = () => {
                                   color="blue"
                                 />
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{p.reference || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{p.reference || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {p.purchase_number ? `#${String(p.purchase_number).padStart(4, '0')}` : '-'}
                               </td>
                               <td className="px-4 py-3 text-sm text-right font-bold text-red-700">
@@ -809,7 +809,7 @@ export const Global: React.FC = () => {
                               <tbody>
                                 {cuentaCorriente.cuentas_a_cobrar.movimientos.map((m: any, idx: number) => (
                                   <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
-                                    <td className="px-4 py-2 text-gray-600">{formatDate(m.fecha)}</td>
+                                    <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
@@ -817,7 +817,7 @@ export const Global: React.FC = () => {
                                         color={m.tipo === 'venta' ? 'blue' : 'green'}
                                       />
                                     </td>
-                                    <td className="px-4 py-2 text-gray-600">{m.descripcion}</td>
+                                    <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.descripcion}</td>
                                     <td className="px-4 py-2 text-right">{m.debe ? formatCurrency(m.debe) : '-'}</td>
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
                                     <td className="px-4 py-2 text-right font-medium">{formatCurrency(m.saldo)}</td>
@@ -855,7 +855,7 @@ export const Global: React.FC = () => {
                               <tbody>
                                 {cuentaCorriente.cuentas_a_pagar.movimientos.map((m: any, idx: number) => (
                                   <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
-                                    <td className="px-4 py-2 text-gray-600">{formatDate(m.fecha)}</td>
+                                    <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
@@ -863,7 +863,7 @@ export const Global: React.FC = () => {
                                         color={m.tipo === 'compra' ? 'orange' : 'red'}
                                       />
                                     </td>
-                                    <td className="px-4 py-2 text-gray-600">{m.descripcion}</td>
+                                    <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.descripcion}</td>
                                     <td className="px-4 py-2 text-right">{m.debe ? formatCurrency(m.debe) : '-'}</td>
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
                                     <td className="px-4 py-2 text-right font-medium">{formatCurrency(m.saldo)}</td>
@@ -911,8 +911,8 @@ export const Global: React.FC = () => {
                           {cheques.map((ch: any) => (
                             <tr key={ch.id} className="border-b border-gray-200 hover:bg-gray-50">
                               <td className="px-4 py-3 text-sm font-mono font-medium">{ch.number}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{ch.bank}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{ch.drawer}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{ch.bank}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{ch.drawer}</td>
                               <td className="px-4 py-3 text-sm">
                                 <StatusBadge
                                   status={ch.status}
@@ -936,7 +936,7 @@ export const Global: React.FC = () => {
                               <td className="px-4 py-3 text-sm text-right font-medium">
                                 {formatCurrency(parseFloat(ch.amount || '0'))}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(ch.due_date)}
                               </td>
                             </tr>
@@ -961,7 +961,7 @@ export const Global: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              <h3 className="text-lg font-medium text-gray-900 mb-1">Busca una empresa</h3>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-1">Busca una empresa</h3>
               <p className="text-sm text-gray-500">
                 Escribi el nombre o CUIT de una empresa para ver toda su informacion:
                 pedidos, cotizaciones, facturas, cobros, pagos y cuenta corriente.

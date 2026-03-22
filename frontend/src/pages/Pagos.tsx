@@ -390,7 +390,7 @@ export const Pagos: React.FC = () => {
                       </PermissionGate>
                       <button
                         onClick={() => handleDismissPending(purchase.id)}
-                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-400 transition-colors"
                         title="Ocultar temporalmente"
                       >
                         ×
@@ -464,7 +464,7 @@ export const Pagos: React.FC = () => {
               <Input label="Referencia" placeholder="N° transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
               <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
               <div className="col-span-full">
-                <label className="text-sm font-medium text-gray-700 block mb-1">Notas</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
               <div className="flex items-end">
@@ -548,7 +548,7 @@ export const Pagos: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-right"><span className="font-bold text-red-600">{fmt(pago.amount)}</span></td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[pago.payment_method] || pago.payment_method}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{pago.bank_name || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{pago.bank_name || '-'}</td>
                     <td className="px-4 py-3">{pago.reference ? <span className="font-mono text-xs">{pago.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
                       <PermissionGate module="pagos" action="delete">

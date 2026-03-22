@@ -103,7 +103,7 @@ const STATUS_OPTIONS = [
   { value: 'todos', label: 'Todos', color: '' },
   { value: 'pendiente', label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
   { value: 'en_produccion', label: 'En Produccion', color: 'bg-blue-100 text-blue-800' },
-  { value: 'en_pausa', label: 'En Pausa', color: 'bg-gray-100 text-gray-800' },
+  { value: 'en_pausa', label: 'En Pausa', color: 'bg-gray-100 text-gray-800 dark:text-gray-200' },
   { value: 'terminado', label: 'Terminado', color: 'bg-green-100 text-green-800' },
   { value: 'entregado', label: 'Entregado', color: 'bg-emerald-100 text-emerald-800' },
   { value: 'cancelado', label: 'Cancelado', color: 'bg-red-100 text-red-800' },
@@ -785,7 +785,7 @@ export const Orders: React.FC = () => {
 
   const getStatusBadge = (status: string) => {
     const s = STATUS_OPTIONS.find(o => o.value === status)
-    return <span className={`px-2 py-1 rounded-full text-xs font-medium ${s?.color || 'bg-gray-100 text-gray-800'}`}>{s?.label || status}</span>
+    return <span className={`px-2 py-1 rounded-full text-xs font-medium ${s?.color || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>{s?.label || status}</span>
   }
 
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
@@ -1383,7 +1383,7 @@ export const Orders: React.FC = () => {
                 <div className="mt-4 flex justify-end">
                   <div className="w-72 space-y-1">
                     <div className="flex items-center justify-between gap-4 mb-1">
-                      <span className="text-sm text-gray-600">% IVA:</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">% IVA:</span>
                       <input
                         type="number" step="0.01" placeholder="21"
                         list="order-vat-rate-list"
@@ -1457,7 +1457,7 @@ export const Orders: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => { setShowNewBankInput(false); setNewBankName('') }}
-                          className="px-2 py-1 text-gray-500 text-sm hover:text-gray-700"
+                          className="px-2 py-1 text-gray-500 text-sm hover:text-gray-700 dark:text-gray-300"
                         >
                           Cancelar
                         </button>
@@ -1534,7 +1534,7 @@ export const Orders: React.FC = () => {
                           </div>
                         ) : (
                           <div>
-                            <p className="text-sm text-gray-600">{order.customer?.name || 'Sin cliente'}</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">{order.customer?.name || 'Sin cliente'}</p>
                           </div>
                         )}
                       </td>
@@ -1585,7 +1585,7 @@ export const Orders: React.FC = () => {
                           <PermissionGate module="orders" action="change_status"
                             fallback={
                               <span className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${
-                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'
+                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800 dark:text-gray-200'
                               }`}>
                                 {STATUS_OPTIONS.find(s => s.value === order.status)?.label || order.status}
                               </span>
@@ -1593,7 +1593,7 @@ export const Orders: React.FC = () => {
                           >
                             <select
                               className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800'
+                                STATUS_OPTIONS.find(s => s.value === order.status)?.color || 'bg-gray-100 text-gray-800 dark:text-gray-200'
                               }`}
                               value={order.status}
                               onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value) }}
@@ -1641,7 +1641,7 @@ export const Orders: React.FC = () => {
                                   {order.description && (
                                     <div>
                                       <p className="text-xs text-gray-500">Descripcion</p>
-                                      <p className="text-sm text-gray-800 break-words whitespace-pre-wrap">{order.description}</p>
+                                      <p className="text-sm text-gray-800 dark:text-gray-200 break-words whitespace-pre-wrap">{order.description}</p>
                                     </div>
                                   )}
                                   {/* Items list from invoicing status */}
@@ -1655,8 +1655,8 @@ export const Orders: React.FC = () => {
                                           {items.map((item: any, i: number) => (
                                             <div key={item.id || i} className="bg-white border border-gray-200 rounded px-2 py-1.5 text-xs">
                                               <div className="flex justify-between items-start">
-                                                <span className="font-medium text-gray-800">{item.product_name}</span>
-                                                <span className="text-gray-600 whitespace-nowrap ml-2">
+                                                <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
+                                                <span className="text-gray-600 dark:text-gray-400 whitespace-nowrap ml-2">
                                                   {item.quantity} x {formatCurrency(parseFloat(item.unit_price || '0'))}
                                                 </span>
                                               </div>
@@ -1690,7 +1690,7 @@ export const Orders: React.FC = () => {
                                   {order.notes && (
                                     <div>
                                       <p className="text-xs text-gray-500">Notas</p>
-                                      <p className="text-sm text-gray-700 bg-yellow-50 px-2 py-1 rounded break-words whitespace-pre-wrap">{order.notes}</p>
+                                      <p className="text-sm text-gray-700 dark:text-gray-300 bg-yellow-50 px-2 py-1 rounded break-words whitespace-pre-wrap">{order.notes}</p>
                                     </div>
                                   )}
                                   <div>
@@ -1706,12 +1706,12 @@ export const Orders: React.FC = () => {
                                   <h4 className="text-sm font-semibold text-blue-800 border-b border-blue-200 pb-1">Entrega y Fechas</h4>
                                   <div>
                                     <p className="text-xs text-gray-500">Fecha de Creacion</p>
-                                    <p className="text-sm text-gray-800">{formatDate(order.created_at)}</p>
+                                    <p className="text-sm text-gray-800 dark:text-gray-200">{formatDate(order.created_at)}</p>
                                   </div>
                                   {order.estimated_delivery && (
                                     <div>
                                       <p className="text-xs text-gray-500">Entrega Estimada</p>
-                                      <p className="text-sm text-gray-800">{formatDate(order.estimated_delivery)}</p>
+                                      <p className="text-sm text-gray-800 dark:text-gray-200">{formatDate(order.estimated_delivery)}</p>
                                     </div>
                                   )}
                                   {order.actual_delivery && (
@@ -1740,7 +1740,7 @@ export const Orders: React.FC = () => {
                                           </button>
                                           <button
                                             onClick={() => setEditingTimer(null)}
-                                            className="text-xs px-1.5 py-0.5 text-gray-500 hover:text-gray-700"
+                                            className="text-xs px-1.5 py-0.5 text-gray-500 hover:text-gray-700 dark:text-gray-300"
                                           >
                                             x
                                           </button>
@@ -1767,13 +1767,13 @@ export const Orders: React.FC = () => {
                                   )}
                                   <div>
                                     <p className="text-xs text-gray-500">Cliente</p>
-                                    <p className="text-sm text-gray-800">{order.customer?.name || 'Sin cliente'}</p>
+                                    <p className="text-sm text-gray-800 dark:text-gray-200">{order.customer?.name || 'Sin cliente'}</p>
                                     {order.customer?.cuit && <p className="text-xs text-gray-500 font-mono">{order.customer.cuit}</p>}
                                   </div>
                                   <div>
                                     <p className="text-xs text-gray-500">Empresa</p>
                                     <div className="flex items-center gap-1.5">
-                                      <p className="text-sm text-gray-800">{order.enterprise?.name || 'Sin empresa'}</p>
+                                      <p className="text-sm text-gray-800 dark:text-gray-200">{order.enterprise?.name || 'Sin empresa'}</p>
                                       <TagBadges tags={order.enterprise_tags || []} size="sm" />
                                     </div>
                                   </div>
@@ -1815,7 +1815,7 @@ export const Orders: React.FC = () => {
                                   {order.bank && (
                                     <div>
                                       <p className="text-xs text-gray-500">Banco</p>
-                                      <p className="text-sm text-gray-800">{order.bank.bank_name}</p>
+                                      <p className="text-sm text-gray-800 dark:text-gray-200">{order.bank.bank_name}</p>
                                     </div>
                                   )}
 
@@ -1876,14 +1876,14 @@ export const Orders: React.FC = () => {
                                             const hasAfip = (status.invoices || []).some(inv => inv.cae)
                                             if (allNoFiscal) {
                                               return (
-                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-semibold">
+                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 dark:text-gray-300 rounded text-xs font-semibold">
                                                   Comprobante No Fiscal
                                                 </span>
                                               )
                                             }
                                             if (allInterno) {
                                               return (
-                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-semibold">
+                                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 dark:text-gray-300 rounded text-xs font-semibold">
                                                   Comprobante Interno
                                                 </span>
                                               )
@@ -1938,7 +1938,7 @@ export const Orders: React.FC = () => {
                                                       <span
                                                         className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                                           inv.fiscal_type === 'no_fiscal' || inv.fiscal_type === 'interno'
-                                                            ? 'bg-gray-100 text-gray-600'
+                                                            ? 'bg-gray-100 text-gray-600 dark:text-gray-400'
                                                             : 'bg-green-100 text-green-800'
                                                         }`}
                                                         title={inv.cae ? `CAE: ${inv.cae}` : undefined}
@@ -1972,10 +1972,10 @@ export const Orders: React.FC = () => {
                                           {showInvoiceForm[order.id] && status.invoicing_status !== 'facturado' && (
                                             <div className="mt-2 bg-white border border-gray-200 rounded-lg p-3 space-y-2">
                                               <div className="flex items-center justify-between">
-                                                <p className="text-xs font-semibold text-gray-700">Crear Factura</p>
+                                                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Crear Factura</p>
                                                 <button
                                                   onClick={() => handleShowInvoiceForm(order.id)}
-                                                  className="text-gray-400 hover:text-gray-600 text-xs"
+                                                  className="text-gray-400 hover:text-gray-600 dark:text-gray-400 text-xs"
                                                 >
                                                   Cerrar
                                                 </button>

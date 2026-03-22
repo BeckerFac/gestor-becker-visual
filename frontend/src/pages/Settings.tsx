@@ -264,7 +264,7 @@ export const Settings: React.FC = () => {
             {/* Step 1 - Datos Empresa */}
             {wizardStep === 1 && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">Verifica que los datos de tu empresa esten completos. El CUIT es obligatorio para facturacion electronica.</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Verifica que los datos de tu empresa esten completos. El CUIT es obligatorio para facturacion electronica.</p>
                 <div className={`flex items-center gap-3 p-3 rounded-lg border ${form.cuit ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                   <span className={`w-3 h-3 rounded-full ${form.cuit ? 'bg-green-500' : 'bg-red-500'}`} />
                   <span className="text-sm">{form.cuit ? `CUIT: ${form.cuit}` : 'CUIT no configurado — completalo en "Datos de la Empresa" arriba'}</span>
@@ -282,12 +282,12 @@ export const Settings: React.FC = () => {
               const csrCommand = `openssl req -new -key clave.key -subj "/C=AR/O=${form.name.replace(/"/g, '')}/CN=BeckerVisual/serialNumber=CUIT ${form.cuit}" -out solicitud.csr`
               return (
                 <div className="space-y-4">
-                  <p className="text-sm text-gray-600">Genera la clave privada y el CSR (Certificate Signing Request) en tu computadora.</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Genera la clave privada y el CSR (Certificate Signing Request) en tu computadora.</p>
 
                   {/* OS Tabs */}
                   <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
                     {(['linux', 'windows', 'macos'] as const).map(os => (
-                      <button key={os} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${osTabs === os ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setOsTabs(os)}>
+                      <button key={os} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${osTabs === os ? 'bg-white text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setOsTabs(os)}>
                         {os === 'linux' ? 'Linux' : os === 'windows' ? 'Windows' : 'macOS'}
                       </button>
                     ))}
@@ -322,8 +322,8 @@ export const Settings: React.FC = () => {
             {/* Step 3 - Subir a ARCA */}
             {wizardStep === 3 && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">Subi el archivo .csr al portal de AFIP/ARCA para obtener tu certificado digital.</p>
-                <ol className="text-sm text-gray-700 space-y-2 list-decimal list-inside">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Subi el archivo .csr al portal de AFIP/ARCA para obtener tu certificado digital.</p>
+                <ol className="text-sm text-gray-700 dark:text-gray-300 space-y-2 list-decimal list-inside">
                   <li>Ingresa a <a href="https://auth.afip.gob.ar/contribuyente_/login.xhtml" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">AFIP - Login con CUIT</a></li>
                   <li>Busca el servicio <strong>"Administracion de Certificados Digitales"</strong></li>
                   <li>Crea un nuevo <strong>"Computador Fiscal"</strong> (nombre: BeckerVisual o el que prefieras)</li>
@@ -341,7 +341,7 @@ export const Settings: React.FC = () => {
             {/* Step 4 - Certificados */}
             {wizardStep === 4 && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">Subi tu certificado digital y clave privada.</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Subi tu certificado digital y clave privada.</p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div className="flex items-center gap-2">
@@ -359,11 +359,11 @@ export const Settings: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Certificado (.pem / .crt)</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Certificado (.pem / .crt)</label>
                     <input ref={certInputRef} type="file" accept=".pem,.crt,.cer" onChange={e => setCertFile(e.target.files?.[0] || null)} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Clave Privada (.key)</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Clave Privada (.key)</label>
                     <input ref={keyInputRef} type="file" accept=".key,.pem" onChange={e => setKeyFile(e.target.files?.[0] || null)} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
                   </div>
                 </div>
@@ -391,7 +391,7 @@ export const Settings: React.FC = () => {
               <div className="space-y-6">
                 {/* Entorno */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Entorno AFIP</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Entorno AFIP</label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg w-64 bg-white dark:bg-gray-700 dark:text-gray-100" value={form.afip_env} onChange={e => setForm({ ...form, afip_env: e.target.value })}>
                     <option value="homologacion">Homologacion (Testing)</option>
                     <option value="produccion">Produccion</option>
@@ -400,7 +400,7 @@ export const Settings: React.FC = () => {
 
                 {/* Puntos de venta */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-gray-700">Puntos de Venta</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Puntos de Venta</label>
                   <div className="flex flex-wrap gap-2">
                     {puntosVenta.map((pv, i) => (
                       <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">

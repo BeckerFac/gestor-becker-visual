@@ -99,7 +99,7 @@ const CSV_COLUMNS = [
 function getTipoBadge(tipo: string) {
   const found = TIPO_OPTIONS.find(o => o.value === tipo)
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${found?.color ?? 'bg-gray-100 text-gray-700'}`}>
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${found?.color ?? 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}>
       {found?.label ?? tipo}
     </span>
   )
@@ -753,7 +753,7 @@ export const Remitos: React.FC = () => {
                     setItems([{ ...EMPTY_ITEM }])
                     setError(null)
                   }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-100 transition-colors"
                 >
                   Cancelar
                 </button>
@@ -808,19 +808,19 @@ export const Remitos: React.FC = () => {
                         {fmtRemitoNumber(remito.remito_number)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       {formatDate(remito.date)}
                     </td>
                     <td className="px-4 py-3">
                       {getTipoBadge(remito.tipo)}
                     </td>
-                    <td className="px-4 py-3 text-gray-700">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                       <div className="flex items-center gap-1.5">
                         {remito.enterprise?.name ?? <span className="text-gray-400">-</span>}
                         <TagBadges tags={remito.enterprise_tags || []} size="sm" />
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                       {remito.customer?.name ?? <span className="text-gray-400">-</span>}
                     </td>
                     <td className="px-4 py-3">
@@ -832,14 +832,14 @@ export const Remitos: React.FC = () => {
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                       {remito.item_count} item{remito.item_count !== 1 ? 's' : ''}
                     </td>
                     <td className="px-4 py-3">
                       <PermissionGate module="remitos" action="edit">
                         <select
                           className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                            STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700'
+                            STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700 dark:text-gray-300'
                           }`}
                           value={remito.status}
                           onChange={e => handleStatusChange(remito.id, e.target.value)}

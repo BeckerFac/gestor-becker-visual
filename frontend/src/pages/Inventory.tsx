@@ -323,7 +323,7 @@ export const Inventory: React.FC = () => {
           <CardContent>
             <form onSubmit={handleAdjust} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Producto *</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Producto *</label>
                 <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={adjustForm.product_id} onChange={e => setAdjustForm({ ...adjustForm, product_id: e.target.value })} required>
                   <option value="">Seleccionar producto...</option>
                   {stockControlProducts.length > 0
@@ -336,7 +336,7 @@ export const Inventory: React.FC = () => {
                 )}
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Cambio de cantidad *</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cambio de cantidad *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -363,14 +363,14 @@ export const Inventory: React.FC = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Producto *</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Producto *</label>
                 <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.product_id} onChange={e => setForm({ ...form, product_id: e.target.value })} required>
                   <option value="">Seleccionar producto...</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Tipo de Movimiento</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Movimiento</label>
                 <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.movement_type} onChange={e => setForm({ ...form, movement_type: e.target.value })}>
                   <option value="purchase">Compra (Ingreso)</option>
                   <option value="adjustment">Ajuste</option>

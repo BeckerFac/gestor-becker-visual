@@ -188,7 +188,7 @@ export const Admin: React.FC = () => {
               'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
               tab === t.key
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-300 hover:border-gray-300'
             )}
           >
             {t.label}
@@ -1105,7 +1105,7 @@ const CompanyDetailPanel: React.FC<{
               'px-3 py-1.5 text-xs font-medium border-b-2 transition-colors -mb-px',
               activeDetailTab === t.key
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-300'
             )}
           >
             {t.label}
@@ -1335,7 +1335,7 @@ const BackupsSubPanel: React.FC<{ companyId: string }> = ({ companyId }) => {
                 <td className="px-2 py-1">
                   <span className={cn(
                     'px-1.5 py-0.5 rounded text-xs',
-                    b.status === 'latest' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                    b.status === 'latest' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 dark:text-gray-400'
                   )}>
                     {b.status === 'latest' ? 'Mas reciente' : 'Disponible'}
                   </span>
@@ -1500,14 +1500,14 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
     active: 'bg-green-100 text-green-800',
     trial: 'bg-yellow-100 text-yellow-800',
     expired: 'bg-red-100 text-red-800',
-    disabled: 'bg-gray-200 text-gray-600',
+    disabled: 'bg-gray-200 text-gray-600 dark:text-gray-400',
     cancelled: 'bg-red-100 text-red-800',
     grace: 'bg-orange-100 text-orange-800',
     blocked: 'bg-red-200 text-red-900',
     past_due: 'bg-orange-100 text-orange-800',
   }
   return (
-    <span className={cn('px-2 py-0.5 rounded text-xs font-medium', styles[status] || 'bg-gray-100 text-gray-600')}>
+    <span className={cn('px-2 py-0.5 rounded text-xs font-medium', styles[status] || 'bg-gray-100 text-gray-600 dark:text-gray-400')}>
       {status}
     </span>
   )
@@ -1533,7 +1533,7 @@ const AuditActionBadge: React.FC<{ action: string }> = ({ action }) => {
     impersonate: 'bg-yellow-100 text-yellow-700',
   }
   return (
-    <span className={cn('px-1.5 py-0.5 rounded text-xs', colors[action] || 'bg-gray-100 text-gray-600')}>
+    <span className={cn('px-1.5 py-0.5 rounded text-xs', colors[action] || 'bg-gray-100 text-gray-600 dark:text-gray-400')}>
       {action.replace(/_/g, ' ')}
     </span>
   )

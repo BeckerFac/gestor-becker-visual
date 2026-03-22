@@ -524,7 +524,7 @@ const MiniModal: React.FC<{
       <div className={`relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl ${wide ? 'max-w-lg' : 'max-w-sm'} w-full mx-4 p-5`}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
         </div>
         {children}
       </div>

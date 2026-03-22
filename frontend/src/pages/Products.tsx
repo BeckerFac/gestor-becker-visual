@@ -426,7 +426,7 @@ export const Products: React.FC = () => {
                   </Button>
                   <button
                     onClick={() => { setShowQuickCategory(false); setQuickCategoryName('') }}
-                    className="text-gray-400 hover:text-gray-600 text-sm px-1"
+                    className="text-gray-400 hover:text-gray-600 dark:text-gray-400 text-sm px-1"
                   >
                     x
                   </button>
