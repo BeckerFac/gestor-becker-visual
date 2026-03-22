@@ -27,6 +27,34 @@
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    // Auto-recovery: if app fails to render in 5 seconds, clear SW cache and reload
+    (function() {
+      var timeout = setTimeout(function() {
+        var root = document.getElementById('root');
+        if (root && (!root.children.length || root.innerHTML.trim() === '')) {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(r) { r.unregister(); });
+            });
+            caches.keys().then(function(names) {
+              names.forEach(function(name) { caches.delete(name); });
+            });
+          }
+          location.reload();
+        }
+      }, 5000);
+      // Cancel timeout if React renders successfully
+      var observer = new MutationObserver(function() {
+        var root = document.getElementById('root');
+        if (root && root.children.length > 0) {
+          clearTimeout(timeout);
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.getElementById('root'), { childList: true });
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -27,13 +27,13 @@ export function PWAUpdatePrompt() {
   useEffect(() => {
     if (needRefresh) {
       setVisible(true)
-      const timer = setTimeout(() => {
-        setVisible(false)
-        setNeedRefresh(false)
-      }, AUTO_DISMISS_MS)
-      return () => clearTimeout(timer)
+      // Auto-update after 3 seconds — don't wait for user action
+      const autoUpdate = setTimeout(() => {
+        updateServiceWorker(true)
+      }, 3000)
+      return () => clearTimeout(autoUpdate)
     }
-  }, [needRefresh, setNeedRefresh])
+  }, [needRefresh, updateServiceWorker])
 
   if (!visible) return null
 
