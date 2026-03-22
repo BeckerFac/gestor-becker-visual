@@ -289,11 +289,11 @@ ${JSON.stringify(analysisData, null, 2)}`,
         id: `rule_${id++}`,
         type: 'payment_pattern',
         severity: data.unpaidAmount > data.totalRevenue * 0.3 ? 'critical' : 'warning',
-        title: `$${Math.round(data.unpaidAmount).toLocaleString('es-AR')} pendientes de cobro`,
-        description: `Hay ${data.unpaidCount} pedidos sin pagar. Priorizá el seguimiento de cobranzas.`,
+        title: `$${Math.round(data.unpaidAmount).toLocaleString('es-AR')} en pedidos sin pagar`,
+        description: `Hay ${data.unpaidCount} pedidos pendientes de pago. Para que cuenten como facturados, genera las facturas correspondientes.`,
         metric: `$${Math.round(data.unpaidAmount).toLocaleString('es-AR')}`,
-        action_label: 'Ver cobros',
-        action_link: '/cobros',
+        action_label: 'Ver pedidos',
+        action_link: '/orders',
       });
     }
 
