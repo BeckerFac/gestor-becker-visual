@@ -229,13 +229,30 @@ app.use('/api/secretaria', secretariaRouter); // SecretarIA WhatsApp assistant (
 
 // Serve frontend static files (monolith deployment)
 const publicPath = path.join(__dirname, '..', 'public');
-app.use(express.static(publicPath));
+// Assets with hash in filename are immutable — cache aggressively
+app.use('/assets', express.static(path.join(publicPath, 'assets'), {
+  maxAge: '1y',
+  immutable: true,
+}));
+// Other static files (icons, manifest, sw.js) — short cache
+app.use(express.static(publicPath, {
+  maxAge: '1h',
+  setHeaders: (res, filePath) => {
+    // Service worker must never be cached
+    if (filePath.endsWith('sw.js') || filePath.endsWith('workbox-4b126c97.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
 
-// SPA catch-all: serve index.html for non-API routes
+// SPA catch-all: serve index.html for non-API routes — NEVER cache
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Route not found' });
   }
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 

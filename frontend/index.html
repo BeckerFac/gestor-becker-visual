@@ -28,31 +28,47 @@
 <body>
   <div id="root"></div>
   <script>
-    // Auto-recovery: if app fails to render in 5 seconds, clear SW cache and reload
+    // Auto-recovery: detect blank page and fix it
+    // This runs BEFORE React — catches SW cache issues
     (function() {
-      var timeout = setTimeout(function() {
+      var RECOVERY_KEY = '__gestia_recovery';
+      var recoveryAttempt = parseInt(sessionStorage.getItem(RECOVERY_KEY) || '0');
+
+      function recover() {
         var root = document.getElementById('root');
-        if (root && (!root.children.length || root.innerHTML.trim() === '')) {
+        if (root && root.children.length > 0) return; // React rendered OK
+
+        if (recoveryAttempt >= 2) {
+          // Already tried twice — show manual message
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;flex-direction:column;gap:12px;background:#0A0A0F;color:white"><p>Actualizando aplicacion...</p><p style="font-size:13px;color:#999">Limpiando cache</p></div>';
+          sessionStorage.removeItem(RECOVERY_KEY);
           if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(r) { r.unregister(); });
-            });
-            caches.keys().then(function(names) {
-              names.forEach(function(name) { caches.delete(name); });
-            });
+            navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(reg){reg.unregister()})});
+            caches.keys().then(function(n){n.forEach(function(name){caches.delete(name)})});
           }
-          location.reload();
+          setTimeout(function(){ location.href = location.origin + '/dashboard'; }, 2000);
+          return;
         }
-      }, 5000);
-      // Cancel timeout if React renders successfully
-      var observer = new MutationObserver(function() {
-        var root = document.getElementById('root');
-        if (root && root.children.length > 0) {
-          clearTimeout(timeout);
-          observer.disconnect();
+
+        sessionStorage.setItem(RECOVERY_KEY, String(recoveryAttempt + 1));
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(reg){reg.unregister()})});
+          caches.keys().then(function(n){n.forEach(function(name){caches.delete(name)})});
+        }
+        setTimeout(function(){ location.reload(); }, 500);
+      }
+
+      // Check after 3 seconds
+      setTimeout(recover, 3000);
+
+      // Also cancel if React renders
+      var obs = new MutationObserver(function() {
+        if (document.getElementById('root').children.length > 0) {
+          sessionStorage.removeItem(RECOVERY_KEY);
+          obs.disconnect();
         }
       });
-      observer.observe(document.getElementById('root'), { childList: true });
+      obs.observe(document.getElementById('root'), { childList: true });
     })();
   </script>
   <script type="module" src="/src/main.tsx"></script>
