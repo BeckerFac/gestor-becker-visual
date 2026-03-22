@@ -35,6 +35,7 @@ interface Enterprise {
   status: string
   contact_count: number
   tags: { id: string; name: string; color: string }[]
+  access_code?: string | null
 }
 
 interface Contact {
@@ -293,6 +294,27 @@ export const Enterprises: React.FC = () => {
       toast.error(e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleGeneratePortalCode = async (enterprise: any) => {
+    try {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase()
+      await api.updateEnterprise(enterprise.id, { access_code: code })
+      toast.success(`Codigo de portal generado: ${code}`)
+      await loadData()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Error generando codigo')
+    }
+  }
+
+  const handleRevokePortalCode = async (enterprise: any) => {
+    try {
+      await api.updateEnterprise(enterprise.id, { access_code: null })
+      toast.success('Acceso al portal revocado')
+      await loadData()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Error revocando acceso')
     }
   }
 
@@ -602,7 +624,17 @@ export const Enterprises: React.FC = () => {
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${ent.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                     {ent.status === 'active' ? 'Activa' : 'Inactiva'}
                   </span>
-                  <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                  <div className="flex gap-2 items-center" onClick={e => e.stopPropagation()}>
+                    {ent.access_code ? (
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded font-mono">{ent.access_code}</code>
+                        <button onClick={() => handleRevokePortalCode(ent)} className="text-xs text-red-500 hover:text-red-700">Revocar</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => handleGeneratePortalCode(ent)} className="text-xs text-blue-600 hover:text-blue-800">
+                        Generar codigo
+                      </button>
+                    )}
                     <PermissionGate module="enterprises" action="create">
                       <button onClick={() => handleAddContact(ent.id)} className="text-green-600 hover:underline text-sm">+ Contacto</button>
                     </PermissionGate>

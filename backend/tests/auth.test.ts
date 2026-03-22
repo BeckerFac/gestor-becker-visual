@@ -270,7 +270,7 @@ describe('AuthService', () => {
 
       expect(result.accessToken).toBeDefined()
       expect(result.refreshToken).toBeDefined()
-      expect(result.customer.name).toBe('Customer Test')
+      expect(result.enterprise.name).toBe('Customer Test')
       expect(result.company.name).toBe('Company Test')
     })
 

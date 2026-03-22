@@ -142,7 +142,7 @@ export class PortalService {
 
   // ==================== ORDERS (config-filtered) ====================
 
-  async getCustomerOrders(customerId: string, companyId: string) {
+  async getCustomerOrders(enterpriseId: string, companyId: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
@@ -166,7 +166,7 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const isPreview = customerId === '__preview__';
+      const isPreview = enterpriseId === '__preview__';
 
       const result = isPreview
         ? await db.execute(sql`
@@ -187,7 +187,7 @@ export class PortalService {
               ELSE NULL END as invoice
             FROM orders o
             LEFT JOIN invoices i ON o.invoice_id = i.id
-            WHERE o.customer_id = ${customerId} AND o.company_id = ${companyId}
+            WHERE o.enterprise_id = ${enterpriseId} AND o.company_id = ${companyId}
             ORDER BY o.created_at DESC
           `);
       const rows = (result as any).rows || result || [];
@@ -199,7 +199,7 @@ export class PortalService {
   }
 
   // Get single order with status history
-  async getCustomerOrder(customerId: string, orderId: string, companyId?: string) {
+  async getCustomerOrder(enterpriseId: string, orderId: string, companyId?: string) {
     try {
       let config: PortalConfig | null = null;
       if (companyId) {
@@ -233,7 +233,7 @@ export class PortalService {
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN invoices i ON o.invoice_id = i.id
-        WHERE o.customer_id = ${customerId} AND o.id = ${orderId}
+        WHERE o.enterprise_id = ${enterpriseId} AND o.id = ${orderId}
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
@@ -262,7 +262,7 @@ export class PortalService {
 
   // ==================== INVOICES (config-filtered) ====================
 
-  async getCustomerInvoices(customerId: string, companyId: string) {
+  async getCustomerInvoices(enterpriseId: string, companyId: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
@@ -282,7 +282,7 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const isPreview = customerId === '__preview__';
+      const isPreview = enterpriseId === '__preview__';
 
       const result = isPreview
         ? await db.execute(sql`
@@ -295,7 +295,9 @@ export class PortalService {
         : await db.execute(sql`
             SELECT ${sql.raw(selectCols)}
             FROM invoices i
-            WHERE i.customer_id = ${customerId} AND i.company_id = ${companyId}
+            WHERE (i.enterprise_id = ${enterpriseId} OR (i.enterprise_id IS NULL AND i.customer_id IN (
+              SELECT id FROM customers WHERE enterprise_id = ${enterpriseId}
+            ))) AND i.company_id = ${companyId}
             ORDER BY i.created_at DESC
           `);
       const rows = (result as any).rows || result || [];
@@ -308,7 +310,7 @@ export class PortalService {
 
   // ==================== QUOTES (config-filtered) ====================
 
-  async getCustomerQuotes(customerId: string, companyId: string) {
+  async getCustomerQuotes(enterpriseId: string, companyId: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
@@ -325,7 +327,7 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const isPreview = customerId === '__preview__';
+      const isPreview = enterpriseId === '__preview__';
 
       const result = isPreview
         ? await db.execute(sql`
@@ -338,7 +340,7 @@ export class PortalService {
         : await db.execute(sql`
             SELECT ${sql.raw(selectCols)}
             FROM quotes q
-            WHERE q.customer_id = ${customerId} AND q.company_id = ${companyId}
+            WHERE q.enterprise_id = ${enterpriseId} AND q.company_id = ${companyId}
             ORDER BY q.created_at DESC
           `);
       const rows = (result as any).rows || result || [];
@@ -351,7 +353,7 @@ export class PortalService {
 
   // ==================== QUOTE ACCEPT/REJECT ====================
 
-  async updateQuoteStatus(customerId: string, companyId: string, quoteId: string, newStatus: 'accepted' | 'rejected', reason?: string) {
+  async updateQuoteStatus(enterpriseId: string, companyId: string, quoteId: string, newStatus: 'accepted' | 'rejected', reason?: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
@@ -359,10 +361,10 @@ export class PortalService {
         throw new ApiError(403, 'Quote accept/reject is not enabled');
       }
 
-      // Verify quote belongs to customer
+      // Verify quote belongs to enterprise
       const checkResult = await pool.query(
-        `SELECT id, status FROM quotes WHERE id = $1 AND customer_id = $2 AND company_id = $3`,
-        [quoteId, customerId, companyId]
+        `SELECT id, status FROM quotes WHERE id = $1 AND enterprise_id = $2 AND company_id = $3`,
+        [quoteId, enterpriseId, companyId]
       );
       if (checkResult.rows.length === 0) {
         throw new ApiError(404, 'Quote not found');
@@ -390,7 +392,7 @@ export class PortalService {
 
   // ==================== REMITOS (config-filtered) ====================
 
-  async getCustomerRemitos(customerId: string, companyId: string) {
+  async getCustomerRemitos(enterpriseId: string, companyId: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
@@ -398,7 +400,7 @@ export class PortalService {
         return { items: [], total: 0 };
       }
 
-      const isPreview = customerId === '__preview__';
+      const isPreview = enterpriseId === '__preview__';
 
       const result = isPreview
         ? await db.execute(sql`
@@ -411,7 +413,7 @@ export class PortalService {
         : await db.execute(sql`
             SELECT r.id, r.remito_number, r.date, r.status, r.created_at
             FROM remitos r
-            WHERE r.customer_id = ${customerId} AND r.company_id = ${companyId}
+            WHERE r.enterprise_id = ${enterpriseId} AND r.company_id = ${companyId}
             ORDER BY r.created_at DESC
           `);
       const rows = (result as any).rows || result || [];
@@ -424,11 +426,11 @@ export class PortalService {
 
   // ==================== SUMMARY (config-filtered) ====================
 
-  async getCustomerSummary(customerId: string, companyId: string) {
+  async getCustomerSummary(enterpriseId: string, companyId: string) {
     try {
       const config = await this.getPortalConfig(companyId);
 
-      const isPreview = customerId === '__preview__';
+      const isPreview = enterpriseId === '__preview__';
 
       const result = isPreview
         ? await db.execute(sql`
@@ -442,12 +444,12 @@ export class PortalService {
           `)
         : await db.execute(sql`
             SELECT
-              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_orders,
-              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
-              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
-              (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId}) as total_spent,
-              (SELECT COUNT(*) FROM invoices WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_invoices,
-              (SELECT COUNT(*) FROM quotes WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_quotes
+              (SELECT COUNT(*) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId})::int as total_orders,
+              (SELECT COUNT(*) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
+              (SELECT COUNT(*) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
+              (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId}) as total_spent,
+              (SELECT COUNT(*) FROM invoices WHERE (enterprise_id = ${enterpriseId} OR (enterprise_id IS NULL AND customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${enterpriseId}))) AND company_id = ${companyId})::int as total_invoices,
+              (SELECT COUNT(*) FROM quotes WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId})::int as total_quotes
           `);
       const rows = (result as any).rows || result || [];
       const summary = rows[0] || {};
@@ -473,22 +475,29 @@ export class PortalService {
     }
   }
 
-  // Get customer profile
-  async getCustomerProfile(customerId: string) {
+  // Get enterprise profile with associated contacts
+  async getCustomerProfile(enterpriseId: string) {
     try {
-      if (customerId === '__preview__') {
-        return { id: '__preview__', name: 'Cliente de ejemplo', email: 'preview@example.com', cuit: '00-00000000-0', phone: null };
+      if (enterpriseId === '__preview__') {
+        return { id: '__preview__', name: 'Empresa de ejemplo', cuit: '00-00000000-0', email: null, phone: null, contacts: [] };
       }
 
       const result = await db.execute(sql`
-        SELECT c.*, comp.name as company_name, comp.cuit as company_cuit, comp.phone as company_phone, comp.email as company_email
-        FROM customers c
-        JOIN companies comp ON c.company_id = comp.id
-        WHERE c.id = ${customerId}
+        SELECT e.*, comp.name as company_name, comp.cuit as company_cuit, comp.phone as company_phone, comp.email as company_email
+        FROM enterprises e
+        JOIN companies comp ON e.company_id = comp.id
+        WHERE e.id = ${enterpriseId}
       `);
       const rows = (result as any).rows || result || [];
-      if (rows.length === 0) throw new ApiError(404, 'Customer not found');
-      return rows[0];
+      if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
+
+      // Get associated contacts (customers linked to this enterprise)
+      const contactsResult = await db.execute(sql`
+        SELECT id, name, email, phone, role FROM customers WHERE enterprise_id = ${enterpriseId}
+      `);
+      const contacts = (contactsResult as any).rows || contactsResult || [];
+
+      return { ...rows[0], contacts };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get profile');

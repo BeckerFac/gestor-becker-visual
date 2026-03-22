@@ -194,9 +194,9 @@ export const CustomerPortal: React.FC = () => {
       const data = await api.customerLogin(loginForm.access_code)
       localStorage.setItem('customerAccessToken', data.accessToken)
       localStorage.setItem('customerRefreshToken', data.refreshToken)
-      localStorage.setItem('customerName', data.customer.name)
+      localStorage.setItem('customerName', data.enterprise.name)
       localStorage.setItem('customerCompanyName', data.company.name)
-      setCustomerName(data.customer.name)
+      setCustomerName(data.enterprise.name)
       setCompanyName(data.company.name)
       setIsLoggedIn(true)
     } catch (e: any) {

@@ -365,10 +365,10 @@ export class AuthService {
   async customerLogin(accessCode: string) {
     try {
       const result = await db.execute(sql`
-        SELECT c.*, comp.name as company_name, comp.cuit as company_cuit
-        FROM customers c
-        JOIN companies comp ON c.company_id = comp.id
-        WHERE c.access_code = ${accessCode} AND c.status = 'active'
+        SELECT e.*, comp.name as company_name, comp.cuit as company_cuit
+        FROM enterprises e
+        JOIN companies comp ON e.company_id = comp.id
+        WHERE e.access_code = ${accessCode} AND e.status = 'active'
         LIMIT 1
       `);
       const rows = (result as any).rows || result || [];
@@ -377,31 +377,29 @@ export class AuthService {
         throw new ApiError(401, 'Codigo de acceso invalido');
       }
 
-      const customer = rows[0];
+      const enterprise = rows[0];
 
       const accessToken = jwt.sign(
-        { id: customer.id, role: 'customer', company_id: customer.company_id, customer_id: customer.id },
+        { id: enterprise.id, role: 'customer', company_id: enterprise.company_id, enterprise_id: enterprise.id },
         env.JWT_SECRET,
         { expiresIn: '24h', algorithm: 'HS256' } as any
       );
 
       const refreshTokenJwt = jwt.sign(
-        { id: customer.id, role: 'customer' },
+        { id: enterprise.id, role: 'customer' },
         env.JWT_REFRESH_SECRET,
         { expiresIn: '30d', algorithm: 'HS256' } as any
       );
 
       return {
-        customer: {
-          id: customer.id,
-          name: customer.name,
-          cuit: customer.cuit,
-          email: customer.email,
-          phone: customer.phone,
+        enterprise: {
+          id: enterprise.id,
+          name: enterprise.name,
+          cuit: enterprise.cuit,
         },
         company: {
-          name: customer.company_name,
-          cuit: customer.company_cuit,
+          name: enterprise.company_name,
+          cuit: enterprise.company_cuit,
         },
         accessToken,
         refreshToken: refreshTokenJwt,
@@ -416,7 +414,7 @@ export class AuthService {
     return jwt.sign(
       {
         id: userId,
-        customer_id: '__preview__',
+        enterprise_id: '__preview__',
         company_id: companyId,
         role: 'customer_preview',
       },

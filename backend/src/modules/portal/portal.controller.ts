@@ -59,11 +59,11 @@ export class PortalController {
 
   async getSummary(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const summary = await portalService.getCustomerSummary(customerId, companyId);
+      const summary = await portalService.getCustomerSummary(enterpriseId, companyId);
       res.json(summary);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -73,10 +73,10 @@ export class PortalController {
 
   async getProfile(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      const enterpriseId = (req.user as any)?.enterprise_id;
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const profile = await portalService.getCustomerProfile(customerId);
+      const profile = await portalService.getCustomerProfile(enterpriseId);
       res.json(profile);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -86,11 +86,11 @@ export class PortalController {
 
   async getOrders(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const orders = await portalService.getCustomerOrders(customerId, companyId);
+      const orders = await portalService.getCustomerOrders(enterpriseId, companyId);
       res.json(orders);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -100,11 +100,11 @@ export class PortalController {
 
   async getOrder(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const order = await portalService.getCustomerOrder(customerId, req.params.id, companyId);
+      const order = await portalService.getCustomerOrder(enterpriseId, req.params.id, companyId);
       res.json(order);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -114,11 +114,11 @@ export class PortalController {
 
   async getInvoices(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const invoices = await portalService.getCustomerInvoices(customerId, companyId);
+      const invoices = await portalService.getCustomerInvoices(enterpriseId, companyId);
       res.json(invoices);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -128,11 +128,11 @@ export class PortalController {
 
   async getQuotes(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const quotes = await portalService.getCustomerQuotes(customerId, companyId);
+      const quotes = await portalService.getCustomerQuotes(enterpriseId, companyId);
       res.json(quotes);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -142,14 +142,14 @@ export class PortalController {
 
   async getQuotePdf(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      // Verify quote belongs to this customer before generating PDF
+      // Verify quote belongs to this enterprise before generating PDF
       const quote = await quotesService.getQuote(companyId, req.params.id);
-      if ((quote as any).customer_id !== customerId) {
-        throw new ApiError(403, 'Access denied: quote does not belong to this customer');
+      if ((quote as any).enterprise_id !== enterpriseId) {
+        throw new ApiError(403, 'Access denied: quote does not belong to this enterprise');
       }
 
       const pdf = await quotesService.generateQuotePdf(companyId, req.params.id);
@@ -164,16 +164,16 @@ export class PortalController {
 
   async updateQuoteStatus(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
       const { status, reason } = req.body;
       if (!status || !['accepted', 'rejected'].includes(status)) {
         throw new ApiError(400, 'Invalid status. Must be accepted or rejected');
       }
 
-      const result = await portalService.updateQuoteStatus(customerId, companyId, req.params.id, status, reason);
+      const result = await portalService.updateQuoteStatus(enterpriseId, companyId, req.params.id, status, reason);
       res.json(result);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
@@ -183,11 +183,11 @@ export class PortalController {
 
   async getRemitos(req: AuthRequest, res: Response) {
     try {
-      const customerId = (req.user as any)?.customer_id;
+      const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!customerId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(403, 'Access denied');
 
-      const remitos = await portalService.getCustomerRemitos(customerId, companyId);
+      const remitos = await portalService.getCustomerRemitos(enterpriseId, companyId);
       res.json(remitos);
     } catch (error) {
       if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
