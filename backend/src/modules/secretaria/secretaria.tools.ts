@@ -49,14 +49,21 @@ export async function queryClients(
         SELECT
           COALESCE(e.name, c.name, 'Sin nombre') as nombre,
           e.cuit,
-          COALESCE(SUM(CAST(o.total_amount AS decimal)), 0) as total_facturado,
-          MAX(o.created_at) as ultimo_pedido,
-          COALESCE(SUM(CASE WHEN o.payment_status = 'pendiente' THEN CAST(o.total_amount AS decimal) ELSE 0 END), 0) as saldo_pendiente,
-          COUNT(o.id) as cantidad_pedidos
-        FROM orders o
-        LEFT JOIN enterprises e ON o.enterprise_id = e.id
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = $1
+          COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as total_facturado,
+          MAX(i.invoice_date) as ultimo_pedido,
+          COALESCE(SUM(
+            CAST(i.total_amount AS decimal) - COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+          ) FILTER (WHERE CAST(i.total_amount AS decimal) > COALESCE(
+            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+          )), 0) as saldo_pendiente,
+          COUNT(i.id) as cantidad_pedidos
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+        WHERE i.company_id = $1
+          AND i.status = 'authorized'
           AND (e.name ILIKE $2 OR c.name ILIKE $2)
         GROUP BY COALESCE(e.name, c.name, 'Sin nombre'), e.cuit
         ORDER BY total_facturado DESC
@@ -87,20 +94,27 @@ export async function queryClients(
       };
     }
 
-    // Default: top 10 clients by revenue this month
+    // Default: top 10 clients by revenue this month - from authorized invoices
     const result = await pool.query(`
       SELECT
         COALESCE(e.name, c.name, 'Sin nombre') as nombre,
         e.cuit,
-        COALESCE(SUM(CAST(o.total_amount AS decimal)), 0) as total_facturado,
-        MAX(o.created_at) as ultimo_pedido,
-        COALESCE(SUM(CASE WHEN o.payment_status = 'pendiente' THEN CAST(o.total_amount AS decimal) ELSE 0 END), 0) as saldo_pendiente,
-        COUNT(o.id) as cantidad_pedidos
-      FROM orders o
-      LEFT JOIN enterprises e ON o.enterprise_id = e.id
-      LEFT JOIN customers c ON o.customer_id = c.id
-      WHERE o.company_id = $1
-        AND o.created_at >= DATE_TRUNC('month', NOW())
+        COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as total_facturado,
+        MAX(i.invoice_date) as ultimo_pedido,
+        COALESCE(SUM(
+          CAST(i.total_amount AS decimal) - COALESCE(
+            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+          )
+        ) FILTER (WHERE CAST(i.total_amount AS decimal) > COALESCE(
+          (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+        )), 0) as saldo_pendiente,
+        COUNT(i.id) as cantidad_pedidos
+      FROM invoices i
+      LEFT JOIN customers c ON i.customer_id = c.id
+      LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+      WHERE i.company_id = $1
+        AND i.status = 'authorized'
+        AND i.invoice_date >= DATE_TRUNC('month', NOW())
       GROUP BY COALESCE(e.name, c.name, 'Sin nombre'), e.cuit
       ORDER BY total_facturado DESC
       LIMIT 10
@@ -331,13 +345,21 @@ export async function queryBalances(
       const result = await pool.query(`
         SELECT
           COALESCE(e.name, c.name, 'Sin nombre') as nombre,
-          COALESCE(SUM(CASE WHEN o.payment_status = 'pendiente' THEN CAST(o.total_amount AS decimal) ELSE 0 END), 0) as por_cobrar,
-          COUNT(CASE WHEN o.payment_status = 'pendiente' THEN 1 END) as facturas_pendientes,
-          MAX(o.created_at) as ultimo_pedido
-        FROM orders o
-        LEFT JOIN enterprises e ON o.enterprise_id = e.id
-        LEFT JOIN customers c ON o.customer_id = c.id
-        WHERE o.company_id = $1
+          COALESCE(SUM(
+            CAST(i.total_amount AS decimal) - COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+          ), 0) as por_cobrar,
+          COUNT(*) as facturas_pendientes,
+          MAX(i.invoice_date) as ultimo_pedido
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+        WHERE i.company_id = $1
+          AND i.status = 'authorized'
+          AND CAST(i.total_amount AS decimal) > COALESCE(
+            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+          )
           AND (e.name ILIKE $2 OR c.name ILIKE $2)
         GROUP BY COALESCE(e.name, c.name, 'Sin nombre')
         ORDER BY por_cobrar DESC
@@ -492,15 +514,15 @@ export async function queryGeneral(
       getTopProducts(companyId, 3),
     ]);
 
-    // Month-over-month comparison
+    // Month-over-month comparison - from authorized invoices
     const momResult = await pool.query(`
       SELECT
-        COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', NOW()) THEN CAST(total_amount AS decimal) ELSE 0 END), 0) as mes_actual,
-        COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', NOW()) - INTERVAL '1 month'
-          AND created_at < DATE_TRUNC('month', NOW()) THEN CAST(total_amount AS decimal) ELSE 0 END), 0) as mes_anterior
-      FROM orders
+        COALESCE(SUM(CASE WHEN invoice_date >= DATE_TRUNC('month', NOW()) THEN CAST(total_amount AS decimal) ELSE 0 END), 0) as mes_actual,
+        COALESCE(SUM(CASE WHEN invoice_date >= DATE_TRUNC('month', NOW()) - INTERVAL '1 month'
+          AND invoice_date < DATE_TRUNC('month', NOW()) THEN CAST(total_amount AS decimal) ELSE 0 END), 0) as mes_anterior
+      FROM invoices
       WHERE company_id = $1
-        AND status NOT IN ('cancelado', 'cancelled')
+        AND status = 'authorized'
     `, [companyId]);
 
     const mom = momResult.rows[0] as any;
@@ -588,13 +610,14 @@ export async function morningBrief(companyId: string): Promise<ToolResult> {
     const chequesCount = parseInt(chequesRow?.cantidad || '0');
     const chequesTotal = parseFloat(chequesRow?.total || '0');
 
-    // Month-over-month sales
+    // Month sales - from authorized invoices
     const momResult = await pool.query(`
       SELECT
-        COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', NOW()) THEN CAST(total_amount AS decimal) ELSE 0 END), 0) as mes_actual
-      FROM orders
+        COALESCE(SUM(CAST(total_amount AS decimal)), 0) as mes_actual
+      FROM invoices
       WHERE company_id = $1
-        AND status NOT IN ('cancelado', 'cancelled')
+        AND status = 'authorized'
+        AND invoice_date >= DATE_TRUNC('month', NOW())
     `, [companyId]);
     const ventasMes = parseFloat((momResult.rows[0] as any)?.mes_actual || '0');
 

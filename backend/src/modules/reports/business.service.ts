@@ -1,4 +1,4 @@
-import { db, pool } from '../../config/db';
+import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -100,24 +100,6 @@ export class BusinessService {
   }
 
   /**
-   * Check if a column exists on a table.
-   */
-  private async columnExists(tableName: string, columnName: string): Promise<boolean> {
-    try {
-      const result = await db.execute(sql`
-        SELECT EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = ${tableName} AND column_name = ${columnName}
-        ) as exists
-      `);
-      const row = extractRows(result)[0];
-      return row?.exists === true || row?.exists === 't' || row?.exists === 'true';
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Ventas Report: revenue, orders count, AOV, sales by month, top products, sales by day of week
    */
   async getVentasReport(companyId: string, dateFrom?: string, dateTo?: string) {
@@ -125,73 +107,73 @@ export class BusinessService {
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
 
-    // Current period totals
-    const { totalFacturado, cantidadPedidos, ticketPromedio } = await safeQuery(
+    // Current period totals - from authorized invoices only
+    const { totalFacturado, cantidadFacturas, ticketPromedio } = await safeQuery(
       'ventas_totals',
       async () => {
         const currentResult = await db.execute(sql`
           SELECT
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total_facturado,
-            COUNT(*) as cantidad_pedidos,
+            COUNT(*) as cantidad_facturas,
             COALESCE(AVG(CAST(total_amount AS decimal)), 0) as ticket_promedio
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${dates.dateFrom}::date
-            AND created_at::date <= ${dates.dateTo}::date
+            AND status = 'authorized'
+            AND invoice_date::date >= ${dates.dateFrom}::date
+            AND invoice_date::date <= ${dates.dateTo}::date
         `);
         const curr = extractRows(currentResult)[0] || {};
         return {
           totalFacturado: parseFloat(curr.total_facturado) || 0,
-          cantidadPedidos: parseInt(curr.cantidad_pedidos) || 0,
+          cantidadFacturas: parseInt(curr.cantidad_facturas) || 0,
           ticketPromedio: parseFloat(curr.ticket_promedio) || 0,
         };
       },
-      { totalFacturado: 0, cantidadPedidos: 0, ticketPromedio: 0 },
+      { totalFacturado: 0, cantidadFacturas: 0, ticketPromedio: 0 },
       warnings,
     );
 
-    // Previous period totals
-    const { prevTotalFacturado, prevCantidadPedidos, prevTicketPromedio } = await safeQuery(
+    // Previous period totals - from authorized invoices only
+    const { prevTotalFacturado, prevCantidadFacturas, prevTicketPromedio } = await safeQuery(
       'ventas_prev_totals',
       async () => {
         const prevResult = await db.execute(sql`
           SELECT
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total_facturado,
-            COUNT(*) as cantidad_pedidos,
+            COUNT(*) as cantidad_facturas,
             COALESCE(AVG(CAST(total_amount AS decimal)), 0) as ticket_promedio
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${prev.dateFrom}::date
-            AND created_at::date <= ${prev.dateTo}::date
+            AND status = 'authorized'
+            AND invoice_date::date >= ${prev.dateFrom}::date
+            AND invoice_date::date <= ${prev.dateTo}::date
         `);
         const prevData = extractRows(prevResult)[0] || {};
         return {
           prevTotalFacturado: parseFloat(prevData.total_facturado) || 0,
-          prevCantidadPedidos: parseInt(prevData.cantidad_pedidos) || 0,
+          prevCantidadFacturas: parseInt(prevData.cantidad_facturas) || 0,
           prevTicketPromedio: parseFloat(prevData.ticket_promedio) || 0,
         };
       },
-      { prevTotalFacturado: 0, prevCantidadPedidos: 0, prevTicketPromedio: 0 },
+      { prevTotalFacturado: 0, prevCantidadFacturas: 0, prevTicketPromedio: 0 },
       warnings,
     );
 
-    // Sales by month (bar chart data)
+    // Sales by month (bar chart data) - from authorized invoices
     const ventasPorMes = await safeQuery(
       'ventas_por_mes',
       async () => {
         const monthlyResult = await db.execute(sql`
           SELECT
-            TO_CHAR(created_at, 'YYYY-MM') as periodo,
+            TO_CHAR(invoice_date, 'YYYY-MM') as periodo,
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total,
             COUNT(*) as cantidad
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${dates.dateFrom}::date
-            AND created_at::date <= ${dates.dateTo}::date
-          GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+            AND status = 'authorized'
+            AND invoice_date::date >= ${dates.dateFrom}::date
+            AND invoice_date::date <= ${dates.dateTo}::date
+          GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
           ORDER BY periodo ASC
         `);
         return extractRows(monthlyResult).map((r: any) => ({
@@ -204,20 +186,20 @@ export class BusinessService {
       warnings,
     );
 
-    // Previous period monthly for comparison
+    // Previous period monthly for comparison - from authorized invoices
     const ventasPrevMes = await safeQuery(
       'ventas_prev_mes',
       async () => {
         const prevMonthlyResult = await db.execute(sql`
           SELECT
-            TO_CHAR(created_at, 'YYYY-MM') as periodo,
+            TO_CHAR(invoice_date, 'YYYY-MM') as periodo,
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${prev.dateFrom}::date
-            AND created_at::date <= ${prev.dateTo}::date
-          GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+            AND status = 'authorized'
+            AND invoice_date::date >= ${prev.dateFrom}::date
+            AND invoice_date::date <= ${prev.dateTo}::date
+          GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
           ORDER BY periodo ASC
         `);
         return extractRows(prevMonthlyResult).map((r: any) => ({
@@ -229,22 +211,22 @@ export class BusinessService {
       warnings,
     );
 
-    // Top 5 products by revenue
+    // Top 5 products by revenue - from authorized invoices
     const topProductos = await safeQuery(
       'top_productos',
       async () => {
         const topProductsResult = await db.execute(sql`
           SELECT
-            COALESCE(oi.product_name, 'Sin nombre') as nombre,
-            SUM(CAST(oi.quantity AS decimal)) as unidades,
-            SUM(CAST(oi.subtotal AS decimal)) as revenue
-          FROM order_items oi
-          JOIN orders o ON oi.order_id = o.id
-          WHERE o.company_id = ${companyId}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            AND o.created_at::date >= ${dates.dateFrom}::date
-            AND o.created_at::date <= ${dates.dateTo}::date
-          GROUP BY oi.product_name
+            COALESCE(ii.product_name, 'Sin nombre') as nombre,
+            SUM(CAST(ii.quantity AS decimal)) as unidades,
+            SUM(CAST(ii.subtotal AS decimal)) as revenue
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date::date >= ${dates.dateFrom}::date
+            AND i.invoice_date::date <= ${dates.dateTo}::date
+          GROUP BY ii.product_name
           ORDER BY revenue DESC
           LIMIT 5
         `);
@@ -258,21 +240,21 @@ export class BusinessService {
       warnings,
     );
 
-    // Sales by day of week
+    // Sales by day of week - from authorized invoices
     const ventasPorDia = await safeQuery(
       'ventas_por_dia',
       async () => {
         const dayOfWeekResult = await db.execute(sql`
           SELECT
-            EXTRACT(DOW FROM created_at) as dow,
+            EXTRACT(DOW FROM invoice_date) as dow,
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total,
             COUNT(*) as cantidad
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${dates.dateFrom}::date
-            AND created_at::date <= ${dates.dateTo}::date
-          GROUP BY EXTRACT(DOW FROM created_at)
+            AND status = 'authorized'
+            AND invoice_date::date >= ${dates.dateFrom}::date
+            AND invoice_date::date <= ${dates.dateTo}::date
+          GROUP BY EXTRACT(DOW FROM invoice_date)
           ORDER BY dow ASC
         `);
         const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
@@ -290,8 +272,8 @@ export class BusinessService {
       summary: {
         total_facturado: round2(totalFacturado),
         total_facturado_delta: deltaPercent(totalFacturado, prevTotalFacturado),
-        cantidad_pedidos: cantidadPedidos,
-        cantidad_pedidos_delta: deltaPercent(cantidadPedidos, prevCantidadPedidos),
+        cantidad_pedidos: cantidadFacturas,
+        cantidad_pedidos_delta: deltaPercent(cantidadFacturas, prevCantidadFacturas),
         ticket_promedio: round2(ticketPromedio),
         ticket_promedio_delta: deltaPercent(ticketPromedio, prevTicketPromedio),
       },
@@ -311,31 +293,31 @@ export class BusinessService {
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
 
-    // Margin by product
+    // Margin by product - from authorized invoices only
     const productos = await safeQuery(
       'rentabilidad_productos',
       async () => {
         const marginResult = await db.execute(sql`
           SELECT
-            COALESCE(oi.product_name, 'Sin nombre') as nombre,
-            oi.product_id,
-            SUM(CAST(oi.quantity AS decimal)) as unidades,
-            SUM(CAST(oi.subtotal AS decimal)) as revenue,
-            SUM(CAST(oi.quantity AS decimal) * COALESCE(CAST(oi.cost AS decimal), 0)) as costo_total,
+            COALESCE(ii.product_name, 'Sin nombre') as nombre,
+            ii.product_id,
+            SUM(CAST(ii.quantity AS decimal)) as unidades,
+            SUM(CAST(ii.subtotal AS decimal)) as revenue,
+            SUM(CAST(ii.quantity AS decimal) * COALESCE(CAST(ii.cost AS decimal), 0)) as costo_total,
             CASE
-              WHEN SUM(CAST(oi.subtotal AS decimal)) > 0
-              THEN ROUND(100 * (1 - SUM(CAST(oi.quantity AS decimal) * COALESCE(CAST(oi.cost AS decimal), 0)) / NULLIF(SUM(CAST(oi.subtotal AS decimal)), 1)), 1)
+              WHEN SUM(CAST(ii.subtotal AS decimal)) > 0
+              THEN ROUND(100 * (1 - SUM(CAST(ii.quantity AS decimal) * COALESCE(CAST(ii.cost AS decimal), 0)) / NULLIF(SUM(CAST(ii.subtotal AS decimal)), 1)), 1)
               ELSE 0
             END as margen_pct,
-            BOOL_OR(COALESCE(CAST(oi.cost AS decimal), 0) = 0) as sin_costo
-          FROM order_items oi
-          JOIN orders o ON oi.order_id = o.id
-          WHERE o.company_id = ${companyId}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            AND o.created_at::date >= ${dates.dateFrom}::date
-            AND o.created_at::date <= ${dates.dateTo}::date
-          GROUP BY oi.product_name, oi.product_id
-          ORDER BY (SUM(CAST(oi.subtotal AS decimal)) - SUM(CAST(oi.quantity AS decimal) * COALESCE(CAST(oi.cost AS decimal), 0))) DESC
+            BOOL_OR(COALESCE(CAST(ii.cost AS decimal), 0) = 0) as sin_costo
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date::date >= ${dates.dateFrom}::date
+            AND i.invoice_date::date <= ${dates.dateTo}::date
+          GROUP BY ii.product_name, ii.product_id
+          ORDER BY (SUM(CAST(ii.subtotal AS decimal)) - SUM(CAST(ii.quantity AS decimal) * COALESCE(CAST(ii.cost AS decimal), 0))) DESC
           LIMIT 50
         `);
         return extractRows(marginResult).map((r: any) => {
@@ -367,20 +349,20 @@ export class BusinessService {
     const productosMargenBajo = productos.filter(p => p.margen_pct < 15 && !p.sin_costo).length;
     const productosMargenNegativo = productos.filter(p => p.margen < 0 && !p.sin_costo).length;
 
-    // Previous period for delta
+    // Previous period for delta - from authorized invoices
     const { prevMargenTotal, prevMargenPct } = await safeQuery(
       'rentabilidad_prev',
       async () => {
         const prevMarginResult = await db.execute(sql`
           SELECT
-            COALESCE(SUM(CAST(oi.subtotal AS decimal)), 0) as revenue,
-            COALESCE(SUM(CAST(oi.quantity AS decimal) * COALESCE(CAST(oi.cost AS decimal), 0)), 0) as costo
-          FROM order_items oi
-          JOIN orders o ON oi.order_id = o.id
-          WHERE o.company_id = ${companyId}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            AND o.created_at::date >= ${prev.dateFrom}::date
-            AND o.created_at::date <= ${prev.dateTo}::date
+            COALESCE(SUM(CAST(ii.subtotal AS decimal)), 0) as revenue,
+            COALESCE(SUM(CAST(ii.quantity AS decimal) * COALESCE(CAST(ii.cost AS decimal), 0)), 0) as costo
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date::date >= ${prev.dateFrom}::date
+            AND i.invoice_date::date <= ${prev.dateTo}::date
         `);
         const prevMargin = extractRows(prevMarginResult)[0] || {};
         const pRevenue = parseFloat(prevMargin.revenue) || 0;
@@ -423,28 +405,28 @@ export class BusinessService {
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
 
-    // Top 10 clients by revenue in period
+    // Top 10 clients by revenue in period - from authorized invoices
     const topClientes = await safeQuery(
       'clientes_top',
       async () => {
         const topClientsResult = await db.execute(sql`
           SELECT
             COALESCE(e.name, c.name, 'Sin cliente') as nombre,
-            o.enterprise_id,
-            o.customer_id,
+            i.enterprise_id,
+            i.customer_id,
             COUNT(*) as cantidad_compras,
-            SUM(CAST(o.total_amount AS decimal)) as revenue,
-            AVG(CAST(o.total_amount AS decimal)) as ticket_promedio,
-            MAX(o.created_at) as ultima_compra
-          FROM orders o
-          LEFT JOIN enterprises e ON o.enterprise_id = e.id
-          LEFT JOIN customers c ON o.customer_id = c.id
-          WHERE o.company_id = ${companyId}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            AND o.created_at::date >= ${dates.dateFrom}::date
-            AND o.created_at::date <= ${dates.dateTo}::date
-            AND (o.enterprise_id IS NOT NULL OR o.customer_id IS NOT NULL)
-          GROUP BY COALESCE(e.name, c.name, 'Sin cliente'), o.enterprise_id, o.customer_id
+            SUM(CAST(i.total_amount AS decimal)) as revenue,
+            AVG(CAST(i.total_amount AS decimal)) as ticket_promedio,
+            MAX(i.invoice_date) as ultima_compra
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date::date >= ${dates.dateFrom}::date
+            AND i.invoice_date::date <= ${dates.dateTo}::date
+            AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
+          GROUP BY COALESCE(e.name, c.name, 'Sin cliente'), i.enterprise_id, i.customer_id
           ORDER BY revenue DESC
           LIMIT 10
         `);
@@ -462,17 +444,17 @@ export class BusinessService {
       warnings,
     );
 
-    // Total revenue + concentration
+    // Total revenue + concentration - from authorized invoices
     const { concentracionTop5, totalRevenue } = await safeQuery(
       'clientes_concentracion',
       async () => {
         const totalRevenueResult = await db.execute(sql`
           SELECT COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
-          FROM orders
+          FROM invoices
           WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${dates.dateFrom}::date
-            AND created_at::date <= ${dates.dateTo}::date
+            AND status = 'authorized'
+            AND invoice_date::date >= ${dates.dateFrom}::date
+            AND invoice_date::date <= ${dates.dateTo}::date
         `);
         const tr = parseFloat(extractRows(totalRevenueResult)[0]?.total) || 0;
         const top5Rev = topClientes.slice(0, 5).reduce((s, c) => s + c.revenue, 0);
@@ -485,18 +467,18 @@ export class BusinessService {
       warnings,
     );
 
-    // Active clients count
+    // Active clients count - from authorized invoices
     const clientesActivos = await safeQuery(
       'clientes_activos',
       async () => {
         const activeResult = await db.execute(sql`
-          SELECT COUNT(DISTINCT COALESCE(enterprise_id::text, customer_id::text)) as activos
-          FROM orders
-          WHERE company_id = ${companyId}
-            AND status NOT IN ('cancelado', 'cancelled')
-            AND created_at::date >= ${dates.dateFrom}::date
-            AND created_at::date <= ${dates.dateTo}::date
-            AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
+          SELECT COUNT(DISTINCT COALESCE(i.enterprise_id::text, i.customer_id::text)) as activos
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND i.invoice_date::date >= ${dates.dateFrom}::date
+            AND i.invoice_date::date <= ${dates.dateTo}::date
+            AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
         `);
         return parseInt(extractRows(activeResult)[0]?.activos) || 0;
       },
@@ -504,25 +486,25 @@ export class BusinessService {
       warnings,
     );
 
-    // New clients
+    // New clients - from authorized invoices
     const clientesNuevos = await safeQuery(
       'clientes_nuevos',
       async () => {
         const newClientsResult = await db.execute(sql`
-          WITH first_orders AS (
+          WITH first_invoices AS (
             SELECT
               COALESCE(enterprise_id::text, customer_id::text) as client_key,
-              MIN(created_at) as primera_compra
-            FROM orders
+              MIN(invoice_date) as primera_factura
+            FROM invoices
             WHERE company_id = ${companyId}
-              AND status NOT IN ('cancelado', 'cancelled')
+              AND status = 'authorized'
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
           SELECT COUNT(*) as nuevos
-          FROM first_orders
-          WHERE primera_compra::date >= ${dates.dateFrom}::date
-            AND primera_compra::date <= ${dates.dateTo}::date
+          FROM first_invoices
+          WHERE primera_factura::date >= ${dates.dateFrom}::date
+            AND primera_factura::date <= ${dates.dateTo}::date
         `);
         return parseInt(extractRows(newClientsResult)[0]?.nuevos) || 0;
       },
@@ -530,25 +512,25 @@ export class BusinessService {
       warnings,
     );
 
-    // Previous period new clients
+    // Previous period new clients - from authorized invoices
     const prevClientesNuevos = await safeQuery(
       'clientes_prev_nuevos',
       async () => {
         const prevNewClientsResult = await db.execute(sql`
-          WITH first_orders AS (
+          WITH first_invoices AS (
             SELECT
               COALESCE(enterprise_id::text, customer_id::text) as client_key,
-              MIN(created_at) as primera_compra
-            FROM orders
+              MIN(invoice_date) as primera_factura
+            FROM invoices
             WHERE company_id = ${companyId}
-              AND status NOT IN ('cancelado', 'cancelled')
+              AND status = 'authorized'
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
           SELECT COUNT(*) as nuevos
-          FROM first_orders
-          WHERE primera_compra::date >= ${prev.dateFrom}::date
-            AND primera_compra::date <= ${prev.dateTo}::date
+          FROM first_invoices
+          WHERE primera_factura::date >= ${prev.dateFrom}::date
+            AND primera_factura::date <= ${prev.dateTo}::date
         `);
         return parseInt(extractRows(prevNewClientsResult)[0]?.nuevos) || 0;
       },
@@ -558,7 +540,7 @@ export class BusinessService {
 
     const clientesRecurrentes = Math.max(0, clientesActivos - clientesNuevos);
 
-    // Inactive clients
+    // Inactive clients - from authorized invoices
     const clientesInactivos = await safeQuery(
       'clientes_inactivos',
       async () => {
@@ -566,21 +548,21 @@ export class BusinessService {
           SELECT
             COALESCE(e.name, c.name, 'Sin nombre') as nombre,
             sub.client_key,
-            sub.ultima_compra,
+            sub.ultima_factura,
             sub.total_historico
           FROM (
             SELECT
-              COALESCE(o.enterprise_id::text, o.customer_id::text) as client_key,
-              o.enterprise_id,
-              o.customer_id,
-              MAX(o.created_at) as ultima_compra,
-              SUM(CAST(o.total_amount AS decimal)) as total_historico
-            FROM orders o
-            WHERE o.company_id = ${companyId}
-              AND o.status NOT IN ('cancelado', 'cancelled')
-              AND (o.enterprise_id IS NOT NULL OR o.customer_id IS NOT NULL)
-            GROUP BY COALESCE(o.enterprise_id::text, o.customer_id::text), o.enterprise_id, o.customer_id
-            HAVING MAX(o.created_at)::date < (CURRENT_DATE - INTERVAL '30 days')
+              COALESCE(i.enterprise_id::text, i.customer_id::text) as client_key,
+              i.enterprise_id,
+              i.customer_id,
+              MAX(i.invoice_date) as ultima_factura,
+              SUM(CAST(i.total_amount AS decimal)) as total_historico
+            FROM invoices i
+            WHERE i.company_id = ${companyId}
+              AND i.status = 'authorized'
+              AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
+            GROUP BY COALESCE(i.enterprise_id::text, i.customer_id::text), i.enterprise_id, i.customer_id
+            HAVING MAX(i.invoice_date)::date < (CURRENT_DATE - INTERVAL '30 days')
           ) sub
           LEFT JOIN enterprises e ON sub.enterprise_id = e.id
           LEFT JOIN customers c ON sub.customer_id = c.id
@@ -589,7 +571,7 @@ export class BusinessService {
         `);
         return extractRows(inactiveResult).map((r: any) => ({
           nombre: r.nombre,
-          ultima_compra: r.ultima_compra,
+          ultima_compra: r.ultima_factura,
           total_historico: round2(parseFloat(r.total_historico) || 0),
         }));
       },
@@ -622,23 +604,7 @@ export class BusinessService {
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
 
-    // Pre-check which tables/columns exist to build correct queries
-    const cobrosExists = await this.tableExists('cobros');
-    const hasPaymentStatus = await this.columnExists('orders', 'payment_status');
-
-    if (!cobrosExists) warnings.push('Tabla cobros no existe; datos de cobros seran cero');
-    if (!hasPaymentStatus) warnings.push('Columna payment_status no existe en orders; aging basado en status pendiente');
-
-    const cobrosSubquery = cobrosExists
-      ? `COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id), 0)`
-      : `0`;
-
-    // Build the WHERE clause for pending orders based on available columns
-    const pendingFilter = hasPaymentStatus
-      ? `o.payment_status = 'pendiente'`
-      : `o.status = 'pendiente'`;
-
-    // --- Aging report ---
+    // --- Aging report --- based on authorized invoices with payments
     const allBuckets = ['al_dia', '1_30', '31_60', '61_90', '90_plus'];
     const bucketLabels: Record<string, string> = {
       'al_dia': 'Al dia',
@@ -658,36 +624,29 @@ export class BusinessService {
     const aging = await safeQuery(
       'cobranzas_aging',
       async () => {
-        // Use CTE to pre-calculate remaining amounts per order, then bucket
-        const cobrosJoin = cobrosExists
-          ? `LEFT JOIN (SELECT order_id, SUM(CAST(amount AS decimal)) as total_cobrado FROM cobros GROUP BY order_id) cb ON cb.order_id = o.id`
-          : ``;
-        const remainingExpr = cobrosExists
-          ? `CAST(o.total_amount AS decimal) - COALESCE(cb.total_cobrado, 0)`
-          : `CAST(o.total_amount AS decimal)`;
-        const remainingFilter = cobrosExists
-          ? `AND CAST(o.total_amount AS decimal) > COALESCE(cb.total_cobrado, 0)`
-          : ``;
-
-        const agingResult = await pool.query(`
+        const agingResult = await db.execute(sql`
           SELECT
             CASE
-              WHEN CURRENT_DATE - o.created_at::date <= 0 THEN 'al_dia'
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 1 AND 30 THEN '1_30'
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 31 AND 60 THEN '31_60'
-              WHEN CURRENT_DATE - o.created_at::date BETWEEN 61 AND 90 THEN '61_90'
+              WHEN GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::integer) <= 0 THEN 'al_dia'
+              WHEN GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::integer) BETWEEN 1 AND 30 THEN '1_30'
+              WHEN GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::integer) BETWEEN 31 AND 60 THEN '31_60'
+              WHEN GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::integer) BETWEEN 61 AND 90 THEN '61_90'
               ELSE '90_plus'
             END as bucket,
             COUNT(*) as cantidad,
-            COALESCE(SUM(${remainingExpr}), 0) as monto
-          FROM orders o
-          ${cobrosJoin}
-          WHERE o.company_id = $1
-            AND ${pendingFilter}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            ${remainingFilter}
+            COALESCE(SUM(
+              CAST(i.total_amount AS decimal) - COALESCE(
+                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              )
+            ), 0) as monto
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND CAST(i.total_amount AS decimal) > COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
           GROUP BY 1
-        `, [companyId]);
+        `);
 
         const agingMap = new Map<string, { cantidad: number; monto: number }>();
         for (const r of extractRows(agingResult)) {
@@ -723,121 +682,115 @@ export class BusinessService {
       .filter(a => ['31_60', '61_90', '90_plus'].includes(a.bucket))
       .reduce((s, a) => s + a.monto, 0);
 
-    // DSO & collections: only query if cobros table exists
+    // DSO from payments on authorized invoices
     let dsoPromedio = 0;
     let prevDsoPromedio = 0;
     let cobranzasPeriodo = 0;
     let prevCobranzasPeriodo = 0;
 
-    if (cobrosExists) {
-      dsoPromedio = await safeQuery(
-        'cobranzas_dso',
-        async () => {
-          const dsoResult = await db.execute(sql`
-            SELECT AVG(
-              EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
-            ) as dso_promedio
-            FROM cobros cb
-            JOIN orders o ON cb.order_id = o.id
-            WHERE o.company_id = ${companyId}
-              AND cb.payment_date::date >= ${dates.dateFrom}::date
-              AND cb.payment_date::date <= ${dates.dateTo}::date
-          `);
-          return round2(parseFloat(extractRows(dsoResult)[0]?.dso_promedio) || 0);
-        },
-        0,
-        warnings,
-      );
+    dsoPromedio = await safeQuery(
+      'cobranzas_dso',
+      async () => {
+        const dsoResult = await db.execute(sql`
+          SELECT AVG(
+            EXTRACT(DAY FROM p.payment_date - i.invoice_date)
+          )::integer as dso_promedio
+          FROM payments p
+          JOIN invoices i ON p.invoice_id = i.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND p.payment_date::date >= ${dates.dateFrom}::date
+            AND p.payment_date::date <= ${dates.dateTo}::date
+        `);
+        return round2(parseFloat(extractRows(dsoResult)[0]?.dso_promedio) || 0);
+      },
+      0,
+      warnings,
+    );
 
-      prevDsoPromedio = await safeQuery(
-        'cobranzas_prev_dso',
-        async () => {
-          const prevDsoResult = await db.execute(sql`
-            SELECT AVG(
-              EXTRACT(EPOCH FROM (cb.payment_date - o.created_at)) / 86400
-            ) as dso_promedio
-            FROM cobros cb
-            JOIN orders o ON cb.order_id = o.id
-            WHERE o.company_id = ${companyId}
-              AND cb.payment_date::date >= ${prev.dateFrom}::date
-              AND cb.payment_date::date <= ${prev.dateTo}::date
-          `);
-          return round2(parseFloat(extractRows(prevDsoResult)[0]?.dso_promedio) || 0);
-        },
-        0,
-        warnings,
-      );
+    prevDsoPromedio = await safeQuery(
+      'cobranzas_prev_dso',
+      async () => {
+        const prevDsoResult = await db.execute(sql`
+          SELECT AVG(
+            EXTRACT(DAY FROM p.payment_date - i.invoice_date)
+          )::integer as dso_promedio
+          FROM payments p
+          JOIN invoices i ON p.invoice_id = i.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND p.payment_date::date >= ${prev.dateFrom}::date
+            AND p.payment_date::date <= ${prev.dateTo}::date
+        `);
+        return round2(parseFloat(extractRows(prevDsoResult)[0]?.dso_promedio) || 0);
+      },
+      0,
+      warnings,
+    );
 
-      cobranzasPeriodo = await safeQuery(
-        'cobranzas_periodo',
-        async () => {
-          const cobrosResult = await db.execute(sql`
-            SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-            FROM cobros
-            WHERE company_id = ${companyId}
-              AND COALESCE(payment_date, created_at)::date >= ${dates.dateFrom}::date
-              AND COALESCE(payment_date, created_at)::date <= ${dates.dateTo}::date
-          `);
-          return parseFloat(extractRows(cobrosResult)[0]?.total) || 0;
-        },
-        0,
-        warnings,
-      );
+    cobranzasPeriodo = await safeQuery(
+      'cobranzas_periodo',
+      async () => {
+        const cobrosResult = await db.execute(sql`
+          SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM payments
+          WHERE company_id = ${companyId}
+            AND payment_date::date >= ${dates.dateFrom}::date
+            AND payment_date::date <= ${dates.dateTo}::date
+        `);
+        return parseFloat(extractRows(cobrosResult)[0]?.total) || 0;
+      },
+      0,
+      warnings,
+    );
 
-      prevCobranzasPeriodo = await safeQuery(
-        'cobranzas_prev_periodo',
-        async () => {
-          const prevCobrosResult = await db.execute(sql`
-            SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-            FROM cobros
-            WHERE company_id = ${companyId}
-              AND COALESCE(payment_date, created_at)::date >= ${prev.dateFrom}::date
-              AND COALESCE(payment_date, created_at)::date <= ${prev.dateTo}::date
-          `);
-          return parseFloat(extractRows(prevCobrosResult)[0]?.total) || 0;
-        },
-        0,
-        warnings,
-      );
-    }
+    prevCobranzasPeriodo = await safeQuery(
+      'cobranzas_prev_periodo',
+      async () => {
+        const prevCobrosResult = await db.execute(sql`
+          SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
+          FROM payments
+          WHERE company_id = ${companyId}
+            AND payment_date::date >= ${prev.dateFrom}::date
+            AND payment_date::date <= ${prev.dateTo}::date
+        `);
+        return parseFloat(extractRows(prevCobrosResult)[0]?.total) || 0;
+      },
+      0,
+      warnings,
+    );
 
-    // Top 5 delinquent clients
+    // Top 5 delinquent clients - from authorized invoices
     const morosos = await safeQuery(
       'cobranzas_morosos',
       async () => {
-        const cobrosJoinM = cobrosExists
-          ? `LEFT JOIN (SELECT order_id, SUM(CAST(amount AS decimal)) as total_cobrado FROM cobros GROUP BY order_id) cb ON cb.order_id = o.id`
-          : ``;
-        const remainingExprM = cobrosExists
-          ? `CAST(o.total_amount AS decimal) - COALESCE(cb.total_cobrado, 0)`
-          : `CAST(o.total_amount AS decimal)`;
-        const remainingFilterM = cobrosExists
-          ? `AND CAST(o.total_amount AS decimal) > COALESCE(cb.total_cobrado, 0)`
-          : ``;
-
-        const morososResult = await pool.query(`
+        const morososResult = await db.execute(sql`
           SELECT
             COALESCE(e.name, c.name, 'Sin cliente') as nombre,
-            SUM(${remainingExprM}) as monto_pendiente,
-            COUNT(*) as pedidos_pendientes,
-            MAX(CURRENT_DATE - o.created_at::date) as dias_max_atraso
-          FROM orders o
-          ${cobrosJoinM}
-          LEFT JOIN enterprises e ON o.enterprise_id = e.id
-          LEFT JOIN customers c ON o.customer_id = c.id
-          WHERE o.company_id = $1
-            AND ${pendingFilter}
-            AND o.status NOT IN ('cancelado', 'cancelled')
-            ${remainingFilterM}
-            AND (o.enterprise_id IS NOT NULL OR o.customer_id IS NOT NULL)
+            SUM(
+              CAST(i.total_amount AS decimal) - COALESCE(
+                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              )
+            ) as monto_pendiente,
+            COUNT(*) as facturas_pendientes,
+            MAX(GREATEST(0, EXTRACT(DAY FROM NOW() - COALESCE(i.due_date, i.invoice_date))::integer)) as dias_max_atraso
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+          WHERE i.company_id = ${companyId}
+            AND i.status = 'authorized'
+            AND CAST(i.total_amount AS decimal) > COALESCE(
+              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            )
+            AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
           GROUP BY COALESCE(e.name, c.name, 'Sin cliente')
           ORDER BY monto_pendiente DESC
           LIMIT 5
-        `, [companyId]);
+        `);
         return extractRows(morososResult).map((r: any) => ({
           nombre: r.nombre,
           monto_pendiente: round2(parseFloat(r.monto_pendiente) || 0),
-          pedidos_pendientes: parseInt(r.pedidos_pendientes) || 0,
+          pedidos_pendientes: parseInt(r.facturas_pendientes) || 0,
           dias_max_atraso: parseInt(r.dias_max_atraso) || 0,
         }));
       },

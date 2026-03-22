@@ -16,7 +16,7 @@ export class CuentaCorrienteService {
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.status = 'authorized'
-              AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+              AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
           ), 0) as total_ventas,
           COALESCE((
             SELECT SUM(CAST(co.amount AS decimal))
@@ -102,7 +102,7 @@ export class CuentaCorrienteService {
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
             AND i.status = 'authorized'
-            AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+            AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
         `);
       } catch (e) {
         console.error('Cuenta corriente: invoices query failed, falling back to empty', (e as any)?.message);
@@ -246,7 +246,7 @@ export class CuentaCorrienteService {
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
             AND i.status = 'authorized'
-            AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+            AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
         `);
       } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
 

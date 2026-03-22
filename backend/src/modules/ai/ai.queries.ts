@@ -90,6 +90,8 @@ export async function getCompanySummary(companyId: string): Promise<Record<strin
         COUNT(CASE WHEN payment_status = 'pendiente' THEN 1 END) as unpaid_orders
       FROM orders WHERE company_id = $1
     `, [companyId]),
+    // NOTE: total_revenue from orders is kept for operational context;
+    // total_invoiced from the next query is the real "facturado" number.
     pool.query(`
       SELECT
         COUNT(*) as total_invoices,
@@ -120,13 +122,14 @@ export async function getCompanySummary(companyId: string): Promise<Record<strin
 export async function getSalesData(companyId: string, daysBack: number = 30): Promise<Record<string, any>> {
   const result = await pool.query(`
     SELECT
-      DATE_TRUNC('day', created_at) as day,
+      DATE_TRUNC('day', invoice_date) as day,
       COUNT(*) as order_count,
       COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
-    FROM orders
+    FROM invoices
     WHERE company_id = $1
-      AND created_at >= NOW() - INTERVAL '${daysBack} days'
-    GROUP BY DATE_TRUNC('day', created_at)
+      AND status = 'authorized'
+      AND invoice_date >= NOW() - INTERVAL '${daysBack} days'
+    GROUP BY DATE_TRUNC('day', invoice_date)
     ORDER BY day DESC
   `, [companyId]);
 
@@ -145,13 +148,14 @@ export async function getTopCustomers(companyId: string, limit: number = 10): Pr
   const result = await pool.query(`
     SELECT
       COALESCE(e.name, c.name, 'Sin nombre') as customer_name,
-      COUNT(o.id) as order_count,
-      COALESCE(SUM(CAST(o.total_amount AS decimal)), 0) as total_revenue,
-      MAX(o.created_at) as last_order_date
-    FROM orders o
-    LEFT JOIN enterprises e ON o.enterprise_id = e.id
-    LEFT JOIN customers c ON o.customer_id = c.id
-    WHERE o.company_id = $1
+      COUNT(i.id) as order_count,
+      COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as total_revenue,
+      MAX(i.invoice_date) as last_order_date
+    FROM invoices i
+    LEFT JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
+    WHERE i.company_id = $1
+      AND i.status = 'authorized'
     GROUP BY COALESCE(e.name, c.name, 'Sin nombre')
     ORDER BY total_revenue DESC
     LIMIT $2
@@ -169,15 +173,16 @@ export async function getTopCustomers(companyId: string, limit: number = 10): Pr
 export async function getTopProducts(companyId: string, limit: number = 10): Promise<any[]> {
   const result = await pool.query(`
     SELECT
-      oi.product_name,
-      COALESCE(SUM(oi.quantity), 0) as total_quantity,
-      COALESCE(SUM(CAST(oi.subtotal AS decimal)), 0) as total_revenue,
-      COALESCE(AVG(CAST(oi.unit_price AS decimal)), 0) as avg_price,
-      COALESCE(AVG(CAST(oi.cost AS decimal)), 0) as avg_cost
-    FROM order_items oi
-    JOIN orders o ON oi.order_id = o.id
-    WHERE o.company_id = $1
-    GROUP BY oi.product_name
+      ii.product_name,
+      COALESCE(SUM(ii.quantity), 0) as total_quantity,
+      COALESCE(SUM(CAST(ii.subtotal AS decimal)), 0) as total_revenue,
+      COALESCE(AVG(CAST(ii.unit_price AS decimal)), 0) as avg_price,
+      COALESCE(AVG(CAST(ii.cost AS decimal)), 0) as avg_cost
+    FROM invoice_items ii
+    JOIN invoices i ON ii.invoice_id = i.id
+    WHERE i.company_id = $1
+      AND i.status = 'authorized'
+    GROUP BY ii.product_name
     ORDER BY total_revenue DESC
     LIMIT $2
   `, [companyId, limit]);
@@ -214,9 +219,17 @@ export async function getCollectionsSummary(companyId: string): Promise<Record<s
     pool.query(`
       SELECT
         COUNT(*) as pending_count,
-        COALESCE(SUM(CAST(total_amount AS decimal)), 0) as pending_amount
-      FROM orders
-      WHERE company_id = $1 AND payment_status = 'pendiente'
+        COALESCE(SUM(
+          CAST(i.total_amount AS decimal) - COALESCE(
+            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+          )
+        ), 0) as pending_amount
+      FROM invoices i
+      WHERE i.company_id = $1
+        AND i.status = 'authorized'
+        AND CAST(i.total_amount AS decimal) > COALESCE(
+          (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+        )
     `, [companyId]),
   ]);
 
