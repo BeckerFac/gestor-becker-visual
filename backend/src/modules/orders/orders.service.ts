@@ -501,23 +501,42 @@ export class OrdersService {
 
   private async deductStockForOrder(companyId: string, orderId: string, userId: string, items: any[]) {
     try {
-      // Get default warehouse
+      // Get or create default warehouse
       const whResult = await db.execute(sql`SELECT id FROM warehouses WHERE company_id = ${companyId} LIMIT 1`);
-      const warehouseId = ((whResult as any).rows || [])[0]?.id;
-      if (!warehouseId) return;
+      let warehouseId = ((whResult as any).rows || [])[0]?.id;
+      if (!warehouseId) {
+        // Create default warehouse if none exists
+        warehouseId = uuid();
+        await db.execute(sql`
+          INSERT INTO warehouses (id, company_id, name, is_default)
+          VALUES (${warehouseId}, ${companyId}, 'Principal', true)
+        `);
+      }
 
       for (const item of items) {
         if (!item.product_id || item.product_id === 'custom') continue;
 
-        // Check if product has controls_stock=true
+        // Verify product exists (don't require controls_stock — user explicitly chose to deduct)
         const productResult = await db.execute(sql`
           SELECT id, controls_stock FROM products WHERE id = ${item.product_id} AND company_id = ${companyId}
         `);
         const productRows = (productResult as any).rows || productResult || [];
-        if (productRows.length === 0 || !productRows[0].controls_stock) continue;
+        if (productRows.length === 0) continue;
 
         const quantity = parseFloat(String(item.quantity)) || 0;
         if (quantity <= 0) continue;
+
+        // Auto-enable controls_stock on the product (since user wants stock tracking)
+        if (!productRows[0].controls_stock) {
+          await db.execute(sql`UPDATE products SET controls_stock = true WHERE id = ${item.product_id}`);
+        }
+
+        // Ensure stock record exists for this product/warehouse (upsert)
+        await db.execute(sql`
+          INSERT INTO stock (id, product_id, warehouse_id, quantity, min_level, max_level)
+          VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, '0', '0', '0')
+          ON CONFLICT (product_id, warehouse_id) DO NOTHING
+        `);
 
         // Create stock movement
         await db.execute(sql`
@@ -525,7 +544,7 @@ export class OrdersService {
           VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, 'sale', ${quantity.toString()}, 'order', ${orderId}, ${'Descuento por pedido'}, ${userId})
         `);
 
-        // Update stock
+        // Update stock (decrease, floor at 0)
         await db.execute(sql`
           UPDATE stock SET quantity = CAST(GREATEST(CAST(quantity AS decimal) - ${quantity}, 0) AS VARCHAR), updated_at = NOW()
           WHERE product_id = ${item.product_id} AND warehouse_id = ${warehouseId}
