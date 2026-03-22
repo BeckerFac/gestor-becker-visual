@@ -53,9 +53,10 @@ interface Order {
 }
 
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
-interface Product { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string }
+interface Product { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string; category_id?: string | null; product_type?: string | null }
 interface Enterprise { id: string; name: string; cuit?: string | null; price_list_id?: string | null }
 interface Bank { id: string; bank_name: string }
+interface Category { id: string; name: string; parent_id: string | null; color?: string | null; product_count?: number; child_product_count?: number }
 
 interface FormItem {
   product_id: string
@@ -66,6 +67,7 @@ interface FormItem {
   cost: number
   product_type: string
   deduct_stock: boolean
+  category_ids: string[]
 }
 
 interface InvoicingStatusData {
@@ -134,6 +136,7 @@ const emptyFormItem = (): FormItem => ({
   cost: 0,
   product_type: 'otro',
   deduct_stock: false,
+  category_ids: [],
 })
 
 const ORDER_DRAFT_KEY = 'bv_order_draft'
@@ -146,6 +149,9 @@ export const Orders: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
   const [productTypes, setProductTypes] = useState<string[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [showNewBankInput, setShowNewBankInput] = useState(false)
+  const [newBankName, setNewBankName] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -215,7 +221,7 @@ export const Orders: React.FC = () => {
         try {
           const draft = JSON.parse(saved)
           if (draft.form) setForm(draft.form)
-          if (draft.formItems?.length) setFormItems(draft.formItems)
+          if (draft.formItems?.length) setFormItems(draft.formItems.map((item: any) => ({ ...emptyFormItem(), ...item, category_ids: item.category_ids || [] })))
           if (draft.formEnterpriseId) setFormEnterpriseId(draft.formEnterpriseId)
           if (draft.formTitle) setFormTitle(draft.formTitle)
           setHasDraft(true)
@@ -241,7 +247,7 @@ export const Orders: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [ordersRes, custRes, prodRes, entRes, banksRes, typesRes, criteriaRes] = await Promise.all([
+      const [ordersRes, custRes, prodRes, entRes, banksRes, typesRes, criteriaRes, categoriesRes] = await Promise.all([
         api.getOrders({
           status: filterStatus.length === 1 ? filterStatus[0] : undefined,
           product_type: filterType.length === 1 ? filterType[0] : undefined,
@@ -258,6 +264,7 @@ export const Orders: React.FC = () => {
         api.getBanks().catch(() => []),
         api.getProductTypes().catch(() => []),
         api.getPriceCriteria().catch(() => []),
+        api.getCategories().catch(() => []),
       ])
       setOrders(ordersRes.items || [])
       setSummary(ordersRes.summary || {})
@@ -271,6 +278,7 @@ export const Orders: React.FC = () => {
       setEnterprises(entRes || [])
       setBanks(banksRes || [])
       setPriceCriteriaList(Array.isArray(criteriaRes) ? criteriaRes : [])
+      setCategories(Array.isArray(categoriesRes) ? categoriesRes : [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -326,7 +334,7 @@ export const Orders: React.FC = () => {
     return null
   }
 
-  const updateFormItem = (idx: number, field: keyof FormItem, value: string | number) => {
+  const updateFormItem = (idx: number, field: keyof FormItem, value: string | number | string[]) => {
     setFormItems(prev => {
       const updated = [...prev]
       const item = { ...updated[idx] }
@@ -387,7 +395,7 @@ export const Orders: React.FC = () => {
           setQuantityTiers(prev => { const next = { ...prev }; delete next[idx]; return next })
         }
       } else if (field === 'quantity') {
-        const newQty = typeof value === 'string' ? parseFloat(value) || 0 : value
+        const newQty = typeof value === 'string' ? parseFloat(value) || 0 : typeof value === 'number' ? value : 0
         item.quantity = newQty
         // Re-resolve price when quantity changes (quantity breaks) - only if not manually overridden
         if (item.product_id && item.product_id !== 'custom' && !manualPriceOverride[idx]) {
@@ -447,9 +455,9 @@ export const Orders: React.FC = () => {
     setError(null)
     try {
       const totals = getFormTotals()
-      // Derive order-level product_type from items
-      const itemTypes = new Set(formItems.map(i => i.product_type || 'otro'))
-      const orderProductType = itemTypes.size === 1 ? formItems[0]?.product_type || 'otro' : 'mixto'
+      // Derive order-level product_type from items (show all types instead of 'mixto')
+      const itemTypes = [...new Set(formItems.map(i => i.product_type || 'otro'))]
+      const orderProductType = itemTypes.join(', ')
       const payload = {
         title: formTitle || formItems[0]?.product_name || 'Pedido',
         description: form.description || null,
@@ -511,6 +519,7 @@ export const Orders: React.FC = () => {
       cost: parseFloat(item.cost?.toString() || '0'),
       product_type: item.product_type || 'otro',
       deduct_stock: item.deduct_stock || false,
+      category_ids: [],
     }))
 
     setEditingOrderId(order.id)
@@ -550,6 +559,20 @@ export const Orders: React.FC = () => {
       await loadData()
     } catch (e: any) {
       setError(e.message)
+    }
+  }
+
+  const handleCreateInlineBank = async () => {
+    if (!newBankName.trim()) return
+    try {
+      const newBank = await api.createBank({ bank_name: newBankName.trim() })
+      setBanks(prev => [...prev, newBank])
+      setForm(prev => ({ ...prev, bank_id: newBank.id }))
+      setShowNewBankInput(false)
+      setNewBankName('')
+      toast.success('Banco creado')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Error creando banco')
     }
   }
 
@@ -759,7 +782,10 @@ export const Orders: React.FC = () => {
   const filteredOrders = useMemo(() => {
     let result = orders
     if (filterStatus.length > 0) result = result.filter(o => filterStatus.includes(o.status))
-    if (filterType.length > 0) result = result.filter(o => filterType.includes(o.product_type))
+    if (filterType.length > 0) result = result.filter(o => {
+      const types = (o.product_type || 'otro').split(', ').map((t: string) => t.trim())
+      return types.some((t: string) => filterType.includes(t))
+    })
     if (filterEnterprise.length > 0) result = result.filter(o => o.enterprise && filterEnterprise.includes(o.enterprise.id))
     if (filterInvoice.length > 0) {
       result = result.filter(o => {
@@ -787,7 +813,7 @@ export const Orders: React.FC = () => {
     const today = now.toISOString().split('T')[0]
     let pFrom = '', pTo = today
     if (summaryPeriod === 'hoy') { pFrom = today }
-    else if (summaryPeriod === 'semana') { const d = new Date(now); d.setDate(now.getDate() - now.getDay() + 1); pFrom = d.toISOString().split('T')[0] }
+    else if (summaryPeriod === 'semana') { const d = new Date(now); const dow = now.getDay(); d.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); pFrom = d.toISOString().split('T')[0] }
     else if (summaryPeriod === 'mes') { pFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0] }
     else if (summaryPeriod === '3meses') { pFrom = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split('T')[0] }
     else if (summaryPeriod === 'anual') { pFrom = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0] }
@@ -805,6 +831,21 @@ export const Orders: React.FC = () => {
 
   const totalPages = Math.ceil(filteredOrders.length / pageSize)
   const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+  const getDeliveryBadge = (order: any) => {
+    if (!order.estimated_delivery || order.status === 'entregado' || order.status === 'cancelado') return null
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const delivery = new Date(order.estimated_delivery)
+    delivery.setHours(0, 0, 0, 0)
+    const diffMs = delivery.getTime() - now.getTime()
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    if (diffDays < 0) return { className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', label: `Vencido (${Math.abs(diffDays)}d)` }
+    if (diffDays === 0) return { className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', label: 'Hoy' }
+    if (diffDays === 1) return { className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300', label: 'Manana' }
+    if (diffDays <= 7) return { className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300', label: `${diffDays}d` }
+    return { className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300', label: `${diffDays}d` }
+  }
 
   const isFiltered = filterStatus.length > 0 || filterType.length > 0 || filterEnterprise.length > 0 || filterInvoice.length > 0 || filterPayment.length > 0 || !!search || !!dateFrom || !!dateTo
 
@@ -1085,21 +1126,99 @@ export const Orders: React.FC = () => {
                   {formItems.map((item, idx) => (
                     <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
                       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                        {/* Product type */}
+                        {/* Product type / category filter */}
                         <div className="flex flex-col gap-1">
-                          <label className="text-xs font-medium text-gray-500">Tipo<HelpTip text="El tipo categoriza el producto o servicio. Podes configurar los tipos disponibles desde Productos > Gestionar tipos." /></label>
-                          <input
-                            list={`order-type-list-${idx}`}
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={item.product_type}
-                            onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
-                            placeholder="Escribir o elegir..."
-                          />
-                          <datalist id={`order-type-list-${idx}`}>
-                            {[...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])].map(t => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </datalist>
+                          <label className="text-xs font-medium text-gray-500">Tipo/Categoria<HelpTip text="Selecciona una o mas categorias para filtrar los productos disponibles. Podes configurar categorias desde Productos > Categorias." /></label>
+                          {categories.length > 0 ? (
+                            <div className="relative">
+                              <button
+                                type="button"
+                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 truncate"
+                                onClick={() => {
+                                  const el = document.getElementById(`cat-dropdown-${idx}`)
+                                  if (el) el.classList.toggle('hidden')
+                                }}
+                              >
+                                {item.category_ids.length > 0
+                                  ? item.category_ids.map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean).join(', ')
+                                  : 'Todas las categorias'}
+                              </button>
+                              <div
+                                id={`cat-dropdown-${idx}`}
+                                className="hidden absolute z-50 mt-1 w-64 max-h-60 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
+                              >
+                                {item.category_ids.length > 0 && (
+                                  <button
+                                    type="button"
+                                    className="w-full px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 text-left border-b border-gray-100 dark:border-gray-700"
+                                    onClick={() => {
+                                      updateFormItem(idx, 'category_ids', [])
+                                      updateFormItem(idx, 'product_type', 'otro')
+                                    }}
+                                  >
+                                    Limpiar filtro
+                                  </button>
+                                )}
+                                {categories.filter(c => !c.parent_id).map(parent => (
+                                  <div key={parent.id}>
+                                    <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={item.category_ids.includes(parent.id)}
+                                        onChange={() => {
+                                          const newIds = item.category_ids.includes(parent.id)
+                                            ? item.category_ids.filter(id => id !== parent.id)
+                                            : [...item.category_ids, parent.id]
+                                          updateFormItem(idx, 'category_ids', newIds)
+                                          const names = newIds.map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean)
+                                          updateFormItem(idx, 'product_type', names.join(', ') || 'otro')
+                                        }}
+                                        className="rounded border-gray-300"
+                                      />
+                                      <span className="text-sm font-medium" style={parent.color ? { color: parent.color } : undefined}>
+                                        {parent.name}
+                                      </span>
+                                      {(parent.product_count || 0) > 0 && <span className="text-xs text-gray-400">({parent.product_count})</span>}
+                                    </label>
+                                    {categories.filter(c => c.parent_id === parent.id).map(child => (
+                                      <label key={child.id} className="flex items-center gap-2 px-3 py-1.5 pl-8 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={item.category_ids.includes(child.id)}
+                                          onChange={() => {
+                                            const newIds = item.category_ids.includes(child.id)
+                                              ? item.category_ids.filter(id => id !== child.id)
+                                              : [...item.category_ids, child.id]
+                                            updateFormItem(idx, 'category_ids', newIds)
+                                            const names = newIds.map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean)
+                                            updateFormItem(idx, 'product_type', names.join(', ') || 'otro')
+                                          }}
+                                          className="rounded border-gray-300"
+                                        />
+                                        <span className="text-sm">{child.name}</span>
+                                        {(child.product_count || 0) > 0 && <span className="text-xs text-gray-400">({child.product_count})</span>}
+                                      </label>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                list={`order-type-list-${idx}`}
+                                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={item.product_type}
+                                onChange={e => updateFormItem(idx, 'product_type', e.target.value)}
+                                placeholder="Escribir o elegir..."
+                              />
+                              <datalist id={`order-type-list-${idx}`}>
+                                {[...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])].map(t => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </datalist>
+                            </>
+                          )}
                         </div>
                         {/* Product selector */}
                         <div className="md:col-span-2 flex flex-col gap-1">
@@ -1110,11 +1229,21 @@ export const Orders: React.FC = () => {
                             onChange={e => updateFormItem(idx, 'product_id', e.target.value)}
                           >
                             <option value="">Seleccionar producto...</option>
-                            {products.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}{p.pricing?.final_price ? ` (${formatCurrency(parseFloat(p.pricing.final_price))})` : ''}
-                              </option>
-                            ))}
+                            {(() => {
+                              const selectedCatIds = item.category_ids || []
+                              const expandedCatIds = new Set(selectedCatIds)
+                              selectedCatIds.forEach(cid => {
+                                categories.filter(c => c.parent_id === cid).forEach(child => expandedCatIds.add(child.id))
+                              })
+                              const filtered = expandedCatIds.size > 0
+                                ? products.filter(p => (p as any).category_id && expandedCatIds.has((p as any).category_id))
+                                : products
+                              return filtered.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name}{p.pricing?.final_price ? ` (${formatCurrency(parseFloat(p.pricing.final_price))})` : ''}
+                                </option>
+                              ))
+                            })()}
                             <option value="custom">Producto personalizado...</option>
                           </select>
                           {(!item.product_id || item.product_id === 'custom') && (
@@ -1284,10 +1413,44 @@ export const Orders: React.FC = () => {
                 {showBankSelector && (
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco</label>
-                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })}>
+                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => {
+                      if (e.target.value === '__new__') {
+                        setShowNewBankInput(true)
+                      } else {
+                        setForm({ ...form, bank_id: e.target.value })
+                        setShowNewBankInput(false)
+                      }
+                    }}>
                       <option value="">Seleccionar banco...</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
+                      <option value="__new__">+ Crear nuevo banco...</option>
                     </select>
+                    {showNewBankInput && (
+                      <div className="flex gap-2 mt-1">
+                        <input
+                          className="flex-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                          placeholder="Nombre del banco"
+                          value={newBankName}
+                          onChange={e => setNewBankName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateInlineBank() } }}
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCreateInlineBank}
+                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                        >
+                          Crear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShowNewBankInput(false); setNewBankName('') }}
+                          className="px-2 py-1 text-gray-500 text-sm hover:text-gray-700"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 <DateInput label="Fecha Estimada de Entrega" value={form.estimated_delivery} onChange={val => setForm({ ...form, estimated_delivery: val })} />
@@ -1367,9 +1530,15 @@ export const Orders: React.FC = () => {
                         <div>
                           <p className="font-medium text-sm">{order.title}</p>
                           <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                              {order.product_type || 'otro'}
-                            </span>
+                            {(order.product_type || 'otro').split(', ').map((type: string, i: number) => (
+                              <span key={i} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+                                {type.trim()}
+                              </span>
+                            ))}
+                            {(() => {
+                              const db = getDeliveryBadge(order)
+                              return db ? <span className={`text-xs px-1.5 py-0.5 rounded ${db.className}`}>{db.label}</span> : null
+                            })()}
                             {order.quote && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 font-mono">
                                 Cot #{String(order.quote.quote_number || 0).padStart(4, '0')}
@@ -1944,6 +2113,11 @@ export const Orders: React.FC = () => {
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
           condicionIva={invoicePreview.previewCondicionIva}
           onCondicionIvaChange={invoicePreview.setPreviewCondicionIva}
+          concepto={invoicePreview.previewConcepto}
+          onConceptoChange={invoicePreview.setPreviewConcepto}
+          onFchServDesdeChange={invoicePreview.setPreviewFchServDesde}
+          onFchServHastaChange={invoicePreview.setPreviewFchServHasta}
+          onFchVtoPagoChange={invoicePreview.setPreviewFchVtoPago}
         />
       )}
 

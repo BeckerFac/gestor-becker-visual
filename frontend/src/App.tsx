@@ -39,6 +39,7 @@ const Oportunidades = React.lazy(() => import('@/pages/Oportunidades').then(m =>
 const SecretarIAPage = React.lazy(() => import('@/pages/SecretarIA'))
 const ActivityLog = React.lazy(() => import('@/pages/ActivityLog'))
 const Admin = React.lazy(() => import('@/pages/Admin').then(m => ({ default: m.Admin })))
+const PortalConfig = React.lazy(() => import('@/pages/PortalConfig').then(m => ({ default: m.PortalConfig })))
 const NotFound = React.lazy(() => import('@/pages/NotFound').then(m => ({ default: m.NotFound })))
 const LegalTerminos = React.lazy(() => import('@/pages/LegalTerminos').then(m => ({ default: m.LegalTerminos })))
 const LegalPrivacidad = React.lazy(() => import('@/pages/LegalPrivacidad').then(m => ({ default: m.LegalPrivacidad })))
@@ -254,6 +255,7 @@ function App() {
         <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
         <Route path="/activity" element={<ProtectedRoute module="audit_log"><ActivityLog /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute module="users"><Users /></ProtectedRoute>} />
+        <Route path="/portal-config" element={<ProtectedRoute><PortalConfig /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
 
         {/* Legal pages - public, no auth required */}

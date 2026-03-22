@@ -661,15 +661,12 @@ export const Invoices: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate('/invoices/recurring')}>
-            Facturas recurrentes
-          </Button>
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
             {vistaMode === 'fiscal' && !showForm && (
               <Button variant="outline" onClick={showImportForm ? closeImportForm : openImportForm}>
-                {showImportForm ? 'Cancelar importacion' : 'Importar factura manual'}
+                {showImportForm ? 'Cancelar' : 'Importar factura ya emitida'}
               </Button>
             )}
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
@@ -756,19 +753,19 @@ export const Invoices: React.FC = () => {
                 </button>
               </div>
             </div>
-            <DateRangeFilter
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onDateFromChange={setDateFrom}
-              onDateToChange={setDateTo}
-              onClear={() => { setDateFrom(''); setDateTo('') }}
-              label="Fecha Factura"
-            />
-            <div className="flex flex-col gap-1 justify-end">
+            <div className="flex flex-col gap-1 lg:col-span-2">
+              <DateRangeFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onDateFromChange={setDateFrom}
+                onDateToChange={setDateTo}
+                onClear={() => { setDateFrom(''); setDateTo('') }}
+                label="Fecha Factura"
+              />
               {isFiltered && (
                 <button
                   onClick={clearFilters}
-                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  className="mt-1 px-3 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline self-start"
                 >
                   Limpiar filtros
                 </button>
@@ -1411,9 +1408,12 @@ export const Invoices: React.FC = () => {
                         <td className="px-4 py-3">
                           {invoice.order ? (
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-blue-700 font-semibold">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); navigate('/orders') }}
+                                className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400"
+                              >
                                 #{String(invoice.order.order_number).padStart(4, '0')}
-                              </span>
+                              </button>
                               <button
                                 onClick={() => setUnlinkTarget(invoice.id)}
                                 className="text-xs text-red-500 hover:text-red-700 hover:underline"
@@ -1534,11 +1534,15 @@ export const Invoices: React.FC = () => {
                               <button
                                 onClick={() => handleAuthorize(invoice)}
                                 disabled={authorizing === invoice.id}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded transition-all ${
+                                  authorizing === invoice.id
+                                    ? 'bg-gray-400 cursor-not-allowed opacity-80 animate-pulse'
+                                    : 'bg-green-600 hover:bg-green-700'
+                                }`}
                               >
                                 {authorizing === invoice.id ? (
                                   <>
-                                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                     </svg>
@@ -1637,6 +1641,11 @@ export const Invoices: React.FC = () => {
           pdfBlobUrl={invoicePreview.pdfBlobUrl}
           condicionIva={invoicePreview.previewCondicionIva}
           onCondicionIvaChange={invoicePreview.setPreviewCondicionIva}
+          concepto={invoicePreview.previewConcepto}
+          onConceptoChange={invoicePreview.setPreviewConcepto}
+          onFchServDesdeChange={invoicePreview.setPreviewFchServDesde}
+          onFchServHastaChange={invoicePreview.setPreviewFchServHasta}
+          onFchVtoPagoChange={invoicePreview.setPreviewFchVtoPago}
         />
       )}
     </div>

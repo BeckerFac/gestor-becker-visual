@@ -255,8 +255,8 @@ export class OrdersService {
       // Derive order-level product_type from items
       let orderProductType = data.product_type || 'otro';
       if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-        const itemTypes = new Set(data.items.map((i: any) => i.product_type || 'otro'));
-        orderProductType = itemTypes.size === 1 ? data.items[0].product_type || 'otro' : 'mixto';
+        const itemTypes = [...new Set(data.items.map((i: any) => i.product_type || 'otro'))];
+        orderProductType = itemTypes.join(', ').substring(0, 50);
       }
 
       await db.execute(sql`

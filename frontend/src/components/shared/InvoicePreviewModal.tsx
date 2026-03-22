@@ -131,6 +131,11 @@ interface InvoicePreviewModalProps {
   pdfBlobUrl?: string | null
   condicionIva?: number
   onCondicionIvaChange?: (v: number) => void
+  concepto?: number
+  onConceptoChange?: (v: number) => void
+  onFchServDesdeChange?: (v: string) => void
+  onFchServHastaChange?: (v: string) => void
+  onFchVtoPagoChange?: (v: string) => void
 }
 
 export function InvoicePreviewModal({
@@ -156,6 +161,11 @@ export function InvoicePreviewModal({
   pdfBlobUrl,
   condicionIva: externalCondicionIva,
   onCondicionIvaChange,
+  concepto: externalConcepto,
+  onConceptoChange,
+  onFchServDesdeChange,
+  onFchServHastaChange,
+  onFchVtoPagoChange,
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const [showConfirmAuthorize, setShowConfirmAuthorize] = useState(false)
@@ -165,6 +175,20 @@ export function InvoicePreviewModal({
   const [localCustomerCuit, setLocalCustomerCuit] = useState('')
   const [localInvoiceDate, setLocalInvoiceDate] = useState('')
   const [localNotes, setLocalNotes] = useState('')
+
+  // AFIP Concepto state
+  const [localConceptoState, setLocalConceptoState] = useState(externalConcepto ?? 1)
+  const setLocalConcepto = (v: number) => { setLocalConceptoState(v); onConceptoChange?.(v) }
+  const localConcepto = localConceptoState
+  const [localFchServDesdeState, setLocalFchServDesdeState] = useState('')
+  const setLocalFchServDesde = (v: string) => { setLocalFchServDesdeState(v); onFchServDesdeChange?.(v) }
+  const localFchServDesde = localFchServDesdeState
+  const [localFchServHastaState, setLocalFchServHastaState] = useState('')
+  const setLocalFchServHasta = (v: string) => { setLocalFchServHastaState(v); onFchServHastaChange?.(v) }
+  const localFchServHasta = localFchServHastaState
+  const [localFchVtoPagoState, setLocalFchVtoPagoState] = useState('')
+  const setLocalFchVtoPago = (v: string) => { setLocalFchVtoPagoState(v); onFchVtoPagoChange?.(v) }
+  const localFchVtoPago = localFchVtoPagoState
 
   // FCE MiPyME state
   const [localIsFce, setLocalIsFce] = useState(false)
@@ -198,6 +222,14 @@ export function InvoicePreviewModal({
         }
       }
       setLocalNotes(invoice.notes || '')
+      setLocalConceptoState(invoice.concepto || 1)
+      onConceptoChange?.(invoice.concepto || 1)
+      setLocalFchServDesdeState(invoice.fch_serv_desde || '')
+      onFchServDesdeChange?.(invoice.fch_serv_desde || '')
+      setLocalFchServHastaState(invoice.fch_serv_hasta || '')
+      onFchServHastaChange?.(invoice.fch_serv_hasta || '')
+      setLocalFchVtoPagoState(invoice.fch_vto_pago || '')
+      onFchVtoPagoChange?.(invoice.fch_vto_pago || '')
       // Initialize CondicionIVAReceptorId from customer data or derive default
       const custCondIva = invoice.customer?.condicion_iva
       const recCode = taxConditionToCode(invoice.customer?.tax_condition)
@@ -342,8 +374,14 @@ export function InvoicePreviewModal({
         ok: !!localCondicionIva && CONDICION_IVA_RECEPTOR_OPTIONS.some(o => o.value === localCondicionIva),
         detail: CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || 'No configurado',
       },
+      {
+        label: 'Fechas de servicio completas',
+        ok: localConcepto === 1 || (!!localFchServDesde && !!localFchServHasta && !!localFchVtoPago),
+        detail: localConcepto === 1 ? 'No aplica (Productos)' : (!!localFchServDesde && !!localFchServHasta && !!localFchVtoPago ? 'Fechas OK' : 'Faltan fechas de servicio (obligatorias para Servicios)'),
+        critical: localConcepto !== 1,
+      },
     ]
-  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta, localCondicionIva])
+  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta, localCondicionIva, localConcepto, localFchServDesde, localFchServHasta, localFchVtoPago])
 
   const allChecksPassed = checklist.every(c => c.ok)
 
@@ -491,6 +529,55 @@ export function InvoicePreviewModal({
                     </div>
                   )}
                 </div>
+
+                {/* AFIP Concepto */}
+                {!authorized && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-400" htmlFor="inv-concepto">Concepto<HelpTip text="Determina si la factura es por productos, servicios o ambos. Para servicios, AFIP requiere fechas de periodo." /></label>
+                      <select
+                        id="inv-concepto"
+                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
+                        value={localConcepto}
+                        onChange={e => setLocalConcepto(parseInt(e.target.value))}
+                      >
+                        <option value={1}>Productos</option>
+                        <option value={2}>Servicios</option>
+                        <option value={3}>Productos y Servicios</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Service date fields (concepto 2 or 3) */}
+                {!authorized && localConcepto !== 1 && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-400">Desde (servicio)</label>
+                      <DateInput
+                        value={localFchServDesde}
+                        onChange={setLocalFchServDesde}
+                        className="px-2 py-1.5 border-gray-200 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-400">Hasta (servicio)</label>
+                      <DateInput
+                        value={localFchServHasta}
+                        onChange={setLocalFchServHasta}
+                        className="px-2 py-1.5 border-gray-200 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-gray-400">Vto. pago</label>
+                      <DateInput
+                        value={localFchVtoPago}
+                        onChange={setLocalFchVtoPago}
+                        className="px-2 py-1.5 border-gray-200 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Customer info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -881,6 +968,7 @@ export function InvoicePreviewModal({
                   <div><span className="text-gray-400">Items:</span> {items.length}</div>
                   <div><span className="text-gray-400">Subtotal:</span> {formatCurrency(subtotal)}</div>
                   <div><span className="text-gray-400">IVA:</span> {formatCurrency(vatAmount)}</div>
+                  <div><span className="text-gray-400">Concepto:</span> {localConcepto === 1 ? 'Productos' : localConcepto === 2 ? 'Servicios' : 'Prod. y Serv.'}</div>
                   <div><span className="text-gray-400">Cond. IVA Receptor:</span> {CONDICION_IVA_RECEPTOR_OPTIONS.find(o => o.value === localCondicionIva)?.label || localCondicionIva}</div>
                   <div className="col-span-2 sm:col-span-4 text-sm font-bold text-gray-900 pt-1 border-t border-amber-200 mt-1">
                     Total: {formatCurrency(total)}

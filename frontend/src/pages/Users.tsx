@@ -102,7 +102,45 @@ export const Users: React.FC = () => {
   const [loadingSessions, setLoadingSessions] = useState(false)
 
   // Tab
-  const [activeTab, setActiveTab] = useState<'users' | 'invitations'>('users')
+  const [activeTab, setActiveTab] = useState<'users' | 'invitations' | 'roles'>('users')
+  const [roleTemplates, setRoleTemplates] = useState<any[]>([])
+  const [editingRole, setEditingRole] = useState<any | null>(null)
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({})
+  const [savingRole, setSavingRole] = useState(false)
+
+  const loadRoleTemplates = useCallback(async () => {
+    try {
+      const data = await api.getRoleTemplates()
+      setRoleTemplates(data || [])
+    } catch (e: any) {
+      console.error('Error loading role templates:', e)
+    }
+  }, [])
+
+  const handleSaveRoleTemplate = async () => {
+    if (!editingRole) return
+    setSavingRole(true)
+    try {
+      await api.updateRoleTemplate(editingRole.role_name, rolePermissions)
+      toast.success(`Permisos del rol "${editingRole.role_name}" actualizados`)
+      setEditingRole(null)
+      await loadRoleTemplates()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e.message || 'Error al guardar rol')
+    } finally {
+      setSavingRole(false)
+    }
+  }
+
+  const handleApplyRoleToAll = async (roleName: string, userCount: number) => {
+    if (!confirm(`Esto actualizara los permisos de ${userCount} usuario${userCount !== 1 ? 's' : ''} con rol "${roleName}". Continuar?`)) return
+    try {
+      const result = await api.applyRoleToAllUsers(roleName)
+      toast.success(`Permisos aplicados a ${result.updated} usuario${result.updated !== 1 ? 's' : ''}`)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e.message || 'Error al aplicar rol')
+    }
+  }
 
   const loadUsers = useCallback(async () => {
     try {

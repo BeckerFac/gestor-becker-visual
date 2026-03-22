@@ -31,7 +31,10 @@ interface DealCardProps {
   onSelect: (deal: Deal) => void
   onMoveForward?: (deal: Deal) => void
   onMoveBackward?: (deal: Deal) => void
+  onContextMenu?: (e: React.MouseEvent) => void
   showStageActions?: boolean
+  isDragging?: boolean
+  className?: string
 }
 
 const PRIORITY_DOTS: Record<string, string> = {
@@ -53,14 +56,18 @@ export const DealCard: React.FC<DealCardProps> = ({
   onSelect,
   onMoveForward,
   onMoveBackward,
+  onContextMenu,
   showStageActions = true,
+  isDragging = false,
+  className = '',
 }) => {
   const borderClass = stageColor ? getStageBorderColor(stageColor) : 'border-l-gray-400'
 
   return (
     <div
-      className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${borderClass} rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group`}
+      className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${borderClass} rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group ${isDragging ? 'opacity-40' : ''} ${className}`}
       onClick={() => onSelect(deal)}
+      onContextMenu={onContextMenu}
     >
       {/* Header row */}
       <div className="flex items-start justify-between gap-2 mb-1">

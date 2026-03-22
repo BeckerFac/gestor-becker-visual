@@ -380,6 +380,21 @@ async function runAutoMigrations() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_permissions_user ON permissions(user_id)`);
 
+    // --- Role templates ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS role_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        role_name VARCHAR(50) NOT NULL,
+        description TEXT,
+        permissions JSONB NOT NULL DEFAULT '{}',
+        is_system BOOLEAN DEFAULT false,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, role_name)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_role_templates_company ON role_templates(company_id)`);
+
     // --- Accounting report indexes (tables may not exist yet on first boot) ---
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoices_company_status_date ON invoices(company_id, status, invoice_date)`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchases_company_status_date ON purchases(company_id, status, date)`); } catch (_) {}

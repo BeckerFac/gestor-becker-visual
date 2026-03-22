@@ -229,6 +229,39 @@ export class UsersController {
       res.status(500).json({ error: 'Error al revocar sesiones' });
     }
   }
+  async getRoleTemplates(req: AuthRequest, res: Response) {
+    try {
+      const templates = await usersService.getRoleTemplates(req.user!.company_id);
+      res.json({ templates });
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Error al obtener roles' });
+    }
+  }
+
+  async updateRoleTemplate(req: AuthRequest, res: Response) {
+    try {
+      const { permissions, description } = req.body;
+      if (!permissions || typeof permissions !== 'object') {
+        throw new ApiError(400, 'Se requiere un objeto de permisos');
+      }
+      const result = await usersService.updateRoleTemplate(req.user!.company_id, req.params.roleName, permissions, description);
+      res.json({ template: result });
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Error al actualizar rol' });
+    }
+  }
+
+  async applyRoleToAllUsers(req: AuthRequest, res: Response) {
+    try {
+      const result = await usersService.applyRoleToAllUsers(req.user!.company_id, req.params.roleName);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Error al aplicar rol' });
+    }
+  }
 }
 
 export const usersController = new UsersController();

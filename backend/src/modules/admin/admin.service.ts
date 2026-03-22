@@ -413,164 +413,201 @@ export class AdminService {
    * Get system-wide statistics including SaaS metrics.
    */
   async getSystemStats() {
-    const result = await db.execute(sql`
-      SELECT
-        (SELECT COUNT(*)::int FROM companies) AS total_companies,
-        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true) AS active_companies,
-        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = false) AS trial_companies,
-        (SELECT COUNT(*)::int FROM companies WHERE blocked = true) AS blocked_companies,
-        (SELECT COUNT(*)::int FROM users WHERE active = true) AS active_users,
-        (SELECT COUNT(*)::int FROM users) AS total_users,
-        (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW())) AS invoices_this_month,
-        (SELECT COALESCE(SUM(total_amount), 0)::numeric FROM invoices WHERE status = 'authorized' AND created_at >= date_trunc('month', NOW())) AS revenue_this_month,
-        (SELECT COUNT(*)::int FROM companies WHERE created_at >= NOW() - INTERVAL '7 days') AS new_companies_last_week,
-        (SELECT COUNT(*)::int FROM companies WHERE created_at >= NOW() - INTERVAL '30 days') AS new_companies_last_month
-    `);
-    const rows = (result as any).rows || result || [];
-    const stats = rows[0] || {};
+    // Base stats (critical - if this fails, return empty)
+    let stats: any = {};
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          (SELECT COUNT(*)::int FROM companies) AS total_companies,
+          (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true) AS active_companies,
+          (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = false) AS trial_companies,
+          (SELECT COUNT(*)::int FROM companies WHERE blocked = true) AS blocked_companies,
+          (SELECT COUNT(*)::int FROM users WHERE active = true) AS active_users,
+          (SELECT COUNT(*)::int FROM users) AS total_users,
+          (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW())) AS invoices_this_month,
+          (SELECT COALESCE(SUM(total_amount), 0)::numeric FROM invoices WHERE status = 'authorized' AND created_at >= date_trunc('month', NOW())) AS revenue_this_month,
+          (SELECT COUNT(*)::int FROM companies WHERE created_at >= NOW() - INTERVAL '7 days') AS new_companies_last_week,
+          (SELECT COUNT(*)::int FROM companies WHERE created_at >= NOW() - INTERVAL '30 days') AS new_companies_last_month
+      `);
+      const rows = (result as any).rows || result || [];
+      stats = rows[0] || {};
+    } catch (e) { console.error('Admin stats base error:', e); }
 
     // Growth: new companies per week for the last 12 weeks
-    const growthResult = await db.execute(sql`
-      SELECT
-        date_trunc('week', created_at) AS week,
-        COUNT(*)::int AS count
-      FROM companies
-      WHERE created_at >= NOW() - INTERVAL '12 weeks'
-      GROUP BY week
-      ORDER BY week ASC
-    `);
-    const growthRows = (growthResult as any).rows || growthResult || [];
+    let growthRows: any[] = [];
+    try {
+      const growthResult = await db.execute(sql`
+        SELECT
+          date_trunc('week', created_at) AS week,
+          COUNT(*)::int AS count
+        FROM companies
+        WHERE created_at >= NOW() - INTERVAL '12 weeks'
+        GROUP BY week
+        ORDER BY week ASC
+      `);
+      growthRows = (growthResult as any).rows || growthResult || [];
+    } catch (e) { console.error('Admin stats growth error:', e); }
 
     // MRR calculation: count active paid subscriptions and sum plan prices
-    const mrrResult = await pool.query(`
-      SELECT
-        s.plan,
-        COUNT(*)::int AS count
-      FROM subscriptions s
-      WHERE s.status = 'active' AND s.plan != 'trial'
-      GROUP BY s.plan
-    `);
     let mrr = 0;
-    for (const row of mrrResult.rows) {
-      const plan = getPlan(row.plan);
-      if (plan) {
-        mrr += plan.priceArsMonthly * row.count;
+    try {
+      const mrrResult = await pool.query(`
+        SELECT
+          s.plan,
+          COUNT(*)::int AS count
+        FROM subscriptions s
+        WHERE s.status = 'active' AND s.plan != 'trial'
+        GROUP BY s.plan
+      `);
+      for (const row of mrrResult.rows) {
+        const plan = getPlan(row.plan);
+        if (plan) {
+          mrr += plan.priceArsMonthly * row.count;
+        }
       }
-    }
+    } catch (e) { console.error('Admin stats MRR error:', e); }
 
     // Churn rate: companies that cancelled this month / total active at start of month
-    const churnResult = await pool.query(`
-      SELECT
-        (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'cancelled' AND updated_at >= date_trunc('month', NOW())) AS cancelled_this_month,
-        (SELECT COUNT(*)::int FROM subscriptions WHERE status IN ('active', 'cancelled')) AS total_ever_active
-    `);
-    const churnData = churnResult.rows[0] || { cancelled_this_month: 0, total_ever_active: 0 };
-    const churnRate = churnData.total_ever_active > 0
-      ? Math.round((churnData.cancelled_this_month / churnData.total_ever_active) * 10000) / 100
-      : 0;
+    let churnRate = 0;
+    try {
+      const churnResult = await pool.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'cancelled' AND updated_at >= date_trunc('month', NOW())) AS cancelled_this_month,
+          (SELECT COUNT(*)::int FROM subscriptions WHERE status IN ('active', 'cancelled')) AS total_ever_active
+      `);
+      const churnData = churnResult.rows[0] || { cancelled_this_month: 0, total_ever_active: 0 };
+      churnRate = churnData.total_ever_active > 0
+        ? Math.round((churnData.cancelled_this_month / churnData.total_ever_active) * 10000) / 100
+        : 0;
+    } catch (e) { console.error('Admin stats churn error:', e); }
 
     // Trial-to-paid conversion rate
-    const conversionResult = await pool.query(`
-      SELECT
-        (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'active' AND plan != 'trial') AS paid_count,
-        (SELECT COUNT(*)::int FROM subscriptions) AS total_subscriptions
-    `);
-    const convData = conversionResult.rows[0] || { paid_count: 0, total_subscriptions: 0 };
-    const conversionRate = convData.total_subscriptions > 0
-      ? Math.round((convData.paid_count / convData.total_subscriptions) * 10000) / 100
-      : 0;
+    let conversionRate = 0;
+    try {
+      const conversionResult = await pool.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'active' AND plan != 'trial') AS paid_count,
+          (SELECT COUNT(*)::int FROM subscriptions) AS total_subscriptions
+      `);
+      const convData = conversionResult.rows[0] || { paid_count: 0, total_subscriptions: 0 };
+      conversionRate = convData.total_subscriptions > 0
+        ? Math.round((convData.paid_count / convData.total_subscriptions) * 10000) / 100
+        : 0;
+    } catch (e) { console.error('Admin stats conversion error:', e); }
 
     // Average revenue per company
-    const arpcResult = await pool.query(`
-      SELECT
-        COALESCE(AVG(monthly_rev), 0)::numeric AS avg_revenue
-      FROM (
+    let avgRevenuePerCompany = 0;
+    try {
+      const arpcResult = await pool.query(`
         SELECT
-          i.company_id,
-          SUM(i.total_amount)::numeric AS monthly_rev
-        FROM invoices i
-        WHERE i.status = 'authorized' AND i.created_at >= date_trunc('month', NOW())
-        GROUP BY i.company_id
-      ) sub
-    `);
-    const avgRevenuePerCompany = parseFloat(arpcResult.rows[0]?.avg_revenue || '0');
+          COALESCE(AVG(monthly_rev), 0)::numeric AS avg_revenue
+        FROM (
+          SELECT
+            i.company_id,
+            SUM(i.total_amount)::numeric AS monthly_rev
+          FROM invoices i
+          WHERE i.status = 'authorized' AND i.created_at >= date_trunc('month', NOW())
+          GROUP BY i.company_id
+        ) sub
+      `);
+      avgRevenuePerCompany = parseFloat(arpcResult.rows[0]?.avg_revenue || '0');
+    } catch (e) { console.error('Admin stats ARPC error:', e); }
 
     // Plan distribution
-    const planDistResult = await pool.query(`
-      SELECT
-        COALESCE(s.plan, 'trial') AS plan,
-        s.status,
-        COUNT(*)::int AS count
-      FROM subscriptions s
-      GROUP BY s.plan, s.status
-      ORDER BY s.plan
-    `);
+    let planDistRows: any[] = [];
+    try {
+      const planDistResult = await pool.query(`
+        SELECT
+          COALESCE(s.plan, 'trial') AS plan,
+          s.status,
+          COUNT(*)::int AS count
+        FROM subscriptions s
+        GROUP BY s.plan, s.status
+        ORDER BY s.plan
+      `);
+      planDistRows = planDistResult.rows;
+    } catch (e) { console.error('Admin stats plan distribution error:', e); }
 
     // Trend comparisons
-    const trendsResult = await pool.query(`
-      SELECT
-        -- Active companies last week vs this week
-        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true) AS active_companies_now,
-        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true AND created_at < NOW() - INTERVAL '7 days') AS active_companies_last_week,
-        -- Active users today vs yesterday
-        (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW())) AS users_active_today,
-        (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW() - INTERVAL '1 day') AND u.last_login < date_trunc('day', NOW())) AS users_active_yesterday,
-        -- Invoices this month vs last month
-        (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW())) AS invoices_this_month_count,
-        (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW())) AS invoices_last_month_count,
-        -- MRR last month (approximate via subscriptions that were active then)
-        (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'active' AND plan != 'trial' AND created_at < date_trunc('month', NOW())) AS paid_subs_start_of_month
-    `);
-    const trends = trendsResult.rows[0] || {};
+    let trends: any = {};
+    try {
+      const trendsResult = await pool.query(`
+        SELECT
+          -- Active companies last week vs this week
+          (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true) AS active_companies_now,
+          (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true AND created_at < NOW() - INTERVAL '7 days') AS active_companies_last_week,
+          -- Active users today vs yesterday
+          (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW())) AS users_active_today,
+          (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW() - INTERVAL '1 day') AND u.last_login < date_trunc('day', NOW())) AS users_active_yesterday,
+          -- Invoices this month vs last month
+          (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW())) AS invoices_this_month_count,
+          (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW())) AS invoices_last_month_count,
+          -- MRR last month (approximate via subscriptions that were active then)
+          (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'active' AND plan != 'trial' AND created_at < date_trunc('month', NOW())) AS paid_subs_start_of_month
+      `);
+      trends = trendsResult.rows[0] || {};
+    } catch (e) { console.error('Admin stats trends error:', e); }
 
     // Trial expiring soon (< 3 days)
-    const trialExpiringResult = await pool.query(`
-      SELECT c.id, c.name, c.cuit, c.trial_ends_at,
-        COALESCE(u_count.cnt, 0) AS users_count
-      FROM companies c
-      LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS cnt FROM users u WHERE u.company_id = c.id
-      ) u_count ON true
-      WHERE c.subscription_status = 'trial'
-        AND c.trial_ends_at IS NOT NULL
-        AND c.trial_ends_at <= NOW() + INTERVAL '3 days'
-        AND c.trial_ends_at > NOW()
-        AND (c.blocked = false OR c.blocked IS NULL)
-      ORDER BY c.trial_ends_at ASC
-      LIMIT 10
-    `);
+    let trialExpiringRows: any[] = [];
+    try {
+      const trialExpiringResult = await pool.query(`
+        SELECT c.id, c.name, c.cuit, c.trial_ends_at,
+          COALESCE(u_count.cnt, 0) AS users_count
+        FROM companies c
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS cnt FROM users u WHERE u.company_id = c.id
+        ) u_count ON true
+        WHERE c.subscription_status = 'trial'
+          AND c.trial_ends_at IS NOT NULL
+          AND c.trial_ends_at <= NOW() + INTERVAL '3 days'
+          AND c.trial_ends_at > NOW()
+          AND (c.blocked = false OR c.blocked IS NULL)
+        ORDER BY c.trial_ends_at ASC
+        LIMIT 10
+      `);
+      trialExpiringRows = trialExpiringResult.rows;
+    } catch (e) { console.error('Admin stats trial expiring error:', e); }
 
     // Abandoned companies (0 activity in 7 days, not blocked)
-    const abandonedResult = await pool.query(`
-      SELECT c.id, c.name, c.cuit, c.created_at,
-        MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) AS last_activity
-      FROM companies c
-      LEFT JOIN users u ON u.company_id = c.id
-      WHERE (c.blocked = false OR c.blocked IS NULL)
-      GROUP BY c.id, c.name, c.cuit, c.created_at
-      HAVING MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) < NOW() - INTERVAL '7 days'
-      ORDER BY last_activity ASC
-      LIMIT 10
-    `);
+    let abandonedRows: any[] = [];
+    try {
+      const abandonedResult = await pool.query(`
+        SELECT c.id, c.name, c.cuit, c.created_at,
+          MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) AS last_activity
+        FROM companies c
+        LEFT JOIN users u ON u.company_id = c.id
+        WHERE (c.blocked = false OR c.blocked IS NULL)
+        GROUP BY c.id, c.name, c.cuit, c.created_at
+        HAVING MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) < NOW() - INTERVAL '7 days'
+        ORDER BY last_activity ASC
+        LIMIT 10
+      `);
+      abandonedRows = abandonedResult.rows;
+    } catch (e) { console.error('Admin stats abandoned error:', e); }
 
     // Recent activity feed (last 10 actions across ALL companies)
-    const recentActivityResult = await pool.query(`
-      SELECT
-        al.id,
-        al.created_at,
-        al.action,
-        al.module,
-        al.description,
-        al.company_id,
-        c.name AS company_name,
-        u.email AS user_email,
-        u.name AS user_name
-      FROM activity_logs al
-      LEFT JOIN companies c ON c.id = al.company_id
-      LEFT JOIN users u ON u.id = al.user_id
-      ORDER BY al.created_at DESC
-      LIMIT 10
-    `);
+    let recentActivityRows: any[] = [];
+    try {
+      const recentActivityResult = await pool.query(`
+        SELECT
+          al.id,
+          al.created_at,
+          al.action,
+          al.module,
+          al.description,
+          al.company_id,
+          c.name AS company_name,
+          u.email AS user_email,
+          u.name AS user_name
+        FROM activity_logs al
+        LEFT JOIN companies c ON c.id = al.company_id
+        LEFT JOIN users u ON u.id = al.user_id
+        ORDER BY al.created_at DESC
+        LIMIT 10
+      `);
+      recentActivityRows = recentActivityResult.rows;
+    } catch (e) { console.error('Admin stats recent activity error:', e); }
 
     return {
       ...stats,
@@ -579,7 +616,7 @@ export class AdminService {
       churn_rate: churnRate,
       conversion_rate: conversionRate,
       avg_revenue_per_company: Math.round(avgRevenuePerCompany * 100) / 100,
-      plan_distribution: planDistResult.rows,
+      plan_distribution: planDistRows,
       trends: {
         active_companies_now: parseInt(trends.active_companies_now || '0'),
         active_companies_last_week: parseInt(trends.active_companies_last_week || '0'),
@@ -590,10 +627,10 @@ export class AdminService {
         paid_subs_start_of_month: parseInt(trends.paid_subs_start_of_month || '0'),
       },
       attention: {
-        trial_expiring: trialExpiringResult.rows,
-        abandoned: abandonedResult.rows,
+        trial_expiring: trialExpiringRows,
+        abandoned: abandonedRows,
       },
-      recent_activity: recentActivityResult.rows,
+      recent_activity: recentActivityRows,
     };
   }
 
@@ -601,20 +638,29 @@ export class AdminService {
    * Get system health metrics.
    */
   async getSystemHealth() {
-    const dbSizeResult = await pool.query(`
-      SELECT pg_database_size(current_database()) AS db_size_bytes
-    `);
-    const dbSizeBytes = parseInt(dbSizeResult.rows[0]?.db_size_bytes || '0', 10);
+    // Database size
+    let dbSizeBytes = 0;
+    try {
+      const dbSizeResult = await pool.query(`
+        SELECT pg_database_size(current_database()) AS db_size_bytes
+      `);
+      dbSizeBytes = parseInt(dbSizeResult.rows[0]?.db_size_bytes || '0', 10);
+    } catch (e) { console.error('System health db size error:', e); }
 
-    const poolStats = {
-      totalCount: pool.totalCount,
-      idleCount: pool.idleCount,
-      waitingCount: pool.waitingCount,
-    };
+    // Connection pool stats
+    let poolStats = { totalCount: 0, idleCount: 0, waitingCount: 0 };
+    try {
+      poolStats = {
+        totalCount: pool.totalCount,
+        idleCount: pool.idleCount,
+        waitingCount: pool.waitingCount,
+      };
+    } catch (e) { console.error('System health pool stats error:', e); }
 
     const memUsage = process.memoryUsage();
     const uptime = process.uptime();
 
+    // Table counts
     let tableCounts: Record<string, number> = {};
     try {
       const tableCountsResult = await pool.query(`

@@ -34,14 +34,6 @@ function ddMmYyyyToIso(display: string): string {
   return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
 }
 
-function autoFormatInput(raw: string): string {
-  // Strip non-digits
-  const digits = raw.replace(/\D/g, '')
-  if (digits.length <= 2) return digits
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`
-}
-
 export const DateInput: React.FC<DateInputProps> = ({
   value,
   onChange,
@@ -62,7 +54,6 @@ export const DateInput: React.FC<DateInputProps> = ({
   if (value !== lastValueRef.current) {
     lastValueRef.current = value
     if (!isFocused) {
-      // Only update display if not currently editing
       const newDisplay = isoToDdMmYyyy(value)
       if (newDisplay !== displayValue) {
         setDisplayValue(newDisplay)
@@ -71,20 +62,55 @@ export const DateInput: React.FC<DateInputProps> = ({
   }
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value
-    const formatted = autoFormatInput(raw)
+    const input = e.target
+    const raw = input.value
+    const cursorPos = input.selectionStart || 0
+
+    // Allow direct editing: only strip invalid chars, preserve slashes in position
+    const cleaned = raw.replace(/[^\d/]/g, '')
+
+    // If user is typing naturally (adding chars), auto-format
+    // If user is deleting (fewer chars than display), preserve cursor position
+    const isDeleting = cleaned.length < displayValue.length
+
+    let formatted: string
+    if (isDeleting) {
+      // When deleting, just use the cleaned value as-is (don't re-format)
+      // This preserves the cursor position naturally
+      formatted = cleaned
+    } else {
+      // When typing, auto-format by extracting digits and inserting slashes
+      const digits = cleaned.replace(/\D/g, '')
+      if (digits.length <= 2) {
+        formatted = digits
+      } else if (digits.length <= 4) {
+        formatted = `${digits.slice(0, 2)}/${digits.slice(2)}`
+      } else {
+        formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`
+      }
+    }
+
     setDisplayValue(formatted)
     setValidationError('')
 
+    // Restore cursor position
+    const newPos = isDeleting ? cursorPos : Math.min(cursorPos + (formatted.length - raw.length + (raw.length - cleaned.length)), formatted.length)
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        const pos = isDeleting ? cursorPos : newPos
+        inputRef.current.setSelectionRange(pos, pos)
+      }
+    })
+
     // Auto-convert when complete (DD/MM/YYYY = 10 chars)
-    if (formatted.length === 10) {
+    if (formatted.length === 10 && formatted.includes('/')) {
       const iso = ddMmYyyyToIso(formatted)
       if (iso) {
         onChange(iso)
         lastValueRef.current = iso
       }
     }
-  }, [onChange])
+  }, [onChange, displayValue])
 
   const handleFocus = useCallback(() => {
     setIsFocused(true)
@@ -99,13 +125,21 @@ export const DateInput: React.FC<DateInputProps> = ({
       setValidationError('')
       return
     }
-    const iso = ddMmYyyyToIso(displayValue)
+
+    // On blur, re-format properly from digits
+    const digits = displayValue.replace(/\D/g, '')
+    let reformatted = displayValue
+    if (digits.length >= 8) {
+      reformatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`
+    }
+
+    const iso = ddMmYyyyToIso(reformatted)
     if (iso) {
       onChange(iso)
       lastValueRef.current = iso
       setDisplayValue(isoToDdMmYyyy(iso))
       setValidationError('')
-    } else {
+    } else if (digits.length > 0) {
       setValidationError('Formato invalido (DD/MM/AAAA)')
     }
   }, [displayValue, onChange])

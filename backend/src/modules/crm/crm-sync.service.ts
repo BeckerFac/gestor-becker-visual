@@ -340,6 +340,138 @@ export class CrmSyncService {
       console.warn('recalculateActualValue warning:', error);
     }
   }
+
+  /**
+   * Bootstrap CRM deals from existing orders, quotes, invoices.
+   * Creates deals for enterprises that have orders but no deals yet.
+   * Determines the correct stage based on the most advanced document state.
+   */
+  async bootstrapFromExistingData(companyId: string): Promise<{ created: number; updated: number }> {
+    try {
+      await crmService.ensureTables();
+      await crmService.ensureDefaultStages(companyId);
+
+      // Get stages for mapping
+      const stagesResult = await db.execute(sql`
+        SELECT id, name, stage_order, trigger_event, is_loss_stage
+        FROM crm_stages WHERE company_id = ${companyId}
+        ORDER BY stage_order ASC
+      `);
+      const stages = (stagesResult as any).rows || [];
+      const stageByTrigger = new Map<string, any>();
+      const stageByName = new Map<string, any>();
+      for (const s of stages) {
+        if (s.trigger_event) stageByTrigger.set(s.trigger_event, s);
+        stageByName.set(s.name.toLowerCase(), s);
+      }
+
+      // Get all enterprises with orders for this company
+      const enterprisesResult = await db.execute(sql`
+        SELECT DISTINCT o.enterprise_id, e.name as enterprise_name,
+          COUNT(o.id)::int as order_count,
+          COALESCE(SUM(CAST(o.total_amount AS decimal)), 0) as total_value,
+          MAX(o.created_at) as last_order_date,
+          BOOL_OR(o.status = 'entregado') as has_delivered,
+          BOOL_OR(o.status = 'en_produccion') as has_in_production
+        FROM orders o
+        LEFT JOIN enterprises e ON e.id = o.enterprise_id
+        WHERE o.company_id = ${companyId} AND o.enterprise_id IS NOT NULL
+        GROUP BY o.enterprise_id, e.name
+      `);
+      const enterprises = (enterprisesResult as any).rows || [];
+
+      let created = 0;
+      let updated = 0;
+
+      for (const ent of enterprises) {
+        if (!ent.enterprise_id) continue;
+
+        // Check if deal already exists for this enterprise
+        const existingResult = await db.execute(sql`
+          SELECT id, stage_id FROM crm_deals
+          WHERE company_id = ${companyId} AND enterprise_id = ${ent.enterprise_id}
+          AND completed_at IS NULL
+          LIMIT 1
+        `);
+        const existingDeal = ((existingResult as any).rows || [])[0];
+
+        // Determine the most advanced stage for this enterprise
+        // Check cobros (payments)
+        const hasPayment = await db.execute(sql`
+          SELECT 1 FROM cobros
+          WHERE company_id = ${companyId} AND enterprise_id = ${ent.enterprise_id}
+          LIMIT 1
+        `).then(r => ((r as any).rows || []).length > 0).catch(() => false);
+
+        // Check invoices
+        const hasInvoice = await db.execute(sql`
+          SELECT 1 FROM invoices
+          WHERE company_id = ${companyId} AND enterprise_id = ${ent.enterprise_id} AND status = 'authorized'
+          LIMIT 1
+        `).then(r => ((r as any).rows || []).length > 0).catch(() => false);
+
+        // Determine target stage (most advanced)
+        let targetStage: any = null;
+        if (hasPayment && stageByTrigger.get('payment_received')) {
+          targetStage = stageByTrigger.get('payment_received');
+        } else if (hasInvoice && stageByTrigger.get('invoice_authorized')) {
+          targetStage = stageByTrigger.get('invoice_authorized');
+        } else if (ent.has_delivered && stageByTrigger.get('order_delivered')) {
+          targetStage = stageByTrigger.get('order_delivered');
+        } else if (stageByTrigger.get('order_created')) {
+          targetStage = stageByTrigger.get('order_created');
+        } else {
+          targetStage = stageByName.get('contacto') || stages.find((s: any) => !s.is_loss_stage);
+        }
+
+        if (!targetStage) continue;
+
+        if (existingDeal) {
+          // Update existing deal to correct stage if it's more advanced
+          const currentStageOrder = stages.find((s: any) => s.id === existingDeal.stage_id)?.stage_order || 0;
+          if (targetStage.stage_order > currentStageOrder) {
+            await db.execute(sql`
+              UPDATE crm_deals SET stage_id = ${targetStage.id}, stage = ${targetStage.name.toLowerCase()}, value = ${ent.total_value}, updated_at = NOW()
+              WHERE id = ${existingDeal.id}
+            `);
+            updated++;
+          }
+        } else {
+          // Create new deal
+          const dealId = uuid();
+          const completed = null; // Always create as active — user can close manually
+          await db.execute(sql`
+            INSERT INTO crm_deals (id, company_id, enterprise_id, title, value, stage, stage_id, priority, estimated_value, completed_at)
+            VALUES (
+              ${dealId}, ${companyId}, ${ent.enterprise_id},
+              ${`${ent.enterprise_name || 'Deal'} - ${ent.order_count} pedido${ent.order_count > 1 ? 's' : ''}`},
+              ${ent.total_value}, ${targetStage.name.toLowerCase()}, ${targetStage.id},
+              'normal', ${ent.total_value}, ${completed}
+            )
+          `);
+
+          // Link all orders for this enterprise
+          const ordersResult = await db.execute(sql`
+            SELECT id FROM orders WHERE company_id = ${companyId} AND enterprise_id = ${ent.enterprise_id}
+          `);
+          for (const order of ((ordersResult as any).rows || [])) {
+            await db.execute(sql`
+              INSERT INTO crm_deal_documents (id, deal_id, document_type, document_id)
+              VALUES (${uuid()}, ${dealId}, 'order', ${order.id})
+              ON CONFLICT (deal_id, document_type, document_id) DO NOTHING
+            `).catch(() => {});
+          }
+
+          created++;
+        }
+      }
+
+      return { created, updated };
+    } catch (error) {
+      console.error('CRM bootstrap error:', error);
+      return { created: 0, updated: 0 };
+    }
+  }
 }
 
 export const crmSyncService = new CrmSyncService();

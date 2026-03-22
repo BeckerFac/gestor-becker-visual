@@ -20,6 +20,10 @@ export interface AuthorizeInvoiceInput {
   puntoVenta: number
   concepto: 1 | 2 | 3 // 1=Productos, 2=Servicios, 3=Productos y Servicios
   condicionIvaReceptorId?: number // AFIP RG 5616 - mandatory from 01/04/2026
+  // Service date fields (mandatory when concepto=2 or 3)
+  fchServDesde?: string   // YYYYMMDD format
+  fchServHasta?: string   // YYYYMMDD format
+  fchVtoPago?: string     // YYYYMMDD format
   items?: Array<{
     quantity: number
     unitPrice: number
@@ -573,6 +577,14 @@ export class AfipService {
       }))
     }
 
+    // Service date fields (mandatory for concepto 2 or 3)
+    const serviceDateFields: Record<string, string | undefined> = {}
+    if (concepto !== 1) {
+      serviceDateFields.FchServDesde = input.fchServDesde || fchDate
+      serviceDateFields.FchServHasta = input.fchServHasta || fchDate
+      serviceDateFields.FchVtoPago = input.fchVtoPago || fchDate
+    }
+
     // Build FECAESolicitar request
     const soapBody = this.buildFECAESolicitarRequest(
       token, sign, company.cuit, {
@@ -595,6 +607,7 @@ export class AfipService {
         MonCotiz: 1,
         Iva: ivaItems,
         CondicionIVAReceptorId: condicionIvaReceptorId,
+        ...serviceDateFields,
         ...fceFields,
         ...cbtesAsocFields,
       }
@@ -707,9 +720,13 @@ export class AfipService {
       ivaXml = `<Iva>${ivaItems}</Iva>`
     }
 
-    // FCE: FchVtoPago is mandatory for FCE invoices
+    // Service date fields (concepto 2 or 3)
+    const fchServDesdeXml = data.FchServDesde ? `<FchServDesde>${data.FchServDesde}</FchServDesde>` : ''
+    const fchServHastaXml = data.FchServHasta ? `<FchServHasta>${data.FchServHasta}</FchServHasta>` : ''
+
+    // FchVtoPago: mandatory for services (concepto 2/3) and FCE invoices
     const isFce = FCE_CBTE_TIPOS.includes(data.CbteTipo)
-    const fchVtoPagoXml = (isFce && data.FchVtoPago)
+    const fchVtoPagoXml = (data.FchVtoPago || (isFce && data.FchVtoPago))
       ? `<FchVtoPago>${data.FchVtoPago}</FchVtoPago>`
       : ''
 
@@ -760,6 +777,8 @@ export class AfipService {
             <CbteDesde>${data.CbteDesde}</CbteDesde>
             <CbteHasta>${data.CbteHasta}</CbteHasta>
             <CbteFch>${data.CbteFch}</CbteFch>
+            ${fchServDesdeXml}
+            ${fchServHastaXml}
             ${fchVtoPagoXml}
             <ImpTotal>${data.ImpTotal}</ImpTotal>
             <ImpTotConc>${data.ImpTotConc}</ImpTotConc>

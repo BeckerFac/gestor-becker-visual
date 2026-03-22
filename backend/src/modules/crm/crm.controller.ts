@@ -1,12 +1,15 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { crmService } from './crm.service';
+import { crmSyncService } from './crm-sync.service';
 
 export class CrmController {
   // Stages
   async getStages(req: AuthRequest, res: Response) {
     const data = await crmService.getStages(req.user!.company_id);
-    res.json(data);
+    // Map stage_order to order for frontend compatibility
+    const mapped = (data || []).map((s: any) => ({ ...s, order: s.stage_order ?? s.order }));
+    res.json(mapped);
   }
 
   async createStage(req: AuthRequest, res: Response) {
@@ -116,6 +119,15 @@ export class CrmController {
   async getCustomerHealth(req: AuthRequest, res: Response) {
     const data = await crmService.getCustomerHealth(req.user!.company_id);
     res.json(data);
+  }
+
+  async bootstrapDeals(req: AuthRequest, res: Response) {
+    try {
+      const result = await crmSyncService.bootstrapFromExistingData(req.user!.company_id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Error al sincronizar deals' });
+    }
   }
 }
 

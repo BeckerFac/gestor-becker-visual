@@ -11,7 +11,6 @@ import { formatDateTime } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { BillingSection } from '@/components/billing/BillingSection'
 import { SecretarIASection } from '@/components/secretaria/SecretarIASection'
-import { PortalConfigSection } from '@/components/portal/PortalConfigSection'
 
 export const Settings: React.FC = () => {
   const authCompany = useAuthStore((state) => state.company)
@@ -205,9 +204,6 @@ export const Settings: React.FC = () => {
 
       {/* SecretarIA - WhatsApp Assistant */}
       <SecretarIASection />
-
-      {/* Portal de Clientes Config */}
-      <PortalConfigSection />
 
       {/* Company Data */}
       <Card>

@@ -105,6 +105,7 @@ export const Quotes: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; parent_id: string | null; color?: string | null; product_count?: number }>>([])
 
   // UI state
   const [loading, setLoading] = useState(true)
@@ -136,6 +137,7 @@ export const Quotes: React.FC = () => {
     customer_id: '',
     valid_until: '',
     notes: '',
+    custom_company_name: '',
   })
   const [formEnterpriseId, setFormEnterpriseId] = useState<string>('')
   const [items, setItems] = useState<{
@@ -145,6 +147,7 @@ export const Quotes: React.FC = () => {
     quantity: string
     unit_price: string
     vat_rate: string
+    category_ids: string[]
   }[]>([])
 
   // ── Load data ──────────────────────────────────────────────────────────────
@@ -173,16 +176,18 @@ export const Quotes: React.FC = () => {
   }, [filterEnterprise, filterStatus, filterSearch, filterDateFrom, filterDateTo])
 
   const loadStaticData = useCallback(async () => {
-    const [custRes, prodRes, entRes, criteriaRes] = await Promise.all([
+    const [custRes, prodRes, entRes, criteriaRes, catRes] = await Promise.all([
       api.getCustomers().catch(() => ({ items: [] })),
       api.getProducts().catch(() => ({ items: [] })),
       api.getEnterprises().catch(() => []),
       api.getPriceCriteria().catch(() => []),
+      api.getCategories().catch(() => []),
     ])
     setCustomers(custRes.items || custRes || [])
     setProducts(prodRes.items || prodRes || [])
     setEnterprises(Array.isArray(entRes) ? entRes : (entRes.items || []))
     setPriceCriteriaList(Array.isArray(criteriaRes) ? criteriaRes : [])
+    setCategories(Array.isArray(catRes) ? catRes : [])
   }, [])
 
   useEffect(() => {
@@ -215,14 +220,14 @@ export const Quotes: React.FC = () => {
   // ── Form handlers ─────────────────────────────────────────────────────────
 
   const addItem = () => {
-    setItems([...items, { product_id: '', product_name: '', description: '', quantity: '1', unit_price: '', vat_rate: '21' }])
+    setItems([...items, { product_id: '', product_name: '', description: '', quantity: '1', unit_price: '', vat_rate: '21', category_ids: [] }])
   }
 
-  const updateItem = (idx: number, field: string, value: string) => {
+  const updateItem = (idx: number, field: string, value: string | string[]) => {
     const updated = [...items]
     updated[idx] = { ...updated[idx], [field]: value }
 
-    if (field === 'product_id' && value) {
+    if (field === 'product_id' && value && typeof value === 'string') {
       const prod = products.find(p => p.id === value)
       if (prod) {
         updated[idx].product_name = prod.name
@@ -291,6 +296,7 @@ export const Quotes: React.FC = () => {
         enterprise_id: formEnterpriseId || undefined,
         valid_until: form.valid_until || null,
         notes: form.notes || null,
+        custom_company_name: form.custom_company_name || null,
         items: items.map(item => ({
           product_id: item.product_id || null,
           product_name: item.product_name,
@@ -302,7 +308,7 @@ export const Quotes: React.FC = () => {
       })
       toast.success('Cotizacion creada correctamente')
       setShowForm(false)
-      setForm({ title: '', customer_id: '', valid_until: '', notes: '' })
+      setForm({ title: '', customer_id: '', valid_until: '', notes: '', custom_company_name: '' })
       setFormEnterpriseId('')
       setItems([])
       await loadQuotes(currentPage)
@@ -500,6 +506,15 @@ export const Quotes: React.FC = () => {
                   <Input label="Notas / Observaciones" placeholder="Tiempo de produccion, condiciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                 </div>
               </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">Nombre emisor (en PDF)</label>
+                <input
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                  placeholder="Por defecto usa el nombre de la empresa"
+                  value={form.custom_company_name || ''}
+                  onChange={e => setForm({ ...form, custom_company_name: e.target.value })}
+                />
+              </div>
 
               {/* Enterprise and Customer selector */}
               <EnterpriseCustomerSelector
@@ -588,8 +603,65 @@ export const Quotes: React.FC = () => {
                     {items.map((item, idx) => (
                       <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
                         <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                          {/* Category filter */}
+                          {categories.length > 0 && (
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-medium text-gray-500">Categoria</label>
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-left truncate"
+                                  onClick={() => {
+                                    const el = document.getElementById(`quote-cat-dropdown-${idx}`)
+                                    if (el) el.classList.toggle('hidden')
+                                  }}
+                                >
+                                  {(item.category_ids || []).length > 0
+                                    ? (item.category_ids || []).map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean).join(', ')
+                                    : 'Todas'}
+                                </button>
+                                <div
+                                  id={`quote-cat-dropdown-${idx}`}
+                                  className="hidden absolute z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
+                                >
+                                  {(item.category_ids || []).length > 0 && (
+                                    <button type="button" className="w-full px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 text-left border-b"
+                                      onClick={() => updateItem(idx, 'category_ids', [])}>
+                                      Limpiar
+                                    </button>
+                                  )}
+                                  {categories.filter(c => !c.parent_id).map(parent => (
+                                    <div key={parent.id}>
+                                      <label className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 cursor-pointer">
+                                        <input type="checkbox" checked={(item.category_ids || []).includes(parent.id)}
+                                          onChange={() => {
+                                            const ids = item.category_ids || []
+                                            const newIds = ids.includes(parent.id) ? ids.filter(id => id !== parent.id) : [...ids, parent.id]
+                                            updateItem(idx, 'category_ids', newIds)
+                                          }}
+                                          className="rounded border-gray-300" />
+                                        <span className="text-sm font-medium" style={parent.color ? { color: parent.color } : undefined}>{parent.name}</span>
+                                      </label>
+                                      {categories.filter(c => c.parent_id === parent.id).map(child => (
+                                        <label key={child.id} className="flex items-center gap-2 px-3 py-1 pl-7 hover:bg-gray-50 cursor-pointer">
+                                          <input type="checkbox" checked={(item.category_ids || []).includes(child.id)}
+                                            onChange={() => {
+                                              const ids = item.category_ids || []
+                                              const newIds = ids.includes(child.id) ? ids.filter(id => id !== child.id) : [...ids, child.id]
+                                              updateItem(idx, 'category_ids', newIds)
+                                            }}
+                                            className="rounded border-gray-300" />
+                                          <span className="text-sm">{child.name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                           {/* Product selector or custom name */}
-                          <div className="md:col-span-2 flex flex-col gap-1">
+                          <div className={`${categories.length > 0 ? 'md:col-span-1' : 'md:col-span-2'} flex flex-col gap-1`}>
                             <label className="text-xs font-medium text-gray-500">Producto</label>
                             <select
                               className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -597,11 +669,19 @@ export const Quotes: React.FC = () => {
                               onChange={e => updateItem(idx, 'product_id', e.target.value)}
                             >
                               <option value="">Producto personalizado...</option>
-                              {products.map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} {p.pricing?.final_price ? `(${formatCurrency(parseFloat(p.pricing.final_price))})` : ''}
-                                </option>
-                              ))}
+                              {(() => {
+                                const catIds = item.category_ids || []
+                                const expandedIds = new Set(catIds)
+                                catIds.forEach(cid => categories.filter(c => c.parent_id === cid).forEach(ch => expandedIds.add(ch.id)))
+                                const filtered = expandedIds.size > 0
+                                  ? products.filter(p => (p as any).category_id && expandedIds.has((p as any).category_id))
+                                  : products
+                                return filtered.map(p => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} {p.pricing?.final_price ? `(${formatCurrency(parseFloat(p.pricing.final_price))})` : ''}
+                                  </option>
+                                ))
+                              })()}
                             </select>
                             {!item.product_id && (
                               <input

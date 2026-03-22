@@ -4,6 +4,11 @@ import { authorize, requireRole, requireMinRole } from '../../middlewares/author
 
 export const usersRouter = Router();
 
+// Role templates
+usersRouter.get('/roles', requireRole('owner', 'admin'), (req, res) => usersController.getRoleTemplates(req as any, res));
+usersRouter.put('/roles/:roleName', requireRole('owner', 'admin'), (req, res) => usersController.updateRoleTemplate(req as any, res));
+usersRouter.post('/roles/:roleName/apply-all', requireRole('owner', 'admin'), (req, res) => usersController.applyRoleToAllUsers(req as any, res));
+
 usersRouter.get('/', authorize('users', 'view'), (req, res) => usersController.getUsers(req, res));
 usersRouter.get('/:id', authorize('users', 'view'), (req, res) => usersController.getUser(req, res));
 usersRouter.post('/', authorize('users', 'create'), (req, res) => usersController.createUser(req, res));

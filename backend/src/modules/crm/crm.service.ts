@@ -26,11 +26,12 @@ const VALID_ACTIVITY_TYPES = [
 const DEFAULT_STAGES = [
   { name: 'Contacto', color: '#6B7280', stage_order: 1, trigger_event: null, is_loss_stage: false },
   { name: 'Cotizacion', color: '#3B82F6', stage_order: 2, trigger_event: 'quote_created', is_loss_stage: false },
-  { name: 'Pedido', color: '#8B5CF6', stage_order: 3, trigger_event: 'order_created', is_loss_stage: false },
-  { name: 'Entregado', color: '#F59E0B', stage_order: 4, trigger_event: 'order_delivered', is_loss_stage: false },
-  { name: 'Facturado', color: '#06B6D4', stage_order: 5, trigger_event: 'invoice_authorized', is_loss_stage: false },
-  { name: 'Cobrado', color: '#22C55E', stage_order: 6, trigger_event: 'payment_received', is_loss_stage: false },
-  { name: 'Perdido', color: '#EF4444', stage_order: 7, trigger_event: 'deal_lost', is_loss_stage: true },
+  { name: 'Negociacion', color: '#EAB308', stage_order: 3, trigger_event: 'quote_accepted', is_loss_stage: false },
+  { name: 'Pedido', color: '#8B5CF6', stage_order: 4, trigger_event: 'order_created', is_loss_stage: false },
+  { name: 'Entregado', color: '#F59E0B', stage_order: 5, trigger_event: 'order_delivered', is_loss_stage: false },
+  { name: 'Facturado', color: '#06B6D4', stage_order: 6, trigger_event: 'invoice_authorized', is_loss_stage: false },
+  { name: 'Cobrado', color: '#22C55E', stage_order: 7, trigger_event: 'payment_received', is_loss_stage: false },
+  { name: 'Perdido', color: '#EF4444', stage_order: 8, trigger_event: 'deal_lost', is_loss_stage: true },
 ];
 
 export class CrmService {
@@ -142,13 +143,31 @@ export class CrmService {
       SELECT COUNT(*)::int as cnt FROM crm_stages WHERE company_id = ${companyId}
     `);
     const count = ((existing as any).rows || existing || [])[0]?.cnt || 0;
-    if (Number(count) > 0) return;
 
-    for (const stage of DEFAULT_STAGES) {
-      await db.execute(sql`
-        INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
-        VALUES (${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage})
-      `);
+    if (Number(count) === 0) {
+      // Seed all default stages
+      for (const stage of DEFAULT_STAGES) {
+        await db.execute(sql`
+          INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
+          VALUES (${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage})
+        `);
+      }
+    } else {
+      // Ensure new stages exist (migration for companies that already have stages)
+      for (const stage of DEFAULT_STAGES) {
+        await db.execute(sql`
+          INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
+          VALUES (${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage})
+          ON CONFLICT (company_id, LOWER(name)) DO NOTHING
+        `).catch(() => {
+          // Fallback: try without ON CONFLICT if constraint doesn't exist
+          db.execute(sql`
+            INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
+            SELECT ${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage}
+            WHERE NOT EXISTS (SELECT 1 FROM crm_stages WHERE company_id = ${companyId} AND LOWER(name) = LOWER(${stage.name}))
+          `).catch(() => {});
+        });
+      }
     }
   }
 
@@ -416,23 +435,21 @@ export class CrmService {
       const dealsResult = await db.execute(dealsQuery);
       const deals = (dealsResult as any).rows || dealsResult || [];
 
-      // Group by stage_id
-      const grouped: Record<string, { stage: any; deals: any[] }> = {};
+      // Group deals by stage_id AND stage name (lowercase) for frontend compatibility
+      const grouped: Record<string, any[]> = {};
       for (const stage of stages) {
         if (!stage.is_loss_stage) {
-          grouped[stage.id] = { stage, deals: [] };
+          grouped[stage.id] = [];
+          grouped[stage.name.toLowerCase()] = grouped[stage.id]; // alias by name
         }
       }
       for (const deal of deals) {
         if (grouped[deal.stage_id]) {
-          grouped[deal.stage_id].deals.push(deal);
+          grouped[deal.stage_id].push(deal);
         }
       }
 
-      return {
-        stages: stages.filter((s: any) => !s.is_loss_stage),
-        columns: grouped,
-      };
+      return grouped;
     } catch (error) {
       console.error('getDealsByStage error:', error);
       throw new ApiError(500, 'Failed to get deals by stage');

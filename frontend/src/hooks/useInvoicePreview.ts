@@ -32,6 +32,10 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [previewCondicionIva, setPreviewCondicionIva] = useState<number>(5)
+  const [previewConcepto, setPreviewConcepto] = useState<number>(1)
+  const [previewFchServDesde, setPreviewFchServDesde] = useState('')
+  const [previewFchServHasta, setPreviewFchServHasta] = useState('')
+  const [previewFchVtoPago, setPreviewFchVtoPago] = useState('')
 
   const openPreview = useCallback(async (invoiceId: string, orderId: string) => {
     setPreviewLoading(true)
@@ -91,6 +95,10 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     try {
       await api.updateDraftInvoice(previewInvoice.id, {
         invoice_type: previewInvoiceType,
+        concepto: previewConcepto,
+        fch_serv_desde: previewConcepto !== 1 ? previewFchServDesde : undefined,
+        fch_serv_hasta: previewConcepto !== 1 ? previewFchServHasta : undefined,
+        fch_vto_pago: previewConcepto !== 1 ? previewFchVtoPago : undefined,
         items: previewItems.map(i => ({
           product_id: i.product_id || null,
           product_name: i.product_name || '',
@@ -120,7 +128,7 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     } finally {
       setAuthorizingInvoice(false)
     }
-  }, [previewInvoice, authorizingInvoice, previewInvoiceType, previewItems, previewPuntoVenta, previewCondicionIva, previewOrderId, onError, onDataRefresh, loadInvoicingStatus])
+  }, [previewInvoice, authorizingInvoice, previewInvoiceType, previewItems, previewPuntoVenta, previewCondicionIva, previewConcepto, previewFchServDesde, previewFchServHasta, previewFchVtoPago, previewOrderId, onError, onDataRefresh, loadInvoicingStatus])
 
   const deleteDraft = useCallback(async (invoiceId: string, orderId: string) => {
     if (!confirm('Eliminar este borrador de factura?')) return
@@ -179,5 +187,13 @@ export function useInvoicePreview({ onError, onDataRefresh, loadInvoicingStatus 
     pdfBlobUrl,
     previewCondicionIva,
     setPreviewCondicionIva,
+    previewConcepto,
+    setPreviewConcepto,
+    previewFchServDesde,
+    setPreviewFchServDesde,
+    previewFchServHasta,
+    setPreviewFchServHasta,
+    previewFchVtoPago,
+    setPreviewFchVtoPago,
   }
 }

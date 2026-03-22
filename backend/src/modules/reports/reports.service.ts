@@ -483,6 +483,54 @@ export class ReportsService {
       } catch (e) { console.error('Insights delivered_not_invoiced error:', e); }
     }
 
+    // Orders with upcoming delivery deadlines
+    if (canView(userPermissions, 'orders')) {
+      try {
+        const urgentDeliveryResult = await db.execute(sql`
+          SELECT COUNT(*) as count
+          FROM orders
+          WHERE company_id = ${companyId}
+            AND status NOT IN ('entregado', 'cancelado')
+            AND estimated_delivery IS NOT NULL
+            AND estimated_delivery::date <= CURRENT_DATE + INTERVAL '1 day'
+        `);
+        const urgentRows = (urgentDeliveryResult as any).rows || urgentDeliveryResult || [];
+        const urgentCount = parseInt(urgentRows[0]?.count || '0');
+        if (urgentCount > 0) {
+          actions.push({
+            type: 'delivery_urgent',
+            severity: 'critical',
+            title: `${urgentCount} pedido${urgentCount > 1 ? 's' : ''} con entrega inminente`,
+            description: 'Entrega hoy o manana - requiere atencion',
+            link: '/orders',
+          });
+        }
+      } catch (e) { console.error('Insights delivery_urgent error:', e); }
+
+      try {
+        const soonDeliveryResult = await db.execute(sql`
+          SELECT COUNT(*) as count
+          FROM orders
+          WHERE company_id = ${companyId}
+            AND status NOT IN ('entregado', 'cancelado')
+            AND estimated_delivery IS NOT NULL
+            AND estimated_delivery::date > CURRENT_DATE + INTERVAL '1 day'
+            AND estimated_delivery::date <= CURRENT_DATE + INTERVAL '7 days'
+        `);
+        const soonRows = (soonDeliveryResult as any).rows || soonDeliveryResult || [];
+        const soonCount = parseInt(soonRows[0]?.count || '0');
+        if (soonCount > 0) {
+          actions.push({
+            type: 'delivery_soon',
+            severity: 'warning',
+            title: `${soonCount} pedido${soonCount > 1 ? 's' : ''} con entrega esta semana`,
+            description: 'Entregas en los proximos 2-7 dias',
+            link: '/orders',
+          });
+        }
+      } catch (e) { console.error('Insights delivery_soon error:', e); }
+    }
+
     // Aging overview insight (replaces single overdue_invoices for richer data)
     if (canView(userPermissions, 'invoices')) {
       try {

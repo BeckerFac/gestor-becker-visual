@@ -12,6 +12,7 @@ export class QuotesService {
     try {
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(e => console.warn('Migration:', e.message));
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_number INTEGER DEFAULT 0`).catch(e => console.warn('Migration:', e.message));
+      await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS custom_company_name TEXT`).catch(e => console.warn('Migration:', e.message));
       // Fix existing quotes with quote_number = 0 or NULL - assign sequential numbers by company
       await db.execute(sql`
         WITH numbered AS (
@@ -264,8 +265,8 @@ export class QuotesService {
 
       // Generate quote_number atomically using subquery to prevent race conditions
       await db.execute(sql`
-        INSERT INTO quotes (id, company_id, customer_id, enterprise_id, quote_number, title, valid_until, subtotal, vat_amount, total_amount, status, notes, created_by)
-        VALUES (${quoteId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, (SELECT COALESCE(MAX(quote_number), 0) + 1 FROM quotes WHERE company_id = ${companyId}), ${data.title || 'Cotización'}, ${data.valid_until || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, 'draft', ${data.notes || null}, ${userId})
+        INSERT INTO quotes (id, company_id, customer_id, enterprise_id, quote_number, title, valid_until, subtotal, vat_amount, total_amount, status, notes, custom_company_name, created_by)
+        VALUES (${quoteId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, (SELECT COALESCE(MAX(quote_number), 0) + 1 FROM quotes WHERE company_id = ${companyId}), ${data.title || 'Cotización'}, ${data.valid_until || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, 'draft', ${data.notes || null}, ${data.custom_company_name || null}, ${userId})
       `);
 
       if (data.items && Array.isArray(data.items)) {
@@ -348,6 +349,7 @@ export class QuotesService {
           vat_amount = ${vatAmount.toString()},
           total_amount = ${totalAmount.toString()},
           notes = ${data.notes !== undefined ? data.notes : existing.notes},
+          custom_company_name = ${data.custom_company_name !== undefined ? (data.custom_company_name || null) : existing.custom_company_name || null},
           updated_at = NOW()
         WHERE id = ${quoteId} AND company_id = ${companyId}
       `);
@@ -414,7 +416,15 @@ export class QuotesService {
   }
 
   private escapeHtml(str: string): string {
-    return String(str || '')
+    // Prevent double-escaping: first unescape any existing HTML entities
+    let clean = String(str || '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+    // Then escape properly
+    return clean
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -485,7 +495,7 @@ export class QuotesService {
   <div style="padding:20px 40px;display:flex;gap:24px;">
     <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">De</div>
-      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(company.name)}</div>
+      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${esc(quote.custom_company_name || company.name)}</div>
       <div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${esc(company.cuit)}</div>
       ${company.address ? `<div style="font-size:12px;color:#666;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
       ${company.phone ? `<div style="font-size:12px;color:#666;">Tel: ${esc(company.phone)}</div>` : ''}
@@ -552,7 +562,7 @@ export class QuotesService {
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#999;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span style="font-weight:700;color:#1a1a2e;font-size:12px;">BECKER<span style="color:#c8102e;">VISUAL</span></span>
-        <span style="color:#666;">${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
+        <span style="color:#666;">${esc(quote.custom_company_name || company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</span>
       </div>
       <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
       <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
@@ -602,7 +612,7 @@ export class QuotesService {
   <div style="padding:32px 48px 24px;background:#f8f9fa;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <div>
-        <div style="font-size:28px;font-weight:300;color:#1f2937;letter-spacing:2px;">${esc(company.name)}</div>
+        <div style="font-size:28px;font-weight:300;color:#1f2937;letter-spacing:2px;">${esc(quote.custom_company_name || company.name)}</div>
         ${company.cuit ? `<div style="font-size:12px;color:#9ca3af;margin-top:4px;">CUIT: ${esc(company.cuit)}</div>` : ''}
       </div>
       <div style="text-align:right;">
@@ -622,7 +632,7 @@ export class QuotesService {
   <div style="padding:16px 48px 24px;display:flex;gap:32px;">
     <div style="flex:1;background:white;border:1px solid #e5e7eb;border-radius:12px;padding:20px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#3b82f6;margin-bottom:8px;font-weight:600;">Emisor</div>
-      <div style="font-size:15px;font-weight:600;color:#1f2937;">${esc(company.name)}</div>
+      <div style="font-size:15px;font-weight:600;color:#1f2937;">${esc(quote.custom_company_name || company.name)}</div>
       ${company.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
       ${company.phone ? `<div style="font-size:12px;color:#6b7280;">Tel: ${esc(company.phone)}</div>` : ''}
       ${company.email ? `<div style="font-size:12px;color:#6b7280;">${esc(company.email)}</div>` : ''}
@@ -686,7 +696,7 @@ export class QuotesService {
   <!-- FOOTER -->
   <div style="position:fixed;bottom:0;left:0;right:0;padding:14px 48px;background:white;border-top:1px solid #e5e7eb;">
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#9ca3af;">
-      <div>${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
+      <div>${esc(quote.custom_company_name || company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
       <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
       <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
     </div>
@@ -734,7 +744,7 @@ export class QuotesService {
   <div style="background:${accentColor};padding:32px 48px;color:white;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <div>
-        <div style="font-size:26px;font-weight:800;letter-spacing:1px;">${esc(company.name)}</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:1px;">${esc(quote.custom_company_name || company.name)}</div>
         ${company.cuit ? `<div style="font-size:12px;opacity:0.8;margin-top:4px;">CUIT: ${esc(company.cuit)}</div>` : ''}
         ${company.phone ? `<div style="font-size:12px;opacity:0.8;">Tel: ${esc(company.phone)}</div>` : ''}
         ${company.email ? `<div style="font-size:12px;opacity:0.8;">${esc(company.email)}</div>` : ''}
@@ -757,7 +767,7 @@ export class QuotesService {
   <div style="padding:24px 48px;display:flex;gap:32px;">
     <div style="flex:1;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:${accentColor};margin-bottom:8px;font-weight:700;">Datos del Emisor</div>
-      <div style="font-size:14px;font-weight:600;color:#1f2937;">${esc(company.name)}</div>
+      <div style="font-size:14px;font-weight:600;color:#1f2937;">${esc(quote.custom_company_name || company.name)}</div>
       ${company.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">${esc(company.address)}${company.city ? `, ${esc(company.city)}` : ''}${company.province ? ` - ${esc(company.province)}` : ''}</div>` : ''}
     </div>
     <div style="flex:1;">
@@ -817,7 +827,7 @@ export class QuotesService {
   <!-- FOOTER -->
   <div style="position:fixed;bottom:0;left:0;right:0;background:${accentColor};padding:12px 48px;">
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:rgba(255,255,255,0.8);">
-      <div style="font-weight:600;color:white;">${esc(company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
+      <div style="font-weight:600;color:white;">${esc(quote.custom_company_name || company.name)} — Cotizacion N° ${String(quote.quote_number || '').padStart(6, '0')}</div>
       <div>Precios en Pesos Argentinos (ARS), IVA incluido</div>
       <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
     </div>

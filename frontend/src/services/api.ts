@@ -1196,6 +1196,20 @@ export const api = {
     return data
   },
 
+  // Role templates
+  getRoleTemplates: async () => {
+    const { data } = await client.get('/users/roles')
+    return data.templates
+  },
+  updateRoleTemplate: async (roleName: string, permissions: Record<string, string[]>, description?: string) => {
+    const { data } = await client.put(`/users/roles/${roleName}`, { permissions, description })
+    return data.template
+  },
+  applyRoleToAllUsers: async (roleName: string) => {
+    const { data } = await client.post(`/users/roles/${roleName}/apply-all`)
+    return data
+  },
+
   // Transfer ownership (owner only)
   transferOwnership: async (newOwnerId: string) => {
     const { data } = await client.post('/users/transfer-ownership', { new_owner_id: newOwnerId })
@@ -1289,6 +1303,10 @@ export const api = {
   },
   getCrmCustomerHealth: async () => {
     const { data } = await client.get('/crm/health')
+    return data
+  },
+  bootstrapCrmDeals: async () => {
+    const { data } = await client.post('/crm/bootstrap')
     return data
   },
 

@@ -17,7 +17,8 @@ const getPeriods = (): Period[] => {
   const today = now.toISOString().split('T')[0]
 
   const startOfWeek = new Date(now)
-  startOfWeek.setDate(now.getDate() - now.getDay() + 1)
+  const dayOfWeek = now.getDay()
+  startOfWeek.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 

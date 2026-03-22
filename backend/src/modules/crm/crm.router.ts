@@ -33,3 +33,6 @@ crmRouter.post('/activities', authorize('enterprises', 'create'), (req, res) => 
 // Summary
 crmRouter.get('/summary', authorize('enterprises', 'view'), (req, res) => crmController.getPipelineSummary(req as any, res));
 crmRouter.get('/health', authorize('enterprises', 'view'), (req, res) => crmController.getCustomerHealth(req as any, res));
+
+// Bootstrap: create deals from existing orders/quotes/invoices
+crmRouter.post('/bootstrap', authorize('enterprises', 'create'), (req, res) => crmController.bootstrapDeals(req as any, res));

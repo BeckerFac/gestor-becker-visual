@@ -49,6 +49,12 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link_url TEXT`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link_id VARCHAR(100)`);
 
+      // AFIP service concept fields
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS concepto INTEGER DEFAULT 1`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fch_serv_desde DATE`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fch_serv_hasta DATE`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fch_vto_pago DATE`);
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Invoices migrations error:', error);
@@ -437,6 +443,21 @@ export class InvoicesService {
         await db.update(invoices).set({ invoice_type: data.invoice_type, updated_at: new Date() }).where(eq(invoices.id, invoiceId));
       }
 
+      // Update concepto and service date fields if provided
+      if (data.concepto !== undefined) {
+        const concepto = parseInt(data.concepto) || 1;
+        await db.execute(sql`UPDATE invoices SET concepto = ${concepto}, updated_at = NOW() WHERE id = ${invoiceId}`);
+      }
+      if (data.fch_serv_desde) {
+        await db.execute(sql`UPDATE invoices SET fch_serv_desde = ${data.fch_serv_desde}, updated_at = NOW() WHERE id = ${invoiceId}`);
+      }
+      if (data.fch_serv_hasta) {
+        await db.execute(sql`UPDATE invoices SET fch_serv_hasta = ${data.fch_serv_hasta}, updated_at = NOW() WHERE id = ${invoiceId}`);
+      }
+      if (data.fch_vto_pago) {
+        await db.execute(sql`UPDATE invoices SET fch_vto_pago = ${data.fch_vto_pago}, updated_at = NOW() WHERE id = ${invoiceId}`);
+      }
+
       // Update items if provided
       if (data.items && Array.isArray(data.items)) {
         // Delete existing items
@@ -776,6 +797,26 @@ export class InvoicesService {
         }
       }
 
+      // Read service date fields from invoice for concepto 2/3
+      let fchServDesde: string | undefined;
+      let fchServHasta: string | undefined;
+      let fchVtoPago: string | undefined;
+      if (concepto !== 1) {
+        const dateFields = await db.execute(sql`SELECT fch_serv_desde, fch_serv_hasta, fch_vto_pago FROM invoices WHERE id = ${invoiceId}`);
+        const dateRow = ((dateFields as any).rows || [])[0];
+        if (dateRow) {
+          const formatDate = (d: any) => {
+            if (!d) return undefined;
+            const dt = new Date(d);
+            if (isNaN(dt.getTime())) return undefined;
+            return dt.toISOString().slice(0, 10).replace(/-/g, '');
+          };
+          fchServDesde = formatDate(dateRow.fch_serv_desde);
+          fchServHasta = formatDate(dateRow.fch_serv_hasta);
+          fchVtoPago = formatDate(dateRow.fch_vto_pago);
+        }
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
@@ -783,6 +824,9 @@ export class InvoicesService {
         concepto,
         customerCuit,
         condicionIvaReceptorId,
+        fchServDesde,
+        fchServHasta,
+        fchVtoPago,
         subtotal: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? neto : parseFloat(invoice.subtotal?.toString() || '0'),
         vat: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? iva : parseFloat(invoice.vat_amount?.toString() || '0'),
         total: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? calculatedTotal : parseFloat(invoice.total_amount?.toString() || '0'),

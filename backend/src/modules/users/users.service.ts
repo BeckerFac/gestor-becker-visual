@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -358,6 +358,18 @@ export class UsersService {
       throw new ApiError(404, 'Usuario no encontrado en esta empresa');
     }
 
+    // Try DB template first, fallback to constants
+    const dbTemplate = await pool.query(
+      'SELECT permissions FROM role_templates WHERE company_id = $1 AND role_name = $2',
+      [companyId, templateName]
+    ).catch(() => ({ rows: [] }));
+
+    if (dbTemplate.rows.length > 0) {
+      const permissions = dbTemplate.rows[0].permissions;
+      await this.setUserPermissions(companyId, userId, permissions);
+      return permissions;
+    }
+
     const template = ROLE_TEMPLATES[templateName];
     if (!template) {
       throw new ApiError(400, `Template '${templateName}' no encontrado`);
@@ -446,6 +458,100 @@ export class UsersService {
     });
 
     return { message: 'Todas las sesiones revocadas' };
+  }
+  async getRoleTemplates(companyId: string) {
+    // Ensure role_templates exist for this company (seed from constants if empty)
+    const existingResult = await pool.query(
+      'SELECT COUNT(*)::int as cnt FROM role_templates WHERE company_id = $1', [companyId]
+    );
+    if (parseInt(existingResult.rows[0]?.cnt || '0') === 0) {
+      // Seed from ROLE_TEMPLATES constant
+      const roleDescriptions: Record<string, string> = {
+        viewer: 'Solo lectura. Puede ver informacion pero no modificar.',
+        vendedor: 'Gestiona ventas: pedidos, cotizaciones y clientes.',
+        contable: 'Gestiona facturas, cobros, pagos y reportes financieros.',
+        editor: 'Edicion general de la mayoria de modulos.',
+        stock_manager: 'Gestiona productos, inventario y compras.',
+        gerente: 'Acceso casi total. Gestiona usuarios y reportes.',
+        admin: 'Acceso completo a todas las funciones.',
+        owner: 'Propietario de la cuenta. Control total.',
+      };
+      for (const [roleName, perms] of Object.entries(ROLE_TEMPLATES)) {
+        const isSystem = ['owner', 'admin'].includes(roleName);
+        await pool.query(
+          `INSERT INTO role_templates (company_id, role_name, description, permissions, is_system)
+           VALUES ($1, $2, $3, $4, $5) ON CONFLICT (company_id, role_name) DO NOTHING`,
+          [companyId, roleName, roleDescriptions[roleName] || '', JSON.stringify(perms), isSystem]
+        );
+      }
+    }
+
+    // Get templates with user count
+    const result = await pool.query(`
+      SELECT rt.*,
+        (SELECT COUNT(*)::int FROM users u WHERE u.company_id = rt.company_id AND u.role = rt.role_name AND u.active = true) as user_count
+      FROM role_templates rt
+      WHERE rt.company_id = $1
+      ORDER BY
+        CASE rt.role_name
+          WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'gerente' THEN 3
+          WHEN 'editor' THEN 4 WHEN 'vendedor' THEN 5 WHEN 'contable' THEN 6
+          WHEN 'stock_manager' THEN 7 WHEN 'viewer' THEN 8 ELSE 9
+        END
+    `, [companyId]);
+    return result.rows;
+  }
+
+  async updateRoleTemplate(companyId: string, roleName: string, permissions: Record<string, string[]>, description?: string) {
+    if (['owner', 'admin'].includes(roleName)) {
+      throw new ApiError(400, 'No se pueden modificar los permisos de Owner o Admin');
+    }
+
+    const descUpdate = description !== undefined ? `, description = $4` : '';
+    const params: any[] = [JSON.stringify(permissions), companyId, roleName];
+    if (description !== undefined) params.push(description);
+
+    const result = await pool.query(
+      `UPDATE role_templates SET permissions = $1, updated_at = NOW()${descUpdate}
+       WHERE company_id = $2 AND role_name = $3 AND is_system = false
+       RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      throw new ApiError(404, 'Rol no encontrado o no editable');
+    }
+    return result.rows[0];
+  }
+
+  async applyRoleToAllUsers(companyId: string, roleName: string) {
+    if (['owner', 'admin'].includes(roleName)) {
+      throw new ApiError(400, 'Owner y Admin tienen acceso completo automaticamente');
+    }
+
+    // Get the template permissions
+    const templateResult = await pool.query(
+      'SELECT permissions FROM role_templates WHERE company_id = $1 AND role_name = $2',
+      [companyId, roleName]
+    );
+    if (templateResult.rows.length === 0) {
+      throw new ApiError(404, 'Template de rol no encontrado');
+    }
+    const permissions = templateResult.rows[0].permissions;
+
+    // Get all active users with this role
+    const usersResult = await pool.query(
+      'SELECT id FROM users WHERE company_id = $1 AND role = $2 AND active = true',
+      [companyId, roleName]
+    );
+
+    let updated = 0;
+    for (const user of usersResult.rows) {
+      await this.setUserPermissions(companyId, user.id, permissions);
+      updated++;
+    }
+
+    return { updated, role: roleName };
   }
 }
 
