@@ -288,7 +288,7 @@ export class PortalService {
         ? await db.execute(sql`
             SELECT ${sql.raw(selectCols)}
             FROM invoices i
-            WHERE i.company_id = ${companyId}
+            WHERE i.company_id = ${companyId} AND i.status = 'authorized'
             ORDER BY i.created_at DESC
             LIMIT 5
           `)
@@ -297,7 +297,7 @@ export class PortalService {
             FROM invoices i
             WHERE (i.enterprise_id = ${enterpriseId} OR (i.enterprise_id IS NULL AND i.customer_id IN (
               SELECT id FROM customers WHERE enterprise_id = ${enterpriseId}
-            ))) AND i.company_id = ${companyId}
+            ))) AND i.company_id = ${companyId} AND i.status = 'authorized'
             ORDER BY i.created_at DESC
           `);
       const rows = (result as any).rows || result || [];
@@ -448,7 +448,7 @@ export class PortalService {
               (SELECT COUNT(*) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
               (SELECT COUNT(*) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
               (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId}) as total_spent,
-              (SELECT COUNT(*) FROM invoices WHERE (enterprise_id = ${enterpriseId} OR (enterprise_id IS NULL AND customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${enterpriseId}))) AND company_id = ${companyId})::int as total_invoices,
+              (SELECT COUNT(*) FROM invoices WHERE (enterprise_id = ${enterpriseId} OR (enterprise_id IS NULL AND customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${enterpriseId}))) AND company_id = ${companyId} AND status = 'authorized')::int as total_invoices,
               (SELECT COUNT(*) FROM quotes WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId})::int as total_quotes
           `);
       const rows = (result as any).rows || result || [];
