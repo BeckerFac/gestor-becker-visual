@@ -388,13 +388,13 @@ export const CuentaCorriente: React.FC = () => {
           columns={[
             { key: 'empresa', label: 'Empresa' },
             { key: 'cuit', label: 'CUIT' },
-            { key: 'facturado', label: 'Facturado AFIP', type: 'currency' as const },
-            { key: 'cobros', label: 'Cobros', type: 'currency' as const },
-            { key: 'a_cobrar', label: 'A Cobrar', type: 'currency' as const },
-            { key: 'compras', label: 'Compras', type: 'currency' as const },
-            { key: 'pagos', label: 'Pagos', type: 'currency' as const },
-            { key: 'a_pagar', label: 'A Pagar', type: 'currency' as const },
-            { key: 'balance', label: 'Balance', type: 'currency' as const },
+            { key: 'facturado', label: 'Facturado AFIP' },
+            { key: 'cobros', label: 'Cobros' },
+            { key: 'a_cobrar', label: 'A Cobrar' },
+            { key: 'compras', label: 'Compras' },
+            { key: 'pagos', label: 'Pagos' },
+            { key: 'a_pagar', label: 'A Pagar' },
+            { key: 'balance', label: 'Balance' },
           ]}
           filename="cuenta_corriente"
         />
