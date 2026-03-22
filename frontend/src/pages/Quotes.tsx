@@ -119,6 +119,9 @@ export const Quotes: React.FC = () => {
   // Preview modal state
   const [previewQuoteId, setPreviewQuoteId] = useState<string | null>(null)
 
+  // Category dropdown state
+  const [openCatDropdown, setOpenCatDropdown] = useState<number | null>(null)
+
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -198,6 +201,18 @@ export const Quotes: React.FC = () => {
     setCurrentPage(1)
     loadQuotes(1)
   }, [loadQuotes])
+
+  // Close category dropdown on outside click
+  useEffect(() => {
+    if (openCatDropdown === null) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-cat-dropdown]')) {
+        setOpenCatDropdown(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openCatDropdown])
 
   // ── Filter helpers ─────────────────────────────────────────────────────────
 
@@ -607,22 +622,19 @@ export const Quotes: React.FC = () => {
                           {categories.length > 0 && (
                             <div className="flex flex-col gap-1">
                               <label className="text-xs font-medium text-gray-500">Categoria</label>
-                              <div className="relative">
+                              <div className="relative" data-cat-dropdown>
                                 <button
                                   type="button"
                                   className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-left truncate"
-                                  onClick={() => {
-                                    const el = document.getElementById(`quote-cat-dropdown-${idx}`)
-                                    if (el) el.classList.toggle('hidden')
-                                  }}
+                                  onClick={() => setOpenCatDropdown(openCatDropdown === idx ? null : idx)}
                                 >
                                   {(item.category_ids || []).length > 0
                                     ? (item.category_ids || []).map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean).join(', ')
                                     : 'Todas'}
                                 </button>
+                                {openCatDropdown === idx && (
                                 <div
-                                  id={`quote-cat-dropdown-${idx}`}
-                                  className="hidden absolute z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
+                                  className="absolute z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
                                 >
                                   {(item.category_ids || []).length > 0 && (
                                     <button type="button" className="w-full px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 text-left border-b"
@@ -657,6 +669,7 @@ export const Quotes: React.FC = () => {
                                     </div>
                                   ))}
                                 </div>
+                                )}
                               </div>
                             </div>
                           )}

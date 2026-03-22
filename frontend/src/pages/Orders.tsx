@@ -150,6 +150,7 @@ export const Orders: React.FC = () => {
   const [banks, setBanks] = useState<Bank[]>([])
   const [productTypes, setProductTypes] = useState<string[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [openCatDropdown, setOpenCatDropdown] = useState<number | null>(null)
   const [showNewBankInput, setShowNewBankInput] = useState(false)
   const [newBankName, setNewBankName] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -287,6 +288,19 @@ export const Orders: React.FC = () => {
   }, [filterStatus, filterType, filterEnterprise, filterInvoice])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Close category dropdown on click outside
+  useEffect(() => {
+    if (openCatDropdown === null) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest(`[data-cat-dropdown]`)) {
+        setOpenCatDropdown(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openCatDropdown])
 
   const handleSearch = () => loadData()
 
@@ -1130,22 +1144,19 @@ export const Orders: React.FC = () => {
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo/Categoria<HelpTip text="Selecciona una o mas categorias para filtrar los productos disponibles. Podes configurar categorias desde Productos > Categorias." /></label>
                           {categories.length > 0 ? (
-                            <div className="relative">
+                            <div className="relative" data-cat-dropdown>
                               <button
                                 type="button"
                                 className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 truncate"
-                                onClick={() => {
-                                  const el = document.getElementById(`cat-dropdown-${idx}`)
-                                  if (el) el.classList.toggle('hidden')
-                                }}
+                                onClick={() => setOpenCatDropdown(openCatDropdown === idx ? null : idx)}
                               >
                                 {item.category_ids.length > 0
                                   ? item.category_ids.map(cid => categories.find(c => c.id === cid)?.name).filter(Boolean).join(', ')
                                   : 'Todas las categorias'}
                               </button>
+                              {openCatDropdown === idx && (
                               <div
-                                id={`cat-dropdown-${idx}`}
-                                className="hidden absolute z-50 mt-1 w-64 max-h-60 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
+                                className="absolute z-50 mt-1 w-64 max-h-60 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg"
                               >
                                 {item.category_ids.length > 0 && (
                                   <button
@@ -1202,6 +1213,7 @@ export const Orders: React.FC = () => {
                                   </div>
                                 ))}
                               </div>
+                              )}
                             </div>
                           ) : (
                             <>
