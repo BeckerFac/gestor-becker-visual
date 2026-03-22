@@ -42,6 +42,19 @@ export class PortalController {
     }
   }
 
+  // ==================== PREVIEW TOKEN (admin) ====================
+
+  async generatePreviewToken(req: AuthRequest, res: Response) {
+    try {
+      const { authService } = await import('../auth/auth.service');
+      const token = await authService.generatePortalPreviewToken(req.user!.company_id, req.user!.id);
+      res.json({ token });
+    } catch (error) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Error generando token de preview' });
+    }
+  }
+
   // ==================== PORTAL DATA ENDPOINTS ====================
 
   async getSummary(req: AuthRequest, res: Response) {

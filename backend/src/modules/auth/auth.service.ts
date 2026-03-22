@@ -412,6 +412,19 @@ export class AuthService {
     }
   }
 
+  async generatePortalPreviewToken(companyId: string, userId: string): Promise<string> {
+    return jwt.sign(
+      {
+        id: userId,
+        customer_id: '__preview__',
+        company_id: companyId,
+        role: 'customer_preview',
+      },
+      env.JWT_SECRET,
+      { expiresIn: '15m', algorithm: 'HS256' } as any
+    );
+  }
+
   private async storeSession(userId: string, refreshToken: string) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days matching JWT_REFRESH_EXPIRATION

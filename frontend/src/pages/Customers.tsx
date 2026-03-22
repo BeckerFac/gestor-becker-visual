@@ -144,6 +144,17 @@ export const Customers: React.FC = () => {
     }
   }
 
+  const handleRevokeCode = async (customer: Customer) => {
+    if (!confirm(`Revocar acceso al portal para ${customer.name}?`)) return
+    try {
+      await api.updateCustomer(customer.id, { access_code: null })
+      toast.success('Acceso revocado')
+      await loadCustomers()
+    } catch (e: any) {
+      toast.error(e.message)
+    }
+  }
+
   const handleDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -183,7 +194,10 @@ export const Customers: React.FC = () => {
       </span>
     )},
     { key: 'access_code' as const, label: 'Código Portal', render: (v: any, row: Customer) => v ? (
-      <span className="font-mono text-xs bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200">{v}</span>
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-xs bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200">{v}</span>
+        <button onClick={(e) => { e.stopPropagation(); handleRevokeCode(row) }} className="text-xs text-red-500 hover:text-red-700">Revocar</button>
+      </div>
     ) : (
       <button onClick={(e) => { e.stopPropagation(); handleGenerateCode(row) }} className="text-blue-600 hover:underline text-xs">Generar</button>
     )},

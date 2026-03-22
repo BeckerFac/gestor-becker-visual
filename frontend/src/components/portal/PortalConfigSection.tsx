@@ -139,8 +139,13 @@ export const PortalConfigSection: React.FC = () => {
     }
   }
 
-  const handlePreview = () => {
-    window.open('/portal?preview=true', '_blank')
+  const handlePreview = async () => {
+    try {
+      const token = await api.getPortalPreviewToken()
+      window.open(`/portal?preview_token=${token}`, '_blank')
+    } catch (e: any) {
+      toast.error('Error al generar vista previa')
+    }
   }
 
   const updateField = <K extends keyof PortalConfigData>(field: K, value: PortalConfigData[K]) => {

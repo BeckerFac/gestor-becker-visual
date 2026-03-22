@@ -493,6 +493,12 @@ export const Users: React.FC = () => {
           >
             Invitaciones ({invitations.filter(i => i.status === 'pending').length})
           </button>
+          <button
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'roles' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            onClick={() => { setActiveTab('roles'); loadRoleTemplates() }}
+          >
+            Roles
+          </button>
         </div>
       )}
 

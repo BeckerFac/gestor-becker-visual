@@ -9,6 +9,9 @@ export const portalRouter = Router();
 portalRouter.get('/config', authMiddleware, requireMinRole('admin'), (req, res) => portalController.getConfig(req, res));
 portalRouter.put('/config', authMiddleware, requireMinRole('admin'), (req, res) => portalController.updateConfig(req, res));
 
+// Admin preview token
+portalRouter.post('/preview-token', authMiddleware, requireMinRole('admin'), (req, res) => portalController.generatePreviewToken(req as any, res));
+
 // Customer-facing endpoints (customer JWT)
 portalRouter.use(authMiddleware);
 

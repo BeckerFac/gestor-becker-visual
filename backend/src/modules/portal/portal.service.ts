@@ -166,16 +166,30 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const result = await db.execute(sql.raw(`
-        SELECT ${selectCols},
-          CASE WHEN i.id IS NOT NULL THEN
-            json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'total_amount', i.total_amount, 'status', i.status)
-          ELSE NULL END as invoice
-        FROM orders o
-        LEFT JOIN invoices i ON o.invoice_id = i.id
-        WHERE o.customer_id = '${customerId}' AND o.company_id = '${companyId}'
-        ORDER BY o.created_at DESC
-      `));
+      const isPreview = customerId === '__preview__';
+
+      const result = isPreview
+        ? await db.execute(sql`
+            SELECT ${sql.raw(selectCols)},
+              CASE WHEN i.id IS NOT NULL THEN
+                json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'total_amount', i.total_amount, 'status', i.status)
+              ELSE NULL END as invoice
+            FROM orders o
+            LEFT JOIN invoices i ON o.invoice_id = i.id
+            WHERE o.company_id = ${companyId}
+            ORDER BY o.created_at DESC
+            LIMIT 5
+          `)
+        : await db.execute(sql`
+            SELECT ${sql.raw(selectCols)},
+              CASE WHEN i.id IS NOT NULL THEN
+                json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'total_amount', i.total_amount, 'status', i.status)
+              ELSE NULL END as invoice
+            FROM orders o
+            LEFT JOIN invoices i ON o.invoice_id = i.id
+            WHERE o.customer_id = ${customerId} AND o.company_id = ${companyId}
+            ORDER BY o.created_at DESC
+          `);
       const rows = (result as any).rows || result || [];
       return { items: rows, total: rows.length };
     } catch (error) {
@@ -210,8 +224,8 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const result = await db.execute(sql.raw(`
-        SELECT ${selectCols},
+      const result = await db.execute(sql`
+        SELECT ${sql.raw(selectCols)},
           json_build_object('id', c.id, 'name', c.name, 'cuit', c.cuit) as customer,
           CASE WHEN i.id IS NOT NULL THEN
             json_build_object('id', i.id, 'invoice_number', i.invoice_number, 'invoice_type', i.invoice_type, 'total_amount', i.total_amount, 'status', i.status)
@@ -219,8 +233,8 @@ export class PortalService {
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id
         LEFT JOIN invoices i ON o.invoice_id = i.id
-        WHERE o.customer_id = '${customerId}' AND o.id = '${orderId}'
-      `));
+        WHERE o.customer_id = ${customerId} AND o.id = ${orderId}
+      `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
 
@@ -268,12 +282,22 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const result = await db.execute(sql.raw(`
-        SELECT ${selectCols}
-        FROM invoices i
-        WHERE i.customer_id = '${customerId}' AND i.company_id = '${companyId}'
-        ORDER BY i.created_at DESC
-      `));
+      const isPreview = customerId === '__preview__';
+
+      const result = isPreview
+        ? await db.execute(sql`
+            SELECT ${sql.raw(selectCols)}
+            FROM invoices i
+            WHERE i.company_id = ${companyId}
+            ORDER BY i.created_at DESC
+            LIMIT 5
+          `)
+        : await db.execute(sql`
+            SELECT ${sql.raw(selectCols)}
+            FROM invoices i
+            WHERE i.customer_id = ${customerId} AND i.company_id = ${companyId}
+            ORDER BY i.created_at DESC
+          `);
       const rows = (result as any).rows || result || [];
       return { items: rows, total: rows.length };
     } catch (error) {
@@ -301,12 +325,22 @@ export class PortalService {
 
       const selectCols = columns.join(', ');
 
-      const result = await db.execute(sql.raw(`
-        SELECT ${selectCols}
-        FROM quotes q
-        WHERE q.customer_id = '${customerId}' AND q.company_id = '${companyId}'
-        ORDER BY q.created_at DESC
-      `));
+      const isPreview = customerId === '__preview__';
+
+      const result = isPreview
+        ? await db.execute(sql`
+            SELECT ${sql.raw(selectCols)}
+            FROM quotes q
+            WHERE q.company_id = ${companyId}
+            ORDER BY q.created_at DESC
+            LIMIT 5
+          `)
+        : await db.execute(sql`
+            SELECT ${sql.raw(selectCols)}
+            FROM quotes q
+            WHERE q.customer_id = ${customerId} AND q.company_id = ${companyId}
+            ORDER BY q.created_at DESC
+          `);
       const rows = (result as any).rows || result || [];
       return { items: rows, total: rows.length };
     } catch (error) {
@@ -364,12 +398,22 @@ export class PortalService {
         return { items: [], total: 0 };
       }
 
-      const result = await db.execute(sql`
-        SELECT r.id, r.remito_number, r.date, r.status, r.created_at
-        FROM remitos r
-        WHERE r.customer_id = ${customerId} AND r.company_id = ${companyId}
-        ORDER BY r.created_at DESC
-      `);
+      const isPreview = customerId === '__preview__';
+
+      const result = isPreview
+        ? await db.execute(sql`
+            SELECT r.id, r.remito_number, r.date, r.status, r.created_at
+            FROM remitos r
+            WHERE r.company_id = ${companyId}
+            ORDER BY r.created_at DESC
+            LIMIT 5
+          `)
+        : await db.execute(sql`
+            SELECT r.id, r.remito_number, r.date, r.status, r.created_at
+            FROM remitos r
+            WHERE r.customer_id = ${customerId} AND r.company_id = ${companyId}
+            ORDER BY r.created_at DESC
+          `);
       const rows = (result as any).rows || result || [];
       return { items: rows, total: rows.length };
     } catch (error) {
@@ -384,15 +428,27 @@ export class PortalService {
     try {
       const config = await this.getPortalConfig(companyId);
 
-      const result = await db.execute(sql`
-        SELECT
-          (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_orders,
-          (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
-          (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
-          (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId}) as total_spent,
-          (SELECT COUNT(*) FROM invoices WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_invoices,
-          (SELECT COUNT(*) FROM quotes WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_quotes
-      `);
+      const isPreview = customerId === '__preview__';
+
+      const result = isPreview
+        ? await db.execute(sql`
+            SELECT
+              (SELECT COUNT(*) FROM orders WHERE company_id = ${companyId})::int as total_orders,
+              (SELECT COUNT(*) FROM orders WHERE company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
+              (SELECT COUNT(*) FROM orders WHERE company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
+              (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE company_id = ${companyId}) as total_spent,
+              (SELECT COUNT(*) FROM invoices WHERE company_id = ${companyId})::int as total_invoices,
+              (SELECT COUNT(*) FROM quotes WHERE company_id = ${companyId})::int as total_quotes
+          `)
+        : await db.execute(sql`
+            SELECT
+              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_orders,
+              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status IN ('pendiente', 'en_produccion'))::int as active_orders,
+              (SELECT COUNT(*) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId} AND status = 'entregado')::int as delivered_orders,
+              (SELECT COALESCE(SUM(total_amount::numeric), 0) FROM orders WHERE customer_id = ${customerId} AND company_id = ${companyId}) as total_spent,
+              (SELECT COUNT(*) FROM invoices WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_invoices,
+              (SELECT COUNT(*) FROM quotes WHERE customer_id = ${customerId} AND company_id = ${companyId})::int as total_quotes
+          `);
       const rows = (result as any).rows || result || [];
       const summary = rows[0] || {};
 
@@ -420,6 +476,10 @@ export class PortalService {
   // Get customer profile
   async getCustomerProfile(customerId: string) {
     try {
+      if (customerId === '__preview__') {
+        return { id: '__preview__', name: 'Cliente de ejemplo', email: 'preview@example.com', cuit: '00-00000000-0', phone: null };
+      }
+
       const result = await db.execute(sql`
         SELECT c.*, comp.name as company_name, comp.cuit as company_cuit, comp.phone as company_phone, comp.email as company_email
         FROM customers c

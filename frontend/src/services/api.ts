@@ -1423,6 +1423,10 @@ export const api = {
     const { data } = await client.put('/portal/config', config)
     return data
   },
+  getPortalPreviewToken: async () => {
+    const { data } = await client.post('/portal/preview-token')
+    return data.token
+  },
 
   // Billing & Subscriptions
   getBillingSubscription: async () => {

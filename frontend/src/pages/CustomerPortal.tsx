@@ -141,11 +141,18 @@ export const CustomerPortal: React.FC = () => {
   const [rejectReason, setRejectReason] = useState('')
   const [showRejectDialog, setShowRejectDialog] = useState<string | null>(null)
 
-  // Check for preview mode
+  // Check for preview mode via preview_token
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('preview') === 'true') {
+    const previewToken = params.get('preview_token')
+    if (previewToken) {
       setIsPreview(true)
+      localStorage.setItem('customerAccessToken', previewToken)
+      setIsLoggedIn(true)
+      setCustomerName('Vista Previa')
+      setCompanyName('')
+      // Clean URL
+      window.history.replaceState({}, '', '/portal')
     }
   }, [])
 
@@ -158,17 +165,6 @@ export const CustomerPortal: React.FC = () => {
       setIsLoggedIn(true)
       setCustomerName(name || '')
       setCompanyName(company || '')
-    }
-    // For preview mode, check admin token
-    if (!token && isPreview) {
-      const adminToken = localStorage.getItem('accessToken')
-      if (adminToken) {
-        // Use admin token as portal token for preview
-        localStorage.setItem('customerAccessToken', adminToken)
-        setIsLoggedIn(true)
-        setCustomerName('Admin (Vista Previa)')
-        setCompanyName('')
-      }
     }
   }, [isPreview])
 
