@@ -3,15 +3,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Card, CardContent } from '@/components/ui/Card'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/services/api'
 
 const loginSchema = z.object({
-  email: z.string().email('Email inválido'),
-  password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
+  email: z.string().email('Email invalido'),
+  password: z.string().min(6, 'La contrasena debe tener al menos 6 caracteres'),
 })
 
 const registerSchema = z.object({
@@ -34,6 +31,26 @@ const registerSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>
 type RegisterFormData = z.infer<typeof registerSchema>
 
+// Styled input for auth pages
+const AuthInput: React.FC<{
+  label: string
+  type?: string
+  placeholder?: string
+  error?: string
+  register: any
+}> = ({ label, type = 'text', placeholder, error, register }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-300 mb-1.5">{label}</label>
+    <input
+      type={type}
+      placeholder={placeholder}
+      {...register}
+      className={`w-full px-4 py-3 bg-white/5 border ${error ? 'border-red-500/60' : 'border-white/10'} rounded-xl text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all duration-200`}
+    />
+    {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+  </div>
+)
+
 export const Login: React.FC = () => {
   const navigate = useNavigate()
   const [isRegister, setIsRegister] = React.useState(false)
@@ -42,29 +59,17 @@ export const Login: React.FC = () => {
   const user = useAuthStore((state) => state.user)
 
   useEffect(() => {
-    if (user) {
-      navigate('/dashboard')
-    }
+    if (user) navigate('/dashboard')
   }, [user, navigate])
 
-  const loginForm = useForm<LoginFormData>({
-    resolver: zodResolver(loginSchema),
-  })
-
-  const registerForm = useForm<RegisterFormData>({
-    resolver: zodResolver(registerSchema),
-  })
+  const loginForm = useForm<LoginFormData>({ resolver: zodResolver(loginSchema) })
+  const registerForm = useForm<RegisterFormData>({ resolver: zodResolver(registerSchema) })
 
   const onLogin = async (data: LoginFormData) => {
     setLoading(true)
     try {
       const response = await api.login(data.email, data.password)
-      // Use company from response or create dummy if null
-      const company = response.company || {
-        id: response.user.company_id,
-        name: 'Mi Empresa',
-        cuit: '00000000000',
-      }
+      const company = response.company || { id: response.user.company_id, name: 'Mi Empresa', cuit: '00000000000' }
       setAuth(response.user, company, response.accessToken, response.refreshToken, response.permissions ?? null)
       navigate('/dashboard')
     } catch (error: any) {
@@ -78,19 +83,8 @@ export const Login: React.FC = () => {
   const onRegister = async (data: RegisterFormData) => {
     setLoading(true)
     try {
-      const response = await api.register(
-        data.email,
-        data.password,
-        data.name,
-        data.company_name,
-        data.cuit
-      )
-      // Use company from response or create dummy if null
-      const company = response.company || {
-        id: response.user.company_id,
-        name: data.company_name,
-        cuit: data.cuit,
-      }
+      const response = await api.register(data.email, data.password, data.name, data.company_name, data.cuit)
+      const company = response.company || { id: response.user.company_id, name: data.company_name, cuit: data.cuit }
       setAuth(response.user, company, response.accessToken, response.refreshToken, response.permissions ?? null)
       navigate('/dashboard')
     } catch (error: any) {
@@ -102,174 +96,137 @@ export const Login: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center px-4">
-      <Card className="w-full max-w-md shadow-2xl">
-        <CardContent className="pt-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">BeckerVisual</h1>
-            <p className="text-gray-600 dark:text-gray-400">Gestor Comercial Profesional</p>
-          </div>
+    <div className="min-h-screen bg-[#0A0A0F] flex items-center justify-center px-4 relative overflow-hidden">
+      {/* Background mesh gradient */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[40%] -left-[20%] w-[70%] h-[70%] rounded-full bg-blue-600/[0.07] blur-[120px]" />
+        <div className="absolute -bottom-[30%] -right-[20%] w-[60%] h-[60%] rounded-full bg-indigo-600/[0.05] blur-[120px]" />
+        <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] rounded-full bg-cyan-500/[0.03] blur-[80px]" />
+      </div>
 
+      <div className="w-full max-w-[420px] relative z-10 animate-[fadeIn_0.4s_ease-out]">
+        {/* Logo + branding */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 mb-4 shadow-lg shadow-blue-500/20">
+            <span className="text-2xl font-bold text-white">G</span>
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">GESTIA</h1>
+          <p className="text-gray-500 text-sm mt-1">Gestion empresarial inteligente</p>
+        </div>
+
+        {/* Card */}
+        <div className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-2xl p-8 shadow-2xl shadow-black/20">
           {!isRegister ? (
-            <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-4">
-              <Input
+            /* ====== LOGIN FORM ====== */
+            <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-5">
+              <AuthInput
                 label="Email"
                 type="email"
                 placeholder="tu@email.com"
-                {...loginForm.register('email')}
+                register={loginForm.register('email')}
                 error={loginForm.formState.errors.email?.message}
               />
-              <Input
-                label="Contraseña"
+              <AuthInput
+                label="Contrasena"
                 type="password"
-                placeholder="••••••"
-                {...loginForm.register('password')}
+                placeholder="Ingresa tu contrasena"
+                register={loginForm.register('password')}
                 error={loginForm.formState.errors.password?.message}
               />
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                className="w-full"
-                loading={loading}
-              >
-                Iniciar sesion
-              </Button>
 
-              <div className="text-center space-y-2">
-                <Link
-                  to="/forgot-password"
-                  className="text-blue-600 hover:underline text-sm block"
-                >
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/30 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Ingresando...
+                  </>
+                ) : 'Iniciar sesion'}
+              </button>
+
+              <div className="text-center space-y-3 pt-2">
+                <Link to="/forgot-password" className="text-sm text-gray-500 hover:text-gray-300 transition-colors">
                   Olvidaste tu contrasena?
                 </Link>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  No tenes cuenta?{' '}
-                  <button
-                    type="button"
-                    onClick={() => setIsRegister(true)}
-                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                  >
-                    Registrate aca
-                  </button>
-                </p>
+                <div className="border-t border-white/[0.06] pt-4">
+                  <p className="text-gray-500 text-sm">
+                    No tenes cuenta?{' '}
+                    <button type="button" onClick={() => setIsRegister(true)} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                      Registrate gratis
+                    </button>
+                  </p>
+                </div>
               </div>
             </form>
           ) : (
+            /* ====== REGISTER FORM ====== */
             <form onSubmit={registerForm.handleSubmit(onRegister)} className="space-y-4">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-2">
-                <p className="text-blue-800 dark:text-blue-200 text-sm font-medium">
-                  15 dias de prueba gratuita - Sin tarjeta de credito
-                </p>
+              <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 mb-1">
+                <svg className="w-5 h-5 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-blue-300 text-sm font-medium">15 dias gratis — sin tarjeta de credito</p>
               </div>
-              <Input
-                label="Nombre completo"
-                placeholder="Tu nombre"
-                {...registerForm.register('name')}
-                error={registerForm.formState.errors.name?.message}
-              />
-              <Input
-                label="Email"
-                type="email"
-                placeholder="tu@email.com"
-                {...registerForm.register('email')}
-                error={registerForm.formState.errors.email?.message}
-              />
-              <Input
-                label="Contrasena"
-                type="password"
-                placeholder="Min. 8 caracteres, 1 mayuscula, 1 numero"
-                {...registerForm.register('password')}
-                error={registerForm.formState.errors.password?.message}
-              />
-              <Input
-                label="Confirmar contrasena"
-                type="password"
-                placeholder="Repetir contrasena"
-                {...registerForm.register('confirmPassword')}
-                error={registerForm.formState.errors.confirmPassword?.message}
-              />
-              <Input
-                label="Nombre de la empresa"
-                placeholder="Mi empresa"
-                {...registerForm.register('company_name')}
-                error={registerForm.formState.errors.company_name?.message}
-              />
-              <Input
-                label="CUIT"
-                placeholder="20123456789"
-                {...registerForm.register('cuit')}
-                error={registerForm.formState.errors.cuit?.message}
-              />
-              <div>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    {...registerForm.register('accept_terms')}
-                    className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    Acepto los{' '}
-                    <a
-                      href="/legal/terminos"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      Terminos y Condiciones
-                    </a>{' '}
-                    y la{' '}
-                    <a
-                      href="/legal/privacidad"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      Politica de Privacidad
-                    </a>
-                  </span>
-                </label>
-                {registerForm.formState.errors.accept_terms && (
-                  <p className="text-red-500 text-xs mt-1">
-                    {registerForm.formState.errors.accept_terms.message}
-                  </p>
-                )}
-              </div>
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                className="w-full"
-                loading={loading}
-              >
-                Crear cuenta
-              </Button>
 
-              <div className="text-center">
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  ¿Ya tienes cuenta?{' '}
-                  <button
-                    type="button"
-                    onClick={() => setIsRegister(false)}
-                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                  >
-                    Inicia sesión aquí
+              <AuthInput label="Nombre completo" placeholder="Tu nombre" register={registerForm.register('name')} error={registerForm.formState.errors.name?.message} />
+              <AuthInput label="Email" type="email" placeholder="tu@email.com" register={registerForm.register('email')} error={registerForm.formState.errors.email?.message} />
+              <div className="grid grid-cols-2 gap-3">
+                <AuthInput label="Contrasena" type="password" placeholder="Min. 8 caracteres" register={registerForm.register('password')} error={registerForm.formState.errors.password?.message} />
+                <AuthInput label="Confirmar" type="password" placeholder="Repetir" register={registerForm.register('confirmPassword')} error={registerForm.formState.errors.confirmPassword?.message} />
+              </div>
+              <AuthInput label="Nombre de la empresa" placeholder="Mi empresa SRL" register={registerForm.register('company_name')} error={registerForm.formState.errors.company_name?.message} />
+              <AuthInput label="CUIT" placeholder="20-12345678-9" register={registerForm.register('cuit')} error={registerForm.formState.errors.cuit?.message} />
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" {...registerForm.register('accept_terms')} className="mt-0.5 h-4 w-4 rounded border-white/20 bg-white/5 text-blue-600 focus:ring-blue-500/50" />
+                <span className="text-xs text-gray-500 leading-relaxed">
+                  Acepto los <a href="/legal/terminos" target="_blank" className="text-blue-400 hover:underline">Terminos</a> y la <a href="/legal/privacidad" target="_blank" className="text-blue-400 hover:underline">Politica de Privacidad</a>
+                </span>
+              </label>
+              {registerForm.formState.errors.accept_terms && (
+                <p className="text-red-400 text-xs -mt-2">{registerForm.formState.errors.accept_terms.message}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/30 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Creando cuenta...
+                  </>
+                ) : 'Crear cuenta gratis'}
+              </button>
+
+              <div className="text-center pt-2">
+                <p className="text-gray-500 text-sm">
+                  Ya tenes cuenta?{' '}
+                  <button type="button" onClick={() => setIsRegister(false)} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                    Inicia sesion
                   </button>
                 </p>
               </div>
             </form>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      <div className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400 space-x-3">
-        <a href="/legal/terminos" className="hover:underline hover:text-gray-700 dark:hover:text-gray-300">
-          Terminos y Condiciones
-        </a>
-        <span>|</span>
-        <a href="/legal/privacidad" className="hover:underline hover:text-gray-700 dark:hover:text-gray-300">
-          Politica de Privacidad
-        </a>
+        {/* Footer */}
+        <div className="mt-6 text-center text-xs text-gray-600 space-x-3">
+          <a href="/legal/terminos" className="hover:text-gray-400 transition-colors">Terminos</a>
+          <span className="text-gray-700">|</span>
+          <a href="/legal/privacidad" className="hover:text-gray-400 transition-colors">Privacidad</a>
+        </div>
       </div>
     </div>
   )
