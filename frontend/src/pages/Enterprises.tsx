@@ -111,11 +111,12 @@ export const Enterprises: React.FC = () => {
       setContacts((custRes.items || custRes || []))
       setPriceLists(Array.isArray(plRes) ? plRes : [])
 
-      // Build enterprise health map from aging data
+      // Build enterprise health map from aging data (only authorized invoices, not orders)
       if (agingRes && agingRes.details) {
         const healthMap = new Map<string, { total_overdue: number; oldest_days: number }>()
         for (const item of agingRes.details) {
           if (item.days_overdue <= 0) continue
+          if (item.document_type !== 'invoice') continue // only count invoices, not unfactured orders
           const key = item.enterprise_name
           const existing = healthMap.get(key)
           if (existing) {
@@ -569,9 +570,9 @@ export const Enterprises: React.FC = () => {
                           return <div className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0" title="Todo al dia" />
                         }
                         if (health.oldest_days > 30) {
-                          return <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" title={`Vencido ${health.oldest_days}d - ${formatCurrency(health.total_overdue)}`} />
+                          return <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" title={`Factura pendiente ${health.oldest_days}d - ${formatCurrency(health.total_overdue)}`} />
                         }
-                        return <div className="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0" title={`Vencido ${health.oldest_days}d - ${formatCurrency(health.total_overdue)}`} />
+                        return <div className="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0" title={`Factura pendiente ${health.oldest_days}d - ${formatCurrency(health.total_overdue)}`} />
                       })()}
                       <h3 className="font-semibold text-gray-900 dark:text-gray-100">{ent.name}</h3>
                       {ent.razon_social && ent.razon_social !== ent.name && (
@@ -585,7 +586,7 @@ export const Enterprises: React.FC = () => {
                             ? 'bg-red-100 text-red-800'
                             : 'bg-yellow-100 text-yellow-800'
                         }`}>
-                          {formatCurrency(enterpriseHealth.get(ent.name)?.total_overdue || 0)} vencido
+                          {formatCurrency(enterpriseHealth.get(ent.name)?.total_overdue || 0)} pendiente
                         </span>
                       )}
                     </div>

@@ -91,7 +91,7 @@ export const Pagos: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [dismissedPending, setDismissedPending] = useState<string[]>(getDismissedPending())
-  const [pendingCollapsed, setPendingCollapsed] = useState(false)
+  const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
