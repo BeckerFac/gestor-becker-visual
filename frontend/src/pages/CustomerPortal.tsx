@@ -163,8 +163,9 @@ export const CustomerPortal: React.FC = () => {
     const company = localStorage.getItem('customerCompanyName')
     if (token) {
       setIsLoggedIn(true)
-      setCustomerName(name || '')
-      setCompanyName(company || '')
+      const clean = (s: string) => s?.replace(/&amp;/g, '&') || ''
+      setCustomerName(clean(name || ''))
+      setCompanyName(clean(company || ''))
     }
   }, [isPreview])
 
@@ -194,10 +195,11 @@ export const CustomerPortal: React.FC = () => {
       const data = await api.customerLogin(loginForm.access_code)
       localStorage.setItem('customerAccessToken', data.accessToken)
       localStorage.setItem('customerRefreshToken', data.refreshToken)
-      localStorage.setItem('customerName', data.enterprise.name)
-      localStorage.setItem('customerCompanyName', data.company.name)
-      setCustomerName(data.enterprise.name)
-      setCompanyName(data.company.name)
+      const cleanName = (s: string) => s?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"') || ''
+      localStorage.setItem('customerName', cleanName(data.enterprise.name))
+      localStorage.setItem('customerCompanyName', cleanName(data.company.name))
+      setCustomerName(cleanName(data.enterprise.name))
+      setCompanyName(cleanName(data.company.name))
       setIsLoggedIn(true)
     } catch (e: any) {
       setLoginError(e.message)

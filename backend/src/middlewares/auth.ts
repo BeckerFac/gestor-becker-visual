@@ -10,6 +10,8 @@ export interface AuthRequest extends Request {
     role: string;
     impersonating?: boolean;
     readonly?: boolean;
+    enterprise_id?: string;
+    customer_id?: string;
   };
 }
 
@@ -38,6 +40,8 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
       role: string;
       impersonating?: boolean;
       readonly?: boolean;
+      enterprise_id?: string;
+      customer_id?: string;
     };
 
     // Validate required claims exist
@@ -52,6 +56,8 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
       role: decoded.role,
       impersonating: decoded.impersonating || false,
       readonly: decoded.readonly || false,
+      enterprise_id: decoded.enterprise_id,
+      customer_id: decoded.customer_id,
     };
 
     // Enforce read-only mode for impersonation tokens
