@@ -252,11 +252,11 @@ export const Pagos: React.FC = () => {
     : purchases
 
   const csvColumns = [
-    { key: 'payment_date', label: 'Fecha' },
+    { key: 'payment_date', label: 'Fecha', type: 'date' as const },
     { key: 'enterprise_name', label: 'Empresa' },
     { key: 'purchase_number', label: 'Compra N°' },
-    { key: 'amount', label: 'Monto' },
-    { key: 'payment_method', label: 'Método' },
+    { key: 'amount', label: 'Monto', type: 'currency' as const },
+    { key: 'payment_method', label: 'Metodo de Pago' },
     { key: 'bank_name', label: 'Banco' },
     { key: 'reference', label: 'Referencia' },
     { key: 'notes', label: 'Notas' },

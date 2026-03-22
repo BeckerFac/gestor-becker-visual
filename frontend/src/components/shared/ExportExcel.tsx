@@ -120,7 +120,7 @@ export function exportToExcel(
         const cell = ws[cellRef]
         if (cell && typeof cell.v === 'number') {
           cell.t = 'n'
-          cell.z = '#,##0.00'
+          cell.z = '$#,##0.00'
         }
       }
     }

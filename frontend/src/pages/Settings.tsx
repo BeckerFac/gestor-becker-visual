@@ -41,6 +41,9 @@ export const Settings: React.FC = () => {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
+  // Reminders state
+  const [remindersEnabled, setRemindersEnabled] = useState(false)
+
   // AFIP wizard state
   const [wizardStep, setWizardStep] = useState(1)
   const [osTabs, setOsTabs] = useState<'linux' | 'windows' | 'macos'>('linux')
@@ -71,7 +74,27 @@ export const Settings: React.FC = () => {
     }
   }
 
-  useEffect(() => { loadCompany() }, [])
+  useEffect(() => { loadCompany(); loadReminderConfig() }, [])
+
+  const loadReminderConfig = async () => {
+    try {
+      const config = await api.getReminderConfig()
+      setRemindersEnabled(!!config.enabled)
+    } catch (_e) {
+      // Silently fail - reminders are optional
+    }
+  }
+
+  const handleToggleReminders = async (enabled: boolean) => {
+    setRemindersEnabled(enabled)
+    try {
+      await api.updateReminderConfig({ enabled })
+      toast.success(enabled ? 'Recordatorios activados' : 'Recordatorios desactivados')
+    } catch (e: any) {
+      setRemindersEnabled(!enabled)
+      toast.error(e.message || 'Error al actualizar recordatorios')
+    }
+  }
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -473,6 +496,74 @@ export const Settings: React.FC = () => {
             <div><span className="text-gray-500">Backend:</span> <span className="font-medium">Express + PostgreSQL</span></div>
             <div><span className="text-gray-500">Frontend:</span> <span className="font-medium">React + Tailwind CSS</span></div>
             <div><span className="text-gray-500">AFIP SDK:</span> <span className="font-medium">@afipsdk/afip.js</span></div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Integraciones */}
+      <Card>
+        <CardHeader><h3 className="text-lg font-semibold">Integraciones</h3></CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500 mb-4">Conecta tu cuenta con plataformas externas para sincronizar productos, pedidos y cobros.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-gray-900 dark:text-gray-100">MercadoLibre</p>
+                <p className="text-xs text-gray-500">Sincronizar productos y pedidos</p>
+              </div>
+              <Button variant="outline" disabled>
+                Proximamente
+              </Button>
+            </div>
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-gray-900 dark:text-gray-100">TiendaNube</p>
+                <p className="text-xs text-gray-500">Sincronizar catalogo y ventas</p>
+              </div>
+              <Button variant="outline" disabled>
+                Proximamente
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recordatorios de cobro */}
+      <Card>
+        <CardHeader><h3 className="text-lg font-semibold">Recordatorios de cobro</h3></CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={remindersEnabled}
+                onChange={e => handleToggleReminders(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-200"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Activar recordatorios automaticos de cobro</span>
+            </label>
+            {remindersEnabled && (
+              <div className="grid grid-cols-1 gap-3 pl-7">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Recordatorio 7 dias</label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                    Estimado cliente, le recordamos que su factura #{'{'} invoice_number {'}'} vence en 7 dias.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Recordatorio 15 dias</label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                    Estimado cliente, su factura #{'{'} invoice_number {'}'} tiene 15 dias de vencida.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-500">Recordatorio 30 dias</label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                    Estimado cliente, su factura #{'{'} invoice_number {'}'} tiene 30 dias de vencida. Por favor regularice su situacion.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

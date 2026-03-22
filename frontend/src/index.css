@@ -59,13 +59,25 @@
   animation: slideIn 0.25s ease-out;
 }
 
+/* Cobro form highlight glow when scrolling into view */
+@keyframes cobroHighlight {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  20% { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.4); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.cobro-form-highlight {
+  animation: cobroHighlight 1.5s ease-out;
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   .animate-fadeIn,
   .animate-slideDown,
   .animate-scaleIn,
   .animate-slide-in,
-  .animate-slide-in-right {
+  .animate-slide-in-right,
+  .cobro-form-highlight {
     animation: none !important;
   }
 }

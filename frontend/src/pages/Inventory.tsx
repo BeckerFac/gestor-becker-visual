@@ -263,9 +263,9 @@ export const Inventory: React.FC = () => {
               { key: 'producto', label: 'Producto' },
               { key: 'sku', label: 'SKU' },
               { key: 'deposito', label: 'Deposito' },
-              { key: 'cantidad', label: 'Cantidad' },
-              { key: 'nivel_minimo', label: 'Nivel Minimo' },
-              { key: 'nivel_maximo', label: 'Nivel Maximo' },
+              { key: 'cantidad', label: 'Cantidad', type: 'number' as const },
+              { key: 'nivel_minimo', label: 'Nivel Minimo', type: 'number' as const },
+              { key: 'nivel_maximo', label: 'Nivel Maximo', type: 'number' as const },
               { key: 'estado', label: 'Estado' },
             ]}
             filename="inventario"

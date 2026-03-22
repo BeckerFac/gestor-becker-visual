@@ -11,7 +11,7 @@ import forge from 'node-forge'
 export interface AuthorizeInvoiceInput {
   invoiceId: string
   invoiceNumber: number
-  invoiceType: 'A' | 'B' | 'C'
+  invoiceType: 'A' | 'B' | 'C' | 'FCE_A' | 'FCE_B' | 'FCE_C' | 'NC_FCE_A' | 'NC_FCE_B' | 'NC_FCE_C' | 'ND_FCE_A' | 'ND_FCE_B' | 'ND_FCE_C' | 'E' | 'ND_E' | 'NC_E'
   customerCuit: string
   subtotal: number
   vat: number
@@ -25,6 +25,20 @@ export interface AuthorizeInvoiceInput {
     unitPrice: number
     vatRate: number
     description: string
+  }>
+  // FCE MiPyME fields
+  isFce?: boolean
+  fceData?: {
+    fchVtoPago: Date       // Fecha vencimiento pago (mandatory for FCE)
+    cbu: string            // CBU 22 digits (mandatory for FCE)
+    cbuAlias?: string      // Alias CBU (alternative to CBU)
+  }
+  cbtesAsoc?: Array<{     // For NC/ND FCE - associated vouchers
+    tipo: number
+    ptoVta: number
+    nro: number
+    cuit: string
+    cbteFch: string        // YYYYMMDD
   }>
 }
 
@@ -48,7 +62,21 @@ interface WsaaToken {
 // AFIP Invoice type codes (CbteTipo)
 const INVOICE_TYPE_MAP: Record<string, number> = {
   'A': 1, 'B': 6, 'C': 11,
+  // FCE MiPyME (Factura de Credito Electronica)
+  'FCE_A': 201, 'FCE_B': 206, 'FCE_C': 211,
+  // NC FCE
+  'NC_FCE_A': 203, 'NC_FCE_B': 208, 'NC_FCE_C': 213,
+  // ND FCE
+  'ND_FCE_A': 202, 'ND_FCE_B': 207, 'ND_FCE_C': 212,
+  // Factura de Exportacion (Tipo E) - TODO: WSFEX integration for export invoices
+  'E': 19, 'ND_E': 20, 'NC_E': 21,
 }
+
+// FCE CbteTipo codes for quick lookup
+const FCE_CBTE_TIPOS = [201, 202, 203, 206, 207, 208, 211, 212, 213]
+
+// Export CbteTipo codes
+const EXPORT_CBTE_TIPOS = [19, 20, 21]
 
 // AFIP IVA rate codes
 const IVA_RATE_MAP: Record<number, number> = {
@@ -514,6 +542,37 @@ export class AfipService {
       }
     }
 
+    // Build FCE-specific data if applicable
+    const isFce = input.isFce || FCE_CBTE_TIPOS.includes(cbteTipo)
+    let fceFields: any = {}
+    if (isFce && input.fceData) {
+      // FchVtoPago (mandatory for FCE)
+      if (input.fceData.fchVtoPago) {
+        fceFields.FchVtoPago = this.formatAfipDate(new Date(input.fceData.fchVtoPago))
+      }
+      // Opcionales: CBU (Id=2101) and SCA (Id=27)
+      const opcionales: Array<{ Id: number; Valor: string }> = []
+      if (input.fceData.cbu) {
+        opcionales.push({ Id: 2101, Valor: input.fceData.cbu })
+      } else if (input.fceData.cbuAlias) {
+        opcionales.push({ Id: 2102, Valor: input.fceData.cbuAlias })
+      }
+      opcionales.push({ Id: 27, Valor: 'SCA' })
+      fceFields.Opcionales = opcionales
+    }
+
+    // CbtesAsoc for NC/ND FCE
+    let cbtesAsocFields: any = {}
+    if (input.cbtesAsoc && input.cbtesAsoc.length > 0) {
+      cbtesAsocFields.CbtesAsoc = input.cbtesAsoc.map(asoc => ({
+        Tipo: asoc.tipo,
+        PtoVta: asoc.ptoVta,
+        Nro: asoc.nro,
+        Cuit: asoc.cuit.replace(/-/g, ''),
+        CbteFch: asoc.cbteFch,
+      }))
+    }
+
     // Build FECAESolicitar request
     const soapBody = this.buildFECAESolicitarRequest(
       token, sign, company.cuit, {
@@ -536,6 +595,8 @@ export class AfipService {
         MonCotiz: 1,
         Iva: ivaItems,
         CondicionIVAReceptorId: condicionIvaReceptorId,
+        ...fceFields,
+        ...cbtesAsocFields,
       }
     )
 
@@ -646,6 +707,39 @@ export class AfipService {
       ivaXml = `<Iva>${ivaItems}</Iva>`
     }
 
+    // FCE: FchVtoPago is mandatory for FCE invoices
+    const isFce = FCE_CBTE_TIPOS.includes(data.CbteTipo)
+    const fchVtoPagoXml = (isFce && data.FchVtoPago)
+      ? `<FchVtoPago>${data.FchVtoPago}</FchVtoPago>`
+      : ''
+
+    // FCE: Opcionales node with CBU (Id=2101) and SCA (Id=27)
+    let opcionalesXml = ''
+    if (isFce && data.Opcionales && data.Opcionales.length > 0) {
+      const opcItems = data.Opcionales.map((opc: any) =>
+        `<Opcional>
+          <Id>${opc.Id}</Id>
+          <Valor>${opc.Valor}</Valor>
+        </Opcional>`
+      ).join('')
+      opcionalesXml = `<Opcionales>${opcItems}</Opcionales>`
+    }
+
+    // CbtesAsoc: for NC/ND FCE (associated vouchers)
+    let cbtesAsocXml = ''
+    if (data.CbtesAsoc && data.CbtesAsoc.length > 0) {
+      const asocItems = data.CbtesAsoc.map((asoc: any) =>
+        `<CbteAsoc>
+          <Tipo>${asoc.Tipo}</Tipo>
+          <PtoVta>${asoc.PtoVta}</PtoVta>
+          <Nro>${asoc.Nro}</Nro>
+          <Cuit>${asoc.Cuit}</Cuit>
+          <CbteFch>${asoc.CbteFch}</CbteFch>
+        </CbteAsoc>`
+      ).join('')
+      cbtesAsocXml = `<CbtesAsoc>${asocItems}</CbtesAsoc>`
+    }
+
     return `<FECAESolicitar xmlns="http://ar.gov.afip.dif.FEV1/">
       <Auth>
         <Token>${token}</Token>
@@ -666,6 +760,7 @@ export class AfipService {
             <CbteDesde>${data.CbteDesde}</CbteDesde>
             <CbteHasta>${data.CbteHasta}</CbteHasta>
             <CbteFch>${data.CbteFch}</CbteFch>
+            ${fchVtoPagoXml}
             <ImpTotal>${data.ImpTotal}</ImpTotal>
             <ImpTotConc>${data.ImpTotConc}</ImpTotConc>
             <ImpNeto>${data.ImpNeto}</ImpNeto>
@@ -676,6 +771,8 @@ export class AfipService {
             <MonId>${data.MonId}</MonId>
             <MonCotiz>${data.MonCotiz}</MonCotiz>
             ${ivaXml}
+            ${cbtesAsocXml}
+            ${opcionalesXml}
           </FECAEDetRequest>
         </FeDetReq>
       </FeCAEReq>

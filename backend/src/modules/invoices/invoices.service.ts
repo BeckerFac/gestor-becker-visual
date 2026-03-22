@@ -28,6 +28,27 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source VARCHAR(30) DEFAULT 'system'`);
       // Add 'emitido' status value for internal vouchers
       await db.execute(sql`ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'emitido'`).catch(() => {});
+
+      // FCE MiPyME columns
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_fce BOOLEAN DEFAULT false`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fce_payment_due_date DATE`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fce_cbu VARCHAR(22)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fce_status VARCHAR(20) DEFAULT 'pendiente'`);
+
+      // Company CBU fields for FCE
+      await db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS cbu VARCHAR(22)`);
+      await db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS cbu_alias VARCHAR(50)`);
+
+      // Export invoice (Tipo E) columns
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_type VARCHAR(20)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS destination_country VARCHAR(5)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS incoterms VARCHAR(10)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_permit VARCHAR(50)`);
+
+      // MercadoPago payment link columns
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link_url TEXT`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link_id VARCHAR(100)`);
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Invoices migrations error:', error);

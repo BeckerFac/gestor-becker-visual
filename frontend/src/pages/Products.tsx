@@ -281,12 +281,12 @@ export const Products: React.FC = () => {
     { key: 'nombre', label: 'Producto' },
     { key: 'tipo', label: 'Tipo' },
     ...(canViewCosts ? [
-      { key: 'costo', label: 'Costo' },
+      { key: 'costo', label: 'Costo', type: 'currency' as const },
       { key: 'margen', label: 'Margen' },
     ] : []),
     { key: 'iva', label: 'IVA' },
-    { key: 'precio_final', label: 'Precio Final' },
-    ...(hasStockProducts ? [{ key: 'stock', label: 'Stock' }] : []),
+    { key: 'precio_final', label: 'Precio Final', type: 'currency' as const },
+    ...(hasStockProducts ? [{ key: 'stock', label: 'Stock', type: 'number' as const }] : []),
     { key: 'estado', label: 'Estado' },
   ]
 

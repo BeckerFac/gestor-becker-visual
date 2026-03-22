@@ -5,7 +5,7 @@ import { HelpTip } from '@/components/shared/HelpTip'
 import { DateInput } from '@/components/ui/DateInput'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
 
-const INVOICE_TYPES = ['A', 'B', 'C']
+const INVOICE_TYPES = ['A', 'B', 'C', 'E']
 
 const VAT_PRESETS = [
   { value: 0, label: '0%' },
@@ -165,6 +165,17 @@ export function InvoicePreviewModal({
   const [localCustomerCuit, setLocalCustomerCuit] = useState('')
   const [localInvoiceDate, setLocalInvoiceDate] = useState('')
   const [localNotes, setLocalNotes] = useState('')
+
+  // FCE MiPyME state
+  const [localIsFce, setLocalIsFce] = useState(false)
+  const [localFceCbu, setLocalFceCbu] = useState('')
+  const [localFceDueDate, setLocalFceDueDate] = useState('')
+
+  // Export (Tipo E) state
+  const [localExportType, setLocalExportType] = useState('')
+  const [localDestCountry, setLocalDestCountry] = useState('')
+  const [localIncoterms, setLocalIncoterms] = useState('')
+  const [localExportPermit, setLocalExportPermit] = useState('')
   const [localCondicionIva, setLocalCondicionIvaState] = useState<number>(externalCondicionIva ?? 5)
   const setLocalCondicionIva = (v: number) => {
     setLocalCondicionIvaState(v)
@@ -560,6 +571,109 @@ export function InvoicePreviewModal({
                     <p className="text-xs text-amber-600">Obligatorio desde 01/04/2026. Se envia a AFIP en FECAESolicitar.</p>
                   </div>
                 </div>
+
+                {/* FCE MiPyME */}
+                {!authorized && (
+                  <div className="border border-dashed border-gray-200 rounded-lg p-3 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={localIsFce}
+                        onChange={e => setLocalIsFce(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-200"
+                      />
+                      <span className="text-sm font-medium text-gray-700">FCE MiPyME (Factura de Credito Electronica)</span>
+                    </label>
+                    {localIsFce && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-gray-400" htmlFor="fce-cbu">CBU (22 digitos)</label>
+                          <input
+                            id="fce-cbu"
+                            type="text"
+                            maxLength={22}
+                            placeholder="0000000000000000000000"
+                            className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
+                            value={localFceCbu}
+                            onChange={e => setLocalFceCbu(e.target.value.replace(/\D/g, '').slice(0, 22))}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-gray-400" htmlFor="fce-due">Fecha vencimiento pago</label>
+                          <DateInput
+                            id="fce-due"
+                            value={localFceDueDate}
+                            onChange={setLocalFceDueDate}
+                            className="px-2 py-1.5 border-gray-200 text-sm"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Export fields (Tipo E) */}
+                {!authorized && invoiceType === 'E' && (
+                  <div className="border border-dashed border-blue-200 rounded-lg p-3 space-y-3">
+                    <p className="text-sm font-medium text-blue-700">Factura de Exportacion (Tipo E)</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-medium text-gray-400" htmlFor="exp-type">Tipo exportacion</label>
+                        <select
+                          id="exp-type"
+                          className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white"
+                          value={localExportType}
+                          onChange={e => setLocalExportType(e.target.value)}
+                        >
+                          <option value="">Seleccionar</option>
+                          <option value="bienes">Bienes</option>
+                          <option value="servicios">Servicios</option>
+                          <option value="otros">Otros</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-medium text-gray-400" htmlFor="exp-country">Pais destino</label>
+                        <input
+                          id="exp-country"
+                          type="text"
+                          maxLength={5}
+                          placeholder="Ej: 203"
+                          className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                          value={localDestCountry}
+                          onChange={e => setLocalDestCountry(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-medium text-gray-400" htmlFor="exp-inco">Incoterms</label>
+                        <select
+                          id="exp-inco"
+                          className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white"
+                          value={localIncoterms}
+                          onChange={e => setLocalIncoterms(e.target.value)}
+                        >
+                          <option value="">Seleccionar</option>
+                          <option value="FOB">FOB</option>
+                          <option value="CIF">CIF</option>
+                          <option value="EXW">EXW</option>
+                          <option value="FCA">FCA</option>
+                          <option value="DDP">DDP</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-medium text-gray-400" htmlFor="exp-permit">Permiso embarque</label>
+                        <input
+                          id="exp-permit"
+                          type="text"
+                          maxLength={50}
+                          className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                          value={localExportPermit}
+                          onChange={e => setLocalExportPermit(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-blue-500">Requiere integracion WSFEX para autorizacion AFIP.</p>
+                  </div>
+                )}
 
                 {/* Items table */}
                 <div>

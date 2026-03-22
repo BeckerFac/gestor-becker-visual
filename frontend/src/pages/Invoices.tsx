@@ -406,6 +406,15 @@ export const Invoices: React.FC = () => {
     }
   }
 
+  const handleGeneratePaymentLink = async (invoiceId: string) => {
+    try {
+      const result = await api.generatePaymentLink(invoiceId)
+      toast.info(result.message || 'Link de pago generado')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al generar link de pago')
+    }
+  }
+
   const handleLinkOrder = async (invoiceId: string) => {
     if (!linkSelectedOrderId) return
     setError(null)
@@ -565,22 +574,22 @@ export const Invoices: React.FC = () => {
   const csvColumns = vistaMode !== 'fiscal'
     ? [
         { key: 'invoice_number_fmt', label: 'N° Comprobante' },
-        { key: 'invoice_date_fmt', label: 'Fecha' },
+        { key: 'invoice_date', label: 'Fecha', type: 'date' as const },
         { key: 'enterprise_name', label: 'Empresa' },
         { key: 'customer_name', label: 'Cliente' },
-        { key: 'total_amount', label: 'Total' },
-        { key: 'total_cobrado', label: 'Cobrado' },
+        { key: 'total_amount', label: 'Total', type: 'currency' as const },
+        { key: 'total_cobrado', label: 'Cobrado', type: 'currency' as const },
         { key: 'payment_status_label', label: 'Estado Pago' },
         { key: 'status_label', label: 'Estado' },
       ]
     : [
         { key: 'invoice_type', label: 'Tipo' },
         { key: 'invoice_number_fmt', label: 'N° Comprobante' },
-        { key: 'invoice_date_fmt', label: 'Fecha' },
+        { key: 'invoice_date', label: 'Fecha', type: 'date' as const },
         { key: 'enterprise_name', label: 'Empresa' },
         { key: 'customer_name', label: 'Cliente' },
         { key: 'order_ref', label: 'Pedido' },
-        { key: 'total_amount', label: 'Total' },
+        { key: 'total_amount', label: 'Total', type: 'currency' as const },
         { key: 'status_label', label: 'Estado' },
         { key: 'cae', label: 'CAE' },
       ]
@@ -588,7 +597,7 @@ export const Invoices: React.FC = () => {
   const csvData = filteredInvoices.map(inv => ({
     invoice_type: inv.invoice_type || '',
     invoice_number_fmt: formatInvoiceNumber(inv),
-    invoice_date_fmt: formatDate(inv.invoice_date),
+    invoice_date: inv.invoice_date,
     enterprise_name: inv.enterprise?.name || '',
     customer_name: inv.customer?.name || 'Consumidor Final',
     order_ref: inv.order ? `#${String(inv.order.order_number).padStart(4, '0')}` : '-',
@@ -652,6 +661,9 @@ export const Invoices: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => navigate('/invoices/recurring')}>
+            Facturas recurrentes
+          </Button>
           <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
@@ -1560,6 +1572,15 @@ export const Invoices: React.FC = () => {
                                   PDF
                                 </>
                               )}
+                            </button>
+                          )}
+                          {invoice.status === 'authorized' && (
+                            <button
+                              onClick={() => handleGeneratePaymentLink(invoice.id)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
+                              title="Generar link de pago (MercadoPago)"
+                            >
+                              Link de pago
                             </button>
                           )}
                         </div>

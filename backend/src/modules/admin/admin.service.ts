@@ -506,6 +506,72 @@ export class AdminService {
       ORDER BY s.plan
     `);
 
+    // Trend comparisons
+    const trendsResult = await pool.query(`
+      SELECT
+        -- Active companies last week vs this week
+        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true) AS active_companies_now,
+        (SELECT COUNT(*)::int FROM companies WHERE onboarding_completed = true AND created_at < NOW() - INTERVAL '7 days') AS active_companies_last_week,
+        -- Active users today vs yesterday
+        (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW())) AS users_active_today,
+        (SELECT COUNT(DISTINCT u.id)::int FROM users u WHERE u.active = true AND u.last_login >= date_trunc('day', NOW() - INTERVAL '1 day') AND u.last_login < date_trunc('day', NOW())) AS users_active_yesterday,
+        -- Invoices this month vs last month
+        (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW())) AS invoices_this_month_count,
+        (SELECT COUNT(*)::int FROM invoices WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW())) AS invoices_last_month_count,
+        -- MRR last month (approximate via subscriptions that were active then)
+        (SELECT COUNT(*)::int FROM subscriptions WHERE status = 'active' AND plan != 'trial' AND created_at < date_trunc('month', NOW())) AS paid_subs_start_of_month
+    `);
+    const trends = trendsResult.rows[0] || {};
+
+    // Trial expiring soon (< 3 days)
+    const trialExpiringResult = await pool.query(`
+      SELECT c.id, c.name, c.cuit, c.trial_ends_at,
+        COALESCE(u_count.cnt, 0) AS users_count
+      FROM companies c
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS cnt FROM users u WHERE u.company_id = c.id
+      ) u_count ON true
+      WHERE c.subscription_status = 'trial'
+        AND c.trial_ends_at IS NOT NULL
+        AND c.trial_ends_at <= NOW() + INTERVAL '3 days'
+        AND c.trial_ends_at > NOW()
+        AND (c.blocked = false OR c.blocked IS NULL)
+      ORDER BY c.trial_ends_at ASC
+      LIMIT 10
+    `);
+
+    // Abandoned companies (0 activity in 7 days, not blocked)
+    const abandonedResult = await pool.query(`
+      SELECT c.id, c.name, c.cuit, c.created_at,
+        MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) AS last_activity
+      FROM companies c
+      LEFT JOIN users u ON u.company_id = c.id
+      WHERE (c.blocked = false OR c.blocked IS NULL)
+      GROUP BY c.id, c.name, c.cuit, c.created_at
+      HAVING MAX(GREATEST(COALESCE(u.last_login, c.created_at), COALESCE(u.updated_at, c.created_at))) < NOW() - INTERVAL '7 days'
+      ORDER BY last_activity ASC
+      LIMIT 10
+    `);
+
+    // Recent activity feed (last 10 actions across ALL companies)
+    const recentActivityResult = await pool.query(`
+      SELECT
+        al.id,
+        al.created_at,
+        al.action,
+        al.module,
+        al.description,
+        al.company_id,
+        c.name AS company_name,
+        u.email AS user_email,
+        u.name AS user_name
+      FROM activity_logs al
+      LEFT JOIN companies c ON c.id = al.company_id
+      LEFT JOIN users u ON u.id = al.user_id
+      ORDER BY al.created_at DESC
+      LIMIT 10
+    `);
+
     return {
       ...stats,
       growth: growthRows,
@@ -514,6 +580,20 @@ export class AdminService {
       conversion_rate: conversionRate,
       avg_revenue_per_company: Math.round(avgRevenuePerCompany * 100) / 100,
       plan_distribution: planDistResult.rows,
+      trends: {
+        active_companies_now: parseInt(trends.active_companies_now || '0'),
+        active_companies_last_week: parseInt(trends.active_companies_last_week || '0'),
+        users_active_today: parseInt(trends.users_active_today || '0'),
+        users_active_yesterday: parseInt(trends.users_active_yesterday || '0'),
+        invoices_this_month: parseInt(trends.invoices_this_month_count || '0'),
+        invoices_last_month: parseInt(trends.invoices_last_month_count || '0'),
+        paid_subs_start_of_month: parseInt(trends.paid_subs_start_of_month || '0'),
+      },
+      attention: {
+        trial_expiring: trialExpiringResult.rows,
+        abandoned: abandonedResult.rows,
+      },
+      recent_activity: recentActivityResult.rows,
     };
   }
 

@@ -40,6 +40,9 @@ export const companies = pgTable('companies', {
   afip_cert: text('afip_cert'), // PEM encoded
   afip_key: text('afip_key'), // PEM encoded
   afip_env: varchar('afip_env', { length: 20 }).default('homologacion'), // homologacion or produccion
+  // CBU for FCE MiPyME
+  cbu: varchar('cbu', { length: 22 }),
+  cbu_alias: varchar('cbu_alias', { length: 50 }),
   // Subscription / trial fields
   subscription_status: subscriptionStatusEnum('subscription_status').default('trial'),
   trial_ends_at: timestamp('trial_ends_at', { withTimezone: true }),
@@ -224,6 +227,16 @@ export const invoices = pgTable('invoices', {
   qr_code: text('qr_code'),
   status: invoiceStatusEnum('status').default('draft'),
   afip_response: jsonb('afip_response'),
+  // FCE MiPyME fields
+  is_fce: boolean('is_fce').default(false),
+  fce_payment_due_date: timestamp('fce_payment_due_date'),
+  fce_cbu: varchar('fce_cbu', { length: 22 }),
+  fce_status: varchar('fce_status', { length: 20 }).default('pendiente'),
+  // Export invoice (Tipo E) fields
+  export_type: varchar('export_type', { length: 20 }),
+  destination_country: varchar('destination_country', { length: 5 }),
+  incoterms: varchar('incoterms', { length: 10 }),
+  export_permit: varchar('export_permit', { length: 50 }),
   created_by: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -282,6 +295,27 @@ export const stock_movements = pgTable('stock_movements', {
 }, (table) => ({
   dateIdx: index('stock_movements_date_idx').on(table.created_at),
 }));
+
+// ============ RECURRING INVOICES (Abonos) ============
+
+export const recurring_invoices = pgTable('recurring_invoices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  company_id: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  enterprise_id: uuid('enterprise_id'), // References enterprises(id) - FK added at runtime
+  customer_id: uuid('customer_id').references(() => customers.id),
+  invoice_type: varchar('invoice_type', { length: 5 }).notNull(), // 'A', 'B', 'C'
+  frequency: varchar('frequency', { length: 20 }).notNull().default('monthly'), // monthly, weekly, biweekly, quarterly, yearly
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  description: text('description'),
+  next_invoice_date: timestamp('next_invoice_date').notNull(),
+  end_date: timestamp('end_date'),
+  active: boolean('active').default(true),
+  auto_authorize: boolean('auto_authorize').default(false),
+  items: jsonb('items'), // [{product_id, quantity, unit_price, vat_rate}]
+  created_by: uuid('created_by').references(() => users.id),
+  created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
 
 // ============ PAYMENTS (Cobranzas) ============
 

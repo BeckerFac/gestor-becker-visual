@@ -337,12 +337,12 @@ export const Purchases: React.FC = () => {
 
   const csvColumns = [
     { key: 'purchase_number', label: 'N° Compra' },
-    { key: 'date', label: 'Fecha' },
+    { key: 'date', label: 'Fecha', type: 'date' as const },
     { key: 'enterprise_name', label: 'Empresa' },
-    { key: 'item_count', label: 'Items' },
-    { key: 'total_amount', label: 'Total' },
+    { key: 'item_count', label: 'Items', type: 'number' as const },
+    { key: 'total_amount', label: 'Total', type: 'currency' as const },
     { key: 'payment_status', label: 'Estado Pago' },
-    { key: 'payment_method', label: 'Método' },
+    { key: 'payment_method', label: 'Metodo de Pago' },
   ]
 
   const clearFilters = () => {

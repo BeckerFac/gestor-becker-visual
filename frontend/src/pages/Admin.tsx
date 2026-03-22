@@ -86,6 +86,30 @@ interface SystemStats {
   conversion_rate: number
   avg_revenue_per_company: number
   plan_distribution: Array<{ plan: string; status: string; count: number }>
+  trends: {
+    active_companies_now: number
+    active_companies_last_week: number
+    users_active_today: number
+    users_active_yesterday: number
+    invoices_this_month: number
+    invoices_last_month: number
+    paid_subs_start_of_month: number
+  }
+  attention: {
+    trial_expiring: Array<{ id: string; name: string; cuit: string; trial_ends_at: string; users_count: number }>
+    abandoned: Array<{ id: string; name: string; cuit: string; created_at: string; last_activity: string }>
+  }
+  recent_activity: Array<{
+    id: string
+    created_at: string
+    action: string
+    module: string
+    description: string
+    company_id: string
+    company_name: string | null
+    user_email: string | null
+    user_name: string | null
+  }>
 }
 
 interface SystemHealth {
@@ -158,6 +182,7 @@ export const Admin: React.FC = () => {
         ]).map((t) => (
           <button
             key={t.key}
+            data-tab={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
               'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
@@ -181,66 +206,328 @@ export const Admin: React.FC = () => {
 
 // ---- Dashboard Tab ----
 
+const calcTrend = (current: number, previous: number): { pct: number; direction: 'up' | 'down' | 'flat' } => {
+  if (previous === 0 && current === 0) return { pct: 0, direction: 'flat' }
+  if (previous === 0) return { pct: 100, direction: 'up' }
+  const pct = Math.round(((current - previous) / previous) * 100)
+  return { pct: Math.abs(pct), direction: pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat' }
+}
+
+const TrendIndicator: React.FC<{ direction: 'up' | 'down' | 'flat'; pct: number; positiveIsGood?: boolean }> = ({
+  direction, pct, positiveIsGood = true,
+}) => {
+  if (direction === 'flat') return <span className="text-[10px] text-gray-400 ml-1">--</span>
+  const isGood = positiveIsGood ? direction === 'up' : direction === 'down'
+  const color = isGood ? 'text-green-600' : 'text-red-600'
+  const arrow = direction === 'up' ? '\u2191' : '\u2193'
+  return (
+    <span className={`text-xs font-medium ${color} ml-1.5`}>
+      {arrow} {pct}%
+    </span>
+  )
+}
+
+const KPICard: React.FC<{
+  label: string
+  value: string | number
+  trend?: { direction: 'up' | 'down' | 'flat'; pct: number }
+  positiveIsGood?: boolean
+  subtitle?: string
+  borderColor?: string
+}> = ({ label, value, trend, positiveIsGood = true, subtitle, borderColor }) => {
+  const border = borderColor || (
+    !trend ? 'border-t-gray-300 dark:border-t-gray-600' :
+    trend.direction === 'flat' ? 'border-t-gray-300 dark:border-t-gray-600' :
+    (positiveIsGood ? trend.direction === 'up' : trend.direction === 'down')
+      ? 'border-t-green-500' : 'border-t-red-500'
+  )
+  return (
+    <div className={cn(
+      'bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-t-4 transition-all hover:shadow-md',
+      border
+    )}>
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">{label}</p>
+      <div className="flex items-baseline">
+        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
+        {trend && <TrendIndicator direction={trend.direction} pct={trend.pct} positiveIsGood={positiveIsGood} />}
+      </div>
+      {subtitle && <p className="text-[10px] text-gray-400 mt-0.5">{subtitle}</p>}
+    </div>
+  )
+}
+
 const DashboardTab: React.FC = () => {
   const [stats, setStats] = useState<SystemStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activityFeed, setActivityFeed] = useState<SystemStats['recent_activity']>([])
+
+  const loadStats = useCallback(() => {
+    api.adminGetSystemStats()
+      .then((data) => {
+        setStats(data)
+        setActivityFeed(data.recent_activity || [])
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
-    api.adminGetSystemStats().then(setStats).catch(console.error).finally(() => setLoading(false))
-  }, [])
+    loadStats()
+    // Auto-refresh activity every 30 seconds
+    const interval = setInterval(() => {
+      api.adminGetSystemStats()
+        .then((data) => {
+          setStats(data)
+          setActivityFeed(data.recent_activity || [])
+        })
+        .catch(console.error)
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [loadStats])
 
   if (loading) return <div className="text-gray-500">Cargando estadisticas...</div>
   if (!stats) return <div className="text-red-500">Error al cargar estadisticas</div>
 
+  const trends = stats.trends || {
+    active_companies_now: stats.active_companies,
+    active_companies_last_week: stats.active_companies,
+    users_active_today: 0,
+    users_active_yesterday: 0,
+    invoices_this_month: stats.invoices_this_month,
+    invoices_last_month: 0,
+    paid_subs_start_of_month: 0,
+  }
+  const attention = stats.attention || { trial_expiring: [], abandoned: [] }
+
+  const activeCompaniesTrend = calcTrend(trends.active_companies_now, trends.active_companies_last_week)
+  const usersActiveTrend = calcTrend(trends.users_active_today, trends.users_active_yesterday)
+  const invoicesTrend = calcTrend(trends.invoices_this_month, trends.invoices_last_month)
+  const mrrTrend = calcTrend(stats.mrr, trends.paid_subs_start_of_month > 0 ? Math.round(stats.mrr * trends.paid_subs_start_of_month / Math.max(1, stats.plan_distribution.reduce((s, p) => s + (p.status === 'active' && p.plan !== 'trial' ? p.count : 0), 0) || 1)) : 0)
+
   return (
-    <div className="space-y-8">
-      {/* SaaS KPI Cards - Primary row */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wider">
-          Metricas SaaS
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="MRR" value={formatCurrency(stats.mrr)} color="green" />
-          <StatCard label="Churn Rate" value={`${stats.churn_rate}%`} color={stats.churn_rate > 5 ? 'red' : 'green'} />
-          <StatCard label="Conversion Trial-Pago" value={`${stats.conversion_rate}%`} color="blue" />
-          <StatCard label="Revenue promedio/empresa" value={formatCurrency(stats.avg_revenue_per_company)} />
+    <div className="space-y-6">
+      {/* KPI Cards with Trends */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard
+          label="Empresas activas"
+          value={stats.active_companies}
+          trend={activeCompaniesTrend}
+          subtitle="vs semana pasada"
+        />
+        <KPICard
+          label="Usuarios activos hoy"
+          value={trends.users_active_today}
+          trend={usersActiveTrend}
+          subtitle="vs ayer"
+        />
+        <KPICard
+          label="Facturas este mes"
+          value={stats.invoices_this_month}
+          trend={invoicesTrend}
+          subtitle="vs mes pasado"
+        />
+        <KPICard
+          label="MRR estimado"
+          value={formatCurrency(stats.mrr)}
+          trend={mrrTrend}
+          borderColor="border-t-green-500"
+          subtitle="ingresos mensuales recurrentes"
+        />
+      </div>
+
+      {/* Secondary SaaS metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Churn Rate" value={`${stats.churn_rate}%`} color={stats.churn_rate > 5 ? 'red' : 'green'} />
+        <StatCard label="Conversion Trial-Pago" value={`${stats.conversion_rate}%`} color="blue" />
+        <StatCard label="Revenue promedio/empresa" value={formatCurrency(stats.avg_revenue_per_company)} />
+        <StatCard label="Revenue este mes" value={formatCurrency(stats.revenue_this_month)} color="green" />
+      </div>
+
+      {/* Quick Actions + Companies needing attention row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Quick Actions */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Acciones rapidas</h3>
+          <div className="space-y-2">
+            <button
+              onClick={() => {
+                const tabBtn = document.querySelector('[data-tab="companies"]') as HTMLButtonElement
+                if (tabBtn) tabBtn.click()
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-sm font-medium transition-colors"
+            >
+              + Crear empresa
+            </button>
+            <button
+              onClick={() => {
+                const tabBtn = document.querySelector('[data-tab="activity"]') as HTMLButtonElement
+                if (tabBtn) tabBtn.click()
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 text-sm font-medium transition-colors"
+            >
+              Ver logs de actividad
+            </button>
+          </div>
+          {/* Company Stats Summary */}
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Empresas totales</span>
+              <span className="font-medium">{stats.total_companies}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">En trial</span>
+              <span className="font-medium text-yellow-600">{stats.trial_companies}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Bloqueadas</span>
+              <span className="font-medium text-red-600">{stats.blocked_companies}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500">Usuarios totales</span>
+              <span className="font-medium">{stats.total_users}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Companies needing attention */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Requieren atencion</h3>
+          <div className="space-y-3">
+            {/* Trial expiring */}
+            {attention.trial_expiring.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-yellow-600 dark:text-yellow-400 mb-1.5 uppercase tracking-wide">
+                  Trial expirando ({'<'} 3 dias) - {attention.trial_expiring.length}
+                </p>
+                <div className="space-y-1">
+                  {attention.trial_expiring.map((c) => {
+                    const expiresAt = new Date(c.trial_ends_at)
+                    const hoursLeft = Math.max(0, Math.round((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60)))
+                    return (
+                      <div key={c.id} className="flex items-center justify-between px-3 py-2 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm border border-yellow-100 dark:border-yellow-800">
+                        <div>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">{c.name}</span>
+                          <span className="text-xs text-gray-500 ml-2">{c.cuit}</span>
+                        </div>
+                        <span className={cn(
+                          'text-xs font-medium px-2 py-0.5 rounded',
+                          hoursLeft < 24 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                        )}>
+                          {hoursLeft < 24 ? `${hoursLeft}h` : `${Math.round(hoursLeft / 24)}d`} restantes
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Abandoned companies */}
+            {attention.abandoned.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+                  Sin actividad (7+ dias) - {attention.abandoned.length}
+                </p>
+                <div className="space-y-1">
+                  {attention.abandoned.slice(0, 5).map((c) => {
+                    const daysSince = Math.round((Date.now() - new Date(c.last_activity).getTime()) / (1000 * 60 * 60 * 24))
+                    return (
+                      <div key={c.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700 rounded text-sm border border-gray-100 dark:border-gray-600">
+                        <div>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">{c.name}</span>
+                          <span className="text-xs text-gray-500 ml-2">{c.cuit}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{daysSince}d inactiva</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {attention.trial_expiring.length === 0 && attention.abandoned.length === 0 && (
+              <p className="text-sm text-gray-400 py-4 text-center">Todo en orden - sin alertas</p>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Company Stats */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wider">
-          Empresas y Usuarios
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="Empresas totales" value={stats.total_companies} />
-          <StatCard label="Activas" value={stats.active_companies} color="green" />
-          <StatCard label="En trial" value={stats.trial_companies} color="yellow" />
-          <StatCard label="Bloqueadas" value={stats.blocked_companies} color="red" />
-          <StatCard label="Usuarios activos" value={stats.active_users} />
+      {/* Growth Chart + Activity Feed row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Growth Chart */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+          <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">
+            Nuevas empresas por semana
+          </h3>
+          {stats.growth.length > 0 ? (
+            <div className="flex items-end gap-1.5 h-36">
+              {stats.growth.slice(-8).map((g, i) => {
+                const max = Math.max(...stats.growth.slice(-8).map((x) => x.count), 1)
+                const height = (g.count / max) * 100
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{g.count}</span>
+                    <div
+                      className="w-full rounded-t transition-all hover:opacity-80"
+                      style={{
+                        height: `${Math.max(height, 6)}%`,
+                        backgroundColor: i === stats.growth.slice(-8).length - 1 ? '#3B82F6' : '#93C5FD',
+                      }}
+                    />
+                    <span className="text-[9px] text-gray-400">
+                      {new Date(g.week).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-8">Sin datos de crecimiento</p>
+          )}
         </div>
-      </div>
 
-      {/* Revenue Stats */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wider">
-          Facturacion y Crecimiento
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Facturas este mes" value={stats.invoices_this_month} />
-          <StatCard label="Revenue este mes" value={formatCurrency(stats.revenue_this_month)} />
-          <StatCard label="Nuevas (7 dias)" value={stats.new_companies_last_week} color="blue" />
-          <StatCard label="Nuevas (30 dias)" value={stats.new_companies_last_month} color="blue" />
+        {/* Recent Activity Feed */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Actividad reciente</h3>
+            <span className="text-[10px] text-gray-400 animate-pulse">auto-refresh 30s</span>
+          </div>
+          {activityFeed.length > 0 ? (
+            <div className="space-y-1 max-h-72 overflow-y-auto">
+              {activityFeed.map((a) => {
+                const timeAgo = getTimeAgo(a.created_at)
+                return (
+                  <div key={a.id} className="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-xs">
+                    <span className="text-gray-400 whitespace-nowrap min-w-[48px] text-[10px] mt-0.5">{timeAgo}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                        {a.company_name || 'Sistema'}
+                      </span>
+                      {a.user_name && (
+                        <span className="text-gray-400 mx-1">-</span>
+                      )}
+                      {a.user_name && (
+                        <span className="text-gray-500">{a.user_name}</span>
+                      )}
+                      <p className="text-gray-500 dark:text-gray-400 truncate">{a.description || a.action.replace(/_/g, ' ')}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-8">Sin actividad reciente</p>
+          )}
         </div>
       </div>
 
       {/* Plan Distribution */}
       {stats.plan_distribution.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+          <h3 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">
             Distribucion de Planes
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {stats.plan_distribution.map((pd, i) => (
               <div key={i} className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
                 <p className="text-lg font-bold">{pd.count}</p>
@@ -250,35 +537,19 @@ const DashboardTab: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Growth Chart */}
-      {stats.growth.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">
-            Nuevas empresas por semana (ultimas 12 semanas)
-          </h3>
-          <div className="flex items-end gap-2 h-32">
-            {stats.growth.map((g, i) => {
-              const max = Math.max(...stats.growth.map((x) => x.count), 1)
-              const height = (g.count / max) * 100
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-xs text-gray-500">{g.count}</span>
-                  <div
-                    className="w-full bg-blue-500 rounded-t"
-                    style={{ height: `${Math.max(height, 4)}%` }}
-                  />
-                  <span className="text-[10px] text-gray-400">
-                    {new Date(g.week).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
     </div>
   )
+}
+
+const getTimeAgo = (dateStr: string): string => {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'ahora'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d`
 }
 
 // ---- Companies Tab ----

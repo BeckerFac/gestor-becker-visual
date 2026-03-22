@@ -60,6 +60,9 @@ import { apiKeysRouter } from './modules/apikeys/apikeys.router';
 import { secretariaRouter } from './modules/secretaria/secretaria.router';
 import { priceCriteriaRouter } from './modules/price-criteria/price-criteria.router';
 import { materialsRouter } from './modules/materials/materials.router';
+import { recurringInvoicesRouter } from './modules/recurring-invoices/recurring-invoices.router';
+import { integrationsRouter } from './modules/integrations/integrations.router';
+import { remindersRouter } from './modules/reminders/reminders.router';
 
 export const app = express();
 
@@ -206,6 +209,9 @@ app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/price-lists', authMiddleware, priceListsRouter);
 app.use('/api/price-criteria', authMiddleware, priceCriteriaRouter);
 app.use('/api/materials', authMiddleware, materialsRouter);
+app.use('/api/recurring-invoices', authMiddleware, recurringInvoicesRouter);
+app.use('/api/integrations', authMiddleware, integrationsRouter);
+app.use('/api/reminders', authMiddleware, remindersRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);

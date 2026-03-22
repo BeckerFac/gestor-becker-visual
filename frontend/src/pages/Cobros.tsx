@@ -77,6 +77,17 @@ interface InvoiceForReceipt {
   total_cobrado: string
 }
 
+interface OrderForReceipt {
+  id: string
+  order_number: number
+  title: string
+  total_amount: string
+  enterprise_name: string
+  customer_name: string
+  paid: number
+  remaining: number
+}
+
 interface AgingDetail {
   enterprise_name: string
   customer_name: string
@@ -201,8 +212,11 @@ export const Cobros: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showInvoiceSection, setShowInvoiceSection] = useState(false)
+  const [linkTab, setLinkTab] = useState<'invoices' | 'orders'>('invoices')
   const [invoicesForReceipt, setInvoicesForReceipt] = useState<InvoiceForReceipt[]>([])
+  const [ordersForReceipt, setOrdersForReceipt] = useState<OrderForReceipt[]>([])
   const [invoiceItems, setInvoiceItems] = useState<Record<string, string>>({})
+  const [orderItems, setOrderItems] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     enterprise_id: '',
     amount: '',
@@ -264,14 +278,53 @@ export const Cobros: React.FC = () => {
 
   const loadInvoicesForReceipt = useCallback(async () => {
     try {
-      const res = await api.getInvoices({ fiscal_type: 'all', limit: 200 })
-      const items: InvoiceForReceipt[] = (res.items || []).filter((inv: any) =>
+      const [invoiceRes, ordersRes, cobrosRes] = await Promise.all([
+        api.getInvoices({ fiscal_type: 'all', limit: 200 }).catch(() => ({ items: [] })),
+        api.getOrders({ limit: 200 }).catch(() => ({ items: [] })),
+        api.getCobros().catch(() => []),
+      ])
+      const items: InvoiceForReceipt[] = (invoiceRes.items || []).filter((inv: any) =>
         (inv.status === 'authorized' || inv.status === 'emitido') &&
         (inv.payment_status !== 'pagado')
       )
       setInvoicesForReceipt(items)
+
+      // Build orders without invoice that are not fully paid
+      const allOrders = (ordersRes.items || ordersRes || []) as any[]
+      // Get invoiced order IDs (orders that have a linked authorized invoice)
+      const invoicedOrderIds = new Set(
+        (invoiceRes.items || [])
+          .filter((inv: any) => inv.order_id && (inv.status === 'authorized' || inv.status === 'emitido'))
+          .map((inv: any) => inv.order_id)
+      )
+      // Calculate paid per order from cobros
+      const paidMap = new Map<string, number>()
+      for (const c of (cobrosRes || [])) {
+        if (c.order_id) {
+          paidMap.set(c.order_id, (paidMap.get(c.order_id) || 0) + Number(c.amount || 0))
+        }
+      }
+      const ordersWithoutInv: OrderForReceipt[] = allOrders
+        .filter((o: any) => o.payment_status !== 'pagado' && o.status !== 'cancelado' && !invoicedOrderIds.has(o.id))
+        .map((o: any) => {
+          const total = parseFloat(o.total_amount || '0')
+          const paid = paidMap.get(o.id) || 0
+          const remaining = Math.max(0, total - paid)
+          return {
+            id: o.id,
+            order_number: o.order_number,
+            title: o.title || '',
+            total_amount: o.total_amount,
+            enterprise_name: o.enterprise?.name || o.customer?.name || 'Sin empresa',
+            customer_name: o.customer?.name || '',
+            paid,
+            remaining,
+          }
+        })
+        .filter((o: OrderForReceipt) => o.remaining > 0)
+      setOrdersForReceipt(ordersWithoutInv)
     } catch (e: any) {
-      console.warn('Could not load invoices for receipt:', e.message)
+      console.warn('Could not load invoices/orders for receipt:', e.message)
     }
   }, [])
 
@@ -383,8 +436,13 @@ export const Cobros: React.FC = () => {
     setShowForm(true)
     // Auto-scroll to the form so the user sees it
     setTimeout(() => {
-      document.getElementById('registrar-cobro-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 100)
+      const el = document.getElementById('registrar-cobro-form')
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        el.classList.add('cobro-form-highlight')
+        setTimeout(() => el.classList.remove('cobro-form-highlight'), 1500)
+      }
+    }, 300)
   }, [])
 
   const handleOpenForm = async () => {
@@ -400,7 +458,18 @@ export const Cobros: React.FC = () => {
     })
     setChequeForm({ ...INITIAL_CHEQUE_FORM })
     setInvoiceItems({})
+    setOrderItems({})
     setShowInvoiceSection(false)
+    setLinkTab('invoices')
+    // Auto-scroll to the form so the user sees it
+    setTimeout(() => {
+      const el = document.getElementById('registrar-cobro-form')
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        el.classList.add('cobro-form-highlight')
+        setTimeout(() => el.classList.remove('cobro-form-highlight'), 1500)
+      }
+    }, 300)
   }
 
   const handleToggleInvoices = async () => {
@@ -414,6 +483,12 @@ export const Cobros: React.FC = () => {
     return Object.values(invoiceItems).reduce((sum, v) => sum + parseFloat(v || '0'), 0)
   }, [invoiceItems])
 
+  const orderTotal = useMemo(() => {
+    return Object.values(orderItems).reduce((sum, v) => sum + parseFloat(v || '0'), 0)
+  }, [orderItems])
+
+  const linkedTotal = invoiceTotal + orderTotal
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -421,11 +496,16 @@ export const Cobros: React.FC = () => {
       .filter(([_, amount]) => parseFloat(amount) > 0)
       .map(([invoice_id, amount]) => ({ invoice_id, amount: parseFloat(amount) }))
 
+    const oItems = Object.entries(orderItems)
+      .filter(([_, amount]) => parseFloat(amount) > 0)
+      .map(([order_id, amount]) => ({ order_id, amount: parseFloat(amount) }))
+
     const hasInvoiceItems = items.length > 0
+    const hasOrderItems = oItems.length > 0
     const directAmount = parseFloat(form.amount || '0')
 
-    if (!hasInvoiceItems && directAmount <= 0) {
-      toast.error('Ingresa un monto o selecciona facturas a cobrar')
+    if (!hasInvoiceItems && !hasOrderItems && directAmount <= 0) {
+      toast.error('Ingresa un monto o selecciona facturas/pedidos a cobrar')
       return
     }
 
@@ -447,8 +527,11 @@ export const Cobros: React.FC = () => {
         enterprise_id: form.enterprise_id || null,
         bank_id: form.bank_id || null,
         reference: form.reference || null,
-        ...(hasInvoiceItems
-          ? { items }
+        ...((hasInvoiceItems || hasOrderItems)
+          ? {
+              ...(hasInvoiceItems ? { items } : {}),
+              ...(hasOrderItems ? { order_items: oItems } : {}),
+            }
           : { amount: directAmount }
         ),
       }
@@ -469,6 +552,7 @@ export const Cobros: React.FC = () => {
       await api.createReceipt(receiptPayload)
       setShowForm(false)
       setInvoiceItems({})
+      setOrderItems({})
       setShowInvoiceSection(false)
       setChequeForm({ ...INITIAL_CHEQUE_FORM })
       toast.success('Cobro registrado correctamente')
@@ -531,11 +615,11 @@ export const Cobros: React.FC = () => {
   const isFiltered = !!filterEnterprise || !!filterMethod || !!dateFrom || !!dateTo
 
   const csvColumns = [
-    { key: 'receipt_date', label: 'Fecha' },
-    { key: 'receipt_number', label: 'N Recibo' },
+    { key: 'receipt_number', label: 'N° Recibo' },
+    { key: 'receipt_date', label: 'Fecha', type: 'date' as const },
     { key: 'enterprise_name', label: 'Empresa' },
-    { key: 'total_amount', label: 'Monto' },
-    { key: 'payment_method', label: 'Metodo' },
+    { key: 'total_amount', label: 'Monto', type: 'currency' as const },
+    { key: 'payment_method', label: 'Metodo de Pago' },
     { key: 'bank_name', label: 'Banco' },
     { key: 'reference', label: 'Referencia' },
     { key: 'notes', label: 'Notas' },
@@ -890,7 +974,7 @@ export const Cobros: React.FC = () => {
 
       {/* Form */}
       {showForm && (
-        <Card id="registrar-cobro-form" className="animate-fadeIn">
+        <Card id="registrar-cobro-form" className="animate-fadeIn" style={{ scrollMarginTop: '20px' }}>
           <CardHeader><h3 className="text-lg font-semibold">Registrar Cobro</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -961,80 +1045,174 @@ export const Cobros: React.FC = () => {
                   onClick={handleToggleInvoices}
                   className="text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
                 >
-                  {showInvoiceSection ? 'Ocultar facturas' : 'Vincular a facturas (opcional)'}<HelpTip text="Opcional. Vincular el cobro a facturas especificas permite llevar control parcial de pagos." />
+                  {showInvoiceSection ? 'Ocultar facturas/pedidos' : 'Vincular a facturas o pedidos (opcional)'}<HelpTip text="Opcional. Vincular el cobro a facturas o pedidos especificos permite llevar control parcial de pagos." />
                 </button>
               </div>
 
               {showInvoiceSection && (
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-2">Facturas a cobrar</label>
-                  {invoicesForReceipt.length === 0 ? (
-                    <p className="text-sm text-gray-400 italic">No hay facturas pendientes de cobro</p>
-                  ) : (
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-gray-50 text-xs text-gray-500">
-                            <th className="px-3 py-2 text-left">Factura</th>
-                            <th className="px-3 py-2 text-left">Cliente / Empresa</th>
-                            <th className="px-3 py-2 text-right">Total</th>
-                            <th className="px-3 py-2 text-right">Cobrado</th>
-                            <th className="px-3 py-2 text-right">Restante</th>
-                            <th className="px-3 py-2 text-right w-36">Monto a pagar</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {invoicesForReceipt.map(inv => {
-                            const total = parseFloat(inv.total_amount || '0')
-                            const cobrado = parseFloat(inv.total_cobrado || '0')
-                            const remaining = Math.max(0, total - cobrado)
-                            const invLabel = inv.fiscal_type === 'interno'
-                              ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
-                              : inv.fiscal_type === 'no_fiscal'
-                                ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
-                                : `${inv.invoice_type || ''} ${String(inv.invoice_number).padStart(8, '0')}`
-                            return (
-                              <tr key={inv.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                <td className="px-3 py-2 font-mono text-xs font-semibold">{invLabel}</td>
-                                <td className="px-3 py-2 text-gray-700">{inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'}</td>
-                                <td className="px-3 py-2 text-right text-gray-600">{fmt(total)}</td>
-                                <td className="px-3 py-2 text-right text-green-600">{fmt(cobrado)}</td>
-                                <td className="px-3 py-2 text-right font-medium">{fmt(remaining)}</td>
-                                <td className="px-3 py-2 text-right">
-                                  {remaining > 0 ? (
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      max={remaining}
-                                      placeholder="0.00"
-                                      value={invoiceItems[inv.id] || ''}
-                                      onChange={e => {
-                                        const val = e.target.value
-                                        setInvoiceItems(prev => {
-                                          const next = { ...prev }
-                                          if (val && parseFloat(val) > 0) next[inv.id] = val
-                                          else delete next[inv.id]
-                                          return next
-                                        })
-                                      }}
-                                      className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                                    />
-                                  ) : (
-                                    <span className="text-xs text-green-600 font-medium">Completo</span>
-                                  )}
-                                </td>
+                  {/* Tabs: Facturas / Pedidos */}
+                  <div className="flex gap-1 mb-3 border-b border-gray-200 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => setLinkTab('invoices')}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${linkTab === 'invoices' ? 'border-blue-500 text-blue-700 dark:text-blue-300' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                      Facturas ({invoicesForReceipt.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLinkTab('orders')}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${linkTab === 'orders' ? 'border-blue-500 text-blue-700 dark:text-blue-300' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                      Pedidos sin factura ({ordersForReceipt.length})
+                    </button>
+                  </div>
+
+                  {/* Invoices tab */}
+                  {linkTab === 'invoices' && (
+                    <div>
+                      {invoicesForReceipt.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic">No hay facturas pendientes de cobro</p>
+                      ) : (
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
+                                <th className="px-3 py-2 text-left">Factura</th>
+                                <th className="px-3 py-2 text-left">Cliente / Empresa</th>
+                                <th className="px-3 py-2 text-right">Total</th>
+                                <th className="px-3 py-2 text-right">Cobrado</th>
+                                <th className="px-3 py-2 text-right">Restante</th>
+                                <th className="px-3 py-2 text-right w-36">Monto a pagar</th>
                               </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
+                            </thead>
+                            <tbody>
+                              {invoicesForReceipt.map(inv => {
+                                const total = parseFloat(inv.total_amount || '0')
+                                const cobrado = parseFloat(inv.total_cobrado || '0')
+                                const remaining = Math.max(0, total - cobrado)
+                                const invLabel = inv.fiscal_type === 'interno'
+                                  ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
+                                  : inv.fiscal_type === 'no_fiscal'
+                                    ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
+                                    : `${inv.invoice_type || ''} ${String(inv.invoice_number).padStart(8, '0')}`
+                                return (
+                                  <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td className="px-3 py-2 font-mono text-xs font-semibold">{invLabel}</td>
+                                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{fmt(total)}</td>
+                                    <td className="px-3 py-2 text-right text-green-600">{fmt(cobrado)}</td>
+                                    <td className="px-3 py-2 text-right font-medium">{fmt(remaining)}</td>
+                                    <td className="px-3 py-2 text-right">
+                                      {remaining > 0 ? (
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          max={remaining}
+                                          placeholder="0.00"
+                                          value={invoiceItems[inv.id] || ''}
+                                          onChange={e => {
+                                            const val = e.target.value
+                                            setInvoiceItems(prev => {
+                                              const next = { ...prev }
+                                              if (val && parseFloat(val) > 0) next[inv.id] = val
+                                              else delete next[inv.id]
+                                              return next
+                                            })
+                                          }}
+                                          className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                                        />
+                                      ) : (
+                                        <span className="text-xs text-green-600 font-medium">Completo</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {invoiceTotal > 0 && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                          Total facturas seleccionadas: <span className="font-bold text-green-700">{fmt(invoiceTotal)}</span>
+                          <span className="text-xs text-gray-400 ml-2">(el monto del recibo se calculara automaticamente)</span>
+                        </p>
+                      )}
                     </div>
                   )}
-                  {invoiceTotal > 0 && (
-                    <p className="text-sm text-gray-600 mt-2">
-                      Total facturas seleccionadas: <span className="font-bold text-green-700">{fmt(invoiceTotal)}</span>
-                      <span className="text-xs text-gray-400 ml-2">(el monto del recibo se calculara automaticamente)</span>
+
+                  {/* Orders tab */}
+                  {linkTab === 'orders' && (
+                    <div>
+                      {ordersForReceipt.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic">No hay pedidos sin factura pendientes de cobro</p>
+                      ) : (
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
+                                <th className="px-3 py-2 text-left">Pedido</th>
+                                <th className="px-3 py-2 text-left">Empresa</th>
+                                <th className="px-3 py-2 text-right">Total</th>
+                                <th className="px-3 py-2 text-right">Cobrado</th>
+                                <th className="px-3 py-2 text-right">Restante</th>
+                                <th className="px-3 py-2 text-right w-36">Monto a pagar</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {ordersForReceipt.map(order => (
+                                <tr key={order.id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                  <td className="px-3 py-2 font-mono text-xs font-semibold">#{String(order.order_number).padStart(4, '0')}</td>
+                                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{order.enterprise_name}</td>
+                                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{fmt(order.total_amount)}</td>
+                                  <td className="px-3 py-2 text-right text-green-600">{fmt(order.paid)}</td>
+                                  <td className="px-3 py-2 text-right font-medium">{fmt(order.remaining)}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    {order.remaining > 0 ? (
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        max={order.remaining}
+                                        placeholder="0.00"
+                                        value={orderItems[order.id] || ''}
+                                        onChange={e => {
+                                          const val = e.target.value
+                                          setOrderItems(prev => {
+                                            const next = { ...prev }
+                                            if (val && parseFloat(val) > 0) next[order.id] = val
+                                            else delete next[order.id]
+                                            return next
+                                          })
+                                        }}
+                                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                                      />
+                                    ) : (
+                                      <span className="text-xs text-green-600 font-medium">Completo</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {orderTotal > 0 && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                          Total pedidos seleccionados: <span className="font-bold text-green-700">{fmt(orderTotal)}</span>
+                          <span className="text-xs text-gray-400 ml-2">(el monto del recibo se calculara automaticamente)</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Combined total */}
+                  {linkedTotal > 0 && (invoiceTotal > 0 && orderTotal > 0) && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      Total combinado: <span className="font-bold text-green-700">{fmt(linkedTotal)}</span>
                     </p>
                   )}
                 </div>
@@ -1043,7 +1221,7 @@ export const Cobros: React.FC = () => {
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <div className="text-sm text-gray-600">
                   Total: <span className="font-bold text-lg text-green-700 ml-2">
-                    {fmt(invoiceTotal > 0 ? invoiceTotal : parseFloat(form.amount || '0'))}
+                    {fmt(linkedTotal > 0 ? linkedTotal : parseFloat(form.amount || '0'))}
                   </span>
                 </div>
                 <Button type="submit" variant="success" loading={saving}>

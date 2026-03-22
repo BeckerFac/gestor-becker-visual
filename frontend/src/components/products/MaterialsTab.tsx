@@ -171,9 +171,9 @@ export const MaterialsTab: React.FC = () => {
     { key: 'sku', label: 'SKU' },
     { key: 'nombre', label: 'Material' },
     { key: 'unidad', label: 'Unidad' },
-    { key: 'costo', label: 'Costo' },
-    { key: 'stock', label: 'Stock' },
-    { key: 'stock_minimo', label: 'Stock Min.' },
+    { key: 'costo', label: 'Costo', type: 'currency' as const },
+    { key: 'stock', label: 'Stock', type: 'number' as const },
+    { key: 'stock_minimo', label: 'Stock Min.', type: 'number' as const },
     { key: 'estado', label: 'Estado' },
   ]
 

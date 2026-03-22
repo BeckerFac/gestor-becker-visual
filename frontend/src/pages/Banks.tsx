@@ -76,6 +76,9 @@ export const Banks: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [breakdown, setBreakdown] = useState<{ methods: Record<string, MethodBreakdown>; recent_movements: Movement[] } | null>(null)
   const [expandedMethod, setExpandedMethod] = useState<string | null>(null)
+  const [expandedBankKey, setExpandedBankKey] = useState<string | null>(null)
+  const [bankMethodTxns, setBankMethodTxns] = useState<any[]>([])
+  const [bankMethodTxnsLoading, setBankMethodTxnsLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Bank | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [balances, setBalances] = useState<any[]>([])
@@ -128,6 +131,25 @@ export const Banks: React.FC = () => {
     } else {
       setSelectedBankId(bankId)
       loadMovements(bankId)
+    }
+  }
+
+  const handleBankMethodExpand = async (bankId: string, method: string) => {
+    const key = `${method}:${bankId}`
+    if (expandedBankKey === key) {
+      setExpandedBankKey(null)
+      setBankMethodTxns([])
+      return
+    }
+    setExpandedBankKey(key)
+    setBankMethodTxnsLoading(true)
+    try {
+      const txns = await api.getBankMethodTransactions(bankId, method)
+      setBankMethodTxns(Array.isArray(txns) ? txns : txns?.items || [])
+    } catch {
+      setBankMethodTxns([])
+    } finally {
+      setBankMethodTxnsLoading(false)
     }
   }
 
@@ -213,12 +235,12 @@ export const Banks: React.FC = () => {
               }))}
               columns={[
                 { key: 'tipo', label: 'Tipo' },
-                { key: 'fecha', label: 'Fecha' },
+                { key: 'fecha', label: 'Fecha', type: 'date' as const },
                 { key: 'detalle', label: 'Detalle' },
                 { key: 'empresa', label: 'Empresa' },
-                { key: 'metodo', label: 'Método' },
+                { key: 'metodo', label: 'Metodo de Pago' },
                 { key: 'banco', label: 'Banco' },
-                { key: 'monto', label: 'Monto' },
+                { key: 'monto', label: 'Monto', type: 'currency' as const },
               ]}
               filename="movimientos_bancos"
             />
@@ -236,12 +258,12 @@ export const Banks: React.FC = () => {
               }))}
               columns={[
                 { key: 'tipo', label: 'Tipo' },
-                { key: 'fecha', label: 'Fecha' },
+                { key: 'fecha', label: 'Fecha', type: 'date' as const },
                 { key: 'detalle', label: 'Detalle' },
                 { key: 'empresa', label: 'Empresa' },
-                { key: 'metodo', label: 'Metodo' },
+                { key: 'metodo', label: 'Metodo de Pago' },
                 { key: 'banco', label: 'Banco' },
-                { key: 'monto', label: 'Monto' },
+                { key: 'monto', label: 'Monto', type: 'currency' as const },
               ]}
               filename="movimientos_bancos"
             />
@@ -402,7 +424,7 @@ export const Banks: React.FC = () => {
                     { key: 'tipo', label: 'Tipo' },
                     { key: 'detalle', label: 'Detalle' },
                     { key: 'empresa', label: 'Empresa' },
-                    { key: 'monto', label: 'Monto' },
+                    { key: 'monto', label: 'Monto', type: 'currency' as const },
                   ]}
                   filename={`extracto_${balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name || 'banco'}`}
                 />
@@ -419,7 +441,7 @@ export const Banks: React.FC = () => {
                     { key: 'tipo', label: 'Tipo' },
                     { key: 'detalle', label: 'Detalle' },
                     { key: 'empresa', label: 'Empresa' },
-                    { key: 'monto', label: 'Monto' },
+                    { key: 'monto', label: 'Monto', type: 'currency' as const },
                   ]}
                   filename={`extracto_${balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name || 'banco'}`}
                 />
@@ -624,21 +646,80 @@ export const Banks: React.FC = () => {
                         </div>
                       </div>
                       {isExpanded && Object.keys(data.bank_details).length > 0 && (
-                        <div className="border-t px-4 py-3 bg-white/60 animate-slideDown">
-                          <p className="text-xs font-medium text-gray-500 mb-2">Desglose por Banco</p>
+                        <div className="border-t px-4 py-3 bg-white/60 dark:bg-gray-800/60 animate-slideDown">
+                          <p className="text-xs font-medium text-gray-500 mb-2">Desglose por Banco (click para ver transacciones)</p>
                           <div className="space-y-1">
-                            {Object.entries(data.bank_details).map(([bankId, bankData]) => (
-                              <div key={bankId} className="flex items-center justify-between px-3 py-2 bg-white rounded border border-gray-100">
-                                <span className="text-sm font-medium text-gray-800">{bankData.bank_name}</span>
-                                <div className="flex gap-4">
-                                  <span className="text-sm text-green-700">+{formatCurrency(bankData.income)}</span>
-                                  <span className="text-sm text-red-700">-{formatCurrency(bankData.expense)}</span>
-                                  <span className={`text-sm font-bold ${bankData.income - bankData.expense >= 0 ? 'text-emerald-700' : 'text-orange-700'}`}>
-                                    = {formatCurrency(bankData.income - bankData.expense)}
-                                  </span>
+                            {Object.entries(data.bank_details).map(([bankId, bankData]) => {
+                              const bankKey = `${method}:${bankId}`
+                              const isBankExpanded = expandedBankKey === bankKey
+                              return (
+                                <div key={bankId}>
+                                  <div
+                                    className="flex items-center justify-between px-3 py-2 bg-white dark:bg-gray-700 rounded border border-gray-100 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                                    onClick={() => handleBankMethodExpand(bankId, method)}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-400 text-[10px]">{isBankExpanded ? '▼' : '▶'}</span>
+                                      <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{bankData.bank_name}</span>
+                                    </div>
+                                    <div className="flex gap-4">
+                                      <span className="text-sm text-green-700 dark:text-green-400">+{formatCurrency(bankData.income)}</span>
+                                      <span className="text-sm text-red-700 dark:text-red-400">-{formatCurrency(bankData.expense)}</span>
+                                      <span className={`text-sm font-bold ${bankData.income - bankData.expense >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-orange-700 dark:text-orange-400'}`}>
+                                        = {formatCurrency(bankData.income - bankData.expense)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {isBankExpanded && (
+                                    <div className="ml-4 mt-1 mb-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-600 overflow-hidden">
+                                      {bankMethodTxnsLoading ? (
+                                        <div className="px-3 py-4 text-center text-xs text-gray-400">Cargando transacciones...</div>
+                                      ) : bankMethodTxns.length === 0 ? (
+                                        <div className="px-3 py-4 text-center text-xs text-gray-400">Sin transacciones individuales</div>
+                                      ) : (
+                                        <table className="w-full text-xs">
+                                          <thead>
+                                            <tr className="border-b border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">
+                                              <th className="text-left py-1.5 px-2 font-medium text-gray-500">Fecha</th>
+                                              <th className="text-left py-1.5 px-2 font-medium text-gray-500">Empresa/Cliente</th>
+                                              <th className="text-left py-1.5 px-2 font-medium text-gray-500">Referencia</th>
+                                              <th className="text-left py-1.5 px-2 font-medium text-gray-500">Tipo</th>
+                                              <th className="text-right py-1.5 px-2 font-medium text-gray-500">Monto</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {bankMethodTxns.map((txn: any, idx: number) => {
+                                              const isIncome = ['cobro', 'venta'].includes(txn.type)
+                                              return (
+                                                <tr key={idx} className="border-b border-gray-100 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-700">
+                                                  <td className="py-1.5 px-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                                    {formatDate(txn.date)}
+                                                  </td>
+                                                  <td className="py-1.5 px-2 text-gray-700 dark:text-gray-300 truncate max-w-[150px]">
+                                                    {txn.enterprise_name || '-'}
+                                                  </td>
+                                                  <td className="py-1.5 px-2 text-gray-500 dark:text-gray-400 truncate max-w-[120px]">
+                                                    {txn.reference || '-'}
+                                                  </td>
+                                                  <td className="py-1.5 px-2">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isIncome ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
+                                                      {txn.type === 'cobro' ? 'Cobro' : txn.type === 'venta' ? 'Venta' : txn.type === 'pago' ? 'Pago' : 'Compra'}
+                                                    </span>
+                                                  </td>
+                                                  <td className={`py-1.5 px-2 text-right font-medium ${isIncome ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                                                    {isIncome ? '+' : '-'}{formatCurrency(parseFloat(txn.amount || '0'))}
+                                                  </td>
+                                                </tr>
+                                              )
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       )}

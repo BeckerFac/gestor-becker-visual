@@ -809,20 +809,24 @@ export const Orders: React.FC = () => {
   const isFiltered = filterStatus.length > 0 || filterType.length > 0 || filterEnterprise.length > 0 || filterInvoice.length > 0 || filterPayment.length > 0 || !!search || !!dateFrom || !!dateTo
 
   const csvColumns = [
-    { key: 'order_number', label: 'N Pedido' },
+    { key: 'order_number', label: 'N° Pedido' },
     { key: 'created_at', label: 'Fecha', type: 'date' as const },
     { key: 'enterprise_name', label: 'Empresa' },
     { key: 'title', label: 'Producto' },
     { key: 'total_amount', label: 'Total', type: 'currency' as const },
     { key: 'payment_status', label: 'Estado Pago' },
     { key: 'status', label: 'Estado' },
-    { key: 'payment_method', label: 'Metodo Pago' },
+    { key: 'payment_method', label: 'Metodo de Pago' },
   ]
   const csvData = filteredOrders.map(o => ({
-    ...o,
     order_number: `#${String(o.order_number).padStart(4, '0')}`,
-    total_amount: parseFloat(o.total_amount?.toString() || '0'),
+    created_at: o.created_at,
     enterprise_name: o.enterprise?.name || o.customer?.name || '',
+    title: o.title || '',
+    total_amount: parseFloat(o.total_amount?.toString() || '0'),
+    payment_status: o.payment_status || '',
+    status: o.status || '',
+    payment_method: o.payment_method || '',
   }))
 
   const clearFilters = () => {

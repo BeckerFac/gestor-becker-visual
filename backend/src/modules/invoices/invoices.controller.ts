@@ -118,6 +118,19 @@ export class InvoicesController {
     }
   }
 
+  async generatePaymentLink(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
+      // TODO: Integrate with MercadoPago SDK to create real payment link
+      res.json({ message: 'Configurar MERCADOPAGO_ACCESS_TOKEN para habilitar links de pago' });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Failed to generate payment link' });
+    }
+  }
+
   async authorizeInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');

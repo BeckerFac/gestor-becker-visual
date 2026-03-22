@@ -740,6 +740,70 @@ export const api = {
     return data
   },
 
+  // Recurring Invoices (Facturas recurrentes / abonos)
+  getRecurringInvoices: async () => {
+    const { data } = await client.get('/recurring-invoices')
+    return data
+  },
+  createRecurringInvoice: async (invoiceData: any) => {
+    const { data } = await client.post('/recurring-invoices', invoiceData)
+    return data
+  },
+  updateRecurringInvoice: async (id: string, invoiceData: any) => {
+    const { data } = await client.put(`/recurring-invoices/${id}`, invoiceData)
+    return data
+  },
+  deactivateRecurringInvoice: async (id: string) => {
+    const { data } = await client.post(`/recurring-invoices/${id}/deactivate`)
+    return data
+  },
+  deleteRecurringInvoice: async (id: string) => {
+    const { data } = await client.delete(`/recurring-invoices/${id}`)
+    return data
+  },
+
+  // Integrations
+  getIntegrations: async () => {
+    const { data } = await client.get('/integrations')
+    return data
+  },
+  createIntegration: async (integrationData: any) => {
+    const { data } = await client.post('/integrations', integrationData)
+    return data
+  },
+  updateIntegration: async (id: string, integrationData: any) => {
+    const { data } = await client.put(`/integrations/${id}`, integrationData)
+    return data
+  },
+  deleteIntegration: async (id: string) => {
+    const { data } = await client.delete(`/integrations/${id}`)
+    return data
+  },
+
+  // Reminders
+  getReminderConfig: async () => {
+    const { data } = await client.get('/reminders/config')
+    return data
+  },
+  updateReminderConfig: async (configData: any) => {
+    const { data } = await client.put('/reminders/config', configData)
+    return data
+  },
+  getReminders: async () => {
+    const { data } = await client.get('/reminders')
+    return data
+  },
+  getOverdueInvoices: async () => {
+    const { data } = await client.get('/reminders/overdue')
+    return data
+  },
+
+  // Payment links (MercadoPago)
+  generatePaymentLink: async (invoiceId: string) => {
+    const { data } = await client.post(`/invoices/${invoiceId}/payment-link`)
+    return data
+  },
+
   // Tags
   getTags: async () => {
     const { data } = await client.get('/tags')
@@ -1059,6 +1123,10 @@ export const api = {
     if (filters?.date_from) params.append('date_from', filters.date_from)
     if (filters?.date_to) params.append('date_to', filters.date_to)
     const { data } = await client.get(`/banks/${bankId}/movements?${params}`)
+    return data
+  },
+  getBankMethodTransactions: async (bankId: string, method: string) => {
+    const { data } = await client.get(`/banks/${bankId}/method/${method}/transactions`)
     return data
   },
 

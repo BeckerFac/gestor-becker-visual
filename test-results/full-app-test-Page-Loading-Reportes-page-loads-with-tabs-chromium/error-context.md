@@ -1,0 +1,184 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e4]:
+    - paragraph [ref=e5]:
+      - text: Usamos cookies esenciales para el funcionamiento de la plataforma y para mejorar tu experiencia. Consulta nuestra
+      - link "Politica de Privacidad" [ref=e6] [cursor=pointer]:
+        - /url: /legal/privacidad
+      - text: para mas informacion.
+    - generic [ref=e7]:
+      - link "Mas info" [ref=e8] [cursor=pointer]:
+        - /url: /legal/privacidad
+      - button "Aceptar" [ref=e9] [cursor=pointer]
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - heading "BeckerVisual" [level=1] [ref=e13]
+        - paragraph [ref=e14]: Gestor Comercial
+      - navigation [ref=e15]:
+        - generic [ref=e16]:
+          - link "📊 Dashboard" [ref=e17] [cursor=pointer]:
+            - /url: /dashboard
+            - generic [ref=e18]: 📊
+            - text: Dashboard
+          - link "🔍 Busqueda Global" [ref=e19] [cursor=pointer]:
+            - /url: /global
+            - generic [ref=e20]: 🔍
+            - text: Busqueda Global
+          - link "SecretarIA" [ref=e21] [cursor=pointer]:
+            - /url: /secretaria
+            - img [ref=e22]
+            - text: SecretarIA
+        - generic [ref=e24]:
+          - paragraph [ref=e25]: Comercial
+          - link "📋 Pedidos" [ref=e26] [cursor=pointer]:
+            - /url: /orders
+            - generic [ref=e27]: 📋
+            - text: Pedidos
+          - link "📄 Cotizaciones" [ref=e28] [cursor=pointer]:
+            - /url: /quotes
+            - generic [ref=e29]: 📄
+            - text: Cotizaciones
+          - link "🧾 Facturas" [ref=e30] [cursor=pointer]:
+            - /url: /invoices
+            - generic [ref=e31]: 🧾
+            - text: Facturas
+          - link "🚚 Remitos" [ref=e32] [cursor=pointer]:
+            - /url: /remitos
+            - generic [ref=e33]: 🚚
+            - text: Remitos
+          - link "🎯 Oportunidades" [ref=e34] [cursor=pointer]:
+            - /url: /oportunidades
+            - generic [ref=e35]: 🎯
+            - text: Oportunidades
+        - generic [ref=e36]:
+          - paragraph [ref=e37]: Abastecimiento
+          - link "🛒 Compras" [ref=e38] [cursor=pointer]:
+            - /url: /compras
+            - generic [ref=e39]: 🛒
+            - text: Compras
+          - link "📦 Productos" [ref=e40] [cursor=pointer]:
+            - /url: /products
+            - generic [ref=e41]: 📦
+            - text: Productos
+        - generic [ref=e42]:
+          - paragraph [ref=e43]: Finanzas
+          - link "💰 Cobros" [ref=e44] [cursor=pointer]:
+            - /url: /cobros
+            - generic [ref=e45]: 💰
+            - text: Cobros
+          - link "💸 Pagos" [ref=e46] [cursor=pointer]:
+            - /url: /pagos
+            - generic [ref=e47]: 💸
+            - text: Pagos
+          - link "📒 Cuenta Corriente" [ref=e48] [cursor=pointer]:
+            - /url: /cuenta-corriente
+            - generic [ref=e49]: 📒
+            - text: Cuenta Corriente
+          - link "📝 Cheques" [ref=e50] [cursor=pointer]:
+            - /url: /cheques
+            - generic [ref=e51]: 📝
+            - text: Cheques
+          - link "📈 Reportes" [ref=e52] [cursor=pointer]:
+            - /url: /reportes
+            - generic [ref=e53]: 📈
+            - text: Reportes
+        - generic [ref=e54]:
+          - paragraph [ref=e55]: Directorio
+          - link "🏢 Empresas" [ref=e56] [cursor=pointer]:
+            - /url: /empresas
+            - generic [ref=e57]: 🏢
+            - text: Empresas
+          - link "🏦 Bancos" [ref=e58] [cursor=pointer]:
+            - /url: /bancos
+            - generic [ref=e59]: 🏦
+            - text: Bancos
+        - generic [ref=e60]:
+          - paragraph [ref=e61]: Sistema
+          - link "👤 Usuarios" [ref=e62] [cursor=pointer]:
+            - /url: /users
+            - generic [ref=e63]: 👤
+            - text: Usuarios
+          - link "⚙️ Configuración" [ref=e64] [cursor=pointer]:
+            - /url: /settings
+            - generic [ref=e65]: ⚙️
+            - text: Configuración
+        - generic [ref=e66]:
+          - link "🌐 Portal Clientes ↗" [ref=e67] [cursor=pointer]:
+            - /url: /portal
+            - generic [ref=e68]: 🌐
+            - text: Portal Clientes
+            - generic [ref=e69]: ↗
+          - button "Exportar Datos" [ref=e70] [cursor=pointer]:
+            - img [ref=e71]
+            - text: Exportar Datos
+      - generic [ref=e73]:
+        - link "Prueba 14d restantes" [ref=e74] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e75]: Prueba
+          - generic [ref=e76]: 14d restantes
+        - generic [ref=e77]:
+          - paragraph [ref=e78]: Sesion iniciada como
+          - paragraph [ref=e79]: e2eplaywright@test.com
+        - button "Cerrar sesión" [ref=e80] [cursor=pointer]
+    - generic [ref=e81]:
+      - banner [ref=e82]:
+        - generic [ref=e83]:
+          - generic [ref=e85]:
+            - generic [ref=e86]:
+              - link "Inicio" [ref=e87] [cursor=pointer]:
+                - /url: /dashboard
+              - generic [ref=e88]: /
+              - generic [ref=e89]: Finanzas
+              - generic [ref=e90]: /
+              - generic [ref=e91]: Reportes
+            - heading "Reportes" [level=2] [ref=e92]
+          - generic [ref=e93]:
+            - button "Activar modo oscuro" [ref=e94] [cursor=pointer]:
+              - img [ref=e95]
+            - generic [ref=e97]:
+              - paragraph [ref=e98]: E2E Test Company
+              - paragraph [ref=e99]: "CUIT: 20999888771"
+      - main [ref=e100]:
+        - generic [ref=e102]:
+          - generic [ref=e104]:
+            - heading "Reportes" [level=1] [ref=e105]
+            - paragraph [ref=e106]: Reportes contables y de negocio
+          - tablist [ref=e108]:
+            - generic [ref=e109]:
+              - generic [ref=e110]: Negocio
+              - tab "Ventas" [selected] [ref=e111] [cursor=pointer]
+              - tab "Rentabilidad" [ref=e112] [cursor=pointer]
+              - tab "Clientes" [ref=e113] [cursor=pointer]
+              - tab "Cobranzas" [ref=e114] [cursor=pointer]
+              - tab "Inventario" [ref=e115] [cursor=pointer]
+              - tab "Conversion" [ref=e116] [cursor=pointer]
+            - generic [ref=e119]:
+              - generic [ref=e120]: Contable
+              - tab "Libro IVA Ventas" [ref=e121] [cursor=pointer]
+              - tab "Libro IVA Compras" [ref=e122] [cursor=pointer]
+              - tab "Posicion IVA" [ref=e123] [cursor=pointer]
+              - tab "Flujo de Caja" [ref=e124] [cursor=pointer]
+          - generic [ref=e127]:
+            - generic [ref=e128]:
+              - generic [ref=e129]: Desde
+              - textbox "DD/MM/AAAA" [ref=e130]: 01/03/2026
+            - generic [ref=e131]:
+              - generic [ref=e132]: Hasta
+              - textbox "DD/MM/AAAA" [ref=e133]: 31/03/2026
+            - generic [ref=e134]:
+              - button "Este mes" [ref=e135] [cursor=pointer]
+              - button "Mes anterior" [ref=e136] [cursor=pointer]
+              - button "Este trimestre" [ref=e137] [cursor=pointer]
+              - button "Este anio" [ref=e138] [cursor=pointer]
+            - button "Limpiar filtros" [ref=e139] [cursor=pointer]
+          - generic [ref=e142]:
+            - generic [ref=e143]: 🔍
+            - heading "No hay actividad en este periodo" [level=3] [ref=e144]
+            - paragraph [ref=e145]: No se registraron ventas en el rango de fechas seleccionado.
+            - paragraph [ref=e146]: Intentá ajustando los filtros o limpiándolos
+    - button "Abrir chat de SecretarIA" [ref=e147] [cursor=pointer]:
+      - img [ref=e148]
+```

@@ -13,3 +13,4 @@ invoicesRouter.delete('/:id', authorize('invoices', 'delete'), (req, res) => inv
 invoicesRouter.post('/:id/authorize', authorize('invoices', 'edit'), (req, res) => invoicesController.authorizeInvoice(req, res));
 invoicesRouter.post('/:id/link-order', authorize('invoices', 'edit'), (req, res) => invoicesController.linkOrder(req, res));
 invoicesRouter.delete('/:id/link-order', authorize('invoices', 'edit'), (req, res) => invoicesController.unlinkOrder(req, res));
+invoicesRouter.post('/:id/payment-link', authorize('invoices', 'edit'), (req, res) => invoicesController.generatePaymentLink(req, res));

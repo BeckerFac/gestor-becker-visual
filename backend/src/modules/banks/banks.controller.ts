@@ -52,6 +52,23 @@ export class BanksController {
       res.status(500).json({ error: 'Failed to get bank movements' });
     }
   }
+  async getTransactionsByBankAndMethod(req: AuthRequest, res: Response) {
+    try {
+      const { bankId, method } = req.params;
+      if (!bankId || !method) {
+        return res.status(400).json({ error: 'bankId and method are required' });
+      }
+      const result = await banksService.getTransactionsByBankAndMethod(
+        req.user!.company_id,
+        bankId,
+        method
+      );
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof ApiError) return res.status(error.statusCode).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to get bank method transactions' });
+    }
+  }
 }
 
 export const banksController = new BanksController();

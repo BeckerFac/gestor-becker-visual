@@ -82,9 +82,9 @@ const CSV_COLUMNS = [
   { key: 'title', label: 'Titulo' },
   { key: 'customer', label: 'Cliente' },
   { key: 'enterprise', label: 'Empresa' },
-  { key: 'date', label: 'Fecha' },
-  { key: 'valid_until', label: 'Valida hasta' },
-  { key: 'total', label: 'Total' },
+  { key: 'date', label: 'Fecha', type: 'date' as const },
+  { key: 'valid_until', label: 'Valida Hasta', type: 'date' as const },
+  { key: 'total', label: 'Total', type: 'currency' as const },
   { key: 'status', label: 'Estado' },
 ]
 
@@ -355,9 +355,9 @@ export const Quotes: React.FC = () => {
     title: q.title || '-',
     customer: q.customer?.name ?? '-',
     enterprise: q.enterprise?.name ?? '-',
-    date: formatDate(q.created_at),
-    valid_until: q.valid_until ? formatDate(q.valid_until) : '-',
-    total: formatCurrency(parseFloat(q.total_amount || '0')),
+    date: q.created_at,
+    valid_until: q.valid_until || '',
+    total: parseFloat(q.total_amount || '0'),
     status: STATUS_LABELS[q.status] ?? q.status,
   }))
 

@@ -339,6 +339,51 @@ export class BanksService {
       throw new ApiError(500, 'Failed to get bank movements');
     }
   }
+  async getTransactionsByBankAndMethod(companyId: string, bankId: string, paymentMethod: string) {
+    await this.ensureTables();
+    try {
+      const result = await db.execute(sql`
+        (
+          SELECT 'cobro' as type, c.payment_method, CAST(c.amount AS decimal) as amount,
+            c.payment_date as date, c.reference as reference, e.name as enterprise_name
+          FROM cobros c
+          LEFT JOIN enterprises e ON c.enterprise_id = e.id
+          WHERE c.company_id = ${companyId} AND c.bank_id = ${bankId} AND c.payment_method = ${paymentMethod}
+        )
+        UNION ALL
+        (
+          SELECT 'pago' as type, pg.payment_method, CAST(pg.amount AS decimal) as amount,
+            pg.payment_date as date, pg.reference as reference, e.name as enterprise_name
+          FROM pagos pg
+          LEFT JOIN enterprises e ON pg.enterprise_id = e.id
+          WHERE pg.company_id = ${companyId} AND pg.bank_id = ${bankId} AND pg.payment_method = ${paymentMethod}
+        )
+        UNION ALL
+        (
+          SELECT 'venta' as type, o.payment_method, CAST(o.total_amount AS decimal) as amount,
+            o.created_at as date, o.title as reference, ent.name as enterprise_name
+          FROM orders o
+          LEFT JOIN enterprises ent ON o.enterprise_id = ent.id
+          WHERE o.company_id = ${companyId} AND o.bank_id = ${bankId} AND o.payment_method = ${paymentMethod} AND o.payment_status = 'pagado'
+        )
+        UNION ALL
+        (
+          SELECT 'compra' as type, p.payment_method, CAST(p.total_amount AS decimal) as amount,
+            p.date as date, CAST(p.purchase_number AS TEXT) as reference, e.name as enterprise_name
+          FROM purchases p
+          LEFT JOIN enterprises e ON p.enterprise_id = e.id
+          WHERE p.company_id = ${companyId} AND p.bank_id = ${bankId} AND p.payment_method = ${paymentMethod} AND p.payment_status = 'pagado'
+        )
+        ORDER BY date DESC
+        LIMIT 50
+      `);
+      const rows = (result as any).rows || result || [];
+      return rows;
+    } catch (error) {
+      console.error('Bank method transactions error:', error);
+      throw new ApiError(500, 'Failed to get bank method transactions');
+    }
+  }
 }
 
 export const banksService = new BanksService();
