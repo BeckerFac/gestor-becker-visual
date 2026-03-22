@@ -258,12 +258,12 @@ export const Banks: React.FC = () => {
               }))}
               columns={[
                 { key: 'tipo', label: 'Tipo' },
-                { key: 'fecha', label: 'Fecha' },
+                { key: 'fecha', label: 'Fecha', type: 'date' as const },
                 { key: 'detalle', label: 'Detalle' },
                 { key: 'empresa', label: 'Empresa' },
                 { key: 'metodo', label: 'Metodo de Pago' },
                 { key: 'banco', label: 'Banco' },
-                { key: 'monto', label: 'Monto' },
+                { key: 'monto', label: 'Monto', type: 'currency' as const },
               ]}
               filename="movimientos_bancos"
             />
@@ -441,7 +441,7 @@ export const Banks: React.FC = () => {
                     { key: 'tipo', label: 'Tipo' },
                     { key: 'detalle', label: 'Detalle' },
                     { key: 'empresa', label: 'Empresa' },
-                    { key: 'monto', label: 'Monto' },
+                    { key: 'monto', label: 'Monto', type: 'currency' as const },
                   ]}
                   filename={`extracto_${balances.find((b: any) => b.bank_id === selectedBankId)?.bank_name || 'banco'}`}
                 />

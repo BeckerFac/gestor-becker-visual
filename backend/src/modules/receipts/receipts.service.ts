@@ -209,6 +209,9 @@ export class ReceiptsService {
           VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${enterprise_id || null}, ${bank_id || null}, ${reference || null}, ${userId}, NOW())
         `);
 
+        // Track first cobro ID for cheque linking
+        let firstCobroId: string | null = null;
+
         if (hasItems) {
           // Receipt with invoice items
           for (const item of items) {
@@ -219,6 +222,7 @@ export class ReceiptsService {
             `);
 
             const cobroId = uuid();
+            if (!firstCobroId) firstCobroId = cobroId;
             const invResult = await db.execute(sql`
               SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
             `);
@@ -236,6 +240,7 @@ export class ReceiptsService {
           // Receipt with order items (pedidos sin facturar)
           for (const item of order_items) {
             const cobroId = uuid();
+            if (!firstCobroId) firstCobroId = cobroId;
             // Get enterprise_id from the order
             const orderResult = await db.execute(sql`
               SELECT o.id, COALESCE(e.id, c2.enterprise_id) as enterprise_id
@@ -261,34 +266,35 @@ export class ReceiptsService {
         if (!hasItems && !hasOrderItems) {
           // Simple receipt without invoices or orders - create a single cobro
           const cobroId = uuid();
+          firstCobroId = cobroId;
           await db.execute(sql`
             INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
             VALUES (${cobroId}, ${companyId}, ${enterprise_id || null}, ${totalAmount.toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${reference || `Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
           `);
+        }
 
-          // If cheque_data is provided, create a cheque linked to this cobro
-          if (cheque_data && payment_method === 'cheque') {
-            const chequeId = uuid();
-            await db.execute(sql`
-              INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, notes, created_by)
-              VALUES (
-                ${chequeId},
-                ${companyId},
-                ${cheque_data.number},
-                ${cheque_data.bank},
-                ${cheque_data.drawer},
-                ${cheque_data.drawer_cuit || null},
-                ${cheque_data.cheque_type || 'comun'},
-                ${totalAmount.toFixed(2)},
-                ${new Date(cheque_data.issue_date)},
-                ${new Date(cheque_data.due_date)},
-                'a_cobrar',
-                ${cobroId},
-                ${notes || null},
-                ${userId}
-              )
-            `);
-          }
+        // If cheque_data is provided, create a cheque linked to the first cobro
+        if (cheque_data && payment_method === 'cheque') {
+          const chequeId = uuid();
+          await db.execute(sql`
+            INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, notes, created_by)
+            VALUES (
+              ${chequeId},
+              ${companyId},
+              ${cheque_data.number},
+              ${cheque_data.bank},
+              ${cheque_data.drawer},
+              ${cheque_data.drawer_cuit || null},
+              ${cheque_data.cheque_type || 'comun'},
+              ${totalAmount.toFixed(2)},
+              ${new Date(cheque_data.issue_date)},
+              ${new Date(cheque_data.due_date)},
+              'a_cobrar',
+              ${firstCobroId},
+              ${notes || null},
+              ${userId}
+            )
+          `);
         }
 
         await db.execute(sql`COMMIT`);

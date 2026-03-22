@@ -83,7 +83,7 @@ const EMPTY_ITEM: RemitoItem = { product_name: '', description: '', quantity: 1,
 
 const CSV_COLUMNS = [
   { key: 'remito_number', label: 'N° Remito' },
-  { key: 'date',          label: 'Fecha' },
+  { key: 'date',          label: 'Fecha', type: 'date' as const },
   { key: 'tipo',          label: 'Tipo' },
   { key: 'enterprise',    label: 'Empresa' },
   { key: 'customer',      label: 'Cliente' },

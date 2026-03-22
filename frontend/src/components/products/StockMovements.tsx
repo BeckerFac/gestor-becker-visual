@@ -215,8 +215,8 @@ export const StockMovements: React.FC<StockMovementsProps> = ({ products, onData
               { key: 'producto', label: 'Producto' },
               { key: 'sku', label: 'SKU' },
               { key: 'deposito', label: 'Deposito' },
-              { key: 'cantidad', label: 'Cantidad' },
-              { key: 'nivel_minimo', label: 'Nivel Minimo' },
+              { key: 'cantidad', label: 'Cantidad', type: 'number' as const },
+              { key: 'nivel_minimo', label: 'Nivel Minimo', type: 'number' as const },
               { key: 'estado', label: 'Estado' },
             ]}
             filename="inventario"
