@@ -122,26 +122,37 @@ export class EnterprisesService {
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
 
-      await db.execute(sql`
-        UPDATE enterprises SET
-          name = ${data.name},
-          razon_social = ${data.razon_social || null},
-          cuit = ${data.cuit || null},
-          address = ${data.address || null},
-          city = ${data.city || null},
-          province = ${data.province || null},
-          postal_code = ${data.postal_code || null},
-          fiscal_address = ${data.fiscal_address || null},
-          fiscal_city = ${data.fiscal_city || null},
-          fiscal_province = ${data.fiscal_province || null},
-          fiscal_postal_code = ${data.fiscal_postal_code || null},
-          phone = ${data.phone || null},
-          email = ${data.email || null},
-          tax_condition = ${data.tax_condition || null},
-          notes = ${data.notes || null},
-          updated_at = NOW()
-        WHERE id = ${enterpriseId} AND company_id = ${companyId}
-      `);
+      // Handle access_code update separately (can be set to null to revoke)
+      if (data.access_code !== undefined) {
+        await db.execute(sql`
+          UPDATE enterprises SET access_code = ${data.access_code}, updated_at = NOW()
+          WHERE id = ${enterpriseId} AND company_id = ${companyId}
+        `);
+      }
+
+      // Update other fields only if name is provided (full update vs partial)
+      if (data.name !== undefined) {
+        await db.execute(sql`
+          UPDATE enterprises SET
+            name = ${data.name},
+            razon_social = ${data.razon_social || null},
+            cuit = ${data.cuit || null},
+            address = ${data.address || null},
+            city = ${data.city || null},
+            province = ${data.province || null},
+            postal_code = ${data.postal_code || null},
+            fiscal_address = ${data.fiscal_address || null},
+            fiscal_city = ${data.fiscal_city || null},
+            fiscal_province = ${data.fiscal_province || null},
+            fiscal_postal_code = ${data.fiscal_postal_code || null},
+            phone = ${data.phone || null},
+            email = ${data.email || null},
+            tax_condition = ${data.tax_condition || null},
+            notes = ${data.notes || null},
+            updated_at = NOW()
+          WHERE id = ${enterpriseId} AND company_id = ${companyId}
+        `);
+      }
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
       const updated = (result as any).rows || result || [];

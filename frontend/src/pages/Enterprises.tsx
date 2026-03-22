@@ -297,44 +297,8 @@ export const Enterprises: React.FC = () => {
     }
   }
 
-  const handleGeneratePortalCode = async (enterprise: any) => {
-    try {
-      const code = Math.random().toString(36).substring(2, 10).toUpperCase()
-      await api.updateEnterprise(enterprise.id, { access_code: code })
-      toast.success(`Codigo de portal generado: ${code}`)
-      await loadData()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || 'Error generando codigo')
-    }
-  }
-
-  const handleRevokePortalCode = async (enterprise: any) => {
-    try {
-      await api.updateEnterprise(enterprise.id, { access_code: null })
-      toast.success('Acceso al portal revocado')
-      await loadData()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || 'Error revocando acceso')
-    }
-  }
-
   const handleDeleteContact = (contact: Contact) => {
     setDeleteTarget({ type: 'contact', item: contact })
-  }
-
-  const handleGenerateCode = async (contact: Contact) => {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase()
-    try {
-      await api.updateCustomer(contact.id, { access_code: code })
-      toast.success(`Código de acceso generado para ${contact.name}: ${code}`)
-      await loadData()
-      if (expandedId) {
-        const detail = await api.getEnterprise(expandedId)
-        setExpandedContacts(detail.contacts || [])
-      }
-    } catch (e: any) {
-      setError(e.message)
-    }
   }
 
   const unassignedContacts = contacts.filter(c => !c.enterprise_id)
@@ -625,16 +589,6 @@ export const Enterprises: React.FC = () => {
                     {ent.status === 'active' ? 'Activa' : 'Inactiva'}
                   </span>
                   <div className="flex gap-2 items-center" onClick={e => e.stopPropagation()}>
-                    {ent.access_code ? (
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded font-mono">{ent.access_code}</code>
-                        <button onClick={() => handleRevokePortalCode(ent)} className="text-xs text-red-500 hover:text-red-700">Revocar</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => handleGeneratePortalCode(ent)} className="text-xs text-blue-600 hover:text-blue-800">
-                        Generar codigo
-                      </button>
-                    )}
                     <PermissionGate module="enterprises" action="create">
                       <button onClick={() => handleAddContact(ent.id)} className="text-green-600 hover:underline text-sm">+ Contacto</button>
                     </PermissionGate>
@@ -672,7 +626,6 @@ export const Enterprises: React.FC = () => {
                           <th className="pb-2 font-medium">Rol</th>
                           <th className="pb-2 font-medium">Teléfono</th>
                           <th className="pb-2 font-medium">Email</th>
-                          <th className="pb-2 font-medium">Portal</th>
                           <th className="pb-2 font-medium">Acciones</th>
                         </tr>
                       </thead>
@@ -684,13 +637,6 @@ export const Enterprises: React.FC = () => {
                             <td className="py-2 text-gray-600">{c.role || '-'}</td>
                             <td className="py-2 text-gray-600">{c.phone || '-'}</td>
                             <td className="py-2 text-gray-600">{c.email || '-'}</td>
-                            <td className="py-2">
-                              {c.access_code ? (
-                                <span className="font-mono text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">{c.access_code}</span>
-                              ) : (
-                                <button onClick={() => handleGenerateCode(c)} className="text-blue-600 hover:underline text-xs">Generar</button>
-                              )}
-                            </td>
                             <td className="py-2">
                               <div className="flex gap-2">
                                 <PermissionGate module="enterprises" action="edit">
