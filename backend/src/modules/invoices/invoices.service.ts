@@ -318,10 +318,11 @@ export class InvoicesService {
           ELSE NULL END as "order",
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta,
-          COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.invoice_id = i.id), 0) as total_cobrado,
+          -- total_cobrado using cobro_invoice_applications (N:N correct system)
+          COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0) as total_cobrado,
           CASE
-            WHEN CAST(i.total_amount AS decimal) > 0 AND COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.invoice_id = i.id), 0) >= CAST(i.total_amount AS decimal) THEN 'pagado'
-            WHEN COALESCE((SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.invoice_id = i.id), 0) > 0 THEN 'parcial'
+            WHEN CAST(i.total_amount AS decimal) > 0 AND COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 WHERE cia2.invoice_id = i.id), 0) >= CAST(i.total_amount AS decimal) THEN 'pagado'
+            WHEN COALESCE((SELECT SUM(CAST(cia3.amount_applied AS decimal)) FROM cobro_invoice_applications cia3 WHERE cia3.invoice_id = i.id), 0) > 0 THEN 'parcial'
             ELSE 'pendiente'
           END as payment_status
         FROM invoices i
