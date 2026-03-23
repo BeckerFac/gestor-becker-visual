@@ -113,7 +113,13 @@ export class OrdersService {
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
           CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status = 'authorized' AND (inv.fiscal_type = 'fiscal' OR inv.fiscal_type IS NULL)), 0) as invoiced_amount
+          COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) as invoiced_amount,
+          CASE
+            WHEN COALESCE(o.total_amount, 0) = 0 THEN 'sin_monto'
+            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) = 0 THEN 'sin_facturar'
+            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
+            ELSE 'parcial'
+          END as invoice_status
           ${selectExtra}
         FROM orders o
         LEFT JOIN customers c ON o.customer_id = c.id

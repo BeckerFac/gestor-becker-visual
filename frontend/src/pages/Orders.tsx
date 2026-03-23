@@ -49,6 +49,7 @@ interface Order {
   quote?: { id: string; quote_number: number } | null
   cobro?: { id: string; amount: string; payment_method: string } | null
   invoiced_amount?: string
+  invoice_status?: string
   created_at: string
 }
 
@@ -1507,6 +1508,7 @@ export const Orders: React.FC = () => {
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Producto</th>
                   <th className="px-4 py-3 text-right">Total</th>
+                  <th className="px-4 py-3 text-center">Facturado</th>
                   <th className="px-4 py-3 text-center">Pago</th>
                   <th className="px-4 py-3 text-center">Estado / Acciones</th>
                 </tr>
@@ -1566,6 +1568,22 @@ export const Orders: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-bold text-green-700 dark:text-green-400">{formatCurrency(parseFloat(order.total_amount || '0'))}</span>
+                      </td>
+                      {/* Facturado */}
+                      <td className="px-4 py-2 text-center">
+                        {(() => {
+                          const invStatus = order.invoice_status || 'sin_facturar'
+                          const invoicedAmt = parseFloat(order.invoiced_amount || '0')
+                          const totalAmt = parseFloat(order.total_amount || '0')
+                          if (invStatus === 'facturado') return <span className="text-xs font-medium rounded-full px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">Completo</span>
+                          if (invStatus === 'parcial') return (
+                            <div>
+                              <span className="text-xs font-medium rounded-full px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300">Parcial</span>
+                              <p className="text-[10px] text-gray-400 mt-0.5">{formatCurrency(invoicedAmt)} / {formatCurrency(totalAmt)}</p>
+                            </div>
+                          )
+                          return <span className="text-xs font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">Sin facturar</span>
+                        })()}
                       </td>
                       <td className="px-4 py-2 text-center">
                         <span
