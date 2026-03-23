@@ -20,21 +20,48 @@ export class CobroApplicationsService {
   async linkCobroToInvoice(
     companyId: string,
     userId: string,
-    cobroId: string,
+    cobroId_param: string,
     invoiceId: string,
     amountApplied: number,
     notes?: string
   ) {
+    let cobroId = cobroId_param;
     if (!amountApplied || amountApplied <= 0) {
       throw new ApiError(400, 'El monto a aplicar debe ser mayor a 0');
     }
 
-    // Get cobro
-    const cobroResult = await db.execute(sql`
+    // Get cobro (check both cobros and receipts tables for backward compat)
+    let cobroResult = await db.execute(sql`
       SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
       FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
     `);
-    const cobro = ((cobroResult as any).rows || [])[0];
+    let cobro = ((cobroResult as any).rows || [])[0];
+
+    // Fallback: check receipts table (legacy system)
+    if (!cobro) {
+      const receiptResult = await db.execute(sql`
+        SELECT r.id, r.company_id, r.enterprise_id, r.total_amount as amount, r.cobro_id
+        FROM receipts r WHERE r.id = ${cobroId} AND r.company_id = ${companyId}
+      `);
+      const receipt = ((receiptResult as any).rows || [])[0];
+      if (receipt) {
+        // Use the receipt's cobro_id if it has one, otherwise use receipt id directly
+        const effectiveId = receipt.cobro_id || receipt.id;
+        // Check if cobro exists with that ID
+        const cobroCheck = await db.execute(sql`SELECT id FROM cobros WHERE id = ${effectiveId}`);
+        if (((cobroCheck as any).rows || []).length > 0) {
+          cobroResult = await db.execute(sql`
+            SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
+            FROM cobros WHERE id = ${effectiveId}
+          `);
+          cobro = ((cobroResult as any).rows || [])[0];
+          // Update cobroId to the actual cobro ID for the rest of the function
+          cobroId = effectiveId;
+        } else {
+          cobro = { id: receipt.id, company_id: receipt.company_id, enterprise_id: receipt.enterprise_id, amount: receipt.amount, pending_status: null, business_unit_id: null };
+        }
+      }
+    }
     if (!cobro) throw new ApiError(404, 'Cobro no encontrado');
 
     // Get invoice
@@ -407,14 +434,17 @@ export class CobroApplicationsService {
     enterprise_id?: string;
     business_unit_id?: string;
   } = {}) {
-    let whereClause = sql`i.company_id = ${companyId} AND i.status != 'cancelled' AND i.payment_status != 'pagado'`;
+    // Show all non-cancelled, non-fully-paid invoices (including drafts for testing)
+    let whereClause = sql`i.company_id = ${companyId} AND i.status != 'cancelled' AND (i.payment_status IS NULL OR i.payment_status != 'pagado')`;
 
     if (filters.enterprise_id) {
-      whereClause = sql`${whereClause} AND i.enterprise_id = ${filters.enterprise_id}`;
+      // Match by enterprise_id on invoice OR via customer's enterprise
+      whereClause = sql`${whereClause} AND (i.enterprise_id = ${filters.enterprise_id} OR i.customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${filters.enterprise_id}))`;
     }
-    if (filters.business_unit_id) {
-      whereClause = sql`${whereClause} AND i.business_unit_id = ${filters.business_unit_id}`;
-    }
+    // Don't filter by business_unit_id for now — show all available invoices
+    // if (filters.business_unit_id) {
+    //   whereClause = sql`${whereClause} AND i.business_unit_id = ${filters.business_unit_id}`;
+    // }
 
     const result = await db.execute(sql`
       SELECT i.id, i.invoice_number, i.invoice_type, i.invoice_date,

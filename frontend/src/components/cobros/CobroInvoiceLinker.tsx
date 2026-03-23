@@ -40,17 +40,20 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoices, balance] = await Promise.all([
-        api.getAvailableInvoicesForLinking({
-          enterprise_id: enterpriseId,
-          business_unit_id: businessUnitId,
-        }),
-        api.getCobroBalance(cobroId),
-      ])
+      const invoices = await api.getAvailableInvoicesForLinking({
+        enterprise_id: enterpriseId,
+        business_unit_id: businessUnitId,
+      })
       setAvailableInvoices(invoices)
-      setCobroBalance(balance.unallocated)
+      // Try to get precise unallocated balance, fallback to full amount
+      try {
+        const balance = await api.getCobroBalance(cobroId)
+        setCobroBalance(balance.unallocated)
+      } catch {
+        setCobroBalance(cobroAmount)
+      }
     } catch (err) {
-      toast.error('Error cargando datos')
+      toast.error('Error cargando facturas')
     } finally {
       setLoading(false)
     }
