@@ -155,18 +155,13 @@ export class CrmService {
     } else {
       // Ensure new stages exist (migration for companies that already have stages)
       for (const stage of DEFAULT_STAGES) {
-        await db.execute(sql`
-          INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
-          VALUES (${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage})
-          ON CONFLICT (company_id, LOWER(name)) DO NOTHING
-        `).catch(() => {
-          // Fallback: try without ON CONFLICT if constraint doesn't exist
-          db.execute(sql`
+        try {
+          await db.execute(sql`
             INSERT INTO crm_stages (id, company_id, name, color, stage_order, trigger_event, is_loss_stage)
             SELECT ${uuid()}, ${companyId}, ${stage.name}, ${stage.color}, ${stage.stage_order}, ${stage.trigger_event}, ${stage.is_loss_stage}
             WHERE NOT EXISTS (SELECT 1 FROM crm_stages WHERE company_id = ${companyId} AND LOWER(name) = LOWER(${stage.name}))
-          `).catch(() => {});
-        });
+          `);
+        } catch { /* stage already exists */ }
       }
     }
   }

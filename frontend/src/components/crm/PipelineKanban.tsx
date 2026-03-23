@@ -200,7 +200,7 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
 
   const lostCount = lossStages.reduce((sum, s) => {
     const key = s.name.toLowerCase()
-    return sum + (dealsByStage[key]?.length || 0) + (dealsByStage[s.id]?.length || 0)
+    return sum + (dealsByStage[key] || dealsByStage[s.id] || []).length
   }, 0) || summary?.stages?.perdido?.count || 0
 
   // Mobile: list view

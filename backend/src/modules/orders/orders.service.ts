@@ -508,8 +508,8 @@ export class OrdersService {
         // Create default warehouse if none exists
         warehouseId = uuid();
         await db.execute(sql`
-          INSERT INTO warehouses (id, company_id, name, is_default)
-          VALUES (${warehouseId}, ${companyId}, 'Principal', true)
+          INSERT INTO warehouses (id, company_id, name)
+          VALUES (${warehouseId}, ${companyId}, 'Principal')
         `);
       }
 
