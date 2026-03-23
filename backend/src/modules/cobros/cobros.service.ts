@@ -174,14 +174,16 @@ export class CobrosService {
           }
         }
 
-        // Create invoice-level applications from totals
+        // Create invoice-level applications from totals + cascade to orders
         for (const [invoiceId, totalAmount] of invoiceTotals.entries()) {
           await db.execute(sql`
             INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
             VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${totalAmount.toString()}, ${userId})
             ON CONFLICT (cobro_id, invoice_id) DO NOTHING
           `);
+          // Cascade: recalculate invoice → then order
           await this.recalculateInvoicePaymentStatus(invoiceId);
+          await this.recalculateOrderStatusFromInvoice(invoiceId);
         }
       }
 
@@ -196,7 +198,7 @@ export class CobrosService {
         }
       }
 
-      // Recalculate order payment status
+      // Recalculate order payment status (legacy direct + new via invoices)
       if (data.order_id) {
         await this.recalculateOrderPaymentStatus(data.order_id);
       }
@@ -289,11 +291,13 @@ export class CobrosService {
       // Delete cobro (CASCADE will delete cobro_invoice_applications)
       await db.execute(sql`DELETE FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
 
-      // Recalculate payment_status for affected invoices
+      // Recalculate payment_status for affected invoices + cascade to orders
       for (const invId of invoiceIds) {
         await this.recalculateInvoicePaymentStatus(invId);
+        await this.recalculateOrderStatusFromInvoice(invId);
       }
 
+      // Legacy fallback: also recalculate via direct order_id
       if (orderId) {
         await this.recalculateOrderPaymentStatus(orderId);
       }
@@ -331,6 +335,42 @@ export class CobrosService {
       `);
     } catch (error) {
       console.warn('Recalculate invoice payment status error:', error);
+    }
+  }
+
+  /**
+   * Get order_id from an invoice and recalculate the order's payment_status
+   * using the CORRECT system (cobro_invoice_applications, not cobros.order_id).
+   */
+  private async recalculateOrderStatusFromInvoice(invoiceId: string) {
+    try {
+      const invResult = await db.execute(sql`SELECT order_id FROM invoices WHERE id = ${invoiceId}`);
+      const orderId = ((invResult as any).rows || [])[0]?.order_id;
+      if (!orderId) return;
+
+      const result = await db.execute(sql`
+        SELECT
+          CAST(o.total_amount AS decimal) as order_total,
+          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
+        FROM orders o
+        LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        WHERE o.id = ${orderId}
+        GROUP BY o.id, o.total_amount
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const orderTotal = parseFloat(row.order_total);
+      const totalPaid = parseFloat(row.total_paid);
+
+      let status = 'pendiente';
+      if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
+      else if (totalPaid > 0) status = 'parcial';
+
+      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+    } catch (error) {
+      console.warn('Recalculate order status from invoice error:', error);
     }
   }
 
