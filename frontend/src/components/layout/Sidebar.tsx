@@ -58,7 +58,6 @@ const navSections: NavSection[] = [
     label: 'Abastecimiento',
     items: [
       { href: '/compras', label: 'Compras', icon: '🛒', module: 'purchases' },
-      { href: '/facturas-compra', label: 'Facturas Compra', icon: '🧾', module: 'purchases' },
       { href: '/products', label: 'Productos', icon: '📦', module: 'products' },
     ],
   },

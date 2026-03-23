@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -119,6 +119,14 @@ function calcItemSubtotal(unit_price: number, quantity: number): number {
   return unit_price * quantity
 }
 
+// Lazy-load purchase invoices tab content
+const LazyPurchaseInvoices = lazy(() => import('@/pages/PurchaseInvoices').then(m => ({ default: m.PurchaseInvoices })))
+const PurchaseInvoicesTab: React.FC = () => (
+  <Suspense fallback={<div className="text-center py-8 text-gray-400">Cargando...</div>}>
+    <LazyPurchaseInvoices />
+  </Suspense>
+)
+
 // ---- Component ----
 
 export const Invoices: React.FC = () => {
@@ -142,7 +150,7 @@ export const Invoices: React.FC = () => {
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
   // Vista mode: fiscal (AFIP) or no_fiscal
-  const [vistaMode, setVistaMode] = useState<'fiscal' | 'no_fiscal'>('fiscal')
+  const [vistaMode, setVistaMode] = useState<'fiscal' | 'no_fiscal' | 'compras'>('fiscal')
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -536,7 +544,7 @@ export const Invoices: React.FC = () => {
     setDateTo('')
   }
 
-  const handleChangeVistaMode = (mode: 'fiscal' | 'no_fiscal') => {
+  const handleChangeVistaMode = (mode: 'fiscal' | 'no_fiscal' | 'compras') => {
     setVistaMode(mode)
     clearFilters()
     setShowForm(false)
@@ -650,13 +658,28 @@ export const Invoices: React.FC = () => {
         >
           No Fiscal
         </button>
+        <button
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            vistaMode === 'compras'
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+          onClick={() => handleChangeVistaMode('compras')}
+        >
+          Facturas de Compra
+        </button>
       </div>
 
+      {/* Purchase Invoices tab */}
+      {vistaMode === 'compras' && <PurchaseInvoicesTab />}
+
+      {/* Sales invoices content (hidden when compras tab active) */}
+      {vistaMode !== 'compras' && <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas de Venta'}
+            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas de Venta (AFIP)'}
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
@@ -1349,17 +1372,16 @@ export const Invoices: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-200 dark:border-gray-700">
-                  {vistaMode === 'fiscal' && <th className="px-4 py-3">Tipo</th>}
-                  <th className="px-4 py-3">N° Comprobante</th>
-                  <th className="px-4 py-3">Fecha</th>
-                  <th className="px-4 py-3">Empresa</th>
-                  <th className="px-4 py-3">Cliente</th>
-                  {vistaMode === 'fiscal' && <th className="px-4 py-3">Pedido</th>}
-                  <th className="px-4 py-3 text-right">Total</th>
-                  <th className="px-4 py-3 text-center">Estado Pago</th>
-                  <th className="px-4 py-3 text-center">Estado</th>
-                  {vistaMode === 'fiscal' && <th className="px-4 py-3">CAE</th>}
-                  <th className="px-4 py-3 text-center">Acciones</th>
+                  <th className="px-3 py-2">Comprobante</th>
+                  <th className="px-3 py-2">Fecha</th>
+                  <th className="px-3 py-2">Empresa</th>
+                  <th className="px-3 py-2">Cliente</th>
+                  {vistaMode === 'fiscal' && <th className="px-3 py-2">Pedido</th>}
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-center">Pago</th>
+                  <th className="px-3 py-2 text-center">Estado</th>
+                  {vistaMode === 'fiscal' && <th className="px-3 py-2">CAE</th>}
+                  <th className="px-3 py-2 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -1369,29 +1391,27 @@ export const Invoices: React.FC = () => {
 
                   return (
                     <tr key={invoice.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                      {/* Tipo - only fiscal */}
-                      {vistaMode === 'fiscal' && (
-                        <td className="px-4 py-3">
-                          <span className={`inline-block px-2.5 py-1 rounded font-bold text-base ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
-                            {invoice.invoice_type}
+                      {/* Comprobante: Tipo + Numero combinados */}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          {vistaMode === 'fiscal' && (
+                            <span className={`inline-block px-2 py-0.5 rounded font-bold text-sm ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
+                              {invoice.invoice_type}
+                            </span>
+                          )}
+                          <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
+                            {formatInvoiceNumber(invoice)}
                           </span>
-                        </td>
-                      )}
-
-                      {/* N° Comprobante */}
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
-                          {formatInvoiceNumber(invoice)}
-                        </span>
+                        </div>
                       </td>
 
                       {/* Fecha */}
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                      <td className="px-3 py-3 text-gray-600 dark:text-gray-400 text-sm">
                         {formatDate(invoice.invoice_date)}
                       </td>
 
                       {/* Empresa */}
-                      <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">
+                      <td className="px-3 py-3 font-medium text-gray-800 dark:text-gray-200 text-sm">
                         <div className="flex items-center gap-1.5">
                           {invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
@@ -1399,7 +1419,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Cliente */}
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                      <td className="px-3 py-3 text-gray-700 dark:text-gray-300 text-sm">
                         {invoice.customer?.name || <span className="text-gray-400">Consumidor Final</span>}
                       </td>
 
@@ -1648,6 +1668,7 @@ export const Invoices: React.FC = () => {
           onFchVtoPagoChange={invoicePreview.setPreviewFchVtoPago}
         />
       )}
+      </>}
     </div>
   )
 }
