@@ -32,10 +32,13 @@ export class ReportsService {
       // Default empty values
       let salesMonth = 0;
       let collectionsPending = 0;
+      let collectionsPendingCount = 0;
       let chequesPendingCount = 0;
       let chequesPendingAmount = 0;
       let ordersUnpaidCount = 0;
       let ordersUnpaidAmount = 0;
+      let ordersUninvoicedCount = 0;
+      let ordersUninvoicedAmount = 0;
       let recentInvoicesList: any[] = [];
       let recentOrdersList: any[] = [];
 
@@ -53,23 +56,24 @@ export class ReportsService {
         const salesMonthRows = (salesMonthResult as any).rows || salesMonthResult || [];
         salesMonth = parseFloat(salesMonthRows[0]?.total || '0');
 
-        // Collections pending - requires invoices view
+        // Collections pending (using cobro_invoice_applications for accurate tracking)
         const collectionsPendingResult = await db.execute(sql`
-          SELECT COALESCE(SUM(
-            CAST(i.total_amount AS decimal) - COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-            )
-          ), 0) as total
+          SELECT
+            COUNT(*) as count,
+            COALESCE(SUM(
+              CAST(i.total_amount AS decimal) - COALESCE(
+                (SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
+              )
+            ), 0) as total
           FROM invoices i
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
-            AND CAST(i.total_amount AS decimal) > COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
-            )
+            AND i.status != 'cancelled'
+            AND (i.payment_status IS NULL OR i.payment_status != 'pagado')
         `);
 
         const collectionsRows = (collectionsPendingResult as any).rows || collectionsPendingResult || [];
         collectionsPending = parseFloat(collectionsRows[0]?.total || '0');
+        collectionsPendingCount = parseInt(collectionsRows[0]?.count || '0');
 
         // Recent invoices (last 5)
         const recentInvoicesResult = await db.execute(sql`
@@ -109,6 +113,27 @@ export class ReportsService {
         ordersUnpaidCount = parseInt(ordersRows[0]?.count || '0');
         ordersUnpaidAmount = parseFloat(ordersRows[0]?.total || '0');
 
+        // Orders not fully invoiced
+        try {
+          const uninvoicedResult = await db.execute(sql`
+            SELECT COUNT(*) as count,
+              COALESCE(SUM(
+                CAST(o.total_amount AS decimal) - COALESCE(
+                  (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled'), 0
+                )
+              ), 0) as total
+            FROM orders o
+            WHERE o.company_id = ${companyId}
+              AND o.status != 'cancelado'
+              AND CAST(o.total_amount AS decimal) > COALESCE(
+                (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled'), 0
+              )
+          `);
+          const uninvoicedRows = (uninvoicedResult as any).rows || [];
+          ordersUninvoicedCount = parseInt(uninvoicedRows[0]?.count || '0');
+          ordersUninvoicedAmount = parseFloat(uninvoicedRows[0]?.total || '0');
+        } catch { /* table may not exist */ }
+
         // Recent orders (last 5)
         const recentOrdersResult = await db.execute(sql`
           SELECT o.id, o.order_number, o.title, o.total_amount, o.status, o.payment_status, o.payment_method, o.created_at,
@@ -125,10 +150,13 @@ export class ReportsService {
       return {
         sales_month: salesMonth,
         collections_pending: collectionsPending,
+        collections_pending_count: collectionsPendingCount,
         cheques_pending_count: chequesPendingCount,
         cheques_pending_amount: chequesPendingAmount,
         orders_unpaid_count: ordersUnpaidCount,
         orders_unpaid_amount: ordersUnpaidAmount,
+        orders_uninvoiced_count: ordersUninvoicedCount,
+        orders_uninvoiced_amount: ordersUninvoicedAmount,
         recent_invoices: recentInvoicesList,
         recent_orders: recentOrdersList,
       };
