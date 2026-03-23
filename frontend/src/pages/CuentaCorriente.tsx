@@ -39,6 +39,7 @@ interface CuentaDetalle {
   total_cobros?: number
   total_compras?: number
   total_pagos?: number
+  total_adelantos?: number
   saldo: number
 }
 
@@ -52,16 +53,22 @@ interface Detalle {
 const tipoColors: Record<string, string> = {
   factura: 'bg-blue-100 text-blue-700',
   venta: 'bg-blue-100 text-blue-700',
+  factura_compra: 'bg-purple-100 text-purple-700',
   cobro: 'bg-green-100 text-green-700',
+  adelanto: 'bg-amber-100 text-amber-700',
+  adelanto_pago: 'bg-amber-100 text-amber-700',
   compra: 'bg-orange-100 text-orange-700',
   pago: 'bg-red-100 text-red-700',
-  ajuste: 'bg-purple-100 text-purple-700',
+  ajuste: 'bg-violet-100 text-violet-700',
 }
 
 const tipoLabels: Record<string, string> = {
   factura: 'Factura',
   venta: 'Factura',
+  factura_compra: 'Fact. Compra',
   cobro: 'Cobro',
+  adelanto: 'Adelanto',
+  adelanto_pago: 'Adelanto',
   compra: 'Compra',
   pago: 'Pago',
   ajuste: 'Ajuste',
@@ -101,7 +108,7 @@ const MovimientosTable: React.FC<MovimientosTableProps> = ({
     </thead>
     <tbody>
       {movimientos.map((m, idx) => (
-        <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
+        <tr key={`${m.id}-${idx}`} className={`border-b border-gray-100 ${m.tipo === 'adelanto' || m.tipo === 'adelanto_pago' ? 'bg-amber-50/60 dark:bg-amber-950/10' : 'even:bg-gray-50/50'}`}>
           <td className="py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
           <td className="py-2">
             <span
@@ -536,23 +543,35 @@ export const CuentaCorriente: React.FC = () => {
                               />
 
                               {/* Mini summary cards */}
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                                  <span className="text-xs text-blue-600 block">Facturado AFIP</span>
-                                  <span className="text-base font-bold text-blue-700">{fmt(detalle.cuentas_a_cobrar.total_ventas)}</span>
+                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
+                                  <span className="text-xs text-blue-600 dark:text-blue-400 block">Facturado</span>
+                                  <span className="text-sm font-bold text-blue-700 dark:text-blue-300">{fmt(detalle.cuentas_a_cobrar.total_ventas)}</span>
                                 </div>
-                                <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                                  <span className="text-xs text-green-600 block">Total Cobrado</span>
-                                  <span className="text-base font-bold text-green-700">{fmt(detalle.cuentas_a_cobrar.total_cobros)}</span>
+                                <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2">
+                                  <span className="text-xs text-green-600 dark:text-green-400 block">Cobrado</span>
+                                  <span className="text-sm font-bold text-green-700 dark:text-green-300">{fmt(detalle.cuentas_a_cobrar.total_cobros)}</span>
                                 </div>
-                                <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
-                                  <span className="text-xs text-purple-600 block">Compras totales</span>
-                                  <span className="text-base font-bold text-purple-700">{fmt(detalle.cuentas_a_pagar.total_compras)}</span>
+                                {(detalle.cuentas_a_cobrar.total_adelantos || 0) > 0 && (
+                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                                    <span className="text-xs text-amber-600 dark:text-amber-400 block">Adelantos sin asignar</span>
+                                    <span className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(detalle.cuentas_a_cobrar.total_adelantos || 0)}</span>
+                                  </div>
+                                )}
+                                <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2">
+                                  <span className="text-xs text-purple-600 dark:text-purple-400 block">Compras</span>
+                                  <span className="text-sm font-bold text-purple-700 dark:text-purple-300">{fmt(detalle.cuentas_a_pagar.total_compras)}</span>
                                 </div>
-                                <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
-                                  <span className="text-xs text-orange-600 block">Total Pagado</span>
-                                  <span className="text-base font-bold text-orange-700">{fmt(detalle.cuentas_a_pagar.total_pagos)}</span>
+                                <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
+                                  <span className="text-xs text-red-600 dark:text-red-400 block">Pagado</span>
+                                  <span className="text-sm font-bold text-red-700 dark:text-red-300">{fmt(detalle.cuentas_a_pagar.total_pagos)}</span>
                                 </div>
+                                {(detalle.cuentas_a_pagar.total_adelantos || 0) > 0 && (
+                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                                    <span className="text-xs text-amber-600 dark:text-amber-400 block">Adelantos a proveedor</span>
+                                    <span className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(detalle.cuentas_a_pagar.total_adelantos || 0)}</span>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Date range filter & PDF download */}
