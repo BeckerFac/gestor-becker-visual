@@ -862,6 +862,50 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
     await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
 
+    // ===== UNIFY: Add receipt_number to cobros (from receipts system) =====
+    await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS receipt_number INTEGER`);
+
+    // Migrate receipts → cobros (one-time: copy receipt data that doesn't already exist in cobros)
+    try {
+      await pool.query(`
+        INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_number, created_by, created_at)
+        SELECT r.id, r.company_id, r.enterprise_id, r.total_amount, r.payment_method, r.bank_id, r.reference, r.receipt_date, r.notes, r.receipt_number, r.created_by, r.created_at
+        FROM receipts r
+        WHERE NOT EXISTS (SELECT 1 FROM cobros c WHERE c.id = r.id)
+          AND NOT EXISTS (SELECT 1 FROM cobros c WHERE c.company_id = r.company_id AND c.receipt_number = r.receipt_number AND r.receipt_number IS NOT NULL)
+      `);
+    } catch (e) { console.warn('Receipt migration (may already be done):', (e as any)?.message); }
+
+    // Migrate receipt_items → cobro_invoice_applications
+    try {
+      await pool.query(`
+        INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, applied_at)
+        SELECT gen_random_uuid(), r.id, ri.invoice_id, ri.amount, r.created_at
+        FROM receipt_items ri
+        JOIN receipts r ON ri.receipt_id = r.id
+        WHERE ri.invoice_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM cobro_invoice_applications cia
+            WHERE cia.cobro_id = r.id AND cia.invoice_id = ri.invoice_id
+          )
+      `);
+    } catch (e) { console.warn('Receipt items migration (may already be done):', (e as any)?.message); }
+
+    // Backfill receipt_number for cobros that were created directly (not from receipts)
+    try {
+      await pool.query(`
+        WITH numbered AS (
+          SELECT id, company_id,
+            ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY created_at ASC) + COALESCE(
+              (SELECT MAX(receipt_number) FROM cobros WHERE company_id = c.company_id AND receipt_number IS NOT NULL), 0
+            ) as new_number
+          FROM cobros c WHERE receipt_number IS NULL
+        )
+        UPDATE cobros SET receipt_number = numbered.new_number
+        FROM numbered WHERE cobros.id = numbered.id
+      `);
+    } catch (e) { console.warn('Receipt number backfill:', (e as any)?.message); }
+
     // ===== ADD payment_status TO INVOICES =====
     await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente'`);
 

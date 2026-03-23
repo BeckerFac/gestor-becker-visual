@@ -73,7 +73,28 @@ export class CobrosService {
           o.order_number, o.title as order_title,
           b.bank_name,
           c.receipt_image IS NOT NULL as has_receipt,
-          (SELECT COUNT(*) FROM cobro_items ci WHERE ci.cobro_id = c.id) as item_count,
+          -- Linked invoices via cobro_invoice_applications
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', cia.id,
+              'invoice_id', cia.invoice_id,
+              'amount', cia.amount_applied,
+              'invoice_number', i.invoice_number,
+              'invoice_type', i.invoice_type,
+              'invoice_total', i.total_amount,
+              'fiscal_type', i.fiscal_type,
+              'enterprise_name', COALESCE(ie.name, ''),
+              'customer_name', COALESCE(ic.name, 'Consumidor Final')
+            ))
+            FROM cobro_invoice_applications cia
+            JOIN invoices i ON cia.invoice_id = i.id
+            LEFT JOIN enterprises ie ON i.enterprise_id = ie.id
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE cia.cobro_id = c.id
+          ), '[]'::json) as linked_invoices,
+          -- Total assigned to invoices
+          COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 WHERE cia2.cobro_id = c.id), 0) as total_assigned,
+          -- Enterprise tags
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM cobros c
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
@@ -102,10 +123,28 @@ export class CobrosService {
       const hasInvoiceItems = data.invoice_items && Array.isArray(data.invoice_items) && data.invoice_items.length > 0;
       const pendingStatus = (data.invoice_id || hasInvoiceItems) ? null : 'pending_invoice';
 
-      await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, created_by)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
+      // Auto-generate receipt_number (sequential per company)
+      const nextNumResult = await db.execute(sql`
+        SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = ${companyId}
       `);
+      const receiptNumber = parseInt(((nextNumResult as any).rows || [])[0]?.next_number || '1');
+
+      await db.execute(sql`
+        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by)
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId})
+      `);
+
+      // Create cheque if payment method is cheque and cheque_data provided
+      if (data.payment_method === 'cheque' && data.cheque_data) {
+        const cd = data.cheque_data;
+        if (cd.number && cd.bank && cd.drawer && cd.issue_date && cd.due_date) {
+          const chequeId = uuid();
+          await db.execute(sql`
+            INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, business_unit_id, created_by)
+            VALUES (${chequeId}, ${companyId}, ${cd.number}, ${cd.bank}, ${cd.drawer}, ${cd.drawer_cuit || null}, ${cd.cheque_type || 'comun'}, ${data.amount.toString()}, ${cd.issue_date}, ${cd.due_date}, 'a_cobrar', ${cobroId}, ${data.business_unit_id || null}, ${userId})
+          `);
+        }
+      }
 
       // Create cobro_invoice_applications entries (N:N cobro↔invoice)
       if (hasInvoiceItems) {

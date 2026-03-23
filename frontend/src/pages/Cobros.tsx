@@ -44,8 +44,9 @@ interface Cobro {
 interface Receipt {
   id: string
   receipt_number: number
-  receipt_date: string
-  total_amount: string
+  payment_date: string
+  amount: string
+  total_amount?: string // legacy compat
   payment_method: string | null
   notes: string | null
   enterprise_id: string | null
@@ -53,7 +54,9 @@ interface Receipt {
   bank_id: string | null
   bank_name: string | null
   reference: string | null
-  items: {
+  pending_status: string | null
+  total_assigned: number | string
+  linked_invoices: {
     id: string
     invoice_id: string
     amount: string
@@ -64,6 +67,10 @@ interface Receipt {
     enterprise_name: string
     customer_name: string
   }[]
+  // Legacy compat
+  items?: any[]
+  receipt_date?: string
+  cobro_id?: string
 }
 
 interface InvoiceForReceipt {
@@ -259,11 +266,7 @@ export const Cobros: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [receiptsRes, cobrosRes, entRes, ordersRes, bankRes, agingRes] = await Promise.all([
-        api.getReceipts().catch((err: any) => {
-          console.warn('Could not load receipts:', err.message)
-          return []
-        }),
+      const [cobrosRes, entRes, ordersRes, bankRes, agingRes] = await Promise.all([
         api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
           setError(`Error cargando cobros: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return []
@@ -273,7 +276,15 @@ export const Cobros: React.FC = () => {
         api.getBanks().catch(() => []),
         api.getAgingReport().catch(() => null),
       ])
-      setReceipts(receiptsRes || [])
+      // Use cobros as the unified source (receipts migrated to cobros)
+      const unifiedReceipts = (cobrosRes || []).map((c: any) => ({
+        ...c,
+        receipt_number: c.receipt_number || 0,
+        receipt_date: c.payment_date,
+        total_amount: c.amount,
+        items: c.linked_invoices || [],
+      }))
+      setReceipts(unifiedReceipts)
       setCobros(cobrosRes || [])
       setEnterprises(entRes || [])
       setOrders((ordersRes.items || ordersRes || []))
@@ -589,7 +600,7 @@ export const Cobros: React.FC = () => {
     if (!deleteTarget) return
     setDeleting(true)
     try {
-      await api.deleteReceipt(deleteTarget.id)
+      await api.deleteCobro(deleteTarget.id)
       toast.success('Cobro eliminado')
       setDeleteTarget(null)
       await loadData()
@@ -1437,7 +1448,7 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3 font-mono font-semibold text-gray-800 dark:text-gray-200">
                       #{String(receipt.receipt_number).padStart(6, '0')}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(receipt.receipt_date)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(receipt.receipt_date || receipt.payment_date)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{getReceiptEnterpriseName(receipt)}</td>
                     <td className="px-4 py-3 text-right"><span className="font-bold text-green-700 dark:text-green-400">{fmt(receipt.total_amount)}</span></td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[receipt.payment_method || ''] || receipt.payment_method || '-'}</td>
@@ -1445,7 +1456,7 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(receipt.items || []).length > 0 ? (
-                          receipt.items.map((item, idx) => {
+                          (receipt.items || receipt.linked_invoices || []).map((item: any, idx: number) => {
                             const label = item.fiscal_type === 'interno'
                               ? `CI-${String(item.invoice_number).padStart(6, '0')}`
                               : item.fiscal_type === 'no_fiscal'
