@@ -1016,7 +1016,22 @@ export const Cobros: React.FC = () => {
                   <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200">Datos del Cheque</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     <Input label="Numero de cheque *" placeholder="Ej: 12345678" value={chequeForm.number} onChange={e => setChequeForm({ ...chequeForm, number: e.target.value })} required />
-                    <Input label="Banco *" placeholder="Ej: Banco Nacion" value={chequeForm.bank} onChange={e => setChequeForm({ ...chequeForm, bank: e.target.value })} required />
+                    <div className="flex flex-col gap-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco *</label>
+                      <div className="relative">
+                        <input
+                          list="cheque-bank-list"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Escribir o seleccionar banco..."
+                          value={chequeForm.bank}
+                          onChange={e => setChequeForm({ ...chequeForm, bank: e.target.value })}
+                          required
+                        />
+                        <datalist id="cheque-bank-list">
+                          {banks.map(b => <option key={b.id} value={b.bank_name} />)}
+                        </datalist>
+                      </div>
+                    </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de cheque *</label>
                       <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={chequeForm.cheque_type} onChange={e => setChequeForm({ ...chequeForm, cheque_type: e.target.value })}>
