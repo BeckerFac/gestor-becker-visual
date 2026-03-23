@@ -15,10 +15,13 @@ import { useBilling } from '@/hooks/useBilling'
 interface DashboardData {
   sales_month: number
   collections_pending: number
+  collections_pending_count: number
   cheques_pending_count: number
   cheques_pending_amount: number
   orders_unpaid_count: number
   orders_unpaid_amount: number
+  orders_uninvoiced_count: number
+  orders_uninvoiced_amount: number
   recent_invoices: any[]
   recent_orders: any[]
 }
@@ -255,6 +258,26 @@ export const Dashboard: React.FC = () => {
       onClick: () => navigate('/orders'),
       visible: canOrders,
     },
+    {
+      label: `Sin Facturar (${dashboard?.orders_uninvoiced_count || 0})`,
+      helpTip: 'Pedidos que aun no fueron facturados completamente. El monto muestra lo que falta facturar.',
+      value: formatCurrency(dashboard?.orders_uninvoiced_amount || 0),
+      color: 'border-teal-200 bg-teal-50 dark:border-teal-800 dark:bg-teal-950/40',
+      textColor: 'text-teal-800 dark:text-teal-300',
+      labelColor: 'text-teal-600 dark:text-teal-400',
+      onClick: () => navigate('/orders'),
+      visible: canOrders,
+    },
+    {
+      label: `Facturas sin Cobrar (${dashboard?.collections_pending_count || 0})`,
+      helpTip: 'Facturas emitidas que no fueron cobradas completamente. Incluye cobros parciales.',
+      value: formatCurrency(dashboard?.collections_pending || 0),
+      color: 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40',
+      textColor: 'text-amber-800 dark:text-amber-300',
+      labelColor: 'text-amber-600 dark:text-amber-400',
+      onClick: () => navigate('/invoices'),
+      visible: canInvoices,
+    },
   ]
   const kpis = allKpis.filter(k => k.visible)
 
@@ -407,7 +430,7 @@ export const Dashboard: React.FC = () => {
       <PeriodSelector selected={period} onChange={p => { setPeriod(p.value); setPeriodDates({ from: p.dateFrom, to: p.dateTo }) }} />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {kpis.map((kpi, idx) => (
           <Card
             key={idx}
