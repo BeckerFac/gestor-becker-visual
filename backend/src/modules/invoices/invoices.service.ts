@@ -942,7 +942,15 @@ export class InvoicesService {
       whereClause = sql`${whereClause} AND o.enterprise_id = ${filters.enterprise_id}`;
     }
 
+    // Use CTE to calculate invoiced quantities, then filter for remaining > 0
     const result = await db.execute(sql`
+      WITH item_invoiced AS (
+        SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
+        FROM invoice_items ii
+        JOIN invoices i ON ii.invoice_id = i.id
+        WHERE i.status != 'cancelled' AND ii.order_item_id IS NOT NULL
+        GROUP BY ii.order_item_id
+      )
       SELECT
         o.id as order_id, o.order_number, o.title as order_title, o.enterprise_id,
         e.name as enterprise_name,
@@ -950,28 +958,14 @@ export class InvoicesService {
         CAST(oi.quantity AS decimal) as quantity,
         CAST(oi.unit_price AS decimal) as unit_price,
         CAST(oi.subtotal AS decimal) as subtotal,
-        COALESCE((
-          SELECT SUM(CAST(ii.quantity AS decimal))
-          FROM invoice_items ii
-          JOIN invoices i ON ii.invoice_id = i.id
-          WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
-        ), 0) as qty_invoiced,
-        CAST(oi.quantity AS decimal) - COALESCE((
-          SELECT SUM(CAST(ii.quantity AS decimal))
-          FROM invoice_items ii
-          JOIN invoices i ON ii.invoice_id = i.id
-          WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
-        ), 0) as qty_remaining
+        COALESCE(inv.qty_invoiced, 0) as qty_invoiced,
+        CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) as qty_remaining
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN enterprises e ON o.enterprise_id = e.id
+      LEFT JOIN item_invoiced inv ON inv.order_item_id = oi.id
       WHERE ${whereClause}
-      HAVING CAST(oi.quantity AS decimal) - COALESCE((
-        SELECT SUM(CAST(ii.quantity AS decimal))
-        FROM invoice_items ii
-        JOIN invoices i ON ii.invoice_id = i.id
-        WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
-      ), 0) > 0
+        AND (CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0)) > 0
       ORDER BY o.order_number DESC, oi.created_at ASC
     `);
     return (result as any).rows || [];

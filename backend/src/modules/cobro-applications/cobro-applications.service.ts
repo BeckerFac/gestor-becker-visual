@@ -20,48 +20,21 @@ export class CobroApplicationsService {
   async linkCobroToInvoice(
     companyId: string,
     userId: string,
-    cobroId_param: string,
+    cobroId: string,
     invoiceId: string,
     amountApplied: number,
     notes?: string
   ) {
-    let cobroId = cobroId_param;
     if (!amountApplied || amountApplied <= 0) {
       throw new ApiError(400, 'El monto a aplicar debe ser mayor a 0');
     }
 
-    // Get cobro (check both cobros and receipts tables for backward compat)
-    let cobroResult = await db.execute(sql`
+    // Get cobro from unified cobros table (receipts migrated in auto-migration)
+    const cobroResult = await db.execute(sql`
       SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
       FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
     `);
-    let cobro = ((cobroResult as any).rows || [])[0];
-
-    // Fallback: check receipts table (legacy system)
-    if (!cobro) {
-      const receiptResult = await db.execute(sql`
-        SELECT r.id, r.company_id, r.enterprise_id, r.total_amount as amount, r.cobro_id
-        FROM receipts r WHERE r.id = ${cobroId} AND r.company_id = ${companyId}
-      `);
-      const receipt = ((receiptResult as any).rows || [])[0];
-      if (receipt) {
-        // Use the receipt's cobro_id if it has one, otherwise use receipt id directly
-        const effectiveId = receipt.cobro_id || receipt.id;
-        // Check if cobro exists with that ID
-        const cobroCheck = await db.execute(sql`SELECT id FROM cobros WHERE id = ${effectiveId}`);
-        if (((cobroCheck as any).rows || []).length > 0) {
-          cobroResult = await db.execute(sql`
-            SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
-            FROM cobros WHERE id = ${effectiveId}
-          `);
-          cobro = ((cobroResult as any).rows || [])[0];
-          // Update cobroId to the actual cobro ID for the rest of the function
-          cobroId = effectiveId;
-        } else {
-          cobro = { id: receipt.id, company_id: receipt.company_id, enterprise_id: receipt.enterprise_id, amount: receipt.amount, pending_status: null, business_unit_id: null };
-        }
-      }
-    }
+    const cobro = ((cobroResult as any).rows || [])[0];
     if (!cobro) throw new ApiError(404, 'Cobro no encontrado');
 
     // Get invoice
