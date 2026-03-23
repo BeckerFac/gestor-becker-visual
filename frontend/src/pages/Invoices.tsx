@@ -1372,16 +1372,13 @@ export const Invoices: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-200 dark:border-gray-700">
-                  <th className="px-3 py-2">Comprobante</th>
-                  <th className="px-3 py-2">Fecha</th>
-                  <th className="px-3 py-2">Empresa</th>
-                  <th className="px-3 py-2">Cliente</th>
-                  {vistaMode === 'fiscal' && <th className="px-3 py-2">Pedido</th>}
-                  <th className="px-3 py-2 text-right">Total</th>
-                  <th className="px-3 py-2 text-center">Pago</th>
-                  <th className="px-3 py-2 text-center">Estado</th>
-                  {vistaMode === 'fiscal' && <th className="px-3 py-2">CAE</th>}
-                  <th className="px-3 py-2 text-center">Acciones</th>
+                  <th className="px-2 py-2">Comprobante</th>
+                  <th className="px-2 py-2">Fecha</th>
+                  <th className="px-2 py-2">Empresa / Cliente</th>
+                  <th className="px-2 py-2 text-right">Total</th>
+                  <th className="px-2 py-2 text-center">Pago</th>
+                  <th className="px-2 py-2 text-center">Estado</th>
+                  <th className="px-2 py-2 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -1391,117 +1388,73 @@ export const Invoices: React.FC = () => {
 
                   return (
                     <tr key={invoice.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                      {/* Comprobante: Tipo + Numero combinados */}
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
+                      {/* Comprobante: Tipo + Numero + CAE */}
+                      <td className="px-2 py-2">
+                        <div className="flex items-center gap-1.5">
                           {vistaMode === 'fiscal' && (
-                            <span className={`inline-block px-2 py-0.5 rounded font-bold text-sm ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
+                            <span className={`inline-block px-1.5 py-0.5 rounded font-bold text-xs ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
                               {invoice.invoice_type}
                             </span>
                           )}
-                          <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
+                          <span className="font-mono text-xs text-gray-800 dark:text-gray-200">
                             {formatInvoiceNumber(invoice)}
                           </span>
                         </div>
+                        {invoice.cae && <p className="font-mono text-[10px] text-gray-400 mt-0.5">CAE: {invoice.cae}</p>}
                       </td>
 
                       {/* Fecha */}
-                      <td className="px-3 py-3 text-gray-600 dark:text-gray-400 text-sm">
+                      <td className="px-2 py-2 text-gray-600 dark:text-gray-400 text-xs">
                         {formatDate(invoice.invoice_date)}
                       </td>
 
-                      {/* Empresa */}
-                      <td className="px-3 py-3 font-medium text-gray-800 dark:text-gray-200 text-sm">
-                        <div className="flex items-center gap-1.5">
-                          {invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}
+                      {/* Empresa + Cliente + Pedido combined */}
+                      <td className="px-2 py-2 text-xs">
+                        <div className="flex items-center gap-1">
+                          <span className="font-medium text-gray-800 dark:text-gray-200">{invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}</span>
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
                         </div>
-                      </td>
-
-                      {/* Cliente */}
-                      <td className="px-3 py-3 text-gray-700 dark:text-gray-300 text-sm">
-                        {invoice.customer?.name || <span className="text-gray-400">Consumidor Final</span>}
-                      </td>
-
-                      {/* Pedido - only fiscal */}
-                      {vistaMode === 'fiscal' && (
-                        <td className="px-4 py-3">
-                          {invoice.order ? (
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); navigate('/orders') }}
-                                className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400"
-                              >
-                                #{String(invoice.order.order_number).padStart(4, '0')}
-                              </button>
-                              <button
-                                onClick={() => setUnlinkTarget(invoice.id)}
-                                className="text-xs text-red-500 hover:text-red-700 hover:underline"
-                                title="Desvincular pedido"
-                              >
-                                Desvincular
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="relative">
-                              <button
-                                onClick={() => {
-                                  if (isLinkOpen) {
-                                    setLinkDropdownInvoiceId(null)
-                                    setLinkSelectedOrderId('')
-                                  } else {
-                                    setLinkDropdownInvoiceId(invoice.id)
-                                    setLinkSelectedOrderId('')
-                                    if (ordersWithoutInvoice.length === 0) {
-                                      api.getOrdersWithoutInvoice().catch(() => []).then(res => {
-                                        setOrdersWithoutInvoice(Array.isArray(res) ? res : [])
-                                      })
-                                    }
+                        <p className="text-gray-500 dark:text-gray-400">{invoice.customer?.name || 'Consumidor Final'}</p>
+                        {vistaMode === 'fiscal' && invoice.order && (
+                          <p className="text-[10px] mt-0.5">
+                            <button onClick={(e) => { e.stopPropagation(); navigate('/orders') }} className="font-mono text-blue-600 hover:underline">
+                              Pedido #{String(invoice.order.order_number).padStart(4, '0')}
+                            </button>
+                            <button onClick={() => setUnlinkTarget(invoice.id)} className="ml-1 text-red-400 hover:text-red-600">x</button>
+                          </p>
+                        )}
+                        {vistaMode === 'fiscal' && !invoice.order && (
+                          <div className="relative mt-0.5">
+                            <button
+                              onClick={() => {
+                                if (isLinkOpen) { setLinkDropdownInvoiceId(null); setLinkSelectedOrderId('') }
+                                else {
+                                  setLinkDropdownInvoiceId(invoice.id); setLinkSelectedOrderId('')
+                                  if (ordersWithoutInvoice.length === 0) {
+                                    api.getOrdersWithoutInvoice().catch(() => []).then(res => setOrdersWithoutInvoice(Array.isArray(res) ? res : []))
                                   }
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
-                              >
-                                Vincular Pedido
-                              </button>
-                              {isLinkOpen && (
-                                <div className="absolute z-10 left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72">
-                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Seleccionar pedido</p>
-                                  <select
-                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-xs bg-white dark:bg-gray-700 dark:text-gray-100 mb-2"
-                                    value={linkSelectedOrderId}
-                                    onChange={e => setLinkSelectedOrderId(e.target.value)}
-                                  >
-                                    <option value="">Elegir pedido...</option>
-                                    {ordersWithoutInvoice.map(o => (
-                                      <option key={o.id} value={o.id}>
-                                        #{String(o.order_number).padStart(4, '0')} - {o.title}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => handleLinkOrder(invoice.id)}
-                                      disabled={!linkSelectedOrderId}
-                                      className="flex-1 px-2 py-1 bg-blue-600 text-white text-xs rounded disabled:opacity-40 hover:bg-blue-700 transition-colors"
-                                    >
-                                      Vincular
-                                    </button>
-                                    <button
-                                      onClick={() => { setLinkDropdownInvoiceId(null); setLinkSelectedOrderId('') }}
-                                      className="px-2 py-1 border border-gray-300 text-xs rounded hover:bg-gray-50 transition-colors"
-                                    >
-                                      Cancelar
-                                    </button>
-                                  </div>
+                                }
+                              }}
+                              className="text-[10px] text-blue-600 hover:underline"
+                            >Vincular Pedido</button>
+                            {isLinkOpen && (
+                              <div className="absolute z-10 left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 w-64">
+                                <select className="w-full px-2 py-1 border rounded text-xs mb-1 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={linkSelectedOrderId} onChange={e => setLinkSelectedOrderId(e.target.value)}>
+                                  <option value="">Elegir pedido...</option>
+                                  {ordersWithoutInvoice.map(o => <option key={o.id} value={o.id}>#{String(o.order_number).padStart(4, '0')} - {o.title}</option>)}
+                                </select>
+                                <div className="flex gap-1">
+                                  <button onClick={() => handleLinkOrder(invoice.id)} disabled={!linkSelectedOrderId} className="flex-1 px-2 py-1 bg-blue-600 text-white text-[10px] rounded disabled:opacity-40">Vincular</button>
+                                  <button onClick={() => { setLinkDropdownInvoiceId(null); setLinkSelectedOrderId('') }} className="px-2 py-1 border text-[10px] rounded">x</button>
                                 </div>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
 
                       {/* Total */}
-                      <td className="px-4 py-3 text-right font-bold text-green-700 dark:text-green-400">
+                      <td className="px-2 py-2 text-right font-bold text-green-700 dark:text-green-400 text-sm">
                         {formatCurrency(parseFloat(invoice.total_amount || '0'))}
                       </td>
 
@@ -1536,18 +1489,8 @@ export const Invoices: React.FC = () => {
                         <StatusBadge status={invoice.status} label={statusMeta.label} />
                       </td>
 
-                      {/* CAE - only fiscal */}
-                      {vistaMode === 'fiscal' && (
-                        <td className="px-4 py-3">
-                          {invoice.cae
-                            ? <span className="font-mono text-xs text-gray-600 dark:text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{invoice.cae}</span>
-                            : <span className="text-gray-300">-</span>
-                          }
-                        </td>
-                      )}
-
                       {/* Acciones */}
-                      <td className="px-4 py-3">
+                      <td className="px-2 py-2">
                         <div className="flex items-center justify-center gap-2">
                           {vistaMode === 'fiscal' && invoice.status === 'draft' && (
                             <PermissionGate module="invoices" action="authorize_afip">
