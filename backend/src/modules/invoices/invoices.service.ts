@@ -65,6 +65,33 @@ export class InvoicesService {
     await this.ensureMigrations();
     try {
       const invoiceId = uuid();
+      // Validate: if items have order_item_id, check that we don't invoice more than available
+      if (data.items && Array.isArray(data.items)) {
+        for (const item of data.items) {
+          if (item.order_item_id) {
+            const checkResult = await db.execute(sql`
+              SELECT
+                CAST(oi.quantity AS decimal) as total_qty,
+                COALESCE((
+                  SELECT SUM(CAST(ii.quantity AS decimal))
+                  FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id
+                  WHERE ii.order_item_id = ${item.order_item_id} AND i.status != 'cancelled'
+                ), 0) as invoiced_qty
+              FROM order_items oi WHERE oi.id = ${item.order_item_id}
+            `);
+            const check = ((checkResult as any).rows || [])[0];
+            if (check) {
+              const available = parseFloat(check.total_qty) - parseFloat(check.invoiced_qty);
+              const requesting = parseFloat(item.quantity) || 0;
+              if (requesting > available + 0.01) {
+                const oiName = item.product_name || 'Item';
+                throw new ApiError(400, `${oiName}: solo quedan ${available.toFixed(2)} unidades disponibles para facturar (pediste ${requesting})`);
+              }
+            }
+          }
+        }
+      }
+
       const fiscalType = data.fiscal_type === 'interno' ? 'interno' : (data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal');
       const invoiceType = (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? null : (data.invoice_type || 'B');
 

@@ -1436,7 +1436,7 @@ export const Cobros: React.FC = () => {
                   <th className="px-4 py-3 text-right">Monto</th>
                   <th className="px-4 py-3">Metodo</th>
                   <th className="px-4 py-3">Referencia</th>
-                  <th className="px-4 py-3">Facturas</th>
+                  <th className="px-4 py-3">Asignacion</th>
                   <th className="px-4 py-3">Notas</th>
                   <th className="px-4 py-3"></th>
                 </tr>
@@ -1453,24 +1453,35 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[receipt.payment_method || ''] || receipt.payment_method || '-'}</td>
                     <td className="px-4 py-3">{receipt.reference ? <span className="font-mono text-xs">{receipt.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {(receipt.items || []).length > 0 ? (
-                          (receipt.items || receipt.linked_invoices || []).map((item: any, idx: number) => {
-                            const label = item.fiscal_type === 'interno'
-                              ? `CI-${String(item.invoice_number).padStart(6, '0')}`
-                              : item.fiscal_type === 'no_fiscal'
-                                ? `NF-${String(item.invoice_number).padStart(6, '0')}`
-                                : `${item.invoice_type || ''} ${String(item.invoice_number).padStart(8, '0')}`
-                            return (
-                              <span key={item.id || idx} className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono" title={`${item.customer_name} - ${fmt(item.amount)}`}>
-                                {label} ({fmt(item.amount)})
-                              </span>
-                            )
-                          })
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
-                      </div>
+                      {(() => {
+                        const totalAmt = parseFloat(receipt.amount || receipt.total_amount || '0')
+                        const assigned = parseFloat(String(receipt.total_assigned || '0'))
+                        const invoices = receipt.items || receipt.linked_invoices || []
+                        const isFullyAssigned = assigned >= totalAmt - 0.01 && totalAmt > 0
+                        const isPartial = assigned > 0 && !isFullyAssigned
+                        const isPending = assigned === 0 || receipt.pending_status === 'pending_invoice'
+
+                        return (
+                          <div>
+                            <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${
+                              isFullyAssigned ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
+                              isPartial ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' :
+                              'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300'
+                            }`}>
+                              {isFullyAssigned ? 'Completo' : isPartial ? `Parcial (${fmt(assigned)}/${fmt(totalAmt)})` : 'Sin vincular'}
+                            </span>
+                            {invoices.length > 0 && (
+                              <div className="flex flex-wrap gap-0.5 mt-1">
+                                {invoices.map((item: any, idx: number) => (
+                                  <span key={item.id || idx} className="text-[10px] text-blue-600 font-mono" title={`${item.customer_name} - ${fmt(item.amount)}`}>
+                                    {item.invoice_type || 'NF'}{item.invoice_number}({fmt(item.amount)})
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[150px] truncate" title={receipt.notes || ''}>{receipt.notes || '-'}</td>
                     <td className="px-4 py-3">
