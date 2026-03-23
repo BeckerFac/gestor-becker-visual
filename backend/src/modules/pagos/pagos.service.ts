@@ -130,6 +130,7 @@ export class PagosService {
             ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
           `);
           await this.recalculatePurchaseInvoiceStatus(piId);
+          await this.recalculatePurchaseStatusFromInvoices(piId);
         }
       }
 
@@ -168,9 +169,10 @@ export class PagosService {
       // Delete pago (CASCADE will delete pago_invoice_applications)
       await db.execute(sql`DELETE FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
 
-      // Recalculate payment_status for affected purchase invoices
+      // Recalculate payment_status for affected purchase invoices + cascade to purchases
       for (const piId of piIds) {
         await this.recalculatePurchaseInvoiceStatus(piId);
+        await this.recalculatePurchaseStatusFromInvoices(piId);
       }
 
       return { success: true };
@@ -206,6 +208,50 @@ export class PagosService {
       `);
     } catch (error) {
       console.warn('Recalculate purchase invoice status error:', error);
+    }
+  }
+
+  /**
+   * Recalculate purchase.payment_status from ALL its purchase_invoices' pago applications.
+   * Chain: pagos → purchase_invoices → purchase (cascada completa)
+   */
+  private async recalculatePurchaseStatusFromInvoices(purchaseInvoiceId: string) {
+    try {
+      // Get the purchase_id from this invoice
+      const piResult = await db.execute(sql`
+        SELECT purchase_id FROM purchase_invoices WHERE id = ${purchaseInvoiceId}
+      `);
+      const purchaseId = ((piResult as any).rows || [])[0]?.purchase_id;
+      if (!purchaseId) return; // standalone invoice, no purchase to update
+
+      // Calculate total paid across ALL purchase_invoices of this purchase
+      const result = await db.execute(sql`
+        SELECT
+          CAST(p.total_amount AS decimal) as purchase_total,
+          COALESCE((
+            SELECT SUM(CAST(pia.amount_applied AS decimal))
+            FROM pago_invoice_applications pia
+            JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+            WHERE pi.purchase_id = ${purchaseId} AND pi.status != 'cancelled'
+          ), 0) as total_paid
+        FROM purchases p
+        WHERE p.id = ${purchaseId}
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const purchaseTotal = parseFloat(row.purchase_total);
+      const totalPaid = parseFloat(row.total_paid);
+
+      let status = 'pendiente';
+      if (totalPaid >= purchaseTotal && purchaseTotal > 0) status = 'pagada';
+      else if (totalPaid > 0) status = 'parcial';
+
+      await db.execute(sql`
+        UPDATE purchases SET payment_status = ${status} WHERE id = ${purchaseId}
+      `);
+    } catch (error) {
+      console.warn('Recalculate purchase status from invoices error:', error);
     }
   }
 

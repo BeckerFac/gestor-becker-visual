@@ -82,7 +82,14 @@ export class PurchasesService {
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0) as item_count
+          COALESCE((SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0) as item_count,
+          COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) as invoiced_amount,
+          CASE
+            WHEN COALESCE(CAST(p.total_amount AS decimal), 0) = 0 THEN 'sin_monto'
+            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) = 0 THEN 'sin_facturar'
+            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) >= CAST(p.total_amount AS decimal) THEN 'facturado'
+            ELSE 'parcial'
+          END as invoice_status
         FROM purchases p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN banks b ON p.bank_id = b.id

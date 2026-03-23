@@ -758,6 +758,7 @@ export const Purchases: React.FC = () => {
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3">Items</th>
                   <th className="px-4 py-3 text-right">Total</th>
+                  <th className="px-4 py-3 text-center">Facturado</th>
                   <th className="px-4 py-3 text-center">Pago</th>
                   <th className="px-4 py-3 text-center">Estado / Acciones</th>
                 </tr>
@@ -785,6 +786,22 @@ export const Purchases: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-bold text-red-700">{formatCurrency(parseFloat(purchase.total_amount || '0'))}</span>
+                      </td>
+                      {/* Facturado */}
+                      <td className="px-4 py-2 text-center">
+                        {(() => {
+                          const invStatus = (purchase as any).invoice_status || 'sin_facturar'
+                          const invoicedAmt = parseFloat((purchase as any).invoiced_amount || '0')
+                          const totalAmt = parseFloat(purchase.total_amount || '0')
+                          if (invStatus === 'facturado') return <span className="text-xs font-medium rounded-full px-2 py-1 bg-green-100 text-green-800">Completo</span>
+                          if (invStatus === 'parcial') return (
+                            <div>
+                              <span className="text-xs font-medium rounded-full px-2 py-1 bg-yellow-100 text-yellow-800">Parcial</span>
+                              <p className="text-[10px] text-gray-400 mt-0.5">{formatCurrency(invoicedAmt)} / {formatCurrency(totalAmt)}</p>
+                            </div>
+                          )
+                          return <span className="text-xs font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600">Sin facturar</span>
+                        })()}
                       </td>
                       <td className="px-4 py-2 text-center">
                         <select
