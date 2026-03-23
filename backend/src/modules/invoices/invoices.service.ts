@@ -930,6 +930,54 @@ export class InvoicesService {
     return (result as any).rows || [];
   }
   /**
+   * Get order items available for invoicing (not yet fully invoiced).
+   * Supports multi-order: returns items from all orders of a company/enterprise.
+   */
+  async getAvailableOrderItemsForInvoicing(companyId: string, filters: {
+    enterprise_id?: string;
+    business_unit_id?: string;
+  } = {}) {
+    let whereClause = sql`o.company_id = ${companyId} AND o.status != 'cancelado'`;
+    if (filters.enterprise_id) {
+      whereClause = sql`${whereClause} AND o.enterprise_id = ${filters.enterprise_id}`;
+    }
+
+    const result = await db.execute(sql`
+      SELECT
+        o.id as order_id, o.order_number, o.title as order_title, o.enterprise_id,
+        e.name as enterprise_name,
+        oi.id as order_item_id, oi.product_id, oi.product_name, oi.description,
+        CAST(oi.quantity AS decimal) as quantity,
+        CAST(oi.unit_price AS decimal) as unit_price,
+        CAST(oi.subtotal AS decimal) as subtotal,
+        COALESCE((
+          SELECT SUM(CAST(ii.quantity AS decimal))
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+        ), 0) as qty_invoiced,
+        CAST(oi.quantity AS decimal) - COALESCE((
+          SELECT SUM(CAST(ii.quantity AS decimal))
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+        ), 0) as qty_remaining
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN enterprises e ON o.enterprise_id = e.id
+      WHERE ${whereClause}
+      HAVING CAST(oi.quantity AS decimal) - COALESCE((
+        SELECT SUM(CAST(ii.quantity AS decimal))
+        FROM invoice_items ii
+        JOIN invoices i ON ii.invoice_id = i.id
+        WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+      ), 0) > 0
+      ORDER BY o.order_number DESC, oi.created_at ASC
+    `);
+    return (result as any).rows || [];
+  }
+
+  /**
    * Get invoice items with payment remaining per item.
    */
   async getInvoiceItemsWithRemaining(companyId: string, invoiceId: string) {

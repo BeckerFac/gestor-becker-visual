@@ -171,6 +171,46 @@ export class PurchaseInvoicesService {
     return (result as any).rows || [];
   }
 
+  /**
+   * Get purchase items available for invoicing (not yet fully invoiced).
+   */
+  async getAvailablePurchaseItemsForInvoicing(companyId: string, filters: {
+    enterprise_id?: string;
+  } = {}) {
+    let whereClause = sql`p.company_id = ${companyId} AND p.status != 'cancelada'`;
+    if (filters.enterprise_id) {
+      whereClause = sql`${whereClause} AND p.enterprise_id = ${filters.enterprise_id}`;
+    }
+
+    const result = await db.execute(sql`
+      SELECT
+        p.id as purchase_id, p.purchase_number, p.enterprise_id,
+        e.name as enterprise_name,
+        pi.id as purchase_item_id, pi.product_name, pi.description,
+        CAST(pi.quantity AS decimal) as quantity,
+        CAST(pi.unit_price AS decimal) as unit_price,
+        CAST(pi.subtotal AS decimal) as subtotal,
+        COALESCE((
+          SELECT SUM(CAST(pii.quantity AS decimal))
+          FROM purchase_invoice_items pii
+          JOIN purchase_invoices pinv ON pii.purchase_invoice_id = pinv.id
+          WHERE pii.purchase_item_id = pi.id AND pinv.status != 'cancelled'
+        ), 0) as qty_invoiced,
+        CAST(pi.quantity AS decimal) - COALESCE((
+          SELECT SUM(CAST(pii.quantity AS decimal))
+          FROM purchase_invoice_items pii
+          JOIN purchase_invoices pinv ON pii.purchase_invoice_id = pinv.id
+          WHERE pii.purchase_item_id = pi.id AND pinv.status != 'cancelled'
+        ), 0) as qty_remaining
+      FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      LEFT JOIN enterprises e ON p.enterprise_id = e.id
+      WHERE ${whereClause}
+      ORDER BY p.purchase_number DESC, pi.created_at ASC
+    `);
+    return (result as any).rows || [];
+  }
+
   async updatePurchaseInvoice(companyId: string, piId: string, data: any) {
     // Verify exists
     await this.getPurchaseInvoice(companyId, piId);

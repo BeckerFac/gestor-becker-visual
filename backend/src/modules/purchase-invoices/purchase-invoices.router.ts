@@ -6,6 +6,8 @@ export const purchaseInvoicesRouter = Router();
 
 purchaseInvoicesRouter.get('/', authorize('purchases', 'view'), (req, res) =>
   purchaseInvoicesController.getAll(req as any, res));
+purchaseInvoicesRouter.get('/available-purchase-items', authorize('purchases', 'view'), (req, res) =>
+  purchaseInvoicesController.getAvailablePurchaseItems(req as any, res));
 purchaseInvoicesRouter.get('/by-purchase/:purchaseId', authorize('purchases', 'view'), (req, res) =>
   purchaseInvoicesController.getByPurchase(req as any, res));
 purchaseInvoicesRouter.get('/:id', authorize('purchases', 'view'), (req, res) =>

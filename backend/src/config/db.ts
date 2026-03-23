@@ -891,6 +891,8 @@ async function runAutoMigrations() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pii_purchase_invoice ON purchase_invoice_items(purchase_invoice_id)`);
+    // Add purchase_item_id FK for linking to specific purchase items
+    await pool.query(`ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS purchase_item_id UUID`);
 
     // ===== COBRO INVOICE ITEM APPLICATIONS (item-level trazabilidad) =====
     await pool.query(`

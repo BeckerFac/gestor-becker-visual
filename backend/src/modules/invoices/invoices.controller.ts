@@ -153,6 +153,13 @@ export class InvoicesController {
     res.json(data);
   }
 
+  async getAvailableOrderItems(req: AuthRequest, res: Response) {
+    const data = await invoicesService.getAvailableOrderItemsForInvoicing(req.user!.company_id, {
+      enterprise_id: req.query.enterprise_id as string,
+    });
+    res.json(data);
+  }
+
   async getInvoiceItemsWithRemaining(req: AuthRequest, res: Response) {
     const data = await invoicesService.getInvoiceItemsWithRemaining(req.user!.company_id, req.params.id);
     res.json(data);

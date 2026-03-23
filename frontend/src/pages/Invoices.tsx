@@ -127,6 +127,114 @@ const PurchaseInvoicesTab: React.FC = () => (
   </Suspense>
 )
 
+// Inline component: import items from multiple orders
+const OrderItemsImporter: React.FC<{
+  enterpriseId?: string;
+  onImport: (items: any[]) => void;
+}> = ({ enterpriseId, onImport }) => {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [orderItems, setOrderItems] = useState<any[]>([])
+  const [selectedQty, setSelectedQty] = useState<Record<string, string>>({})
+
+  const loadItems = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await api.getAvailableOrderItemsForInvoicing(
+        enterpriseId ? { enterprise_id: enterpriseId } : undefined
+      )
+      setOrderItems(data || [])
+    } catch { setOrderItems([]) }
+    finally { setLoading(false) }
+  }, [enterpriseId])
+
+  useEffect(() => { if (open) loadItems() }, [open, loadItems])
+
+  const handleImport = () => {
+    const items = orderItems
+      .filter(oi => selectedQty[oi.order_item_id] && parseFloat(selectedQty[oi.order_item_id]) > 0)
+      .map(oi => ({
+        ...oi,
+        qty_to_invoice: parseFloat(selectedQty[oi.order_item_id]),
+      }))
+    if (items.length === 0) return
+    onImport(items)
+    setOpen(false)
+    setSelectedQty({})
+  }
+
+  // Group by order
+  const grouped = useMemo(() => {
+    const map = new Map<string, { order_id: string; order_number: number; order_title: string; enterprise_name: string; items: any[] }>()
+    for (const oi of orderItems) {
+      if (!map.has(oi.order_id)) {
+        map.set(oi.order_id, { order_id: oi.order_id, order_number: oi.order_number, order_title: oi.order_title, enterprise_name: oi.enterprise_name, items: [] })
+      }
+      map.get(oi.order_id)!.items.push(oi)
+    }
+    return Array.from(map.values())
+  }, [orderItems])
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="text-sm text-blue-600 hover:text-blue-800 font-medium mb-2">
+        Importar items de pedidos
+      </button>
+    )
+  }
+
+  return (
+    <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-3 bg-blue-50/50 dark:bg-blue-950/20">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-300">Seleccionar items de pedidos</h4>
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm">Cerrar</button>
+      </div>
+
+      {loading ? <p className="text-xs text-gray-400">Cargando...</p> : grouped.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No hay items de pedidos pendientes de facturar</p>
+      ) : (
+        <div className="space-y-3 max-h-64 overflow-y-auto">
+          {grouped.map(group => (
+            <div key={group.order_id} className="border border-blue-100 dark:border-blue-900 rounded p-2">
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Pedido #{String(group.order_number).padStart(4, '0')} — {group.enterprise_name || 'Sin empresa'}
+              </p>
+              <div className="space-y-1">
+                {group.items.map((oi: any) => {
+                  const remaining = parseFloat(oi.qty_remaining || '0')
+                  return (
+                    <div key={oi.order_item_id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 text-gray-700 dark:text-gray-300">{oi.product_name}</span>
+                      <span className="text-gray-400">{parseFloat(oi.quantity)}x ${parseFloat(oi.unit_price).toLocaleString('es-AR')}</span>
+                      <span className="text-orange-600">Disponible: {remaining}</span>
+                      <input
+                        type="number" min="0" max={remaining} step="0.01"
+                        placeholder="0"
+                        value={selectedQty[oi.order_item_id] || ''}
+                        onChange={e => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: e.target.value }))}
+                        className="w-16 px-1 py-0.5 border rounded text-right text-xs dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <button type="button" onClick={() => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: remaining.toString() }))}
+                        className="text-blue-600 text-[10px] font-medium">Todo</button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex justify-end mt-2">
+        <button type="button" onClick={handleImport}
+          className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+          Importar seleccionados
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ---- Component ----
 
 export const Invoices: React.FC = () => {
@@ -947,6 +1055,27 @@ export const Invoices: React.FC = () => {
                     Items cargados desde el pedido. Puede editarlos antes de facturar.
                   </div>
                 )}
+
+                {/* Import from orders button */}
+                <OrderItemsImporter
+                  enterpriseId={formEnterpriseId}
+                  onImport={(importedItems) => {
+                    const newItems = importedItems.map((oi: any) => {
+                      const qty = parseFloat(oi.qty_to_invoice || oi.qty_remaining)
+                      const price = parseFloat(oi.unit_price)
+                      return {
+                        product_id: oi.product_id || '',
+                        product_name: oi.product_name || '',
+                        quantity: qty,
+                        unit_price: price,
+                        vat_rate: 21,
+                        subtotal: qty * price,
+                        order_item_id: oi.order_item_id,
+                      }
+                    })
+                    setFormItems([...formItems.filter(i => i.product_name), ...newItems])
+                  }}
+                />
 
                 {/* Items table */}
                 <div className="overflow-x-auto">

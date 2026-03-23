@@ -334,6 +334,14 @@ export const api = {
     const { data } = await client.get(`/purchase-invoices/${id}/items`)
     return data
   },
+  getAvailableOrderItemsForInvoicing: async (filters?: { enterprise_id?: string }) => {
+    const { data } = await client.get('/invoices/available-order-items', { params: filters })
+    return data
+  },
+  getAvailablePurchaseItemsForInvoicing: async (filters?: { enterprise_id?: string }) => {
+    const { data } = await client.get('/purchase-invoices/available-purchase-items', { params: filters })
+    return data
+  },
   getInvoiceItemsWithRemaining: async (invoiceId: string) => {
     const { data } = await client.get(`/invoices/${invoiceId}/items-remaining`)
     return data
