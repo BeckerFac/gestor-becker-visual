@@ -771,6 +771,182 @@ async function runAutoMigrations() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_portal_config_company ON portal_config(company_id)`);
 
+    // ===== BUSINESS UNITS (Razones Sociales) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS business_units (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        is_fiscal BOOLEAN DEFAULT false,
+        cuit VARCHAR(20),
+        address TEXT,
+        iibb_number VARCHAR(30),
+        afip_start_date TIMESTAMP WITH TIME ZONE,
+        sort_order INTEGER DEFAULT 0,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by UUID,
+        UNIQUE(company_id, name)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_units_company ON business_units(company_id)`);
+
+    // ===== PURCHASE INVOICES (Facturas de Compra) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_invoices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        business_unit_id UUID NOT NULL REFERENCES business_units(id),
+        enterprise_id UUID NOT NULL REFERENCES enterprises(id),
+        purchase_id UUID REFERENCES purchases(id),
+        invoice_type VARCHAR(5) NOT NULL,
+        punto_venta VARCHAR(10),
+        invoice_number VARCHAR(50) NOT NULL,
+        invoice_date TIMESTAMP WITH TIME ZONE NOT NULL,
+        cae VARCHAR(20),
+        cae_expiry_date TIMESTAMP WITH TIME ZONE,
+        subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        other_taxes DECIMAL(12,2) DEFAULT 0,
+        total_amount DECIMAL(12,2) NOT NULL,
+        payment_status VARCHAR(20) DEFAULT 'pendiente',
+        status VARCHAR(20) DEFAULT 'active',
+        notes TEXT,
+        created_by UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_company_bu ON purchase_invoices(company_id, business_unit_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_enterprise ON purchase_invoices(enterprise_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_purchase ON purchase_invoices(purchase_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_payment_status ON purchase_invoices(company_id, payment_status)`);
+
+    // ===== COBRO ↔ INVOICE APPLICATIONS (N:N) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cobro_invoice_applications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cobro_id UUID NOT NULL REFERENCES cobros(id) ON DELETE CASCADE,
+        invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+        amount_applied DECIMAL(12,2) NOT NULL CHECK (amount_applied > 0),
+        applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by UUID,
+        notes TEXT,
+        UNIQUE(cobro_id, invoice_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cia_cobro ON cobro_invoice_applications(cobro_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cia_invoice ON cobro_invoice_applications(invoice_id)`);
+
+    // ===== PAGO ↔ PURCHASE INVOICE APPLICATIONS (N:N) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pago_invoice_applications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE CASCADE,
+        purchase_invoice_id UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+        amount_applied DECIMAL(12,2) NOT NULL CHECK (amount_applied > 0),
+        applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by UUID,
+        UNIQUE(pago_id, purchase_invoice_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pia_pago ON pago_invoice_applications(pago_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pia_purchase_invoice ON pago_invoice_applications(purchase_invoice_id)`);
+
+    // ===== ADD business_unit_id TO EXISTING TABLES =====
+    await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+    await pool.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+    await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+    await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+    await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+    await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
+
+    // ===== ADD payment_status TO INVOICES =====
+    await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente'`);
+
+    // ===== ADD pending_status TO COBROS AND PAGOS =====
+    await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS pending_status VARCHAR(20)`);
+    await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS pending_status VARCHAR(20)`);
+
+    // ===== ADD cheque_id TO PAGOS (for cheque endorsement) =====
+    await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS cheque_id UUID REFERENCES cheques(id)`);
+
+    // ===== ADD endorsement fields TO CHEQUES =====
+    await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS endorsed_to_enterprise_id UUID REFERENCES enterprises(id)`);
+    await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS endorsed_pago_id UUID`);
+    await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS endorsed_at TIMESTAMP WITH TIME ZONE`);
+
+    // ===== AUTO-CREATE DEFAULT BUSINESS UNIT FOR EXISTING COMPANIES =====
+    // Only creates if the company doesn't have any business_units yet
+    await pool.query(`
+      INSERT INTO business_units (company_id, name, is_fiscal, sort_order, active)
+      SELECT c.id, COALESCE(c.razon_social, c.name) || ' (Default)', false, 0, true
+      FROM companies c
+      WHERE NOT EXISTS (
+        SELECT 1 FROM business_units bu WHERE bu.company_id = c.id
+      )
+    `);
+
+    // ===== BACKFILL business_unit_id ON EXISTING ROWS =====
+    // For each table, set business_unit_id to the company's default BU where NULL
+    const tablesToBackfill = ['orders', 'purchases', 'invoices', 'cobros', 'pagos', 'cheques'];
+    for (const tbl of tablesToBackfill) {
+      try {
+        await pool.query(`
+          UPDATE ${tbl} SET business_unit_id = (
+            SELECT bu.id FROM business_units bu
+            WHERE bu.company_id = ${tbl}.company_id
+            ORDER BY bu.sort_order ASC, bu.created_at ASC
+            LIMIT 1
+          )
+          WHERE business_unit_id IS NULL
+        `);
+      } catch (_) {
+        // Table may not have company_id or may not exist
+      }
+    }
+
+    // ===== MIGRATE existing cobros with invoice_id to cobro_invoice_applications =====
+    try {
+      await pool.query(`
+        INSERT INTO cobro_invoice_applications (cobro_id, invoice_id, amount_applied, applied_at)
+        SELECT c.id, c.invoice_id, c.amount, c.created_at
+        FROM cobros c
+        WHERE c.invoice_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM cobro_invoice_applications cia
+            WHERE cia.cobro_id = c.id AND cia.invoice_id = c.invoice_id
+          )
+      `);
+    } catch (_) {}
+
+    // ===== SET pending_status on cobros without invoice linkage =====
+    try {
+      await pool.query(`
+        UPDATE cobros SET pending_status = 'pending_invoice'
+        WHERE invoice_id IS NULL
+          AND pending_status IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM cobro_invoice_applications cia WHERE cia.cobro_id = cobros.id
+          )
+      `);
+    } catch (_) {}
+
+    // ===== CALCULATE payment_status for existing invoices =====
+    try {
+      await pool.query(`
+        UPDATE invoices SET payment_status = CASE
+          WHEN COALESCE((SELECT SUM(amount_applied) FROM cobro_invoice_applications WHERE invoice_id = invoices.id), 0) = 0
+            THEN 'pendiente'
+          WHEN COALESCE((SELECT SUM(amount_applied) FROM cobro_invoice_applications WHERE invoice_id = invoices.id), 0) >= COALESCE(invoices.total_amount, 0)
+            THEN 'pagado'
+          ELSE 'parcial'
+        END
+        WHERE payment_status = 'pendiente' OR payment_status IS NULL
+      `);
+    } catch (_) {}
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -835,6 +1011,8 @@ async function applyRowLevelSecurity() {
     'account_adjustments',
     'price_criteria',
     'product_prices',
+    'business_units',
+    'purchase_invoices',
   ];
 
   for (const table of tablesWithCompanyId) {
@@ -941,6 +1119,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'account_adjustments', fk: 'company_id' },
     { name: 'price_criteria', fk: 'company_id' },
     { name: 'product_prices', fk: 'company_id' },
+    { name: 'business_units', fk: 'company_id' },
+    { name: 'purchase_invoices', fk: 'company_id' },
   ];
 
   // Child tables accessed via parent FK (no direct company_id)
@@ -965,6 +1145,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'payments', parentTable: 'invoices', parentFk: 'invoice_id' },
     { name: 'crm_deal_documents', parentTable: 'crm_deals', parentFk: 'deal_id' },
     { name: 'crm_deal_stage_history', parentTable: 'crm_deals', parentFk: 'deal_id' },
+    { name: 'cobro_invoice_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
+    { name: 'pago_invoice_applications', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
   ];
 
   const result: Record<string, any[]> = {};

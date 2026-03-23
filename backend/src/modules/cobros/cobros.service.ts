@@ -4,6 +4,18 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 
+/**
+ * CobrosService handles payment collection (cobranzas).
+ *
+ * IMPORTANT: As of the Razones Sociales refactor (2026-03-23):
+ * - cobros.order_id and cobros.invoice_id are DEPRECATED direct links
+ * - New system uses cobro_invoice_applications table for N:N cobro↔invoice linking
+ * - Use CobroApplicationsService for linking/unlinking cobros to invoices
+ * - cobros.pending_status = 'pending_invoice' marks cobros not yet linked to any invoice
+ * - CC calculation uses cobro_invoice_applications, not these direct fields
+ * - The recalculateOrderPaymentStatus() here is LEGACY - new calculation is in
+ *   CobroApplicationsService.recalculateOrderPaymentStatusFromInvoices()
+ */
 export class CobrosService {
   private tablesEnsured = false;
 
@@ -44,10 +56,13 @@ export class CobrosService {
     }
   }
 
-  async getCobros(companyId: string, filters: { enterprise_id?: string } = {}) {
+  async getCobros(companyId: string, filters: { enterprise_id?: string; business_unit_id?: string } = {}) {
     await this.ensureTables();
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
+      if (filters.business_unit_id) {
+        whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
+      }
       if (filters.enterprise_id) {
         whereClause = sql`${whereClause} AND c.enterprise_id = ${filters.enterprise_id}`;
       }
@@ -83,9 +98,11 @@ export class CobrosService {
 
     try {
       const cobroId = uuid();
+      // Determine pending_status: if no invoice linked, mark as pending_invoice
+      const pendingStatus = data.invoice_id ? null : 'pending_invoice';
       await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, created_by)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${userId})
+        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, created_by)
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
       `);
 
       // Insert cobro_items for partial payments

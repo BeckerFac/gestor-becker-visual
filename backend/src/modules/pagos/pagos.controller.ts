@@ -6,6 +6,7 @@ export class PagosController {
   async getPagos(req: AuthRequest, res: Response) {
     const data = await pagosService.getPagos(req.user!.company_id, {
       enterprise_id: req.query.enterprise_id as string,
+      business_unit_id: req.query.business_unit_id as string,
     });
     res.json(data);
   }

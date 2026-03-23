@@ -43,12 +43,22 @@ interface Purchase {
   date?: string
 }
 interface Bank { id: string; bank_name: string }
+interface ChequeDisponible {
+  id: string
+  number: string
+  bank: string
+  drawer: string
+  amount: string
+  due_date: string
+  customer_name: string | null
+}
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   efectivo: 'Efectivo',
   mercado_pago: 'Mercado Pago',
   transferencia: 'Transferencia',
   cheque: 'Cheque',
+  cheque_endosado: 'Cheque Endosado',
   tarjeta: 'Tarjeta',
 }
 
@@ -93,6 +103,9 @@ export const Pagos: React.FC = () => {
   const [dismissedPending, setDismissedPending] = useState<string[]>(getDismissedPending())
   const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
+  const [chequesDisponibles, setChequesDisponibles] = useState<ChequeDisponible[]>([])
+  const [selectedChequeId, setSelectedChequeId] = useState('')
+
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
     amount: '', payment_method: 'transferencia', bank_id: '',
@@ -102,7 +115,7 @@ export const Pagos: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [pagosRes, entRes, purchRes, bankRes] = await Promise.all([
+      const [pagosRes, entRes, purchRes, bankRes, chequesRes] = await Promise.all([
         api.getPagos(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
           setError(`Error cargando pagos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return []
@@ -110,11 +123,13 @@ export const Pagos: React.FC = () => {
         api.getEnterprises().catch(() => []),
         api.getPurchases().catch(() => []),
         api.getBanks().catch(() => []),
+        api.getChequesForEndorsement().catch(() => []),
       ])
       setPagos(pagosRes || [])
       setEnterprises(entRes || [])
       setPurchases(purchRes || [])
       setBanks(bankRes || [])
+      setChequesDisponibles(chequesRes || [])
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -184,22 +199,52 @@ export const Pagos: React.FC = () => {
       setError('El monto debe ser mayor a 0')
       return
     }
+    if (form.payment_method === 'cheque_endosado') {
+      if (!selectedChequeId) {
+        setError('Selecciona un cheque para endosar')
+        return
+      }
+      if (!form.enterprise_id) {
+        setError('Selecciona un proveedor para endosar el cheque')
+        return
+      }
+      const cheque = chequesDisponibles.find(c => c.id === selectedChequeId)
+      if (cheque && parseFloat(form.amount) > parseFloat(cheque.amount)) {
+        setError(`El monto ($${form.amount}) supera el valor del cheque ($${cheque.amount})`)
+        return
+      }
+    }
     setSaving(true)
     setError(null)
     try {
-      await api.createPago({
-        enterprise_id: form.enterprise_id || null,
-        purchase_id: form.purchase_id || null,
-        amount: parseFloat(form.amount),
-        payment_method: form.payment_method,
-        bank_id: form.bank_id || null,
-        reference: form.reference || null,
-        payment_date: form.payment_date,
-        notes: form.notes || null,
-      })
+      if (form.payment_method === 'cheque_endosado' && selectedChequeId) {
+        // Endorse cheque to pay provider
+        const result = await api.endorseCheque(selectedChequeId, {
+          enterprise_id: form.enterprise_id,
+          amount: parseFloat(form.amount),
+          notes: form.notes || undefined,
+        })
+        if (result.excess > 0) {
+          toast.success(`Cheque endosado. Exceso de ${formatCurrency(result.excess)} registrado como credito a favor en CC`)
+        } else {
+          toast.success('Pago con cheque endosado registrado')
+        }
+      } else {
+        await api.createPago({
+          enterprise_id: form.enterprise_id || null,
+          purchase_id: form.purchase_id || null,
+          amount: parseFloat(form.amount),
+          payment_method: form.payment_method,
+          bank_id: form.bank_id || null,
+          reference: form.reference || null,
+          payment_date: form.payment_date,
+          notes: form.notes || null,
+        })
+        toast.success('Pago registrado correctamente')
+      }
       setShowForm(false)
+      setSelectedChequeId('')
       setForm({ enterprise_id: '', purchase_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
-      toast.success('Pago registrado correctamente')
       await loadData()
     } catch (e: any) {
       toast.error(e.message)
@@ -226,6 +271,12 @@ export const Pagos: React.FC = () => {
   const fmt = (n: any) => formatCurrency(n)
   const fmtDate = (d: string) => formatDate(d)
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
+  const showChequeSelector = form.payment_method === 'cheque_endosado'
+
+  const selectedCheque = chequesDisponibles.find(c => c.id === selectedChequeId)
+  const chequeExcess = selectedCheque && form.amount
+    ? parseFloat(selectedCheque.amount) - parseFloat(form.amount)
+    : 0
 
   const filteredPagos = useMemo(() => {
     let result = pagos
@@ -449,6 +500,7 @@ export const Pagos: React.FC = () => {
                   <option value="mercado_pago">Mercado Pago</option>
                   <option value="transferencia">Transferencia</option>
                   <option value="cheque">Cheque</option>
+                  <option value="cheque_endosado">Cheque Endosado (usar cheque recibido)</option>
                   <option value="tarjeta">Tarjeta</option>
                 </select>
               </div>
@@ -460,6 +512,49 @@ export const Pagos: React.FC = () => {
                   onBanksChange={setBanks}
                   label="Banco *"
                 />
+              )}
+              {showChequeSelector && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cheque disponible *</label>
+                  <select
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={selectedChequeId}
+                    onChange={e => {
+                      const cheque = chequesDisponibles.find(c => c.id === e.target.value)
+                      setSelectedChequeId(e.target.value)
+                      if (cheque) {
+                        const chequeAmount = parseFloat(cheque.amount)
+                        const currentAmount = parseFloat(form.amount) || 0
+                        setForm({
+                          ...form,
+                          amount: currentAmount > 0 ? form.amount : chequeAmount.toFixed(2),
+                          reference: `Cheque #${cheque.number} - ${cheque.bank}`,
+                        })
+                      }
+                    }}
+                    required
+                  >
+                    <option value="">Seleccionar cheque...</option>
+                    {chequesDisponibles.map(ch => (
+                      <option key={ch.id} value={ch.id}>
+                        #{ch.number} - {ch.bank} - {fmt(ch.amount)} (vto: {fmtDate(ch.due_date)})
+                      </option>
+                    ))}
+                  </select>
+                  {chequesDisponibles.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">No hay cheques disponibles para endosar</p>
+                  )}
+                  {selectedCheque && chequeExcess > 0.01 && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      Exceso de {fmt(chequeExcess)} quedara como credito a favor en CC del proveedor
+                    </p>
+                  )}
+                  {selectedCheque && chequeExcess < -0.01 && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                      El cheque ({fmt(selectedCheque.amount)}) no cubre el monto total. Se descontara lo que cubra.
+                    </p>
+                  )}
+                </div>
               )}
               <Input label="Referencia" placeholder="N° transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
               <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />

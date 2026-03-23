@@ -158,7 +158,7 @@ describe('InventoryService', () => {
   })
 
   describe('addStockFromPurchase', () => {
-    it('only processes controls_stock products', async () => {
+    it('processes all products and auto-enables controls_stock', async () => {
       // stock_added check
       mockDbRows([{ stock_added: false }])
       // Warehouse lookup
@@ -171,33 +171,49 @@ describe('InventoryService', () => {
       mockDbRows([{ id: 'stock-1', quantity: '10' }])
       // UPDATE stock
       mockDbVoid()
-      // Product 2: has controls_stock=false
+      // Product 2: has controls_stock=false (will be auto-enabled)
       mockDbRows([{ id: 'p2', controls_stock: false }])
+      // UPDATE product controls_stock=true
+      mockDbVoid()
+      // INSERT movement for p2
+      mockDbVoid()
+      // Check existing stock for p2
+      mockDbEmpty()
+      // INSERT new stock record for p2
+      mockDbVoid()
 
       const result = await service.addStockFromPurchase('company-1', 'user-1', 'purchase-1', [
         { product_id: 'p1', quantity: 5 },
         { product_id: 'p2', quantity: 10 },
       ])
 
-      // Only p1 should be processed
-      expect(result.items_processed).toHaveLength(1)
+      // Both should be processed (p2 auto-enabled)
+      expect(result.items_processed).toHaveLength(2)
       expect(result.items_processed[0].product_id).toBe('p1')
-      expect(result.items_processed[0].quantity_added).toBe(5)
-      expect(result.items_processed[0].new_quantity).toBe(15)
+      expect(result.items_processed[1].product_id).toBe('p2')
     })
 
-    it('skips non-stock products', async () => {
+    it('auto-enables controls_stock for non-stock products', async () => {
       // stock_added check
       mockDbRows([{ stock_added: false }])
       mockDbRows([{ id: 'wh-1' }])
       // Product has controls_stock=false
       mockDbRows([{ id: 'p1', controls_stock: false }])
+      // UPDATE product controls_stock=true
+      mockDbVoid()
+      // INSERT movement
+      mockDbVoid()
+      // Check existing stock (none)
+      mockDbEmpty()
+      // INSERT new stock
+      mockDbVoid()
 
       const result = await service.addStockFromPurchase('company-1', 'user-1', 'purchase-1', [
         { product_id: 'p1', quantity: 5 },
       ])
 
-      expect(result.items_processed).toHaveLength(0)
+      expect(result.items_processed).toHaveLength(1)
+      expect(result.items_processed[0].quantity_added).toBe(5)
     })
 
     it('skips products not found in company', async () => {

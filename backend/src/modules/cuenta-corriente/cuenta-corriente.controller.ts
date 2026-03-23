@@ -6,12 +6,19 @@ import { ApiError } from '../../middlewares/errorHandler';
 
 export class CuentaCorrienteController {
   async getResumen(req: AuthRequest, res: Response) {
-    const data = await cuentaCorrienteService.getResumen(req.user!.company_id);
+    const data = await cuentaCorrienteService.getResumen(
+      req.user!.company_id,
+      req.query.business_unit_id as string
+    );
     res.json(data);
   }
 
   async getDetalle(req: AuthRequest, res: Response) {
-    const data = await cuentaCorrienteService.getDetalle(req.user!.company_id, req.params.enterpriseId);
+    const data = await cuentaCorrienteService.getDetalle(
+      req.user!.company_id,
+      req.params.enterpriseId,
+      req.query.business_unit_id as string
+    );
     res.json(data);
   }
 

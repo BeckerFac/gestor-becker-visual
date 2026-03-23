@@ -9,6 +9,7 @@ export class ChequesController {
       search: req.query.search as string,
       due_from: req.query.due_from as string,
       due_to: req.query.due_to as string,
+      business_unit_id: req.query.business_unit_id as string,
     });
     res.json(data);
   }
@@ -46,6 +47,28 @@ export class ChequesController {
 
   async getSummary(req: AuthRequest, res: Response) {
     const data = await chequesService.getSummary(req.user!.company_id);
+    res.json(data);
+  }
+  async endorseCheque(req: AuthRequest, res: Response) {
+    const data = await chequesService.endorseCheque(
+      req.user!.company_id,
+      req.user!.id,
+      req.params.id,
+      {
+        enterprise_id: req.body.enterprise_id,
+        amount: parseFloat(req.body.amount),
+        purchase_invoice_id: req.body.purchase_invoice_id,
+        notes: req.body.notes,
+      }
+    );
+    res.status(201).json(data);
+  }
+
+  async getChequesForEndorsement(req: AuthRequest, res: Response) {
+    const data = await chequesService.getChequesForEndorsement(
+      req.user!.company_id,
+      req.query.business_unit_id as string
+    );
     res.json(data);
   }
 }

@@ -304,13 +304,16 @@ export class InventoryService {
       const results: any[] = [];
 
       for (const item of items) {
-        // Check if product has controls_stock=true
         const productResult = await db.execute(sql`
           SELECT id, controls_stock FROM products WHERE id = ${item.product_id} AND company_id = ${companyId}
         `);
         const productRows = (productResult as any).rows || productResult || [];
         if (productRows.length === 0) continue;
-        if (!productRows[0].controls_stock) continue;
+
+        // Auto-enable controls_stock (user explicitly chose to add stock from purchase)
+        if (!productRows[0].controls_stock) {
+          await db.execute(sql`UPDATE products SET controls_stock = true WHERE id = ${item.product_id}`);
+        }
 
         const quantity = parseFloat(String(item.quantity));
 

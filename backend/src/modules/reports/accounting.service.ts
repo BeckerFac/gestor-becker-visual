@@ -76,9 +76,16 @@ export class AccountingService {
   /**
    * Libro IVA Ventas: authorized invoices with IVA breakdown by rate
    */
-  async getLibroIVAVentas(companyId: string, dateFrom: string, dateTo: string) {
+  async getLibroIVAVentas(companyId: string, dateFrom: string, dateTo: string, businessUnitId?: string) {
     try {
       const dates = validateDateRange(dateFrom, dateTo);
+
+      // Build optional business_unit filter
+      // Libro IVA only includes fiscal invoices from fiscal business units
+      const buFilter = businessUnitId
+        ? sql`AND i.business_unit_id = ${businessUnitId}`
+        : sql``;
+
       const result = await db.execute(sql`
         SELECT
           TO_CHAR(i.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') as invoice_date,
@@ -100,10 +107,14 @@ export class AccountingService {
         FROM invoices i
         LEFT JOIN customers c ON i.customer_id = c.id
         JOIN invoice_items ii ON ii.invoice_id = i.id
+        LEFT JOIN business_units bu ON i.business_unit_id = bu.id
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
+          AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)
+          AND (bu.is_fiscal = true OR i.business_unit_id IS NULL)
           AND (i.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
           AND (i.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
+          ${buFilter}
         GROUP BY i.id, i.invoice_date, i.invoice_type, i.invoice_number, i.vat_amount, i.total_amount, i.afip_response, c.name, c.cuit
         ORDER BY i.invoice_date ASC, i.invoice_number ASC
         LIMIT ${LIBRO_MAX_ROWS}
@@ -167,26 +178,37 @@ export class AccountingService {
   /**
    * Libro IVA Compras: active purchases with supplier info
    */
-  async getLibroIVACompras(companyId: string, dateFrom: string, dateTo: string) {
+  async getLibroIVACompras(companyId: string, dateFrom: string, dateTo: string, businessUnitId?: string) {
     try {
       const dates = validateDateRange(dateFrom, dateTo);
+
+      const buFilter = businessUnitId
+        ? sql`AND pi.business_unit_id = ${businessUnitId}`
+        : sql``;
+
+      // Use purchase_invoices table (facturas de compra) instead of purchases
+      // Only include invoices from fiscal business units
       const result = await db.execute(sql`
         SELECT
-          TO_CHAR(p.date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') as date,
-          p.invoice_type,
-          p.invoice_number,
+          TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') as date,
+          pi.invoice_type,
+          COALESCE(pi.punto_venta, '') || '-' || pi.invoice_number as invoice_number,
           COALESCE(e.name, 'Proveedor desconocido') as enterprise_name,
           COALESCE(e.cuit, '') as enterprise_cuit,
-          COALESCE(CAST(p.subtotal AS decimal), COALESCE(CAST(p.total_amount AS decimal), 0) - COALESCE(CAST(p.vat_amount AS decimal), 0)) as neto_gravado,
-          COALESCE(CAST(p.vat_amount AS decimal), 0) as iva,
-          COALESCE(CAST(p.total_amount AS decimal), 0) as total
-        FROM purchases p
-        LEFT JOIN enterprises e ON p.enterprise_id = e.id
-        WHERE p.company_id = ${companyId}
-          AND p.status = 'activa'
-          AND (p.date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
-          AND (p.date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
-        ORDER BY p.date ASC, p.purchase_number ASC
+          COALESCE(CAST(pi.subtotal AS decimal), COALESCE(CAST(pi.total_amount AS decimal), 0) - COALESCE(CAST(pi.vat_amount AS decimal), 0)) as neto_gravado,
+          COALESCE(CAST(pi.vat_amount AS decimal), 0) as iva,
+          COALESCE(CAST(pi.other_taxes AS decimal), 0) as otros_tributos,
+          COALESCE(CAST(pi.total_amount AS decimal), 0) as total
+        FROM purchase_invoices pi
+        LEFT JOIN enterprises e ON pi.enterprise_id = e.id
+        LEFT JOIN business_units bu ON pi.business_unit_id = bu.id
+        WHERE pi.company_id = ${companyId}
+          AND pi.status = 'active'
+          AND (bu.is_fiscal = true OR pi.business_unit_id IS NULL)
+          AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
+          AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
+          ${buFilter}
+        ORDER BY pi.invoice_date ASC, pi.invoice_number ASC
         LIMIT ${LIBRO_MAX_ROWS}
       `);
 
@@ -248,17 +270,20 @@ export class AccountingService {
         GROUP BY TO_CHAR(invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM')
       `);
 
-      // Credito fiscal: IVA from active purchases by month
+      // Credito fiscal: IVA from purchase_invoices (facturas de compra) by month
+      // Only from fiscal business units
       const creditoResult = await db.execute(sql`
         SELECT
-          TO_CHAR(date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as periodo,
-          COALESCE(SUM(COALESCE(CAST(vat_amount AS decimal), 0)), 0) as credito_fiscal
-        FROM purchases
-        WHERE company_id = ${companyId}
-          AND status = 'activa'
-          AND (date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
-          AND (date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
-        GROUP BY TO_CHAR(date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM')
+          TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as periodo,
+          COALESCE(SUM(COALESCE(CAST(pi.vat_amount AS decimal), 0)), 0) as credito_fiscal
+        FROM purchase_invoices pi
+        LEFT JOIN business_units bu ON pi.business_unit_id = bu.id
+        WHERE pi.company_id = ${companyId}
+          AND pi.status = 'active'
+          AND (bu.is_fiscal = true OR pi.business_unit_id IS NULL)
+          AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
+          AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
+        GROUP BY TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM')
       `);
 
       // Build lookup maps

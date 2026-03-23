@@ -135,7 +135,7 @@ const emptyFormItem = (): FormItem => ({
   unit_price: 0,
   cost: 0,
   product_type: 'otro',
-  deduct_stock: false,
+  deduct_stock: true,
   category_ids: [],
 })
 

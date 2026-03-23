@@ -7,6 +7,7 @@ import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { exportMultiSheetExcel } from '@/components/shared/ExportExcel'
 import { PlanBadge } from '@/components/billing/PlanBadge'
+import { BusinessUnitSelector } from '@/components/ui/BusinessUnitSelector'
 import { useBilling } from '@/hooks/useBilling'
 import type { FeatureKey } from '@/hooks/useBilling'
 
@@ -57,6 +58,7 @@ const navSections: NavSection[] = [
     label: 'Abastecimiento',
     items: [
       { href: '/compras', label: 'Compras', icon: '🛒', module: 'purchases' },
+      { href: '/facturas-compra', label: 'Facturas Compra', icon: '🧾', module: 'purchases' },
       { href: '/products', label: 'Productos', icon: '📦', module: 'products' },
     ],
   },
@@ -177,6 +179,9 @@ export const Sidebar: React.FC = () => {
         <h1 className="text-xl font-bold">BeckerVisual</h1>
         <p className="text-xs text-gray-400">Gestor Comercial</p>
       </div>
+
+      {/* Business Unit Selector */}
+      <BusinessUnitSelector className="py-3 border-b border-gray-700 dark:border-gray-800" />
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-3">

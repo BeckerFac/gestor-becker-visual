@@ -26,10 +26,13 @@ export class ChequesService {
     }
   }
 
-  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string } = {}) {
+  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string; business_unit_id?: string } = {}) {
     await this.ensureMigrations();
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
+      if (filters.business_unit_id) {
+        whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
+      }
       if (filters.status && filters.status !== 'todos') {
         whereClause = sql`${whereClause} AND c.status = ${filters.status}`;
       }
@@ -66,8 +69,8 @@ export class ChequesService {
     try {
       const chequeId = uuid();
       await db.execute(sql`
-        INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, customer_id, order_id, notes, created_by)
-        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, 'a_cobrar', ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${userId})
+        INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, customer_id, order_id, notes, business_unit_id, created_by)
+        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, 'a_cobrar', ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
       `);
       return { id: chequeId, status: 'a_cobrar' };
     } catch (error) {
@@ -267,6 +270,122 @@ export class ChequesService {
     } catch (error) {
       throw new ApiError(500, 'Failed to get cheques summary');
     }
+  }
+  /**
+   * Endorse a cheque to pay a provider.
+   * Creates a pago, updates cheque status, and creates CC adjustment for excess.
+   */
+  async endorseCheque(companyId: string, userId: string, chequeId: string, data: {
+    enterprise_id: string;      // Provider to pay
+    amount: number;             // Amount to pay (must be <= cheque.amount)
+    purchase_invoice_id?: string; // Optional: link pago to purchase invoice
+    notes?: string;
+  }) {
+    await this.ensureMigrations();
+
+    // Get cheque
+    const chequeResult = await db.execute(sql`
+      SELECT * FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
+    `);
+    const cheque = ((chequeResult as any).rows || [])[0];
+    if (!cheque) throw new ApiError(404, 'Cheque no encontrado');
+
+    // V1: Must be 'a_cobrar'
+    if (cheque.status !== 'a_cobrar') {
+      throw new ApiError(400, 'Solo se pueden endosar cheques en estado "a cobrar"');
+    }
+
+    // V2: Amount must be <= cheque amount
+    const chequeAmount = parseFloat(cheque.amount);
+    if (data.amount > chequeAmount) {
+      throw new ApiError(400, `Cheque ($${chequeAmount.toFixed(2)}) insuficiente para pago ($${data.amount.toFixed(2)})`);
+    }
+
+    if (data.amount <= 0) {
+      throw new ApiError(400, 'El monto a pagar debe ser mayor a 0');
+    }
+
+    // V3: Verify enterprise
+    const entCheck = await db.execute(sql`
+      SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}
+    `);
+    if (((entCheck as any).rows || []).length === 0) {
+      throw new ApiError(400, 'Proveedor no valido');
+    }
+
+    // CREATE pago
+    const pagoId = uuid();
+    const pendingStatus = data.purchase_invoice_id ? null : 'pending_invoice';
+    await db.execute(sql`
+      INSERT INTO pagos (id, company_id, enterprise_id, amount, payment_method, payment_date, notes, business_unit_id, pending_status, cheque_id, created_by)
+      VALUES (${pagoId}, ${companyId}, ${data.enterprise_id}, ${data.amount.toString()}, 'cheque_endosado', NOW(), ${data.notes || `Endoso cheque #${cheque.number}`}, ${cheque.business_unit_id || null}, ${pendingStatus}, ${chequeId}, ${userId})
+    `);
+
+    // Link pago to purchase invoice if provided
+    if (data.purchase_invoice_id) {
+      try {
+        const { pagoApplicationsService } = await import('../pago-applications/pago-applications.service');
+        await pagoApplicationsService.linkPagoToPurchaseInvoice(
+          companyId, userId, pagoId, data.purchase_invoice_id, data.amount
+        );
+      } catch (err) {
+        console.warn('Error linking pago to purchase invoice during endorsement:', err);
+      }
+    }
+
+    // UPDATE cheque status to 'endosado'
+    await db.execute(sql`
+      UPDATE cheques SET
+        status = 'endosado',
+        endorsed_to_enterprise_id = ${data.enterprise_id},
+        endorsed_pago_id = ${pagoId},
+        endorsed_at = NOW()
+      WHERE id = ${chequeId}
+    `);
+
+    // Record history
+    await db.execute(sql`
+      INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
+      VALUES (${chequeId}, 'a_cobrar', 'endosado', ${`Endosado a proveedor por $${data.amount.toFixed(2)}`}, ${userId})
+    `);
+
+    // Handle excess: cheque amount > pago amount
+    const excess = chequeAmount - data.amount;
+    if (excess > 0.01) {
+      await db.execute(sql`
+        INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by)
+        VALUES (${companyId}, ${data.enterprise_id}, ${(-excess).toString()}, ${`Exceso por endoso de cheque #${cheque.number} ($${chequeAmount.toFixed(2)} cheque - $${data.amount.toFixed(2)} pago)`}, 'credit', ${userId})
+      `);
+    }
+
+    return {
+      pago_id: pagoId,
+      cheque_id: chequeId,
+      endorsed_to: data.enterprise_id,
+      amount_paid: data.amount,
+      excess,
+      cheque_status: 'endosado',
+    };
+  }
+
+  /**
+   * Get cheques available for endorsement (status = 'a_cobrar').
+   */
+  async getChequesForEndorsement(companyId: string, businessUnitId?: string) {
+    let whereClause = sql`c.company_id = ${companyId} AND c.status = 'a_cobrar'`;
+    if (businessUnitId) {
+      whereClause = sql`${whereClause} AND c.business_unit_id = ${businessUnitId}`;
+    }
+
+    const result = await db.execute(sql`
+      SELECT c.id, c.number, c.bank, c.drawer, c.amount, c.issue_date, c.due_date,
+        cu.name as customer_name
+      FROM cheques c
+      LEFT JOIN customers cu ON c.customer_id = cu.id
+      WHERE ${whereClause}
+      ORDER BY c.due_date ASC
+    `);
+    return (result as any).rows || [];
   }
 }
 

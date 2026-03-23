@@ -51,6 +51,7 @@ export class OrdersService {
     product_type?: string;
     customer_id?: string;
     enterprise_id?: string;
+    business_unit_id?: string;
     has_invoice?: string;
     search?: string;
     skip?: number;
@@ -58,9 +59,12 @@ export class OrdersService {
   } = {}) {
     await this.ensureMigrations();
     try {
-      const { status, product_type, customer_id, enterprise_id, has_invoice, search, skip = 0, limit = 50 } = filters;
+      const { status, product_type, customer_id, enterprise_id, business_unit_id, has_invoice, search, skip = 0, limit = 50 } = filters;
 
       let whereClause = sql`o.company_id = ${companyId}`;
+      if (business_unit_id) {
+        whereClause = sql`${whereClause} AND o.business_unit_id = ${business_unit_id}`;
+      }
 
       if (status && status !== 'todos') {
         whereClause = sql`${whereClause} AND o.status = ${status}`;
@@ -260,8 +264,8 @@ export class OrdersService {
       }
 
       await db.execute(sql`
-        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, notes, created_by)
-        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${data.notes || null}, ${userId})
+        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, notes, created_by)
+        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${data.notes || null}, ${userId})
       `);
 
       // Insert items

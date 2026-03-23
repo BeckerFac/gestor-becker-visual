@@ -4,6 +4,16 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { inventoryService } from '../inventory/inventory.service';
 
+/**
+ * PurchasesService handles purchase orders (compras).
+ *
+ * IMPORTANT: As of the Razones Sociales refactor (2026-03-23):
+ * - purchases.invoice_type, invoice_number, invoice_cae are DEPRECATED embedded fields
+ * - New system uses separate purchase_invoices table (1 purchase → N purchase invoices)
+ * - Use PurchaseInvoicesService for CRUD on provider invoices
+ * - Use PagoApplicationsService for linking pagos to purchase_invoices
+ * - CC calculation uses purchase_invoices, not purchases directly
+ */
 export class PurchasesService {
   private tablesEnsured = false;
 
@@ -53,10 +63,13 @@ export class PurchasesService {
     }
   }
 
-  async getPurchases(companyId: string, filters: { enterprise_id?: string } = {}) {
+  async getPurchases(companyId: string, filters: { enterprise_id?: string; business_unit_id?: string } = {}) {
     await this.ensureTables();
     try {
       let whereClause = sql`p.company_id = ${companyId}`;
+      if (filters.business_unit_id) {
+        whereClause = sql`${whereClause} AND p.business_unit_id = ${filters.business_unit_id}`;
+      }
       if (filters.enterprise_id) {
         whereClause = sql`${whereClause} AND p.enterprise_id = ${filters.enterprise_id}`;
       }
@@ -134,8 +147,8 @@ export class PurchasesService {
       }
 
       await db.execute(sql`
-        INSERT INTO purchases (id, company_id, enterprise_id, purchase_number, date, invoice_type, invoice_number, invoice_cae, subtotal, vat_amount, total_amount, payment_method, payment_status, bank_id, notes, created_by)
-        VALUES (${purchaseId}, ${companyId}, ${data.enterprise_id || null}, ${purchaseNumber}, ${data.date || new Date().toISOString()}, ${data.invoice_type || null}, ${data.invoice_number || null}, ${data.invoice_cae || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, ${data.payment_method || null}, ${data.payment_status || 'pendiente'}, ${data.bank_id || null}, ${data.notes || null}, ${userId})
+        INSERT INTO purchases (id, company_id, enterprise_id, purchase_number, date, invoice_type, invoice_number, invoice_cae, subtotal, vat_amount, total_amount, payment_method, payment_status, bank_id, notes, business_unit_id, created_by)
+        VALUES (${purchaseId}, ${companyId}, ${data.enterprise_id || null}, ${purchaseNumber}, ${data.date || new Date().toISOString()}, ${data.invoice_type || null}, ${data.invoice_number || null}, ${data.invoice_cae || null}, ${subtotal.toString()}, ${vatAmount.toString()}, ${totalAmount.toString()}, ${data.payment_method || null}, ${data.payment_status || 'pendiente'}, ${data.bank_id || null}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
       `);
 
       if (data.items && Array.isArray(data.items)) {

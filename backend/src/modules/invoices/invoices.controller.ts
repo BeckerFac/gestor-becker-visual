@@ -24,6 +24,7 @@ export class InvoicesController {
         skip: Math.max(0, parseInt(req.query.skip as string) || 0),
         limit: Math.max(1, Math.min(parseInt(req.query.limit as string) || 50, 200)),
         enterprise_id: req.query.enterprise_id as string,
+        business_unit_id: req.query.business_unit_id as string,
         status: req.query.status as string,
         invoice_type: req.query.invoice_type as string,
         search: req.query.search as string,
@@ -146,6 +147,15 @@ export class InvoicesController {
       }
       res.status(500).json({ error: 'Failed to authorize invoice' });
     }
+  }
+  async getOrderRemainingToInvoice(req: AuthRequest, res: Response) {
+    const data = await invoicesService.getOrderRemainingToInvoice(req.user!.company_id, req.params.orderId);
+    res.json(data);
+  }
+
+  async getInvoicesByOrder(req: AuthRequest, res: Response) {
+    const data = await invoicesService.getInvoicesByOrder(req.user!.company_id, req.params.orderId);
+    res.json(data);
   }
 }
 

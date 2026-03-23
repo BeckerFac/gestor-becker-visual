@@ -9,6 +9,7 @@ export class OrdersController {
       product_type: req.query.product_type as string,
       customer_id: req.query.customer_id as string,
       enterprise_id: req.query.enterprise_id as string,
+      business_unit_id: req.query.business_unit_id as string,
       has_invoice: req.query.has_invoice as string,
       search: req.query.search as string,
       skip: parseInt(req.query.skip as string) || 0,

@@ -28,43 +28,58 @@
 <body>
   <div id="root"></div>
   <script>
-    // Auto-recovery: detect blank page and fix it
-    // This runs BEFORE React — catches SW cache issues
+    // Auto-recovery: detect blank page / stale SW cache / JS load errors
     (function() {
       var RECOVERY_KEY = '__gestia_recovery';
       var recoveryAttempt = parseInt(sessionStorage.getItem(RECOVERY_KEY) || '0');
+      var recovered = false;
 
-      function recover() {
-        var root = document.getElementById('root');
-        if (root && root.children.length > 0) return; // React rendered OK
-
-        if (recoveryAttempt >= 2) {
-          // Already tried twice — show manual message
-          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;flex-direction:column;gap:12px;background:#0A0A0F;color:white"><p>Actualizando aplicacion...</p><p style="font-size:13px;color:#999">Limpiando cache</p></div>';
-          sessionStorage.removeItem(RECOVERY_KEY);
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(reg){reg.unregister()})});
-            caches.keys().then(function(n){n.forEach(function(name){caches.delete(name)})});
-          }
-          setTimeout(function(){ location.href = location.origin + '/dashboard'; }, 2000);
-          return;
+      function nukeSwAndReload(showMsg) {
+        if (recovered) return;
+        recovered = true;
+        if (showMsg) {
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;flex-direction:column;gap:12px;background:#0A0A0F;color:white"><p>Actualizando...</p><p style="font-size:13px;color:#999">Limpiando cache</p></div>';
         }
-
-        sessionStorage.setItem(RECOVERY_KEY, String(recoveryAttempt + 1));
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(reg){reg.unregister()})});
           caches.keys().then(function(n){n.forEach(function(name){caches.delete(name)})});
         }
-        setTimeout(function(){ location.reload(); }, 500);
+        if (recoveryAttempt >= 2) {
+          sessionStorage.removeItem(RECOVERY_KEY);
+          setTimeout(function(){ location.href = location.origin + '/dashboard'; }, 1500);
+        } else {
+          sessionStorage.setItem(RECOVERY_KEY, String(recoveryAttempt + 1));
+          setTimeout(function(){ location.reload(); }, 400);
+        }
       }
 
-      // Check after 3 seconds
-      setTimeout(recover, 3000);
+      // Catch JS module load errors (stale SW serving 404 for new asset hashes)
+      window.addEventListener('error', function(e) {
+        if (e.message && (e.message.indexOf('Failed to fetch') !== -1 || e.message.indexOf('Loading module') !== -1 || e.message.indexOf('Importing a module') !== -1 || e.message.indexOf('dynamically imported') !== -1)) {
+          nukeSwAndReload(true);
+        }
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var msg = (e.reason && (e.reason.message || String(e.reason))) || '';
+        if (msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('Loading chunk') !== -1 || msg.indexOf('dynamically imported') !== -1) {
+          nukeSwAndReload(true);
+        }
+      });
 
-      // Also cancel if React renders
+      // Blank page check at 1.5s
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        if (!root || root.children.length === 0) {
+          nukeSwAndReload(recoveryAttempt >= 1);
+        }
+      }, 1500);
+
+      // Cancel recovery once React renders
       var obs = new MutationObserver(function() {
-        if (document.getElementById('root').children.length > 0) {
+        var root = document.getElementById('root');
+        if (root && root.children.length > 0) {
           sessionStorage.removeItem(RECOVERY_KEY);
+          recovered = true;
           obs.disconnect();
         }
       });

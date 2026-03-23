@@ -7,6 +7,7 @@ export class PurchasesController {
   async getPurchases(req: AuthRequest, res: Response) {
     const data = await purchasesService.getPurchases(req.user!.company_id, {
       enterprise_id: req.query.enterprise_id as string,
+      business_unit_id: req.query.business_unit_id as string,
     });
     res.json(data);
   }

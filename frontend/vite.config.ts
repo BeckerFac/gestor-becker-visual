@@ -40,13 +40,14 @@ export default defineConfig({
       },
       workbox: {
         // NEVER precache index.html — always fetch from network
-        // This prevents blank page when new deploy has different asset hashes
         globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
         navigateFallback: null,
         navigateFallbackDenylist: [/^\/api\//],
         // Skip waiting and claim clients immediately on update
         skipWaiting: true,
         clientsClaim: true,
+        // Auto-cleanup old precaches from previous deploys
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/gestor-becker-backend\.onrender\.com\/api\/.*/i,

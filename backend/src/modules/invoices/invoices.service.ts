@@ -99,9 +99,9 @@ export class InvoicesService {
         // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
         await db.execute(sql`
           INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
-            subtotal, vat_amount, total_amount, status, fiscal_type, created_by, created_at, updated_at)
+            subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
           VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, NULL, ${nextNumber}, NOW(),
-            '0', '0', '0', 'emitido', ${fiscalType}, ${userId}, NOW(), NOW())
+            '0', '0', '0', 'emitido', ${fiscalType}, ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
         `);
       } else {
         await db.insert(invoices).values({
@@ -119,10 +119,10 @@ export class InvoicesService {
         }).returning();
       }
 
-      // Set order_id, enterprise_id and fiscal_type via raw SQL (columns added by migration)
+      // Set order_id, enterprise_id, fiscal_type and business_unit_id via raw SQL (columns added by migration)
       await db.execute(sql`
         UPDATE invoices SET order_id = ${data.order_id || null}, enterprise_id = ${enterpriseId},
-          fiscal_type = ${fiscalType}
+          fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null}
         WHERE id = ${invoiceId}
       `);
 
@@ -227,6 +227,7 @@ export class InvoicesService {
     skip?: number;
     limit?: number;
     enterprise_id?: string;
+    business_unit_id?: string;
     status?: string;
     invoice_type?: string;
     search?: string;
@@ -236,7 +237,7 @@ export class InvoicesService {
   } = {}) {
     await this.ensureMigrations();
     try {
-      const { enterprise_id, status, invoice_type, search, date_from, date_to, fiscal_type } = filters;
+      const { enterprise_id, business_unit_id, status, invoice_type, search, date_from, date_to, fiscal_type } = filters;
       const skip = Math.max(0, Math.min(Number(filters.skip) || 0, 100000));
       const limit = Math.max(1, Math.min(Number(filters.limit) || 50, 200));
 
@@ -250,6 +251,9 @@ export class InvoicesService {
         // show all
       } else {
         whereClause = sql`${whereClause} AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)`;
+      }
+      if (business_unit_id) {
+        whereClause = sql`${whereClause} AND i.business_unit_id = ${business_unit_id}`;
       }
       if (enterprise_id) {
         whereClause = sql`${whereClause} AND (i.enterprise_id = ${enterprise_id} OR c.enterprise_id = ${enterprise_id})`;
@@ -880,6 +884,50 @@ export class InvoicesService {
       console.error('Authorize invoice error:', error);
       throw new ApiError(500, 'Error al autorizar factura');
     }
+  }
+  /**
+   * Get remaining amount to invoice for an order.
+   * order.total - SUM(invoices.total_amount) for non-cancelled invoices.
+   */
+  async getOrderRemainingToInvoice(companyId: string, orderId: string) {
+    const result = await db.execute(sql`
+      SELECT
+        CAST(o.total_amount AS decimal) as order_total,
+        COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as invoiced_total
+      FROM orders o
+      LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
+      WHERE o.id = ${orderId} AND o.company_id = ${companyId}
+      GROUP BY o.id, o.total_amount
+    `);
+    const row = ((result as any).rows || [])[0];
+    if (!row) throw new ApiError(404, 'Pedido no encontrado');
+
+    const orderTotal = parseFloat(row.order_total);
+    const invoicedTotal = parseFloat(row.invoiced_total);
+
+    return {
+      order_id: orderId,
+      order_total: orderTotal,
+      invoiced_total: invoicedTotal,
+      remaining: Math.max(0, orderTotal - invoicedTotal),
+    };
+  }
+
+  /**
+   * Get all invoices for a specific order.
+   */
+  async getInvoicesByOrder(companyId: string, orderId: string) {
+    const result = await db.execute(sql`
+      SELECT i.id, i.invoice_number, i.invoice_type, i.invoice_date,
+        i.subtotal, i.vat_amount, i.total_amount, i.status, i.fiscal_type,
+        i.payment_status, i.cae,
+        e.name as enterprise_name
+      FROM invoices i
+      LEFT JOIN enterprises e ON i.enterprise_id = e.id
+      WHERE i.order_id = ${orderId} AND i.company_id = ${companyId}
+      ORDER BY i.invoice_date DESC
+    `);
+    return (result as any).rows || [];
   }
 }
 

@@ -63,6 +63,10 @@ import { materialsRouter } from './modules/materials/materials.router';
 import { recurringInvoicesRouter } from './modules/recurring-invoices/recurring-invoices.router';
 import { integrationsRouter } from './modules/integrations/integrations.router';
 import { remindersRouter } from './modules/reminders/reminders.router';
+import { businessUnitsRouter } from './modules/business-units/business-units.router';
+import { cobroApplicationsRouter } from './modules/cobro-applications/cobro-applications.router';
+import { purchaseInvoicesRouter } from './modules/purchase-invoices/purchase-invoices.router';
+import { pagoApplicationsRouter } from './modules/pago-applications/pago-applications.router';
 
 export const app = express();
 
@@ -212,6 +216,10 @@ app.use('/api/materials', authMiddleware, materialsRouter);
 app.use('/api/recurring-invoices', authMiddleware, recurringInvoicesRouter);
 app.use('/api/integrations', authMiddleware, integrationsRouter);
 app.use('/api/reminders', authMiddleware, remindersRouter);
+app.use('/api/business-units', authMiddleware, businessUnitsRouter);
+app.use('/api/payment-applications', authMiddleware, cobroApplicationsRouter);
+app.use('/api/purchase-invoices', authMiddleware, purchaseInvoicesRouter);
+app.use('/api/pago-applications', authMiddleware, pagoApplicationsRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);

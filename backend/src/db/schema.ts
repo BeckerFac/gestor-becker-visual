@@ -349,6 +349,89 @@ export const audit_log = pgTable('audit_log', {
   userIdx: index('audit_log_user_idx').on(table.user_id),
 }));
 
+// ============ BUSINESS UNITS (Razones Sociales) ============
+
+export const business_units = pgTable('business_units', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  company_id: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 255 }).notNull(),
+  is_fiscal: boolean('is_fiscal').default(false),
+  cuit: varchar('cuit', { length: 20 }),
+  address: text('address'),
+  iibb_number: varchar('iibb_number', { length: 30 }),
+  afip_start_date: timestamp('afip_start_date', { withTimezone: true }),
+  sort_order: integer('sort_order').default(0),
+  active: boolean('active').default(true),
+  created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  created_by: uuid('created_by'),
+}, (table) => ({
+  uniqueNamePerCompany: uniqueIndex('unique_bu_name_per_company').on(table.company_id, table.name),
+  companyIdx: index('business_units_company_idx').on(table.company_id),
+}));
+
+// ============ PURCHASE INVOICES (Facturas de Compra) ============
+
+export const purchase_invoices = pgTable('purchase_invoices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  company_id: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  business_unit_id: uuid('business_unit_id').notNull(),
+  enterprise_id: uuid('enterprise_id').notNull(),
+  purchase_id: uuid('purchase_id'), // nullable: can be standalone (services, rent, etc.)
+  invoice_type: varchar('invoice_type', { length: 5 }).notNull(), // 'A', 'B', 'C'
+  punto_venta: varchar('punto_venta', { length: 10 }),
+  invoice_number: varchar('invoice_number', { length: 50 }).notNull(),
+  invoice_date: timestamp('invoice_date', { withTimezone: true }).notNull(),
+  cae: varchar('cae', { length: 20 }),
+  cae_expiry_date: timestamp('cae_expiry_date', { withTimezone: true }),
+  subtotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull().default('0'),
+  vat_amount: decimal('vat_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  other_taxes: decimal('other_taxes', { precision: 12, scale: 2 }).default('0'),
+  total_amount: decimal('total_amount', { precision: 12, scale: 2 }).notNull(),
+  payment_status: varchar('payment_status', { length: 20 }).default('pendiente'),
+  status: varchar('status', { length: 20 }).default('active'),
+  notes: text('notes'),
+  created_by: uuid('created_by'),
+  created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  companyBuIdx: index('pi_company_bu_idx').on(table.company_id, table.business_unit_id),
+  enterpriseIdx: index('pi_enterprise_idx').on(table.enterprise_id),
+  purchaseIdx: index('pi_purchase_idx').on(table.purchase_id),
+  paymentStatusIdx: index('pi_payment_status_idx').on(table.company_id, table.payment_status),
+}));
+
+// ============ COBRO ↔ INVOICE APPLICATIONS (N:N) ============
+
+export const cobro_invoice_applications = pgTable('cobro_invoice_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cobro_id: uuid('cobro_id').notNull(),
+  invoice_id: uuid('invoice_id').notNull().references(() => invoices.id, { onDelete: 'cascade' }),
+  amount_applied: decimal('amount_applied', { precision: 12, scale: 2 }).notNull(),
+  applied_at: timestamp('applied_at', { withTimezone: true }).defaultNow(),
+  created_by: uuid('created_by'),
+  notes: text('notes'),
+}, (table) => ({
+  uniqueCobroInvoice: uniqueIndex('unique_cobro_invoice').on(table.cobro_id, table.invoice_id),
+  cobroIdx: index('cia_cobro_idx').on(table.cobro_id),
+  invoiceIdx: index('cia_invoice_idx').on(table.invoice_id),
+}));
+
+// ============ PAGO ↔ PURCHASE INVOICE APPLICATIONS (N:N) ============
+
+export const pago_invoice_applications = pgTable('pago_invoice_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pago_id: uuid('pago_id').notNull(),
+  purchase_invoice_id: uuid('purchase_invoice_id').notNull().references(() => purchase_invoices.id, { onDelete: 'cascade' }),
+  amount_applied: decimal('amount_applied', { precision: 12, scale: 2 }).notNull(),
+  applied_at: timestamp('applied_at', { withTimezone: true }).defaultNow(),
+  created_by: uuid('created_by'),
+}, (table) => ({
+  uniquePagoPurchaseInvoice: uniqueIndex('unique_pago_purchase_invoice').on(table.pago_id, table.purchase_invoice_id),
+  pagoIdx: index('pia_pago_idx').on(table.pago_id),
+  purchaseInvoiceIdx: index('pia_purchase_invoice_idx').on(table.purchase_invoice_id),
+}));
+
 // Type exports for use in queries
 export type Company = typeof companies.$inferSelect;
 export type User = typeof users.$inferSelect;
@@ -357,3 +440,7 @@ export type Customer = typeof customers.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type Stock = typeof stock.$inferSelect;
 export type Invitation = typeof invitations.$inferSelect;
+export type BusinessUnit = typeof business_units.$inferSelect;
+export type PurchaseInvoice = typeof purchase_invoices.$inferSelect;
+export type CobroInvoiceApplication = typeof cobro_invoice_applications.$inferSelect;
+export type PagoInvoiceApplication = typeof pago_invoice_applications.$inferSelect;

@@ -3,49 +3,106 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
 export class CuentaCorrienteService {
-  async getResumen(companyId: string) {
+  /**
+   * Get CC summary per enterprise, optionally filtered by business_unit_id.
+   *
+   * NEW calculation using cobro_invoice_applications and pago_invoice_applications:
+   * - total_ventas = SUM(invoices.total_amount) where status != cancelled
+   * - total_cobros_aplicados = SUM(cobro_invoice_applications.amount_applied) via invoices
+   * - adelantos_cobros = SUM(cobros.amount) where pending_status = 'pending_invoice'
+   * - total_compras = SUM(purchase_invoices.total_amount) where status != cancelled
+   * - total_pagos_aplicados = SUM(pago_invoice_applications.amount_applied) via purchase_invoices
+   * - adelantos_pagos = SUM(pagos.amount) where pending_status = 'pending_invoice'
+   * - ajustes debit/credit from account_adjustments
+   */
+  async getResumen(companyId: string, businessUnitId?: string) {
     try {
+      const buFilter = businessUnitId
+        ? sql` AND business_unit_id = ${businessUnitId}`
+        : sql``;
+
       const result = await db.execute(sql`
         SELECT
           e.id, e.name, e.cuit, e.status,
+
+          -- Ventas: facturas no canceladas
           COALESCE((
             SELECT SUM(CAST(i.total_amount AS decimal))
             FROM invoices i
-            LEFT JOIN enterprises ie ON i.enterprise_id = ie.id
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status = 'authorized'
-              AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
+              AND i.status != 'cancelled'
+              ${buFilter}
           ), 0) as total_ventas,
+
+          -- Cobros aplicados (via tabla intermedia)
+          COALESCE((
+            SELECT SUM(CAST(cia.amount_applied AS decimal))
+            FROM cobro_invoice_applications cia
+            JOIN invoices i ON cia.invoice_id = i.id
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              ${buFilter}
+          ), 0) as total_cobros_aplicados,
+
+          -- Adelantos cobros (cobros sin factura asignada)
           COALESCE((
             SELECT SUM(CAST(co.amount AS decimal))
             FROM cobros co
-            WHERE co.company_id = ${companyId} AND co.enterprise_id = e.id
-          ), 0) as total_cobros,
+            WHERE co.company_id = ${companyId}
+              AND co.enterprise_id = e.id
+              AND co.pending_status = 'pending_invoice'
+              ${buFilter}
+          ), 0) as total_adelantos_cobros,
+
+          -- Compras: purchase_invoices no canceladas
           COALESCE((
-            SELECT SUM(CAST(p.total_amount AS decimal))
-            FROM purchases p
-            WHERE p.company_id = ${companyId} AND p.enterprise_id = e.id
-              AND p.status != 'cancelada'
+            SELECT SUM(CAST(pi.total_amount AS decimal))
+            FROM purchase_invoices pi
+            WHERE pi.company_id = ${companyId}
+              AND pi.enterprise_id = e.id
+              AND pi.status != 'cancelled'
+              ${buFilter}
           ), 0) as total_compras,
+
+          -- Pagos aplicados (via tabla intermedia)
+          COALESCE((
+            SELECT SUM(CAST(pia.amount_applied AS decimal))
+            FROM pago_invoice_applications pia
+            JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+            WHERE pi.company_id = ${companyId}
+              AND pi.enterprise_id = e.id
+              ${buFilter}
+          ), 0) as total_pagos_aplicados,
+
+          -- Adelantos pagos (pagos sin factura asignada)
           COALESCE((
             SELECT SUM(CAST(pa.amount AS decimal))
             FROM pagos pa
-            WHERE pa.company_id = ${companyId} AND pa.enterprise_id = e.id
-          ), 0) as total_pagos,
+            WHERE pa.company_id = ${companyId}
+              AND pa.enterprise_id = e.id
+              AND pa.pending_status = 'pending_invoice'
+              ${buFilter}
+          ), 0) as total_adelantos_pagos,
+
+          -- Ajustes debit
           COALESCE((
             SELECT SUM(CAST(aa.amount AS decimal))
             FROM account_adjustments aa
             WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
               AND aa.adjustment_type = 'debit'
           ), 0) as total_ajustes_debit,
+
+          -- Ajustes credit
           COALESCE((
             SELECT SUM(ABS(CAST(aa.amount AS decimal)))
             FROM account_adjustments aa
             WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
               AND aa.adjustment_type = 'credit'
           ), 0) as total_ajustes_credit
+
         FROM enterprises e
         WHERE e.company_id = ${companyId}
         ORDER BY e.name ASC
@@ -54,21 +111,30 @@ export class CuentaCorrienteService {
 
       return rows.map((r: any) => {
         const ventas = parseFloat(r.total_ventas || '0');
-        const cobros = parseFloat(r.total_cobros || '0');
+        const cobrosAplicados = parseFloat(r.total_cobros_aplicados || '0');
+        const adelantosCobros = parseFloat(r.total_adelantos_cobros || '0');
         const compras = parseFloat(r.total_compras || '0');
-        const pagos = parseFloat(r.total_pagos || '0');
+        const pagosAplicados = parseFloat(r.total_pagos_aplicados || '0');
+        const adelantosPagos = parseFloat(r.total_adelantos_pagos || '0');
         const ajustesDebit = parseFloat(r.total_ajustes_debit || '0');
         const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
-        // Debit adjustments increase "nos deben", credit adjustments decrease it (like cobros)
-        const aCobrar = ventas + ajustesDebit - cobros - ajustesCredit;
-        const aPagar = compras - pagos;
+
+        // A cobrar = ventas + ajustes_debit - cobros_aplicados - adelantos_cobros - ajustes_credit
+        const aCobrar = ventas + ajustesDebit - cobrosAplicados - adelantosCobros - ajustesCredit;
+        // A pagar = compras - pagos_aplicados - adelantos_pagos
+        const aPagar = compras - pagosAplicados - adelantosPagos;
         const balance = aCobrar - aPagar;
+
         return {
           ...r,
           total_ventas: ventas,
-          total_cobros: cobros,
+          total_cobros: cobrosAplicados + adelantosCobros,
+          total_cobros_aplicados: cobrosAplicados,
+          adelantos_cobros: adelantosCobros,
           total_compras: compras,
-          total_pagos: pagos,
+          total_pagos: pagosAplicados + adelantosPagos,
+          total_pagos_aplicados: pagosAplicados,
+          adelantos_pagos: adelantosPagos,
           a_cobrar: aCobrar,
           a_pagar: aPagar,
           saldo: balance,
@@ -80,7 +146,7 @@ export class CuentaCorrienteService {
     }
   }
 
-  async getDetalle(companyId: string, enterpriseId: string) {
+  async getDetalle(companyId: string, enterpriseId: string, businessUnitId?: string) {
     try {
       const entCheck = await db.execute(sql`
         SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
@@ -89,36 +155,55 @@ export class CuentaCorrienteService {
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entRows[0];
 
-      // Facturado AFIP (facturas autorizadas) -- nos deben
-      let ordersResult: any = { rows: [] };
+      const buFilter = businessUnitId ? sql` AND business_unit_id = ${businessUnitId}` : sql``;
+
+      // Facturas de venta (nos deben)
+      let invoicesResult: any = { rows: [] };
       try {
-        ordersResult = await db.execute(sql`
+        invoicesResult = await db.execute(sql`
           SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
             'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' ||
               LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
-            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
+            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto,
+            i.payment_status
           FROM invoices i
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status = 'authorized'
-            AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
+            AND i.status != 'cancelled'
+            ${buFilter}
         `);
-      } catch (e) {
-        console.error('Cuenta corriente: invoices query failed, falling back to empty', (e as any)?.message);
-      }
+      } catch (e) { console.error('CC detalle: invoices query failed', (e as any)?.message); }
 
-      // Cobros -- nos pagaron
+      // Cobros aplicados (nos pagaron - con detalle de factura)
       let cobrosResult: any = { rows: [] };
       try {
         cobrosResult = await db.execute(sql`
-          SELECT co.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
+          SELECT cia.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '')
+            || ' → Fact ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
+            CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
+          FROM cobro_invoice_applications cia
+          JOIN cobros co ON cia.cobro_id = co.id
+          JOIN invoices i ON cia.invoice_id = i.id
+          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+            ${buFilter}
+        `);
+      } catch (e) { console.error('CC detalle: cobros query failed', (e as any)?.message); }
+
+      // Adelantos cobros (cobros sin factura)
+      let adelantosResult: any = { rows: [] };
+      try {
+        adelantosResult = await db.execute(sql`
+          SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+            'Adelanto' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
             CAST(COALESCE(co.amount, 0) AS decimal) as monto
           FROM cobros co
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+            AND co.pending_status = 'pending_invoice'
+            ${buFilter}
         `);
-      } catch (e) { console.error('Cuenta corriente: cobros query failed', (e as any)?.message); }
+      } catch (e) { console.error('CC detalle: adelantos query failed', (e as any)?.message); }
 
       // Ajustes manuales
       let adjustmentsResult: any = { rows: [] };
@@ -131,43 +216,69 @@ export class CuentaCorrienteService {
           FROM account_adjustments aa
           WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
         `);
-      } catch (e) { console.error('Cuenta corriente: adjustments query failed', (e as any)?.message); }
+      } catch (e) { console.error('CC detalle: adjustments query failed', (e as any)?.message); }
 
-      // Compras -- les debemos
-      let purchasesResult: any = { rows: [] };
+      // Facturas de compra (les debemos)
+      let purchaseInvoicesResult: any = { rows: [] };
       try {
-        purchasesResult = await db.execute(sql`
-          SELECT p.id, 'compra' as tipo, COALESCE(p.date, p.created_at) as fecha,
-            'Compra #' || LPAD(CAST(COALESCE(p.purchase_number, 0) AS TEXT), 4, '0') as descripcion,
-            CAST(COALESCE(p.total_amount, 0) AS decimal) as monto
-          FROM purchases p
-          WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
-            AND p.status != 'cancelada'
+        purchaseInvoicesResult = await db.execute(sql`
+          SELECT pi.id, 'factura_compra' as tipo, COALESCE(pi.invoice_date, pi.created_at) as fecha,
+            'Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
+            CAST(COALESCE(pi.total_amount, 0) AS decimal) as monto,
+            pi.payment_status
+          FROM purchase_invoices pi
+          WHERE pi.company_id = ${companyId} AND pi.enterprise_id = ${enterpriseId}
+            AND pi.status != 'cancelled'
+            ${buFilter}
         `);
-      } catch (e) { console.error('Cuenta corriente: purchases query failed', (e as any)?.message); }
+      } catch (e) { console.error('CC detalle: purchase_invoices query failed', (e as any)?.message); }
 
-      // Pagos -- les pagamos
+      // Pagos aplicados (les pagamos)
       let pagosResult: any = { rows: [] };
       try {
         pagosResult = await db.execute(sql`
-          SELECT pa.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
+          SELECT pia.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
+            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '')
+            || ' → Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
+            CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
+          FROM pago_invoice_applications pia
+          JOIN pagos pa ON pia.pago_id = pa.id
+          JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+          WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+            ${buFilter}
+        `);
+      } catch (e) { console.error('CC detalle: pagos query failed', (e as any)?.message); }
+
+      // Adelantos pagos
+      let adelantosPagosResult: any = { rows: [] };
+      try {
+        adelantosPagosResult = await db.execute(sql`
+          SELECT pa.id, 'adelanto_pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
+            'Adelanto pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
             CAST(COALESCE(pa.amount, 0) AS decimal) as monto
           FROM pagos pa
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+            AND pa.pending_status = 'pending_invoice'
+            ${buFilter}
         `);
-      } catch (e) { console.error('Cuenta corriente: pagos query failed', (e as any)?.message); }
+      } catch (e) { console.error('CC detalle: adelantos pagos query failed', (e as any)?.message); }
 
-      const orders = ((ordersResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
-      const cobros = ((cobrosResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
-      const adjustments = ((adjustmentsResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
-      const purchases = ((purchasesResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
-      const pagos = ((pagosResult as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
+      const parseRows = (result: any) =>
+        ((result as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
 
-      // Cuentas a Cobrar: Ventas (+), Cobros (-), Ajustes debit (+) / credit (-)
+      const facturas = parseRows(invoicesResult);
+      const cobros = parseRows(cobrosResult);
+      const adelantos = parseRows(adelantosResult);
+      const adjustments = parseRows(adjustmentsResult);
+      const purchaseInvoices = parseRows(purchaseInvoicesResult);
+      const pagos = parseRows(pagosResult);
+      const adelantosPagos = parseRows(adelantosPagosResult);
+
+      // Cuentas a Cobrar
       const movsCobrar = [
-        ...orders.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
+        ...facturas.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
+        ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
         ...adjustments.map((a: any) => ({
           ...a,
           debe: a.adjustment_type === 'debit' ? a.monto : 0,
@@ -181,10 +292,11 @@ export class CuentaCorrienteService {
         return { ...m, saldo: saldoCobrar };
       });
 
-      // Cuentas a Pagar: Compras (+) y Pagos (-)
+      // Cuentas a Pagar
       const movsPagar = [
-        ...purchases.map((p: any) => ({ ...p, debe: p.monto, haber: 0 })),
+        ...purchaseInvoices.map((p: any) => ({ ...p, debe: p.monto, haber: 0 })),
         ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto })),
+        ...adelantosPagos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
       ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
       let saldoPagar = 0;
@@ -197,14 +309,16 @@ export class CuentaCorrienteService {
         enterprise,
         cuentas_a_cobrar: {
           movimientos: movsCobrarConSaldo,
-          total_ventas: orders.reduce((s: number, m: any) => s + m.monto, 0),
+          total_ventas: facturas.reduce((s: number, m: any) => s + m.monto, 0),
           total_cobros: cobros.reduce((s: number, m: any) => s + m.monto, 0),
+          total_adelantos: adelantos.reduce((s: number, m: any) => s + m.monto, 0),
           saldo: saldoCobrar,
         },
         cuentas_a_pagar: {
           movimientos: movsPagarConSaldo,
-          total_compras: purchases.reduce((s: number, m: any) => s + m.monto, 0),
+          total_compras: purchaseInvoices.reduce((s: number, m: any) => s + m.monto, 0),
           total_pagos: pagos.reduce((s: number, m: any) => s + m.monto, 0),
+          total_adelantos: adelantosPagos.reduce((s: number, m: any) => s + m.monto, 0),
           saldo: saldoPagar,
         },
         balance_neto: saldoCobrar - saldoPagar,
@@ -218,7 +332,6 @@ export class CuentaCorrienteService {
 
   async getPdfData(companyId: string, enterpriseId: string, dateFrom: string, dateTo: string) {
     try {
-      // Validate enterprise belongs to company
       const entCheck = await db.execute(sql`
         SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
       `);
@@ -226,18 +339,16 @@ export class CuentaCorrienteService {
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entRows[0];
 
-      // Get company info
       const compCheck = await db.execute(sql`
         SELECT name, cuit FROM companies WHERE id = ${companyId}
       `);
-      const compRows = (compCheck as any).rows || compCheck || [];
-      if (compRows.length === 0) throw new ApiError(404, 'Company not found');
-      const company = compRows[0];
+      const company = ((compCheck as any).rows || [])[0];
+      if (!company) throw new ApiError(404, 'Company not found');
 
-      // ALL transactions (for total balance) - each query wrapped defensively
-      let allOrders: any = { rows: [] };
+      // Facturas de venta
+      let allInvoices: any = { rows: [] };
       try {
-        allOrders = await db.execute(sql`
+        allInvoices = await db.execute(sql`
           SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
             'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
             CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
@@ -245,22 +356,37 @@ export class CuentaCorrienteService {
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status = 'authorized'
-            AND (i.fiscal_type IS NULL OR i.fiscal_type IN ('fiscal', 'no_fiscal'))
+            AND i.status != 'cancelled'
         `);
       } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
 
+      // Cobros aplicados
       let allCobros: any = { rows: [] };
       try {
         allCobros = await db.execute(sql`
-          SELECT co.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+          SELECT cia.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
             'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
-            CAST(COALESCE(co.amount, 0) AS decimal) as monto
-          FROM cobros co
+            CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
+          FROM cobro_invoice_applications cia
+          JOIN cobros co ON cia.cobro_id = co.id
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
         `);
       } catch (e) { console.error('PDF: cobros query failed', (e as any)?.message); }
 
+      // Adelantos
+      let allAdelantos: any = { rows: [] };
+      try {
+        allAdelantos = await db.execute(sql`
+          SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
+            'Adelanto' || COALESCE(' — ' || co.payment_method, '') as descripcion,
+            CAST(COALESCE(co.amount, 0) AS decimal) as monto
+          FROM cobros co
+          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+            AND co.pending_status = 'pending_invoice'
+        `);
+      } catch (e) { console.error('PDF: adelantos query failed', (e as any)?.message); }
+
+      // Ajustes
       let allAdjustments: any = { rows: [] };
       try {
         allAdjustments = await db.execute(sql`
@@ -273,25 +399,28 @@ export class CuentaCorrienteService {
         `);
       } catch (e) { console.error('PDF: adjustments query failed', (e as any)?.message); }
 
-      let allPurchases: any = { rows: [] };
+      // Facturas de compra
+      let allPurchaseInvoices: any = { rows: [] };
       try {
-        allPurchases = await db.execute(sql`
-          SELECT p.id, 'compra' as tipo, COALESCE(p.date, p.created_at) as fecha,
-            'Compra #' || LPAD(CAST(COALESCE(p.purchase_number, 0) AS TEXT), 4, '0') as descripcion,
-            CAST(COALESCE(p.total_amount, 0) AS decimal) as monto
-          FROM purchases p
-          WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
-            AND p.status != 'cancelada'
+        allPurchaseInvoices = await db.execute(sql`
+          SELECT pi.id, 'factura_compra' as tipo, COALESCE(pi.invoice_date, pi.created_at) as fecha,
+            'Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
+            CAST(COALESCE(pi.total_amount, 0) AS decimal) as monto
+          FROM purchase_invoices pi
+          WHERE pi.company_id = ${companyId} AND pi.enterprise_id = ${enterpriseId}
+            AND pi.status != 'cancelled'
         `);
-      } catch (e) { console.error('PDF: purchases query failed', (e as any)?.message); }
+      } catch (e) { console.error('PDF: purchase_invoices query failed', (e as any)?.message); }
 
+      // Pagos aplicados
       let allPagos: any = { rows: [] };
       try {
         allPagos = await db.execute(sql`
-          SELECT pa.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
+          SELECT pia.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
             'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
-            CAST(COALESCE(pa.amount, 0) AS decimal) as monto
-          FROM pagos pa
+            CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
+          FROM pago_invoice_applications pia
+          JOIN pagos pa ON pia.pago_id = pa.id
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
         `);
       } catch (e) { console.error('PDF: pagos query failed', (e as any)?.message); }
@@ -304,35 +433,32 @@ export class CuentaCorrienteService {
           descripcion: m.descripcion || 'Sin descripcion',
         }));
 
-      const orders = parseRows(allOrders);
+      const invoices = parseRows(allInvoices);
       const cobros = parseRows(allCobros);
+      const adelantos = parseRows(allAdelantos);
       const adjustments = parseRows(allAdjustments);
-      const purchases = parseRows(allPurchases);
+      const purchaseInvoices = parseRows(allPurchaseInvoices);
       const pagos = parseRows(allPagos);
 
-      // Build ALL movimientos sorted by date (for running saldo)
+      // Build ALL movements sorted by date
       const allMovimientos = [
-        ...orders.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
+        ...invoices.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
+        ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
         ...adjustments.map((a: any) => ({
           ...a,
           debe: a.adjustment_type === 'debit' ? a.monto : 0,
           haber: a.adjustment_type === 'credit' ? a.monto : 0,
         })),
-        ...purchases.map((p: any) => ({ ...p, debe: p.monto, haber: 0, isPagar: true })),
+        ...purchaseInvoices.map((p: any) => ({ ...p, debe: p.monto, haber: 0, isPagar: true })),
         ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto, isPagar: true })),
       ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
-      // Calculate running saldo and total balance
-      // Saldo = (ventas + debit_adjustments - cobros - credit_adjustments) - (compras - pagos)
-      // Positive = nos deben, Negative = les debemos
       let runningBalance = 0;
       const allWithSaldo = allMovimientos.map((m: any) => {
         if (m.isPagar) {
-          // Compras increase debt (negative), pagos decrease it
           runningBalance -= (m.debe - m.haber);
         } else {
-          // Ventas/adjustments increase receivable (positive), cobros decrease it
           runningBalance += (m.debe - m.haber);
         }
         return { ...m, saldo: runningBalance };
@@ -340,7 +466,7 @@ export class CuentaCorrienteService {
 
       const totalBalance = runningBalance;
 
-      // Filter movimientos by date range for the table
+      // Filter by date range
       const fromDate = new Date(dateFrom + 'T00:00:00');
       const toDate = new Date(dateTo + 'T23:59:59');
 
@@ -349,7 +475,6 @@ export class CuentaCorrienteService {
         return fecha >= fromDate && fecha <= toDate;
       });
 
-      // Limit to 500 most recent if too many
       const limitedMovimientos = filteredMovimientos.length > 500
         ? filteredMovimientos.slice(filteredMovimientos.length - 500)
         : filteredMovimientos;
@@ -377,24 +502,16 @@ export class CuentaCorrienteService {
     created_by?: string;
   }) {
     try {
-      // Validate enterprise belongs to company
       const entCheck = await db.execute(sql`
         SELECT id FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
       `);
       const entRows = (entCheck as any).rows || entCheck || [];
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
 
-      if (!data.amount || data.amount === 0) {
-        throw new ApiError(400, 'Amount must be non-zero');
-      }
-      if (!data.reason || data.reason.trim().length === 0) {
-        throw new ApiError(400, 'Reason is required');
-      }
-      if (!['credit', 'debit'].includes(data.adjustment_type)) {
-        throw new ApiError(400, 'adjustment_type must be "credit" or "debit"');
-      }
+      if (!data.amount || data.amount === 0) throw new ApiError(400, 'Amount must be non-zero');
+      if (!data.reason || data.reason.trim().length === 0) throw new ApiError(400, 'Reason is required');
+      if (!['credit', 'debit'].includes(data.adjustment_type)) throw new ApiError(400, 'adjustment_type must be "credit" or "debit"');
 
-      // Store amount: positive for debit, negative for credit
       const storedAmount = data.adjustment_type === 'credit'
         ? -Math.abs(data.amount)
         : Math.abs(data.amount);
@@ -404,8 +521,7 @@ export class CuentaCorrienteService {
         VALUES (${companyId}, ${enterpriseId}, ${storedAmount}, ${data.reason.trim()}, ${data.adjustment_type}, ${data.created_by || null})
         RETURNING *
       `);
-      const rows = (result as any).rows || result || [];
-      return rows[0];
+      return ((result as any).rows || [])[0];
     } catch (error) {
       if (error instanceof ApiError) throw error;
       console.error('Create adjustment error:', error);
@@ -422,8 +538,7 @@ export class CuentaCorrienteService {
         WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
         ORDER BY aa.created_at DESC
       `);
-      const rows = (result as any).rows || result || [];
-      return rows.map((r: any) => ({
+      return ((result as any).rows || []).map((r: any) => ({
         ...r,
         amount: parseFloat(r.amount || '0'),
       }));
@@ -439,8 +554,7 @@ export class CuentaCorrienteService {
         SELECT id FROM account_adjustments
         WHERE id = ${adjustmentId} AND company_id = ${companyId} AND enterprise_id = ${enterpriseId}
       `);
-      const checkRows = (check as any).rows || check || [];
-      if (checkRows.length === 0) throw new ApiError(404, 'Adjustment not found');
+      if (((check as any).rows || []).length === 0) throw new ApiError(404, 'Adjustment not found');
 
       await db.execute(sql`
         DELETE FROM account_adjustments

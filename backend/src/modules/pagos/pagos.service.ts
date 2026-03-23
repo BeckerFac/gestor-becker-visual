@@ -31,10 +31,13 @@ export class PagosService {
     }
   }
 
-  async getPagos(companyId: string, filters: { enterprise_id?: string } = {}) {
+  async getPagos(companyId: string, filters: { enterprise_id?: string; business_unit_id?: string } = {}) {
     await this.ensureTables();
     try {
       let whereClause = sql`p.company_id = ${companyId}`;
+      if (filters.business_unit_id) {
+        whereClause = sql`${whereClause} AND p.business_unit_id = ${filters.business_unit_id}`;
+      }
       if (filters.enterprise_id) {
         whereClause = sql`${whereClause} AND p.enterprise_id = ${filters.enterprise_id}`;
       }
@@ -71,8 +74,8 @@ export class PagosService {
     try {
       const pagoId = uuid();
       await db.execute(sql`
-        INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by)
-        VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${userId})
+        INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, created_by)
+        VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
       `);
 
       const result = await db.execute(sql`

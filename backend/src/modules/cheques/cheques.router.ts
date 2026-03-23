@@ -11,3 +11,5 @@ chequesRouter.put('/:id', authorize('cheques', 'edit'), (req, res) => chequesCon
 chequesRouter.delete('/:id', authorize('cheques', 'delete'), (req, res) => chequesController.deleteCheque(req as any, res));
 chequesRouter.put('/:id/status', authorize('cheques', 'edit'), (req, res) => chequesController.updateStatus(req as any, res));
 chequesRouter.get('/:id/history', authorize('cheques', 'view'), (req, res) => chequesController.getStatusHistory(req as any, res));
+chequesRouter.post('/:id/endorse', authorize('cheques', 'edit'), (req, res) => chequesController.endorseCheque(req as any, res));
+chequesRouter.get('/for-endorsement', authorize('cheques', 'view'), (req, res) => chequesController.getChequesForEndorsement(req as any, res));

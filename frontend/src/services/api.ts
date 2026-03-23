@@ -7,11 +7,17 @@ const client: AxiosInstance = axios.create({
   baseURL: API_BASE,
 })
 
-// Agregar token a requests
+// Agregar token + business_unit_id a requests
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  // Auto-inject active business_unit_id as query param for GET requests
+  // Only inject if it looks like a valid UUID to avoid breaking requests
+  const activeUnitId = localStorage.getItem('gestia_active_business_unit_id')
+  if (activeUnitId && config.method === 'get' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeUnitId)) {
+    config.params = { ...config.params, business_unit_id: activeUnitId }
   }
   return config
 })
@@ -222,6 +228,151 @@ export const api = {
 
   acceptInvitation: async (token: string, acceptData: { name: string; password: string }) => {
     const { data } = await client.post(`/invitations/accept/${token}`, acceptData)
+    return data
+  },
+
+  // Business Units (Razones Sociales)
+  getBusinessUnits: async () => {
+    const { data } = await client.get('/business-units')
+    return data
+  },
+  getBusinessUnit: async (id: string) => {
+    const { data } = await client.get(`/business-units/${id}`)
+    return data
+  },
+  getDefaultBusinessUnit: async () => {
+    const { data } = await client.get('/business-units/default')
+    return data
+  },
+  createBusinessUnit: async (buData: any) => {
+    const { data } = await client.post('/business-units', buData)
+    return data
+  },
+  updateBusinessUnit: async (id: string, buData: any) => {
+    const { data } = await client.patch(`/business-units/${id}`, buData)
+    return data
+  },
+  deleteBusinessUnit: async (id: string) => {
+    const { data } = await client.delete(`/business-units/${id}`)
+    return data
+  },
+
+  // Payment Applications (Cobro ↔ Factura N:N)
+  linkCobroToInvoice: async (cobroId: string, invoiceId: string, amountApplied: number, notes?: string) => {
+    const { data } = await client.post(`/payment-applications/cobros/${cobroId}/link`, {
+      invoice_id: invoiceId,
+      amount_applied: amountApplied,
+      notes,
+    })
+    return data
+  },
+  unlinkCobroFromInvoice: async (cobroId: string, invoiceId: string) => {
+    const { data } = await client.delete(`/payment-applications/cobros/${cobroId}/unlink`, {
+      data: { invoice_id: invoiceId },
+    })
+    return data
+  },
+  getCobroApplications: async (cobroId: string) => {
+    const { data } = await client.get(`/payment-applications/cobros/${cobroId}/applications`)
+    return data
+  },
+  getCobroBalance: async (cobroId: string) => {
+    const { data } = await client.get(`/payment-applications/cobros/${cobroId}/balance`)
+    return data
+  },
+  getInvoiceCobros: async (invoiceId: string) => {
+    const { data } = await client.get(`/payment-applications/invoices/${invoiceId}/cobros`)
+    return data
+  },
+  getInvoiceBalance: async (invoiceId: string) => {
+    const { data } = await client.get(`/payment-applications/invoices/${invoiceId}/balance`)
+    return data
+  },
+  getPendingCobros: async (filters?: { enterprise_id?: string; business_unit_id?: string }) => {
+    const { data } = await client.get('/payment-applications/pending-cobros', { params: filters })
+    return data
+  },
+  getAvailableInvoicesForLinking: async (filters?: { enterprise_id?: string; business_unit_id?: string }) => {
+    const { data } = await client.get('/payment-applications/available-invoices', { params: filters })
+    return data
+  },
+  getOrderRemainingToInvoice: async (orderId: string) => {
+    const { data } = await client.get(`/invoices/order/${orderId}/remaining`)
+    return data
+  },
+  getInvoicesByOrder: async (orderId: string) => {
+    const { data } = await client.get(`/invoices/order/${orderId}/invoices`)
+    return data
+  },
+
+  // Purchase Invoices (Facturas de Compra)
+  getPurchaseInvoices: async (filters?: any) => {
+    const { data } = await client.get('/purchase-invoices', { params: filters })
+    return data
+  },
+  getPurchaseInvoice: async (id: string) => {
+    const { data } = await client.get(`/purchase-invoices/${id}`)
+    return data
+  },
+  createPurchaseInvoice: async (piData: any) => {
+    const { data } = await client.post('/purchase-invoices', piData)
+    return data
+  },
+  updatePurchaseInvoice: async (id: string, piData: any) => {
+    const { data } = await client.patch(`/purchase-invoices/${id}`, piData)
+    return data
+  },
+  deletePurchaseInvoice: async (id: string) => {
+    const { data } = await client.delete(`/purchase-invoices/${id}`)
+    return data
+  },
+  getPurchaseInvoiceBalance: async (id: string) => {
+    const { data } = await client.get(`/purchase-invoices/${id}/balance`)
+    return data
+  },
+  getPurchaseInvoicesByPurchase: async (purchaseId: string) => {
+    const { data } = await client.get(`/purchase-invoices/by-purchase/${purchaseId}`)
+    return data
+  },
+
+  // Pago Applications (Pago ↔ Factura Compra N:N)
+  linkPagoToPurchaseInvoice: async (pagoId: string, purchaseInvoiceId: string, amountApplied: number) => {
+    const { data } = await client.post(`/pago-applications/pagos/${pagoId}/link`, {
+      purchase_invoice_id: purchaseInvoiceId,
+      amount_applied: amountApplied,
+    })
+    return data
+  },
+  unlinkPagoFromPurchaseInvoice: async (pagoId: string, purchaseInvoiceId: string) => {
+    const { data } = await client.delete(`/pago-applications/pagos/${pagoId}/unlink`, {
+      data: { purchase_invoice_id: purchaseInvoiceId },
+    })
+    return data
+  },
+  getPagoApplications: async (pagoId: string) => {
+    const { data } = await client.get(`/pago-applications/pagos/${pagoId}/applications`)
+    return data
+  },
+  getPurchaseInvoicePagos: async (purchaseInvoiceId: string) => {
+    const { data } = await client.get(`/pago-applications/purchase-invoices/${purchaseInvoiceId}/pagos`)
+    return data
+  },
+  getPendingPagos: async (filters?: { enterprise_id?: string; business_unit_id?: string }) => {
+    const { data } = await client.get('/pago-applications/pending-pagos', { params: filters })
+    return data
+  },
+  getAvailablePurchaseInvoicesForLinking: async (filters?: { enterprise_id?: string; business_unit_id?: string }) => {
+    const { data } = await client.get('/pago-applications/available-purchase-invoices', { params: filters })
+    return data
+  },
+
+  // Cheque Endorsement
+  endorseCheque: async (chequeId: string, endorseData: { enterprise_id: string; amount: number; purchase_invoice_id?: string; notes?: string }) => {
+    const { data } = await client.post(`/cheques/${chequeId}/endorse`, endorseData)
+    return data
+  },
+  getChequesForEndorsement: async (businessUnitId?: string) => {
+    const { data } = await client.get('/cheques/for-endorsement', { params: businessUnitId ? { business_unit_id: businessUnitId } : {} })
     return data
   },
 

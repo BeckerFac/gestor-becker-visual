@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -74,6 +74,132 @@ const STATUS_OPTIONS = [
   { value: 'cancelada', label: 'Cancelada', color: 'bg-red-100 text-red-800' },
 ]
 
+// Inline component for purchase invoices within expanded purchase detail
+const PurchaseInvoicesSection: React.FC<{ purchaseId: string; enterpriseId: string }> = ({ purchaseId, enterpriseId }) => {
+  const [invoices, setInvoices] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [piForm, setPiForm] = useState({
+    invoice_type: 'A', punto_venta: '', invoice_number: '',
+    invoice_date: new Date().toISOString().split('T')[0],
+    cae: '', subtotal: '', vat_amount: '', total_amount: '', notes: '',
+  })
+
+  const loadInvoices = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await api.getPurchaseInvoicesByPurchase(purchaseId)
+      setInvoices(data || [])
+    } catch { setInvoices([]) }
+    finally { setLoading(false) }
+  }, [purchaseId])
+
+  useEffect(() => { loadInvoices() }, [loadInvoices])
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!piForm.invoice_number || !piForm.total_amount) {
+      toast.error('Numero de factura y monto total son requeridos')
+      return
+    }
+    setSaving(true)
+    try {
+      const buId = localStorage.getItem('gestia_active_business_unit_id') || undefined
+      await api.createPurchaseInvoice({
+        business_unit_id: buId,
+        enterprise_id: enterpriseId,
+        purchase_id: purchaseId,
+        invoice_type: piForm.invoice_type,
+        punto_venta: piForm.punto_venta || undefined,
+        invoice_number: piForm.invoice_number,
+        invoice_date: piForm.invoice_date,
+        cae: piForm.cae || undefined,
+        subtotal: parseFloat(piForm.subtotal) || 0,
+        vat_amount: parseFloat(piForm.vat_amount) || 0,
+        total_amount: parseFloat(piForm.total_amount),
+        notes: piForm.notes || undefined,
+      })
+      toast.success('Factura de compra registrada')
+      setShowForm(false)
+      setPiForm({ invoice_type: 'A', punto_venta: '', invoice_number: '', invoice_date: new Date().toISOString().split('T')[0], cae: '', subtotal: '', vat_amount: '', total_amount: '', notes: '' })
+      loadInvoices()
+    } catch (err: any) {
+      toast.error(err.message || 'Error al crear factura de compra')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase">Facturas de Compra</p>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+        >
+          {showForm ? 'Cancelar' : '+ Cargar factura'}
+        </button>
+      </div>
+
+      {loading && <p className="text-xs text-gray-400">Cargando...</p>}
+
+      {invoices.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {invoices.map((pi: any) => (
+            <div key={pi.id} className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded px-2 py-1 text-xs">
+              <span className="font-mono font-semibold text-purple-800 dark:text-purple-300">
+                {pi.invoice_type} {pi.punto_venta ? `${pi.punto_venta}-` : ''}{pi.invoice_number}
+              </span>
+              <span className="text-gray-600 dark:text-gray-400">{formatDate(pi.invoice_date)}</span>
+              <span className="font-medium">{formatCurrency(pi.total_amount)}</span>
+              <span className={`rounded-full px-1.5 py-0.5 font-medium ${
+                pi.payment_status === 'pagado' ? 'bg-green-100 text-green-800' :
+                pi.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {pi.payment_status === 'pagado' ? 'Pagado' : pi.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
+              </span>
+              {pi.remaining_balance && parseFloat(pi.remaining_balance) > 0 && (
+                <span className="text-red-600 text-xs">Resta: {formatCurrency(pi.remaining_balance)}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {invoices.length === 0 && !loading && !showForm && (
+        <p className="text-xs text-gray-400 italic mb-2">Sin facturas de compra registradas</p>
+      )}
+
+      {showForm && (
+        <form onSubmit={handleCreate} className="space-y-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2">
+          <div className="grid grid-cols-3 gap-2">
+            <select className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={piForm.invoice_type} onChange={e => setPiForm({ ...piForm, invoice_type: e.target.value })}>
+              <option value="A">Tipo A</option>
+              <option value="B">Tipo B</option>
+              <option value="C">Tipo C</option>
+            </select>
+            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Pto Vta" value={piForm.punto_venta} onChange={e => setPiForm({ ...piForm, punto_venta: e.target.value })} />
+            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="N° Factura *" value={piForm.invoice_number} onChange={e => setPiForm({ ...piForm, invoice_number: e.target.value })} required />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <input type="date" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={piForm.invoice_date} onChange={e => setPiForm({ ...piForm, invoice_date: e.target.value })} />
+            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="CAE" value={piForm.cae} onChange={e => setPiForm({ ...piForm, cae: e.target.value })} />
+            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Total *" value={piForm.total_amount} onChange={e => setPiForm({ ...piForm, total_amount: e.target.value })} required />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Subtotal" value={piForm.subtotal} onChange={e => setPiForm({ ...piForm, subtotal: e.target.value })} />
+            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="IVA" value={piForm.vat_amount} onChange={e => setPiForm({ ...piForm, vat_amount: e.target.value })} />
+          </div>
+          <button type="submit" disabled={saving} className="w-full text-xs font-medium px-2 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+            {saving ? 'Guardando...' : 'Registrar factura de compra'}
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
 export const Purchases: React.FC = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
@@ -100,7 +226,7 @@ export const Purchases: React.FC = () => {
     payment_method: '', bank_id: '', notes: '',
     invoice_type: '', invoice_number: '', invoice_cae: '',
     vat_rate: '21',
-    add_to_inventory: false,
+    add_to_inventory: true,
   })
   const [items, setItems] = useState<PurchaseItem[]>([
     { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true },
@@ -148,7 +274,7 @@ export const Purchases: React.FC = () => {
         invoice_number: detail.invoice_number || '',
         invoice_cae: detail.invoice_cae || '',
         vat_rate: '21',
-        add_to_inventory: false,
+        add_to_inventory: true,
       })
       setItems(detail.items?.map((i: any) => ({
         product_id: i.product_id || '',
@@ -205,7 +331,7 @@ export const Purchases: React.FC = () => {
       }
       setShowForm(false)
       setEditingId(null)
-      setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false })
+      setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: true })
       setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }])
       await loadData()
     } catch (e: any) {
@@ -362,7 +488,7 @@ export const Purchases: React.FC = () => {
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <ExportExcelButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <PermissionGate module="purchases" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: false }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }]) } }}>
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: true }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }]) } }}>
               {showForm ? 'Cancelar' : '+ Nueva Compra'}
             </Button>
           </PermissionGate>
@@ -820,6 +946,11 @@ export const Purchases: React.FC = () => {
                                       <option value="pagado">Pagado</option>
                                     </select>
                                   </div>
+                                  {/* Purchase Invoices section */}
+                                  <div className="pt-2 border-t border-orange-200">
+                                    <PurchaseInvoicesSection purchaseId={purchase.id} enterpriseId={purchase.enterprise_id || ''} />
+                                  </div>
+
                                   <div className="pt-2 border-t border-orange-200">
                                     <PermissionGate module="inventory" action="create">
                                       {purchase.stock_added ? (

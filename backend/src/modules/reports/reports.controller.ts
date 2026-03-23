@@ -45,7 +45,8 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await accountingService.getLibroIVAVentas(req.user!.company_id, dateFrom as any, dateTo as any);
+      const businessUnitId = req.query.business_unit_id as string | undefined;
+      const data = await accountingService.getLibroIVAVentas(req.user!.company_id, dateFrom as any, dateTo as any, businessUnitId);
       res.json(data);
     } catch (error) {
       console.error('Controller getLibroIVAVentas error:', error);
@@ -59,7 +60,8 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await accountingService.getLibroIVACompras(req.user!.company_id, dateFrom as any, dateTo as any);
+      const businessUnitId = req.query.business_unit_id as string | undefined;
+      const data = await accountingService.getLibroIVACompras(req.user!.company_id, dateFrom as any, dateTo as any, businessUnitId);
       res.json(data);
     } catch (error) {
       console.error('Controller getLibroIVACompras error:', error);

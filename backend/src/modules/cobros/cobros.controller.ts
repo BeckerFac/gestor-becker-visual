@@ -6,6 +6,7 @@ export class CobrosController {
   async getCobros(req: AuthRequest, res: Response) {
     const data = await cobrosService.getCobros(req.user!.company_id, {
       enterprise_id: req.query.enterprise_id as string,
+      business_unit_id: req.query.business_unit_id as string,
     });
     res.json(data);
   }

@@ -656,7 +656,7 @@ export const Invoices: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas'}
+            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas de Venta'}
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
