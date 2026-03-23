@@ -198,8 +198,9 @@ export class CobrosService {
         }
       }
 
-      // Recalculate order payment status (legacy direct + new via invoices)
-      if (data.order_id) {
+      // Recalculate order payment status (only if no invoice_items, to avoid dual recalculation)
+      // When invoice_items exist, recalculateOrderStatusFromInvoice already handles this above
+      if (data.order_id && !hasInvoiceItems) {
         await this.recalculateOrderPaymentStatus(data.order_id);
       }
 
