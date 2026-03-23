@@ -69,7 +69,6 @@ interface Receipt {
   }[]
   // Legacy compat
   items?: any[]
-  receipt_date?: string
   cobro_id?: string
 }
 
@@ -237,7 +236,7 @@ export const Cobros: React.FC = () => {
     payment_method: 'transferencia',
     bank_id: '',
     reference: '',
-    receipt_date: new Date().toISOString().split('T')[0],
+    payment_date: new Date().toISOString().split('T')[0],
     notes: '',
   })
 
@@ -280,7 +279,7 @@ export const Cobros: React.FC = () => {
       const unifiedReceipts = (cobrosRes || []).map((c: any) => ({
         ...c,
         receipt_number: c.receipt_number || 0,
-        receipt_date: c.payment_date,
+        payment_date: c.payment_date,
         total_amount: c.amount,
         items: c.linked_invoices || [],
       }))
@@ -386,7 +385,7 @@ export const Cobros: React.FC = () => {
           payment_method: 'transferencia',
           bank_id: '',
           reference: '',
-          receipt_date: new Date().toISOString().split('T')[0],
+          payment_date: new Date().toISOString().split('T')[0],
           notes: '',
         })
         setInvoiceItems({ [invoiceId]: remaining })
@@ -449,7 +448,7 @@ export const Cobros: React.FC = () => {
       payment_method: 'transferencia',
       bank_id: '',
       reference: '',
-      receipt_date: new Date().toISOString().split('T')[0],
+      payment_date: new Date().toISOString().split('T')[0],
       notes: `Cobro pedido #${String(order.order_number).padStart(4, '0')}`,
     })
     setInvoiceItems({})
@@ -474,7 +473,7 @@ export const Cobros: React.FC = () => {
       payment_method: 'transferencia',
       bank_id: '',
       reference: '',
-      receipt_date: new Date().toISOString().split('T')[0],
+      payment_date: new Date().toISOString().split('T')[0],
       notes: '',
     })
     setChequeForm({ ...INITIAL_CHEQUE_FORM })
@@ -563,7 +562,7 @@ export const Cobros: React.FC = () => {
         payment_method: form.payment_method,
         bank_id: form.bank_id || null,
         reference: form.reference || null,
-        payment_date: form.receipt_date,
+        payment_date: form.payment_date,
         notes: form.notes || null,
         invoice_items: hasInvoiceItems ? items : undefined,
       }
@@ -630,11 +629,11 @@ export const Cobros: React.FC = () => {
     }
     if (filterMethod) result = result.filter(r => r.payment_method === filterMethod)
     if (dateFrom) result = result.filter(r => {
-      const d = r.receipt_date ? new Date(r.receipt_date).toISOString().split('T')[0] : ''
+      const d = r.payment_date ? new Date(r.payment_date).toISOString().split('T')[0] : ''
       return d >= dateFrom
     })
     if (dateTo) result = result.filter(r => {
-      const d = r.receipt_date ? new Date(r.receipt_date).toISOString().split('T')[0] : ''
+      const d = r.payment_date ? new Date(r.payment_date).toISOString().split('T')[0] : ''
       return d <= dateTo
     })
     return result
@@ -648,7 +647,7 @@ export const Cobros: React.FC = () => {
 
   const csvColumns = [
     { key: 'receipt_number', label: 'N° Recibo' },
-    { key: 'receipt_date', label: 'Fecha', type: 'date' as const },
+    { key: 'payment_date', label: 'Fecha', type: 'date' as const },
     { key: 'enterprise_name', label: 'Empresa' },
     { key: 'total_amount', label: 'Monto', type: 'currency' as const },
     { key: 'payment_method', label: 'Metodo de Pago' },
@@ -1039,7 +1038,7 @@ export const Cobros: React.FC = () => {
                   />
                 )}
                 <Input label="Referencia" placeholder="N transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
-                <DateInput label="Fecha" value={form.receipt_date} onChange={val => setForm({ ...form, receipt_date: val })} />
+                <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
               </div>
 
               {/* Cheque inline form */}
@@ -1448,7 +1447,7 @@ export const Cobros: React.FC = () => {
                     <td className="px-4 py-3 font-mono font-semibold text-gray-800 dark:text-gray-200">
                       #{String(receipt.receipt_number).padStart(6, '0')}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(receipt.receipt_date || receipt.payment_date)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(receipt.payment_date)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{getReceiptEnterpriseName(receipt)}</td>
                     <td className="px-4 py-3 text-right"><span className="font-bold text-green-700 dark:text-green-400">{fmt(receipt.total_amount)}</span></td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[receipt.payment_method || ''] || receipt.payment_method || '-'}</td>

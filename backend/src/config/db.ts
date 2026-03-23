@@ -400,6 +400,10 @@ async function runAutoMigrations() {
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchases_company_status_date ON purchases(company_id, status, date)`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_cobros_company_date ON cobros(company_id, payment_date)`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_pagos_company_date ON pagos(company_id, payment_date)`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_pagos_enterprise ON pagos(company_id, enterprise_id)`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_pagos_bu ON pagos(company_id, business_unit_id)`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_cobros_enterprise ON cobros(company_id, enterprise_id)`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_cobros_bu ON cobros(company_id, business_unit_id)`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_cheques_company_status_collected ON cheques(company_id, status, collected_date)`); } catch (_) {}
 
     // --- Onboarding wizard ---

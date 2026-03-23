@@ -258,7 +258,7 @@ export const Invoices: React.FC = () => {
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
   // Vista mode: fiscal (AFIP) or no_fiscal
-  const [vistaMode, setVistaMode] = useState<'venta_fiscal' | 'venta_no_fiscal' | 'compra_fiscal' | 'compra_no_fiscal'>('venta_fiscal')
+  const [vistaMode, setVistaMode] = useState<'venta_fiscal' | 'venta_no_fiscal' | 'compra'>('venta_fiscal')
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -657,7 +657,7 @@ export const Invoices: React.FC = () => {
     setDateTo('')
   }
 
-  const handleChangeVistaMode = (mode: 'venta_fiscal' | 'venta_no_fiscal' | 'compra_fiscal' | 'compra_no_fiscal') => {
+  const handleChangeVistaMode = (mode: 'venta_fiscal' | 'venta_no_fiscal' | 'compra') => {
     setVistaMode(mode)
     clearFilters()
     setShowForm(false)
@@ -754,8 +754,7 @@ export const Invoices: React.FC = () => {
         {([
           { key: 'venta_fiscal', label: 'Facturas Venta' },
           { key: 'venta_no_fiscal', label: 'No Fiscal Venta' },
-          { key: 'compra_fiscal', label: 'Facturas Compra' },
-          { key: 'compra_no_fiscal', label: 'No Fiscal Compra' },
+          { key: 'compra', label: 'Facturas de Compra' },
         ] as const).map(tab => (
           <button
             key={tab.key}
@@ -772,10 +771,10 @@ export const Invoices: React.FC = () => {
       </div>
 
       {/* Purchase Invoices tab */}
-      {vistaMode.startsWith('compra') && <PurchaseInvoicesTab />}
+      {vistaMode === 'compra' && <PurchaseInvoicesTab />}
 
       {/* Sales invoices content (hidden when compras tab active) */}
-      {vistaMode.startsWith('venta') && <>
+      {vistaMode !== 'compra' && <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

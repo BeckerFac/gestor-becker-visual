@@ -96,14 +96,11 @@ export class CobroApplicationsService {
       await this.recalculateOrderPaymentStatusFromInvoices(invoice.order_id);
     }
 
-    // Update cobro pending_status
-    const newCobroBalance = await this.getCobroUnallocatedBalance(cobroId);
-    if (newCobroBalance <= 0.01) {
+    // Update cobro pending_status: once ANY invoice is linked, it's no longer "pending_invoice"
+    if (cobro.pending_status === 'pending_invoice') {
       await db.execute(sql`
         UPDATE cobros SET pending_status = NULL WHERE id = ${cobroId}
       `);
-    } else if (cobro.pending_status === 'pending_invoice') {
-      // Still has unallocated balance, keep as pending_invoice
     }
 
     // Return the created application with context
