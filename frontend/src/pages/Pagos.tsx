@@ -788,6 +788,7 @@ export const Pagos: React.FC = () => {
                   <th className="px-4 py-3 text-right">Monto</th>
                   <th className="px-4 py-3">Metodo</th>
                   <th className="px-4 py-3">Banco</th>
+                  <th className="px-4 py-3">Asignacion</th>
                   <th className="px-4 py-3">Referencia</th>
                   <th className="px-4 py-3"></th>
                 </tr>
@@ -810,6 +811,35 @@ export const Pagos: React.FC = () => {
                     <td className="px-4 py-3 text-right"><span className="font-bold text-red-600">{fmt(pago.amount)}</span></td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[pago.payment_method] || pago.payment_method}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{pago.bank_name || '-'}</td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const totalAmt = parseFloat(pago.amount || '0')
+                        const assigned = parseFloat(String((pago as any).total_assigned || '0'))
+                        const invoices = (pago as any).linked_purchase_invoices || []
+                        const isFullyAssigned = assigned >= totalAmt - 0.01 && totalAmt > 0
+                        const isPartial = assigned > 0 && !isFullyAssigned
+                        return (
+                          <div>
+                            <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${
+                              isFullyAssigned ? 'bg-green-100 text-green-800' :
+                              isPartial ? 'bg-blue-100 text-blue-800' :
+                              'bg-orange-100 text-orange-800'
+                            }`}>
+                              {isFullyAssigned ? 'Completo' : isPartial ? `Parcial` : 'Sin vincular'}
+                            </span>
+                            {invoices.length > 0 && (
+                              <div className="flex flex-wrap gap-0.5 mt-0.5">
+                                {invoices.map((pi: any, idx: number) => (
+                                  <span key={pi.id || idx} className="text-[10px] text-purple-600 font-mono">
+                                    {pi.invoice_type}{pi.invoice_number}({fmt(pi.amount)})
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </td>
                     <td className="px-4 py-3">{pago.reference ? <span className="font-mono text-xs">{pago.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

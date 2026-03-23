@@ -47,6 +47,21 @@ export class PagosService {
           e.name as enterprise_name,
           pu.purchase_number,
           b.bank_name,
+          -- Linked purchase invoices
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', pia.id,
+              'purchase_invoice_id', pia.purchase_invoice_id,
+              'amount', pia.amount_applied,
+              'invoice_number', pi.invoice_number,
+              'invoice_type', pi.invoice_type,
+              'invoice_total', pi.total_amount
+            ))
+            FROM pago_invoice_applications pia
+            JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+            WHERE pia.pago_id = p.id
+          ), '[]'::json) as linked_purchase_invoices,
+          COALESCE((SELECT SUM(CAST(pia2.amount_applied AS decimal)) FROM pago_invoice_applications pia2 WHERE pia2.pago_id = p.id), 0) as total_assigned,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
