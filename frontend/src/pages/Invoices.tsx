@@ -258,7 +258,7 @@ export const Invoices: React.FC = () => {
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
   // Vista mode: fiscal (AFIP) or no_fiscal
-  const [vistaMode, setVistaMode] = useState<'fiscal' | 'no_fiscal' | 'compras'>('fiscal')
+  const [vistaMode, setVistaMode] = useState<'venta_fiscal' | 'venta_no_fiscal' | 'compra_fiscal' | 'compra_no_fiscal'>('venta_fiscal')
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -318,7 +318,12 @@ export const Invoices: React.FC = () => {
   const loadInvoices = async () => {
     try {
       setLoading(true)
-      const filters: Record<string, string> = { fiscal_type: vistaMode }
+      // Map vistaMode to backend fiscal_type
+      const fiscalTypeMap: Record<string, string> = {
+        venta_fiscal: 'fiscal',
+        venta_no_fiscal: 'no_fiscal',
+      }
+      const filters: Record<string, string> = { fiscal_type: fiscalTypeMap[vistaMode] || 'fiscal' }
       if (filterEnterprise) filters.enterprise_id = filterEnterprise
       if (filterType) filters.invoice_type = filterType
       if (filterStatus) filters.status = filterStatus
@@ -470,19 +475,19 @@ export const Invoices: React.FC = () => {
       await api.createInvoice({
         customer_id: formCustomerId || null,
         enterprise_id: formEnterpriseId || null,
-        invoice_type: vistaMode === 'fiscal' ? formInvoiceType : undefined,
+        invoice_type: vistaMode === 'venta_fiscal' ? formInvoiceType : undefined,
         order_id: formOrderId || null,
-        fiscal_type: vistaMode,
+        fiscal_type: vistaMode === 'venta_fiscal' ? 'fiscal' : 'no_fiscal',
         items: formItems.map(item => ({
           product_id: item.product_id || null,
           product_name: item.product_name,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          vat_rate: vistaMode !== 'fiscal' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
+          vat_rate: vistaMode !== 'venta_fiscal' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
           order_item_id: item.order_item_id || null,
         })),
       })
-      toast.success(vistaMode === 'fiscal' ? 'Factura creada correctamente' : 'Comprobante creado correctamente')
+      toast.success(vistaMode === 'venta_fiscal' ? 'Factura creada correctamente' : 'Comprobante creado correctamente')
       closeForm()
       await loadInvoices()
     } catch (e: any) {
@@ -652,7 +657,7 @@ export const Invoices: React.FC = () => {
     setDateTo('')
   }
 
-  const handleChangeVistaMode = (mode: 'fiscal' | 'no_fiscal' | 'compras') => {
+  const handleChangeVistaMode = (mode: 'venta_fiscal' | 'venta_no_fiscal' | 'compra_fiscal' | 'compra_no_fiscal') => {
     setVistaMode(mode)
     clearFilters()
     setShowForm(false)
@@ -687,7 +692,7 @@ export const Invoices: React.FC = () => {
 
   // ---- CSV Export ----
 
-  const csvColumns = vistaMode !== 'fiscal'
+  const csvColumns = vistaMode !== 'venta_fiscal'
     ? [
         { key: 'invoice_number_fmt', label: 'N° Comprobante' },
         { key: 'invoice_date', label: 'Fecha', type: 'date' as const },
@@ -744,64 +749,52 @@ export const Invoices: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Tabs: Fiscal / Interno */}
-      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit">
-        <button
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            vistaMode === 'fiscal'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-          }`}
-          onClick={() => handleChangeVistaMode('fiscal')}
-        >
-          Facturas AFIP
-        </button>
-        <button
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            vistaMode === 'no_fiscal'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-          }`}
-          onClick={() => handleChangeVistaMode('no_fiscal')}
-        >
-          No Fiscal
-        </button>
-        <button
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            vistaMode === 'compras'
-              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-          }`}
-          onClick={() => handleChangeVistaMode('compras')}
-        >
-          Facturas de Compra
-        </button>
+      {/* Tabs: 4 categorias */}
+      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit flex-wrap">
+        {([
+          { key: 'venta_fiscal', label: 'Facturas Venta' },
+          { key: 'venta_no_fiscal', label: 'No Fiscal Venta' },
+          { key: 'compra_fiscal', label: 'Facturas Compra' },
+          { key: 'compra_no_fiscal', label: 'No Fiscal Compra' },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              vistaMode === tab.key
+                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+            onClick={() => handleChangeVistaMode(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Purchase Invoices tab */}
-      {vistaMode === 'compras' && <PurchaseInvoicesTab />}
+      {vistaMode.startsWith('compra') && <PurchaseInvoicesTab />}
 
       {/* Sales invoices content (hidden when compras tab active) */}
-      {vistaMode !== 'compras' && <>
+      {vistaMode.startsWith('venta') && <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {vistaMode === 'no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas de Venta (AFIP)'}
+            {vistaMode === 'venta_no_fiscal' ? 'Comprobantes No Fiscales' : 'Facturas de Venta (AFIP)'}
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filteredInvoices.length} comprobante{filteredInvoices.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
-          <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
+          <ExportCSVButton data={csvData} columns={csvColumns} filename={vistaMode === 'venta_no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
+          <ExportExcelButton data={csvData} columns={csvColumns} filename={vistaMode === 'venta_no_fiscal' ? 'comprobantes_no_fiscales' : 'facturas'} />
           <PermissionGate module="invoices" action="create">
-            {vistaMode === 'fiscal' && !showForm && (
+            {vistaMode === 'venta_fiscal' && !showForm && (
               <Button variant="outline" onClick={showImportForm ? closeImportForm : openImportForm}>
                 {showImportForm ? 'Cancelar' : 'Importar factura ya emitida'}
               </Button>
             )}
             <Button variant={showForm ? 'danger' : 'primary'} onClick={showForm ? closeForm : openForm}>
-              {showForm ? 'Cancelar' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
+              {showForm ? 'Cancelar' : vistaMode === 'venta_fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
             </Button>
           </PermissionGate>
         </div>
@@ -832,7 +825,7 @@ export const Invoices: React.FC = () => {
                 ))}
               </select>
             </div>
-            {vistaMode === 'fiscal' && (
+            {vistaMode === 'venta_fiscal' && (
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-500">Tipo</label>
                 <select
@@ -855,7 +848,7 @@ export const Invoices: React.FC = () => {
                 onChange={e => setFilterStatus(e.target.value)}
               >
                 <option value="">Todos</option>
-                {vistaMode === 'fiscal' ? (
+                {vistaMode === 'venta_fiscal' ? (
                   <>
                     <option value="draft">Borrador</option>
                     <option value="authorized">Autorizada</option>
@@ -911,7 +904,7 @@ export const Invoices: React.FC = () => {
         <Card className="animate-fadeIn">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">{vistaMode === 'fiscal' ? 'Nueva Factura' : 'Nuevo Comprobante No Fiscal'}</h3>
+              <h3 className="text-lg font-semibold">{vistaMode === 'venta_fiscal' ? 'Nueva Factura' : 'Nuevo Comprobante No Fiscal'}</h3>
               <div className="flex items-center gap-2">
                 <span className={`text-sm px-3 py-1 rounded-full font-medium ${formStep === 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                   1. Datos
@@ -940,7 +933,7 @@ export const Invoices: React.FC = () => {
                 />
 
                 {/* Invoice type - only for fiscal invoices */}
-                {vistaMode === 'fiscal' && (
+                {vistaMode === 'venta_fiscal' && (
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
                       Tipo de Comprobante <span className="text-red-500">*</span>
@@ -965,7 +958,7 @@ export const Invoices: React.FC = () => {
                   </div>
                 )}
 
-                {vistaMode === 'no_fiscal' && (
+                {vistaMode === 'venta_no_fiscal' && (
                   <div className="px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
                     Este comprobante no fiscal no se emitira en AFIP.
                   </div>
@@ -1014,7 +1007,7 @@ export const Invoices: React.FC = () => {
               <div className="space-y-5">
                 {/* Summary of step 1 */}
                 <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                  {vistaMode === 'fiscal' ? (
+                  {vistaMode === 'venta_fiscal' ? (
                     <span className={`text-xl font-bold px-2 py-0.5 rounded ${TYPE_BADGE_COLORS[formInvoiceType]}`}>
                       {formInvoiceType}
                     </span>
@@ -1154,9 +1147,9 @@ export const Invoices: React.FC = () => {
                               type="number" step="0.01" placeholder="21"
                               list={`invoice-vat-list-${idx}`}
                               className="w-full text-center px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                              value={vistaMode !== 'fiscal' || formInvoiceType === 'C' ? 0 : item.vat_rate}
+                              value={vistaMode !== 'venta_fiscal' || formInvoiceType === 'C' ? 0 : item.vat_rate}
                               onChange={e => handleItemChange(idx, 'vat_rate', parseFloat(e.target.value))}
-                              disabled={vistaMode !== 'fiscal' || formInvoiceType === 'C'}
+                              disabled={vistaMode !== 'venta_fiscal' || formInvoiceType === 'C'}
                             />
                             <datalist id={`invoice-vat-list-${idx}`}>
                               {VAT_RATES.map(r => (
@@ -1219,7 +1212,7 @@ export const Invoices: React.FC = () => {
                       disabled={!isFormStep2Valid || saving}
                       onClick={handleCreateInvoice}
                     >
-                      {vistaMode === 'fiscal' ? 'Crear Factura' : 'Crear Comprobante'}
+                      {vistaMode === 'venta_fiscal' ? 'Crear Factura' : 'Crear Comprobante'}
                     </Button>
                   </div>
                 </div>
@@ -1481,18 +1474,18 @@ export const Invoices: React.FC = () => {
       {loading ? (
         <Card>
           <CardContent>
-            <SkeletonTable rows={6} cols={vistaMode === 'fiscal' ? 10 : 8} />
+            <SkeletonTable rows={6} cols={vistaMode === 'venta_fiscal' ? 10 : 8} />
           </CardContent>
         </Card>
       ) : filteredInvoices.length === 0 ? (
         <EmptyState
           title={isFiltered
-            ? `No hay ${vistaMode === 'fiscal' ? 'facturas' : 'comprobantes'} con estos filtros`
-            : `No hay ${vistaMode === 'fiscal' ? 'facturas registradas' : 'comprobantes registrados'}`
+            ? `No hay ${vistaMode === 'venta_fiscal' ? 'facturas' : 'comprobantes'} con estos filtros`
+            : `No hay ${vistaMode === 'venta_fiscal' ? 'facturas registradas' : 'comprobantes registrados'}`
           }
-          description={isFiltered ? undefined : vistaMode === 'fiscal' ? 'Crea la primera factura para comenzar' : 'Crea el primer comprobante para comenzar'}
+          description={isFiltered ? undefined : vistaMode === 'venta_fiscal' ? 'Crea la primera factura para comenzar' : 'Crea el primer comprobante para comenzar'}
           variant={isFiltered ? 'filtered' : 'empty'}
-          actionLabel={isFiltered ? 'Limpiar filtros' : vistaMode === 'fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
+          actionLabel={isFiltered ? 'Limpiar filtros' : vistaMode === 'venta_fiscal' ? '+ Nueva Factura' : '+ Nuevo Comprobante'}
           onAction={isFiltered ? clearFilters : openForm}
         />
       ) : (
@@ -1520,7 +1513,7 @@ export const Invoices: React.FC = () => {
                       {/* Comprobante: Tipo + Numero + CAE */}
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-1.5">
-                          {vistaMode === 'fiscal' && (
+                          {vistaMode === 'venta_fiscal' && (
                             <span className={`inline-block px-1.5 py-0.5 rounded font-bold text-xs ${TYPE_BADGE_COLORS[invoice.invoice_type] || 'bg-gray-100 text-gray-800 dark:text-gray-200'}`}>
                               {invoice.invoice_type}
                             </span>
@@ -1544,7 +1537,7 @@ export const Invoices: React.FC = () => {
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
                         </div>
                         <p className="text-gray-500 dark:text-gray-400">{invoice.customer?.name || 'Consumidor Final'}</p>
-                        {vistaMode === 'fiscal' && invoice.order && (
+                        {vistaMode === 'venta_fiscal' && invoice.order && (
                           <p className="text-[10px] mt-0.5">
                             <button onClick={(e) => { e.stopPropagation(); navigate('/orders') }} className="font-mono text-blue-600 hover:underline">
                               Pedido #{String(invoice.order.order_number).padStart(4, '0')}
@@ -1552,7 +1545,7 @@ export const Invoices: React.FC = () => {
                             <button onClick={() => setUnlinkTarget(invoice.id)} className="ml-1 text-red-400 hover:text-red-600">x</button>
                           </p>
                         )}
-                        {vistaMode === 'fiscal' && !invoice.order && (
+                        {vistaMode === 'venta_fiscal' && !invoice.order && (
                           <div className="relative mt-0.5">
                             <button
                               onClick={() => {
@@ -1621,7 +1614,7 @@ export const Invoices: React.FC = () => {
                       {/* Acciones */}
                       <td className="px-2 py-2">
                         <div className="flex items-center justify-center gap-2">
-                          {vistaMode === 'fiscal' && invoice.status === 'draft' && (
+                          {vistaMode === 'venta_fiscal' && invoice.status === 'draft' && (
                             <PermissionGate module="invoices" action="authorize_afip">
                               <button
                                 onClick={() => handleAuthorize(invoice)}
