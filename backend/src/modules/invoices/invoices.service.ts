@@ -929,6 +929,30 @@ export class InvoicesService {
     `);
     return (result as any).rows || [];
   }
+  /**
+   * Get invoice items with payment remaining per item.
+   */
+  async getInvoiceItemsWithRemaining(companyId: string, invoiceId: string) {
+    const result = await db.execute(sql`
+      SELECT ii.*,
+        CAST(ii.subtotal AS decimal) as item_total,
+        COALESCE((
+          SELECT SUM(CAST(ciia.amount_applied AS decimal))
+          FROM cobro_invoice_item_applications ciia
+          WHERE ciia.invoice_item_id = ii.id
+        ), 0) as paid,
+        CAST(ii.subtotal AS decimal) - COALESCE((
+          SELECT SUM(CAST(ciia.amount_applied AS decimal))
+          FROM cobro_invoice_item_applications ciia
+          WHERE ciia.invoice_item_id = ii.id
+        ), 0) as remaining
+      FROM invoice_items ii
+      JOIN invoices i ON ii.invoice_id = i.id
+      WHERE ii.invoice_id = ${invoiceId} AND i.company_id = ${companyId}
+      ORDER BY ii.created_at ASC
+    `);
+    return (result as any).rows || [];
+  }
 }
 
 export const invoicesService = new InvoicesService();

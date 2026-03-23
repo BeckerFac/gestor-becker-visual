@@ -107,6 +107,10 @@ export const Pagos: React.FC = () => {
   const [selectedChequeId, setSelectedChequeId] = useState('')
   const [purchaseInvoices, setPurchaseInvoices] = useState<any[]>([])
   const [piAmounts, setPiAmounts] = useState<Record<string, string>>({})
+  // Item-level amounts for purchase invoices
+  const [piItemAmounts, setPiItemAmounts] = useState<Record<string, string>>({})
+  const [expandedPiIds, setExpandedPiIds] = useState<Set<string>>(new Set())
+  const [loadedPiItems, setLoadedPiItems] = useState<Record<string, any[]>>({})
 
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
@@ -244,10 +248,20 @@ export const Pagos: React.FC = () => {
           toast.success('Pago con cheque endosado registrado')
         }
       } else {
-        // Build purchase_invoice_items from piAmounts
+        // Build purchase_invoice_items from piAmounts with item_details
         const purchaseInvoiceItems = Object.entries(piAmounts)
           .filter(([, amount]) => parseFloat(amount) > 0)
-          .map(([purchase_invoice_id, amount]) => ({ purchase_invoice_id, amount: parseFloat(amount) }))
+          .map(([purchase_invoice_id, amount]) => {
+            const piItems = loadedPiItems[purchase_invoice_id] || []
+            const details = piItems
+              .filter((ii: any) => piItemAmounts[ii.id] && parseFloat(piItemAmounts[ii.id]) > 0)
+              .map((ii: any) => ({ purchase_invoice_item_id: ii.id, amount: parseFloat(piItemAmounts[ii.id]) }))
+            return {
+              purchase_invoice_id,
+              amount: parseFloat(amount),
+              item_details: details.length > 0 ? details : undefined,
+            }
+          })
 
         const finalAmount = purchaseInvoiceItems.length > 0
           ? purchaseInvoiceItems.reduce((sum, i) => sum + i.amount, 0)
@@ -606,10 +620,33 @@ export const Pagos: React.FC = () => {
                         <tbody>
                           {purchaseInvoices.map((pi: any) => {
                             const remaining = parseFloat(pi.remaining_balance || '0')
+                            const isExpanded = expandedPiIds.has(pi.id)
+                            const piItems = loadedPiItems[pi.id] || []
+                            const itemTotal = piItems.reduce((s: number, ii: any) => s + (parseFloat(piItemAmounts[ii.id] || '0') || 0), 0)
+                            const effectiveAmount = isExpanded && itemTotal > 0 ? itemTotal.toFixed(2) : piAmounts[pi.id] || ''
+
+                            const handleTogglePi = async () => {
+                              const next = new Set(expandedPiIds)
+                              if (isExpanded) { next.delete(pi.id) } else {
+                                next.add(pi.id)
+                                if (!loadedPiItems[pi.id]) {
+                                  try {
+                                    const items = await api.getPurchaseInvoiceItems(pi.id)
+                                    setLoadedPiItems(prev => ({ ...prev, [pi.id]: items }))
+                                  } catch { /* ignore */ }
+                                }
+                              }
+                              setExpandedPiIds(next)
+                            }
+
                             return (
-                              <tr key={pi.id} className="border-b border-purple-100 dark:border-purple-800">
-                                <td className="py-2 font-mono font-medium text-purple-800 dark:text-purple-300">
-                                  {pi.invoice_type} {pi.invoice_number}
+                              <React.Fragment key={pi.id}>
+                              <tr className="border-b border-purple-100 dark:border-purple-800">
+                                <td className="py-2">
+                                  <button type="button" onClick={handleTogglePi} className="font-mono font-medium text-purple-800 dark:text-purple-300 hover:underline flex items-center gap-1">
+                                    <span className="text-gray-400 text-xs">{isExpanded ? '▼' : '▶'}</span>
+                                    {pi.invoice_type} {pi.invoice_number}
+                                  </button>
                                 </td>
                                 <td className="py-2 text-gray-500">{fmtDate(pi.invoice_date)}</td>
                                 <td className="py-2 text-right">{fmt(pi.total_amount)}</td>
@@ -622,20 +659,60 @@ export const Pagos: React.FC = () => {
                                       max={remaining}
                                       step="0.01"
                                       placeholder="0.00"
-                                      value={piAmounts[pi.id] || ''}
-                                      onChange={e => setPiAmounts({ ...piAmounts, [pi.id]: e.target.value })}
+                                      value={effectiveAmount}
+                                      onChange={e => { if (!(isExpanded && itemTotal > 0)) setPiAmounts({ ...piAmounts, [pi.id]: e.target.value }) }}
+                                      readOnly={isExpanded && itemTotal > 0}
                                       className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-purple-500"
                                     />
-                                    <button
-                                      type="button"
-                                      onClick={() => setPiAmounts({ ...piAmounts, [pi.id]: remaining.toFixed(2) })}
-                                      className="text-xs text-purple-600 hover:text-purple-800 font-medium whitespace-nowrap"
-                                    >
-                                      Todo
-                                    </button>
+                                    <button type="button" onClick={() => setPiAmounts({ ...piAmounts, [pi.id]: remaining.toFixed(2) })} className="text-xs text-purple-600 hover:text-purple-800 font-medium whitespace-nowrap">Todo</button>
                                   </div>
                                 </td>
                               </tr>
+                              {isExpanded && piItems.length > 0 && piItems.map((ii: any) => {
+                                const itemRemaining = parseFloat(ii.remaining || '0')
+                                return (
+                                  <tr key={ii.id} className="bg-purple-50/50 dark:bg-purple-950/10 border-t border-purple-100 dark:border-purple-900">
+                                    <td className="py-1.5 pl-6 text-xs" colSpan={2}>
+                                      <span className="font-medium text-gray-700 dark:text-gray-300">{ii.product_name}</span>
+                                      <span className="ml-2 text-gray-400">{parseFloat(ii.quantity)}x {fmt(ii.unit_price)}</span>
+                                    </td>
+                                    <td className="py-1.5 text-right text-xs">{fmt(ii.subtotal)}</td>
+                                    <td className="py-1.5 text-right text-xs font-medium">{fmt(itemRemaining)}</td>
+                                    <td className="py-1.5 text-right">
+                                      {itemRemaining > 0 ? (
+                                        <div className="flex items-center gap-1 justify-end">
+                                          <input type="number" step="0.01" min="0" max={itemRemaining} placeholder="0.00"
+                                            value={piItemAmounts[ii.id] || ''}
+                                            onChange={e => {
+                                              setPiItemAmounts(prev => ({ ...prev, [ii.id]: e.target.value }))
+                                              setTimeout(() => {
+                                                let newTotal = 0
+                                                for (const it of (loadedPiItems[pi.id] || [])) {
+                                                  newTotal += it.id === ii.id ? (parseFloat(e.target.value) || 0) : (parseFloat(piItemAmounts[it.id] || '0'))
+                                                }
+                                                if (newTotal > 0) setPiAmounts(prev => ({ ...prev, [pi.id]: newTotal.toFixed(2) }))
+                                              }, 0)
+                                            }}
+                                            className="w-24 px-2 py-1 border border-purple-300 dark:border-purple-700 rounded text-right text-xs bg-white dark:bg-gray-700 dark:text-gray-100"
+                                          />
+                                          <button type="button" onClick={() => {
+                                            setPiItemAmounts(prev => ({ ...prev, [ii.id]: itemRemaining.toFixed(2) }))
+                                            let newTotal = 0
+                                            for (const it of (loadedPiItems[pi.id] || [])) {
+                                              newTotal += it.id === ii.id ? itemRemaining : (parseFloat(piItemAmounts[it.id] || '0'))
+                                            }
+                                            setPiAmounts(prev => ({ ...prev, [pi.id]: newTotal.toFixed(2) }))
+                                          }} className="text-xs text-purple-600 font-medium">Todo</button>
+                                        </div>
+                                      ) : <span className="text-xs text-green-500">Pagado</span>}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                              {isExpanded && piItems.length === 0 && (
+                                <tr className="bg-purple-50/30"><td colSpan={5} className="px-6 py-2 text-xs text-gray-400 italic">Sin items detallados</td></tr>
+                              )}
+                              </React.Fragment>
                             )
                           })}
                         </tbody>

@@ -330,6 +330,14 @@ export const api = {
     const { data } = await client.get(`/purchase-invoices/${id}/balance`)
     return data
   },
+  getPurchaseInvoiceItems: async (id: string) => {
+    const { data } = await client.get(`/purchase-invoices/${id}/items`)
+    return data
+  },
+  getInvoiceItemsWithRemaining: async (invoiceId: string) => {
+    const { data } = await client.get(`/invoices/${invoiceId}/items-remaining`)
+    return data
+  },
   getPurchaseInvoicesByPurchase: async (purchaseId: string) => {
     const { data } = await client.get(`/purchase-invoices/by-purchase/${purchaseId}`)
     return data

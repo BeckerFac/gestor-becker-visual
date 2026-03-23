@@ -877,6 +877,51 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS endorsed_pago_id UUID`);
     await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS endorsed_at TIMESTAMP WITH TIME ZONE`);
 
+    // ===== PURCHASE INVOICE ITEMS (line items of provider invoices) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_invoice_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        purchase_invoice_id UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+        product_name VARCHAR(255) NOT NULL,
+        description TEXT,
+        quantity DECIMAL(12,2) NOT NULL DEFAULT 1,
+        unit_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+        subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pii_purchase_invoice ON purchase_invoice_items(purchase_invoice_id)`);
+
+    // ===== COBRO INVOICE ITEM APPLICATIONS (item-level trazabilidad) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cobro_invoice_item_applications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cobro_id UUID NOT NULL REFERENCES cobros(id) ON DELETE CASCADE,
+        invoice_item_id UUID NOT NULL REFERENCES invoice_items(id) ON DELETE CASCADE,
+        amount_applied DECIMAL(12,2) NOT NULL CHECK (amount_applied > 0),
+        applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by UUID,
+        UNIQUE(cobro_id, invoice_item_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ciia_cobro ON cobro_invoice_item_applications(cobro_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ciia_invoice_item ON cobro_invoice_item_applications(invoice_item_id)`);
+
+    // ===== PAGO PURCHASE INVOICE ITEM APPLICATIONS (item-level trazabilidad) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pago_invoice_item_applications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE CASCADE,
+        purchase_invoice_item_id UUID NOT NULL REFERENCES purchase_invoice_items(id) ON DELETE CASCADE,
+        amount_applied DECIMAL(12,2) NOT NULL CHECK (amount_applied > 0),
+        applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by UUID,
+        UNIQUE(pago_id, purchase_invoice_item_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_piia_pago ON pago_invoice_item_applications(pago_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_piia_pi_item ON pago_invoice_item_applications(purchase_invoice_item_id)`);
+
     // ===== AUTO-CREATE DEFAULT BUSINESS UNIT FOR EXISTING COMPANIES =====
     // Only creates if the company doesn't have any business_units yet
     await pool.query(`

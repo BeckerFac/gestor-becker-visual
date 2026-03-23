@@ -12,6 +12,8 @@ purchaseInvoicesRouter.get('/:id', authorize('purchases', 'view'), (req, res) =>
   purchaseInvoicesController.getOne(req as any, res));
 purchaseInvoicesRouter.get('/:id/balance', authorize('purchases', 'view'), (req, res) =>
   purchaseInvoicesController.getPaymentBalance(req as any, res));
+purchaseInvoicesRouter.get('/:id/items', authorize('purchases', 'view'), (req, res) =>
+  purchaseInvoicesController.getItems(req as any, res));
 purchaseInvoicesRouter.post('/', authorize('purchases', 'create'), (req, res) =>
   purchaseInvoicesController.create(req as any, res));
 purchaseInvoicesRouter.patch('/:id', authorize('purchases', 'edit'), (req, res) =>

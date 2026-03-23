@@ -109,15 +109,40 @@ export class CobrosService {
 
       // Create cobro_invoice_applications entries (N:N cobro↔invoice)
       if (hasInvoiceItems) {
+        // Group by invoice_id to calculate total per invoice
+        const invoiceTotals = new Map<string, number>();
+
         for (const item of data.invoice_items) {
-          if (!item.invoice_id || !item.amount || parseFloat(item.amount) <= 0) continue;
+          if (!item.invoice_id) continue;
+
+          // If item has sub-items (item-level detail), process each
+          if (item.item_details && Array.isArray(item.item_details)) {
+            for (const detail of item.item_details) {
+              if (!detail.invoice_item_id || !detail.amount || parseFloat(detail.amount) <= 0) continue;
+              // Insert item-level application
+              await db.execute(sql`
+                INSERT INTO cobro_invoice_item_applications (id, cobro_id, invoice_item_id, amount_applied, created_by)
+                VALUES (${uuid()}, ${cobroId}, ${detail.invoice_item_id}, ${parseFloat(detail.amount).toString()}, ${userId})
+                ON CONFLICT (cobro_id, invoice_item_id) DO NOTHING
+              `);
+              const current = invoiceTotals.get(item.invoice_id) || 0;
+              invoiceTotals.set(item.invoice_id, current + parseFloat(detail.amount));
+            }
+          } else if (item.amount && parseFloat(item.amount) > 0) {
+            // Fallback: total amount for the invoice (no item detail)
+            const current = invoiceTotals.get(item.invoice_id) || 0;
+            invoiceTotals.set(item.invoice_id, current + parseFloat(item.amount));
+          }
+        }
+
+        // Create invoice-level applications from totals
+        for (const [invoiceId, totalAmount] of invoiceTotals.entries()) {
           await db.execute(sql`
             INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
-            VALUES (${uuid()}, ${cobroId}, ${item.invoice_id}, ${parseFloat(item.amount).toString()}, ${userId})
+            VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${totalAmount.toString()}, ${userId})
             ON CONFLICT (cobro_id, invoice_id) DO NOTHING
           `);
-          // Recalculate invoice payment_status
-          await this.recalculateInvoicePaymentStatus(item.invoice_id);
+          await this.recalculateInvoicePaymentStatus(invoiceId);
         }
       }
 

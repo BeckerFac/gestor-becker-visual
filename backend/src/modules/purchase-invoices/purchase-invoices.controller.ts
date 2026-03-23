@@ -54,6 +54,13 @@ export class PurchaseInvoicesController {
     );
     res.json(data);
   }
+  async getItems(req: AuthRequest, res: Response) {
+    const data = await purchaseInvoicesService.getPurchaseInvoiceItems(
+      req.user!.company_id,
+      req.params.id
+    );
+    res.json(data);
+  }
 }
 
 export const purchaseInvoicesController = new PurchaseInvoicesController();

@@ -84,6 +84,7 @@ export class PurchaseInvoicesService {
     other_taxes?: number;
     total_amount: number;
     notes?: string;
+    items?: Array<{ product_name: string; description?: string; quantity: number; unit_price: number }>;
   }) {
     if (!data.business_unit_id) throw new ApiError(400, 'Razon social requerida');
     if (!data.enterprise_id) throw new ApiError(400, 'Proveedor requerido');
@@ -135,7 +136,39 @@ export class PurchaseInvoicesService {
       )
     `);
 
+    // Insert items if provided
+    if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+      for (const item of data.items) {
+        if (!item.product_name || !item.quantity || !item.unit_price) continue;
+        const qty = parseFloat(String(item.quantity)) || 1;
+        const price = parseFloat(String(item.unit_price)) || 0;
+        const subtotal = qty * price;
+        await db.execute(sql`
+          INSERT INTO purchase_invoice_items (id, purchase_invoice_id, product_name, description, quantity, unit_price, subtotal)
+          VALUES (${uuid()}, ${piId}, ${item.product_name}, ${item.description || null}, ${qty.toString()}, ${price.toString()}, ${subtotal.toString()})
+        `);
+      }
+    }
+
     return this.getPurchaseInvoice(companyId, piId);
+  }
+
+  async getPurchaseInvoiceItems(companyId: string, piId: string) {
+    // Verify ownership
+    await this.getPurchaseInvoice(companyId, piId);
+
+    const result = await db.execute(sql`
+      SELECT pii.*,
+        CAST(pii.subtotal AS decimal) - COALESCE((
+          SELECT SUM(CAST(piia.amount_applied AS decimal))
+          FROM pago_invoice_item_applications piia
+          WHERE piia.purchase_invoice_item_id = pii.id
+        ), 0) as remaining
+      FROM purchase_invoice_items pii
+      WHERE pii.purchase_invoice_id = ${piId}
+      ORDER BY pii.created_at ASC
+    `);
+    return (result as any).rows || [];
   }
 
   async updatePurchaseInvoice(companyId: string, piId: string, data: any) {

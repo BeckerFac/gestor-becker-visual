@@ -84,15 +84,37 @@ export class PagosService {
 
       // Link pago to purchase invoices if items provided (N:N)
       if (hasInvoiceItems) {
+        const piTotals = new Map<string, number>();
+
         for (const item of data.purchase_invoice_items) {
-          if (!item.purchase_invoice_id || !item.amount || parseFloat(item.amount) <= 0) continue;
+          if (!item.purchase_invoice_id) continue;
+
+          // If item has sub-items (item-level detail), process each
+          if (item.item_details && Array.isArray(item.item_details)) {
+            for (const detail of item.item_details) {
+              if (!detail.purchase_invoice_item_id || !detail.amount || parseFloat(detail.amount) <= 0) continue;
+              await db.execute(sql`
+                INSERT INTO pago_invoice_item_applications (id, pago_id, purchase_invoice_item_id, amount_applied, created_by)
+                VALUES (${uuid()}, ${pagoId}, ${detail.purchase_invoice_item_id}, ${parseFloat(detail.amount).toString()}, ${userId})
+                ON CONFLICT (pago_id, purchase_invoice_item_id) DO NOTHING
+              `);
+              const current = piTotals.get(item.purchase_invoice_id) || 0;
+              piTotals.set(item.purchase_invoice_id, current + parseFloat(detail.amount));
+            }
+          } else if (item.amount && parseFloat(item.amount) > 0) {
+            const current = piTotals.get(item.purchase_invoice_id) || 0;
+            piTotals.set(item.purchase_invoice_id, current + parseFloat(item.amount));
+          }
+        }
+
+        // Create invoice-level applications from totals
+        for (const [piId, totalAmount] of piTotals.entries()) {
           await db.execute(sql`
             INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
-            VALUES (${uuid()}, ${pagoId}, ${item.purchase_invoice_id}, ${parseFloat(item.amount).toString()}, ${userId})
+            VALUES (${uuid()}, ${pagoId}, ${piId}, ${totalAmount.toString()}, ${userId})
             ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
           `);
-          // Recalculate purchase invoice payment_status
-          await this.recalculatePurchaseInvoiceStatus(item.purchase_invoice_id);
+          await this.recalculatePurchaseInvoiceStatus(piId);
         }
       }
 
