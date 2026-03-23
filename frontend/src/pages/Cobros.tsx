@@ -18,6 +18,7 @@ import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { CobroInvoiceLinker } from '@/components/cobros/CobroInvoiceLinker'
 
 interface Enterprise { id: string; name: string }
 interface Order { id: string; order_number: number; title: string; total_amount: string; payment_status?: string; enterprise_id?: string; enterprise?: { id: string; name: string } | null; customer?: { id?: string; name?: string; enterprise_id?: string } }
@@ -239,6 +240,9 @@ export const Cobros: React.FC = () => {
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Linking state for existing cobros
+  const [linkingCobro, setLinkingCobro] = useState<{ id: string; amount: number; enterprise_id?: string } | null>(null)
 
   // Pending orders state
   const [dismissedPendingCobros, setDismissedPendingCobros] = useState<string[]>(getDismissedPendingCobros())
@@ -1460,14 +1464,28 @@ export const Cobros: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[150px] truncate" title={receipt.notes || ''}>{receipt.notes || '-'}</td>
                     <td className="px-4 py-3">
-                      <PermissionGate module="cobros" action="delete">
-                        <button
-                          onClick={() => setDeleteTarget(receipt)}
-                          className="text-red-500 hover:text-red-700 text-sm transition-colors"
-                        >
-                          Eliminar
-                        </button>
-                      </PermissionGate>
+                      <div className="flex items-center gap-2">
+                        <PermissionGate module="cobros" action="create">
+                          <button
+                            onClick={() => setLinkingCobro({
+                              id: (receipt as any).cobro_id || receipt.id,
+                              amount: parseFloat(receipt.total_amount || '0'),
+                              enterprise_id: receipt.enterprise_id || undefined,
+                            })}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors"
+                          >
+                            Vincular
+                          </button>
+                        </PermissionGate>
+                        <PermissionGate module="cobros" action="delete">
+                          <button
+                            onClick={() => setDeleteTarget(receipt)}
+                            className="text-red-500 hover:text-red-700 text-sm transition-colors"
+                          >
+                            Eliminar
+                          </button>
+                        </PermissionGate>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1495,6 +1513,17 @@ export const Cobros: React.FC = () => {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Modal: vincular cobro existente a facturas */}
+      {linkingCobro && (
+        <CobroInvoiceLinker
+          cobroId={linkingCobro.id}
+          cobroAmount={linkingCobro.amount}
+          enterpriseId={linkingCobro.enterprise_id}
+          onClose={() => setLinkingCobro(null)}
+          onLinked={() => { setLinkingCobro(null); loadData() }}
+        />
+      )}
     </div>
   )
 }

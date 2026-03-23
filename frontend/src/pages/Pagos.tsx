@@ -16,6 +16,7 @@ import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { PagoInvoiceLinker } from '@/components/pagos/PagoInvoiceLinker'
 
 interface Pago {
   id: string
@@ -100,6 +101,7 @@ export const Pagos: React.FC = () => {
   const [pageSize, setPageSize] = useState(25)
   const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [linkingPago, setLinkingPago] = useState<{ id: string; amount: number; enterprise_id?: string } | null>(null)
   const [dismissedPending, setDismissedPending] = useState<string[]>(getDismissedPending())
   const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
@@ -810,9 +812,23 @@ export const Pagos: React.FC = () => {
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{pago.bank_name || '-'}</td>
                     <td className="px-4 py-3">{pago.reference ? <span className="font-mono text-xs">{pago.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
-                      <PermissionGate module="pagos" action="delete">
-                        <button onClick={() => setDeleteTarget(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
-                      </PermissionGate>
+                      <div className="flex items-center gap-2">
+                        <PermissionGate module="pagos" action="create">
+                          <button
+                            onClick={() => setLinkingPago({
+                              id: pago.id,
+                              amount: parseFloat(pago.amount || '0'),
+                              enterprise_id: pago.enterprise_id || undefined,
+                            })}
+                            className="text-purple-600 hover:text-purple-800 text-xs font-medium transition-colors"
+                          >
+                            Vincular
+                          </button>
+                        </PermissionGate>
+                        <PermissionGate module="pagos" action="delete">
+                          <button onClick={() => setDeleteTarget(pago)} className="text-red-500 hover:text-red-700 text-sm transition-colors">Eliminar</button>
+                        </PermissionGate>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -840,6 +856,17 @@ export const Pagos: React.FC = () => {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Modal: vincular pago existente a facturas de compra */}
+      {linkingPago && (
+        <PagoInvoiceLinker
+          pagoId={linkingPago.id}
+          pagoAmount={linkingPago.amount}
+          enterpriseId={linkingPago.enterprise_id}
+          onClose={() => setLinkingPago(null)}
+          onLinked={() => { setLinkingPago(null); loadData() }}
+        />
+      )}
     </div>
   )
 }
