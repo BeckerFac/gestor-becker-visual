@@ -105,6 +105,8 @@ export const Pagos: React.FC = () => {
 
   const [chequesDisponibles, setChequesDisponibles] = useState<ChequeDisponible[]>([])
   const [selectedChequeId, setSelectedChequeId] = useState('')
+  const [purchaseInvoices, setPurchaseInvoices] = useState<any[]>([])
+  const [piAmounts, setPiAmounts] = useState<Record<string, string>>({})
 
   const [form, setForm] = useState({
     enterprise_id: '', purchase_id: '',
@@ -139,6 +141,18 @@ export const Pagos: React.FC = () => {
 
   useEffect(() => { loadData() }, [filterEnterprise])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
+
+  // Load purchase invoices for selected enterprise (for linking)
+  useEffect(() => {
+    if (form.enterprise_id) {
+      api.getAvailablePurchaseInvoicesForLinking({ enterprise_id: form.enterprise_id })
+        .then(data => setPurchaseInvoices(data || []))
+        .catch(() => setPurchaseInvoices([]))
+    } else {
+      setPurchaseInvoices([])
+    }
+    setPiAmounts({})
+  }, [form.enterprise_id])
 
   // Calculate paid amounts per purchase from pagos data
   const paidByPurchase = useMemo(() => {
@@ -230,15 +244,25 @@ export const Pagos: React.FC = () => {
           toast.success('Pago con cheque endosado registrado')
         }
       } else {
+        // Build purchase_invoice_items from piAmounts
+        const purchaseInvoiceItems = Object.entries(piAmounts)
+          .filter(([, amount]) => parseFloat(amount) > 0)
+          .map(([purchase_invoice_id, amount]) => ({ purchase_invoice_id, amount: parseFloat(amount) }))
+
+        const finalAmount = purchaseInvoiceItems.length > 0
+          ? purchaseInvoiceItems.reduce((sum, i) => sum + i.amount, 0)
+          : parseFloat(form.amount)
+
         await api.createPago({
           enterprise_id: form.enterprise_id || null,
           purchase_id: form.purchase_id || null,
-          amount: parseFloat(form.amount),
+          amount: finalAmount,
           payment_method: form.payment_method,
           bank_id: form.bank_id || null,
           reference: form.reference || null,
           payment_date: form.payment_date,
           notes: form.notes || null,
+          purchase_invoice_items: purchaseInvoiceItems.length > 0 ? purchaseInvoiceItems : undefined,
         })
         toast.success('Pago registrado correctamente')
       }
@@ -272,6 +296,10 @@ export const Pagos: React.FC = () => {
   const fmtDate = (d: string) => formatDate(d)
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
   const showChequeSelector = form.payment_method === 'cheque_endosado'
+
+  // Calculate total from purchase invoice amounts
+  const piTotal = Object.values(piAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+  const hasPiItems = piTotal > 0
 
   const selectedCheque = chequesDisponibles.find(c => c.id === selectedChequeId)
   const chequeExcess = selectedCheque && form.amount
@@ -485,14 +513,7 @@ export const Pagos: React.FC = () => {
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
                 </select>
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Compra asociada</label>
-                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.purchase_id} onChange={e => setForm({ ...form, purchase_id: e.target.value })}>
-                  <option value="">Sin compra</option>
-                  {filteredPurchases.map(p => <option key={p.id} value={p.id}>#{String(p.purchase_number).padStart(4, '0')} ({fmt(p.total_amount)})</option>)}
-                </select>
-              </div>
-              <Input label="Monto *" type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+              <Input label={hasPiItems ? `Monto (auto: ${fmt(piTotal)})` : 'Monto *'} type="number" step="0.01" min="0.01" placeholder="0.00" value={hasPiItems ? piTotal.toFixed(2) : form.amount} onChange={e => { if (!hasPiItems) setForm({ ...form, amount: e.target.value }) }} required={!hasPiItems} readOnly={hasPiItems} />
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Metodo de Pago *</label>
                 <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
@@ -562,7 +583,73 @@ export const Pagos: React.FC = () => {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
-              <div className="flex items-end">
+
+              {/* Purchase Invoices linking section */}
+              {form.enterprise_id && (
+                <div className="col-span-full border border-purple-200 dark:border-purple-800 rounded-lg p-4 bg-purple-50/50 dark:bg-purple-950/20">
+                  <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-3">
+                    Vincular a facturas de compra
+                    {hasPiItems && <span className="ml-2 text-xs font-normal text-purple-600">Total: {fmt(piTotal)}</span>}
+                  </h4>
+                  {purchaseInvoices.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-gray-500 border-b border-purple-200 dark:border-purple-700">
+                            <th className="pb-2">Factura</th>
+                            <th className="pb-2">Fecha</th>
+                            <th className="pb-2 text-right">Total</th>
+                            <th className="pb-2 text-right">Restante</th>
+                            <th className="pb-2 text-right w-32">Monto a pagar</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {purchaseInvoices.map((pi: any) => {
+                            const remaining = parseFloat(pi.remaining_balance || '0')
+                            return (
+                              <tr key={pi.id} className="border-b border-purple-100 dark:border-purple-800">
+                                <td className="py-2 font-mono font-medium text-purple-800 dark:text-purple-300">
+                                  {pi.invoice_type} {pi.invoice_number}
+                                </td>
+                                <td className="py-2 text-gray-500">{fmtDate(pi.invoice_date)}</td>
+                                <td className="py-2 text-right">{fmt(pi.total_amount)}</td>
+                                <td className="py-2 text-right text-orange-600 dark:text-orange-400">{fmt(remaining)}</td>
+                                <td className="py-2 text-right">
+                                  <div className="flex items-center gap-1 justify-end">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={remaining}
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      value={piAmounts[pi.id] || ''}
+                                      onChange={e => setPiAmounts({ ...piAmounts, [pi.id]: e.target.value })}
+                                      className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-purple-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setPiAmounts({ ...piAmounts, [pi.id]: remaining.toFixed(2) })}
+                                      className="text-xs text-purple-600 hover:text-purple-800 font-medium whitespace-nowrap"
+                                    >
+                                      Todo
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">
+                      {form.enterprise_id ? 'Este proveedor no tiene facturas de compra pendientes' : 'Selecciona un proveedor'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-end col-span-full">
                 <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Pago</Button>
               </div>
             </form>

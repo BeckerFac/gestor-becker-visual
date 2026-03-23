@@ -98,14 +98,30 @@ export class CobrosService {
 
     try {
       const cobroId = uuid();
-      // Determine pending_status: if no invoice linked, mark as pending_invoice
-      const pendingStatus = data.invoice_id ? null : 'pending_invoice';
+      // Check if invoice_items are provided (N:N linking to invoices)
+      const hasInvoiceItems = data.invoice_items && Array.isArray(data.invoice_items) && data.invoice_items.length > 0;
+      const pendingStatus = (data.invoice_id || hasInvoiceItems) ? null : 'pending_invoice';
+
       await db.execute(sql`
         INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, created_by)
         VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
       `);
 
-      // Insert cobro_items for partial payments
+      // Create cobro_invoice_applications entries (N:N cobro↔invoice)
+      if (hasInvoiceItems) {
+        for (const item of data.invoice_items) {
+          if (!item.invoice_id || !item.amount || parseFloat(item.amount) <= 0) continue;
+          await db.execute(sql`
+            INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
+            VALUES (${uuid()}, ${cobroId}, ${item.invoice_id}, ${parseFloat(item.amount).toString()}, ${userId})
+            ON CONFLICT (cobro_id, invoice_id) DO NOTHING
+          `);
+          // Recalculate invoice payment_status
+          await this.recalculateInvoicePaymentStatus(item.invoice_id);
+        }
+      }
+
+      // Legacy: insert cobro_items for partial payments by order_item
       if (data.items && Array.isArray(data.items) && data.items.length > 0) {
         for (const item of data.items) {
           if (!item.order_item_id || !item.amount_paid || Number(item.amount_paid) <= 0) continue;
@@ -200,7 +216,19 @@ export class CobrosService {
       if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
       const orderId = rows[0].order_id;
 
+      // Get linked invoices before deleting (for recalculation)
+      const linkedInvoices = await db.execute(sql`
+        SELECT invoice_id FROM cobro_invoice_applications WHERE cobro_id = ${cobroId}
+      `);
+      const invoiceIds = ((linkedInvoices as any).rows || []).map((r: any) => r.invoice_id);
+
+      // Delete cobro (CASCADE will delete cobro_invoice_applications)
       await db.execute(sql`DELETE FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+
+      // Recalculate payment_status for affected invoices
+      for (const invId of invoiceIds) {
+        await this.recalculateInvoicePaymentStatus(invId);
+      }
 
       if (orderId) {
         await this.recalculateOrderPaymentStatus(orderId);
@@ -210,6 +238,35 @@ export class CobrosService {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to delete cobro');
+    }
+  }
+
+  private async recalculateInvoicePaymentStatus(invoiceId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          CAST(i.total_amount AS decimal) as total,
+          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
+        FROM invoices i
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        WHERE i.id = ${invoiceId}
+        GROUP BY i.id, i.total_amount
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const total = parseFloat(row.total);
+      const applied = parseFloat(row.applied);
+
+      let status = 'pendiente';
+      if (applied >= total && total > 0) status = 'pagado';
+      else if (applied > 0) status = 'parcial';
+
+      await db.execute(sql`
+        UPDATE invoices SET payment_status = ${status} WHERE id = ${invoiceId}
+      `);
+    } catch (error) {
+      console.warn('Recalculate invoice payment status error:', error);
     }
   }
 

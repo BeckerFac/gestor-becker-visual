@@ -520,25 +520,23 @@ export const Cobros: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      const receiptPayload: any = {
-        receipt_date: form.receipt_date,
-        payment_method: form.payment_method,
-        notes: form.notes || null,
+      const finalAmount = hasInvoiceItems ? items.reduce((s, i) => s + i.amount, 0) : directAmount
+
+      // Use createCobro with invoice_items for N:N linking
+      const cobroPayload: any = {
         enterprise_id: form.enterprise_id || null,
+        amount: finalAmount,
+        payment_method: form.payment_method,
         bank_id: form.bank_id || null,
         reference: form.reference || null,
-        ...((hasInvoiceItems || hasOrderItems)
-          ? {
-              ...(hasInvoiceItems ? { items } : {}),
-              ...(hasOrderItems ? { order_items: oItems } : {}),
-            }
-          : { amount: directAmount }
-        ),
+        payment_date: form.receipt_date,
+        notes: form.notes || null,
+        invoice_items: hasInvoiceItems ? items : undefined,
       }
 
       // Attach cheque data if payment method is cheque
       if (form.payment_method === 'cheque') {
-        receiptPayload.cheque_data = {
+        cobroPayload.cheque_data = {
           number: chequeForm.number,
           bank: chequeForm.bank,
           cheque_type: chequeForm.cheque_type,
@@ -549,7 +547,7 @@ export const Cobros: React.FC = () => {
         }
       }
 
-      await api.createReceipt(receiptPayload)
+      await api.createCobro(cobroPayload)
       setShowForm(false)
       setInvoiceItems({})
       setOrderItems({})

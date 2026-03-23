@@ -73,10 +73,28 @@ export class PagosService {
 
     try {
       const pagoId = uuid();
+      // Determine pending_status based on whether purchase_invoice_items are provided
+      const hasInvoiceItems = data.purchase_invoice_items && Array.isArray(data.purchase_invoice_items) && data.purchase_invoice_items.length > 0;
+      const pendingStatus = hasInvoiceItems ? null : 'pending_invoice';
+
       await db.execute(sql`
-        INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, created_by)
-        VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
+        INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by)
+        VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
       `);
+
+      // Link pago to purchase invoices if items provided (N:N)
+      if (hasInvoiceItems) {
+        for (const item of data.purchase_invoice_items) {
+          if (!item.purchase_invoice_id || !item.amount || parseFloat(item.amount) <= 0) continue;
+          await db.execute(sql`
+            INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
+            VALUES (${uuid()}, ${pagoId}, ${item.purchase_invoice_id}, ${parseFloat(item.amount).toString()}, ${userId})
+            ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
+          `);
+          // Recalculate purchase invoice payment_status
+          await this.recalculatePurchaseInvoiceStatus(item.purchase_invoice_id);
+        }
+      }
 
       const result = await db.execute(sql`
         SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
@@ -104,11 +122,53 @@ export class PagosService {
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Pago not found');
 
+      // Get linked purchase invoices before deleting (for recalculation)
+      const linkedPIs = await db.execute(sql`
+        SELECT purchase_invoice_id FROM pago_invoice_applications WHERE pago_id = ${pagoId}
+      `);
+      const piIds = ((linkedPIs as any).rows || []).map((r: any) => r.purchase_invoice_id);
+
+      // Delete pago (CASCADE will delete pago_invoice_applications)
       await db.execute(sql`DELETE FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
+
+      // Recalculate payment_status for affected purchase invoices
+      for (const piId of piIds) {
+        await this.recalculatePurchaseInvoiceStatus(piId);
+      }
+
       return { success: true };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to delete pago');
+    }
+  }
+
+  private async recalculatePurchaseInvoiceStatus(purchaseInvoiceId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          CAST(pi.total_amount AS decimal) as total,
+          COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as applied
+        FROM purchase_invoices pi
+        LEFT JOIN pago_invoice_applications pia ON pia.purchase_invoice_id = pi.id
+        WHERE pi.id = ${purchaseInvoiceId}
+        GROUP BY pi.id, pi.total_amount
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const total = parseFloat(row.total);
+      const applied = parseFloat(row.applied);
+
+      let status = 'pendiente';
+      if (applied >= total && total > 0) status = 'pagado';
+      else if (applied > 0) status = 'parcial';
+
+      await db.execute(sql`
+        UPDATE purchase_invoices SET payment_status = ${status} WHERE id = ${purchaseInvoiceId}
+      `);
+    } catch (error) {
+      console.warn('Recalculate purchase invoice status error:', error);
     }
   }
 
