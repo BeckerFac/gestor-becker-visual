@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { PipelineKanban } from '@/components/crm/PipelineKanban'
 import { StageConfigurator, CrmStage } from '@/components/crm/StageConfigurator'
 import { Button } from '@/components/ui/Button'
@@ -94,7 +94,7 @@ export const Oportunidades: React.FC = () => {
     loadData()
   }
 
-  const activeStages = stages.filter(s => !s.is_loss_stage).sort((a, b) => a.order - b.order)
+  const activeStages = useMemo(() => stages.filter(s => !s.is_loss_stage).sort((a, b) => a.order - b.order), [stages])
 
   if (loading) {
     return (

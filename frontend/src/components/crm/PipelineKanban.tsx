@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { DndContext, DragOverlay, useDroppable, useDraggable, closestCorners } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { DealCard, Deal } from './DealCard'
@@ -70,13 +70,14 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
   const [showLostDeals, setShowLostDeals] = useState(false)
   const [lostDeals, setLostDeals] = useState<Deal[]>([])
 
-  // Active (non-loss) stages sorted by order
-  const activeStages = stages
-    .filter(s => !s.is_loss_stage)
-    .sort((a, b) => a.order - b.order)
+  // Active (non-loss) stages sorted by order — memoized to prevent re-render loops
+  const activeStages = useMemo(() =>
+    stages.filter(s => !s.is_loss_stage).sort((a, b) => a.order - b.order),
+    [stages]
+  )
 
-  // Loss stages
-  const lossStages = stages.filter(s => s.is_loss_stage)
+  // Loss stages — memoized
+  const lossStages = useMemo(() => stages.filter(s => s.is_loss_stage), [stages])
 
   const loadData = useCallback(async () => {
     try {
