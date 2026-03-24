@@ -326,6 +326,7 @@ export class AccountingEntriesService {
    * C: Deudores por Ventas (monto)
    */
   async createEntryForCobro(cobro: CobroData): Promise<any> {
+    if (!await isAccountingEnabled(cobro.company_id)) return null;
     const amount = Number(cobro.amount);
     const date = cobro.date || new Date().toISOString().split('T')[0];
 
@@ -363,6 +364,7 @@ export class AccountingEntriesService {
    * C: Caja/Bancos (monto)
    */
   async createEntryForPago(pago: PagoData): Promise<any> {
+    if (!await isAccountingEnabled(pago.company_id)) return null;
     // Skip accounting for cheque endorsements (handled by createEntryForChequeTransition)
     if (pago.payment_method === 'cheque_endosado' || pago.skip_accounting) return null;
 
@@ -522,6 +524,7 @@ export class AccountingEntriesService {
    * C: Proveedores (total)
    */
   async createEntryForPurchaseInvoice(pi: PurchaseInvoiceData): Promise<any> {
+    if (!await isAccountingEnabled(pi.company_id)) return null;
     const total = Number(pi.total);
     const vat = Number(pi.vat_amount || 0);
     const neto = pi.subtotal ? Number(pi.subtotal) : total - vat;
