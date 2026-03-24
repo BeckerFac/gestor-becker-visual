@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { getRows, getFirstRow } from '../../lib/db-utils';
 
 export class TagsService {
   async getTags(companyId: string) {
@@ -13,7 +14,7 @@ export class TagsService {
         WHERE t.company_id = ${companyId}
         ORDER BY t.name
       `);
-      return (result as any).rows || result || [];
+      return getRows(result);
     } catch (error) {
       throw new ApiError(500, 'Failed to get tags');
     }
@@ -30,8 +31,7 @@ export class TagsService {
         VALUES (${tagId}, ${companyId}, ${data.name.trim()}, ${data.color || '#6B7280'})
       `);
       const result = await db.execute(sql`SELECT * FROM tags WHERE id = ${tagId}`);
-      const rows = (result as any).rows || result || [];
-      return rows[0];
+      return getFirstRow(result);
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create tag');
@@ -41,8 +41,7 @@ export class TagsService {
   async updateTag(companyId: string, tagId: string, data: { name?: string; color?: string }) {
     try {
       const check = await db.execute(sql`SELECT id FROM tags WHERE id = ${tagId} AND company_id = ${companyId}`);
-      const rows = (check as any).rows || check || [];
-      if (rows.length === 0) throw new ApiError(404, 'Tag not found');
+      if (getRows(check).length === 0) throw new ApiError(404, 'Tag not found');
 
       await db.execute(sql`
         UPDATE tags SET
@@ -51,7 +50,7 @@ export class TagsService {
         WHERE id = ${tagId} AND company_id = ${companyId}
       `);
       const result = await db.execute(sql`SELECT * FROM tags WHERE id = ${tagId}`);
-      return ((result as any).rows || result || [])[0];
+      return getFirstRow(result);
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update tag');
@@ -61,8 +60,7 @@ export class TagsService {
   async deleteTag(companyId: string, tagId: string) {
     try {
       const check = await db.execute(sql`SELECT id FROM tags WHERE id = ${tagId} AND company_id = ${companyId}`);
-      const rows = (check as any).rows || check || [];
-      if (rows.length === 0) throw new ApiError(404, 'Tag not found');
+      if (getRows(check).length === 0) throw new ApiError(404, 'Tag not found');
       await db.execute(sql`DELETE FROM tags WHERE id = ${tagId} AND company_id = ${companyId}`);
       return { success: true };
     } catch (error) {
@@ -108,7 +106,7 @@ export class TagsService {
         WHERE et.entity_id = ${entityId} AND et.entity_type = ${entityType}
         ORDER BY t.name
       `);
-      return (result as any).rows || result || [];
+      return getRows(result);
     } catch (error) {
       throw new ApiError(500, 'Failed to get entity tags');
     }

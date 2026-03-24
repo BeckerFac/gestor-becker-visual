@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
+import { getRows, getFirstRow } from '../../lib/db-utils';
 
 export class QuotesService {
   private migrationsRun = false;
@@ -75,7 +76,7 @@ export class QuotesService {
         ORDER BY q.created_at DESC
         LIMIT ${limit} OFFSET ${skip}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
 
       const countResult = await db.execute(sql`
         SELECT COUNT(*)::int as total
@@ -83,7 +84,7 @@ export class QuotesService {
         LEFT JOIN customers c ON q.customer_id = c.id
         WHERE ${whereClause}
       `);
-      const total = ((countResult as any).rows || [])[0]?.total || 0;
+      const total = getFirstRow(countResult)?.total || 0;
 
       return { items: rows, total };
     } catch (error) {
@@ -92,7 +93,7 @@ export class QuotesService {
     }
   }
 
-  async getQuote(companyId: string, quoteId: string) {
+  async getQuote(companyId: string, quoteId: string): Promise<Record<string, any>> {
     try {
       const result = await db.execute(sql`
         SELECT q.*,
@@ -101,13 +102,13 @@ export class QuotesService {
         LEFT JOIN customers c ON q.customer_id = c.id
         WHERE q.company_id = ${companyId} AND q.id = ${quoteId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Quote not found');
 
       const itemsResult = await db.execute(sql`
         SELECT * FROM quote_items WHERE quote_id = ${quoteId} ORDER BY created_at ASC
       `);
-      const items = (itemsResult as any).rows || itemsResult || [];
+      const items = getRows(itemsResult);
 
       return { ...rows[0], items };
     } catch (error) {
@@ -127,7 +128,7 @@ export class QuotesService {
       const result = await db.execute(sql`
         SELECT id, status FROM quotes WHERE id = ${quoteId} AND company_id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Quote not found');
 
       await db.execute(sql`
@@ -142,7 +143,7 @@ export class QuotesService {
         const orderResult = await db.execute(sql`
           SELECT id FROM orders WHERE quote_id = ${quoteId} AND company_id = ${companyId}
         `);
-        const orderRows = (orderResult as any).rows || orderResult || [];
+        const orderRows = getRows(orderResult);
         if (orderRows.length > 0) {
           const orderId = orderRows[0].id;
           await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
@@ -157,7 +158,7 @@ export class QuotesService {
         if (newStatus === 'accepted') {
           // Resolve enterprise_id for the quote
           const quoteData = await db.execute(sql`SELECT enterprise_id, customer_id, total_amount, quote_number FROM quotes WHERE id = ${quoteId}`);
-          const qd = ((quoteData as any).rows || [])[0];
+          const qd = getFirstRow(quoteData);
           if (qd) {
             await crmSyncService.handleEvent({
               companyId,
@@ -171,7 +172,7 @@ export class QuotesService {
           }
         } else if (newStatus === 'rejected') {
           const quoteData = await db.execute(sql`SELECT enterprise_id, customer_id, quote_number FROM quotes WHERE id = ${quoteId}`);
-          const qd = ((quoteData as any).rows || [])[0];
+          const qd = getFirstRow(quoteData);
           if (qd) {
             await crmSyncService.handleEvent({
               companyId,
@@ -200,7 +201,7 @@ export class QuotesService {
     const numResult = await db.execute(sql`
       SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = ${companyId}
     `);
-    const numRows = (numResult as any).rows || numResult || [];
+    const numRows = getRows(numResult);
     const orderNumber = parseInt(numRows[0]?.next_number || '1');
 
     const orderId = uuid();
@@ -210,7 +211,7 @@ export class QuotesService {
     let enterpriseId = quote.enterprise_id || null;
     if (!enterpriseId && quote.customer_id) {
       const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${quote.customer_id}`);
-      const custRows = (custResult as any).rows || custResult || [];
+      const custRows = getRows(custResult);
       if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
     }
 
@@ -259,7 +260,7 @@ export class QuotesService {
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
         const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = (custResult as any).rows || custResult || [];
+        const custRows = getRows(custResult);
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
@@ -283,7 +284,7 @@ export class QuotesService {
       try {
         // Fetch quote_number for metadata title
         const qnResult = await db.execute(sql`SELECT quote_number FROM quotes WHERE id = ${quoteId}`);
-        const quoteNumber = ((qnResult as any).rows || [])[0]?.quote_number || '';
+        const quoteNumber = getFirstRow(qnResult)?.quote_number || '';
         await crmSyncService.handleEvent({
           companyId,
           event: 'quote_created',
@@ -314,7 +315,7 @@ export class QuotesService {
       let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
         const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = (custResult as any).rows || custResult || [];
+        const custRows = getRows(custResult);
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
@@ -381,7 +382,7 @@ export class QuotesService {
       const companyResult = await db.execute(sql`
         SELECT * FROM companies WHERE id = ${companyId}
       `);
-      const companyRows = (companyResult as any).rows || companyResult || [];
+      const companyRows = getRows(companyResult);
       const company = companyRows[0];
 
       if (!company) throw new ApiError(404, 'Company not found');
@@ -866,7 +867,7 @@ export class QuotesService {
       const result = await db.execute(sql`
         SELECT quote_banner_base64 FROM companies WHERE id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       return rows[0]?.quote_banner_base64 || null;
     } catch (error) {
       console.error('Get banner error:', error);

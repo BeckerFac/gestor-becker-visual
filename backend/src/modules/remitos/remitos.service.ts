@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import puppeteer from 'puppeteer';
+import { getRows, getFirstRow } from '../../lib/db-utils';
 
 export class RemitosService {
   private tablesEnsured = false;
@@ -106,7 +107,7 @@ export class RemitosService {
         ORDER BY r.created_at DESC
         LIMIT ${limit} OFFSET ${skip}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       return { items: rows, total: rows.length };
     } catch (error) {
       console.error('Get remitos error:', error);
@@ -114,7 +115,7 @@ export class RemitosService {
     }
   }
 
-  async getRemito(companyId: string, remitoId: string) {
+  async getRemito(companyId: string, remitoId: string): Promise<Record<string, any>> {
     await this.ensureTables();
     try {
       const result = await db.execute(sql`
@@ -128,13 +129,13 @@ export class RemitosService {
         LEFT JOIN orders o ON r.order_id = o.id
         WHERE r.company_id = ${companyId} AND r.id = ${remitoId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
       const itemsResult = await db.execute(sql`
         SELECT * FROM remito_items WHERE remito_id = ${remitoId} ORDER BY id ASC
       `);
-      const items = (itemsResult as any).rows || itemsResult || [];
+      const items = getRows(itemsResult);
 
       return { ...rows[0], items };
     } catch (error) {
@@ -151,14 +152,14 @@ export class RemitosService {
       const numResult = await db.execute(sql`
         SELECT COALESCE(MAX(remito_number), 0) + 1 as next_number FROM remitos WHERE company_id = ${companyId}
       `);
-      const numRows = (numResult as any).rows || numResult || [];
+      const numRows = getRows(numResult);
       const remitoNumber = parseInt(numRows[0]?.next_number || '1');
 
       // Resolve enterprise_id from customer if not provided
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
         const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = (custResult as any).rows || custResult || [];
+        const custRows = getRows(custResult);
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
@@ -197,7 +198,7 @@ export class RemitosService {
       let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
         const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = (custResult as any).rows || custResult || [];
+        const custRows = getRows(custResult);
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
@@ -245,7 +246,7 @@ export class RemitosService {
       const result = await db.execute(sql`
         SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
       await db.execute(sql`
@@ -265,7 +266,7 @@ export class RemitosService {
       const result = await db.execute(sql`
         SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
       await db.execute(sql`DELETE FROM remito_items WHERE remito_id = ${remitoId}`);
@@ -284,7 +285,7 @@ export class RemitosService {
       const result = await db.execute(sql`
         SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
       await db.execute(sql`
@@ -303,7 +304,7 @@ export class RemitosService {
       const result = await db.execute(sql`
         SELECT signed_pdf_url FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
-      const rows = (result as any).rows || result || [];
+      const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
       return rows[0].signed_pdf_url || null;
     } catch (error) {
@@ -317,7 +318,7 @@ export class RemitosService {
       const remito = await this.getRemito(companyId, remitoId);
 
       const companyResult = await db.execute(sql`SELECT * FROM companies WHERE id = ${companyId}`);
-      const companyRows = (companyResult as any).rows || companyResult || [];
+      const companyRows = getRows(companyResult);
       if (companyRows.length === 0) throw new ApiError(404, 'Company not found');
       const company = companyRows[0];
 
