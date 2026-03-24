@@ -25,6 +25,26 @@ const DEFAULT_STAGES: CrmStage[] = [
   { id: 'default-7', name: 'Perdido', color: '#EF4444', order: 7, trigger_event: null, is_loss_stage: true },
 ]
 
+class KanbanErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+  state = { hasError: false, error: '' }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error: error.message } }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6 text-center">
+          <p className="text-red-700 dark:text-red-300 font-medium">Error al cargar pipeline</p>
+          <p className="text-sm text-red-500 mt-1">{this.state.error}</p>
+          <button onClick={() => { this.setState({ hasError: false, error: '' }); window.location.reload() }}
+            className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
+            Recargar
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export const Oportunidades: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [stages, setStages] = useState<CrmStage[]>([])
@@ -180,11 +200,15 @@ export const Oportunidades: React.FC = () => {
         )}
       </div>
 
-      {/* Kanban */}
-      <PipelineKanban
-        enterprises={enterprises}
-        stages={stages}
-      />
+      {/* Kanban — wrapped in error boundary to prevent page crash */}
+      <React.Suspense fallback={<div className="text-center py-8 text-gray-400">Cargando pipeline...</div>}>
+        <KanbanErrorBoundary>
+          <PipelineKanban
+            enterprises={enterprises}
+            stages={stages}
+          />
+        </KanbanErrorBoundary>
+      </React.Suspense>
 
       {/* Stage Configurator Modal */}
       <StageConfigurator
