@@ -172,7 +172,7 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
     }
   }
 
-  const filterDeals = (deals: Deal[]): Deal[] => {
+  const filterDeals = useCallback((deals: Deal[]): Deal[] => {
     if (!search.trim()) return deals
     const s = search.toLowerCase()
     return deals.filter(d =>
@@ -180,7 +180,7 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
       (d.enterprise_name || '').toLowerCase().includes(s) ||
       (d.customer_name || '').toLowerCase().includes(s)
     )
-  }
+  }, [search])
 
   if (loading) {
     return (
@@ -199,13 +199,13 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
     )
   }
 
-  const lostCount = lossStages.reduce((sum, s) => {
+  const lostCount = useMemo(() => lossStages.reduce((sum, s) => {
     const key = s.name.toLowerCase()
     return sum + (dealsByStage[key] || dealsByStage[s.id] || []).length
-  }, 0) || summary?.stages?.perdido?.count || 0
+  }, 0) || summary?.stages?.perdido?.count || 0, [lossStages, dealsByStage, summary])
 
-  // Mobile: list view
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  // Mobile: list view — compute once
+  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
 
   // Drag & drop
   const dnd = useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData })
