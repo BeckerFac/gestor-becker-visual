@@ -20,6 +20,13 @@ interface EnterpriseSaldo {
   a_cobrar: number
   a_pagar: number
   saldo: number
+  // Semantic fields (always >= 0)
+  deuda_cliente?: number
+  credito_cliente?: number
+  deuda_proveedor?: number
+  credito_proveedor?: number
+  saldo_neto?: number
+  tipo?: string
 }
 
 interface Movimiento {
@@ -356,15 +363,15 @@ export const CuentaCorriente: React.FC = () => {
 
   const fmt = (n: number) => formatCurrency(n)
 
-  const totalNosDebem = resumen
-    .filter((r) => r.a_cobrar > 0)
-    .reduce((s, r) => s + r.a_cobrar, 0)
+  // Use semantic fields from backend (always >= 0)
+  const totalACobrar = resumen.reduce((s, r) => s + (r.deuda_cliente || Math.max(r.a_cobrar, 0)), 0)
+  const totalAPagar = resumen.reduce((s, r) => s + (r.deuda_proveedor || Math.max(r.a_pagar, 0)), 0)
+  const totalCreditos = resumen.reduce((s, r) => s + (r.credito_cliente || 0) + (r.credito_proveedor || 0), 0)
+  const balanceNeto = totalACobrar - totalAPagar
 
-  const totalLesDebemos = resumen
-    .filter((r) => r.a_pagar > 0)
-    .reduce((s, r) => s + r.a_pagar, 0)
-
-  const balanceNeto = totalNosDebem - totalLesDebemos
+  // Legacy compat
+  const totalNosDebem = totalACobrar
+  const totalLesDebemos = totalAPagar
 
   const hasMovimientosCobrar =
     detalle && detalle.cuentas_a_cobrar.movimientos.length > 0
@@ -433,27 +440,37 @@ export const CuentaCorriente: React.FC = () => {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent>
-            <p className="text-sm text-gray-500">Nos Deben</p>
-            <p className="text-2xl font-bold text-green-700">{fmt(totalNosDebem)}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Card className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30">
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-medium text-green-600 dark:text-green-400">A Cobrar</p>
+            <p className="text-xl font-bold text-green-700 dark:text-green-300">{fmt(totalACobrar)}</p>
+            <p className="text-[10px] text-green-500 mt-0.5">{resumen.filter(r => (r.deuda_cliente || Math.max(r.a_cobrar, 0)) > 0).length} empresas</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent>
-            <p className="text-sm text-gray-500">Les Debemos</p>
-            <p className="text-2xl font-bold text-red-600">{fmt(totalLesDebemos)}</p>
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-medium text-red-600 dark:text-red-400">A Pagar</p>
+            <p className="text-xl font-bold text-red-700 dark:text-red-300">{fmt(totalAPagar)}</p>
+            <p className="text-[10px] text-red-500 mt-0.5">{resumen.filter(r => (r.deuda_proveedor || Math.max(r.a_pagar, 0)) > 0).length} proveedores</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent>
-            <p className="text-sm text-gray-500">Balance Neto</p>
-            <p
-              className={`text-2xl font-bold ${balanceNeto >= 0 ? 'text-green-700' : 'text-red-600'}`}
-            >
-              {fmt(balanceNeto)}
+        {totalCreditos > 0 && (
+          <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
+            <CardContent className="pt-4 pb-3">
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Creditos Pendientes</p>
+              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalCreditos)}</p>
+              <p className="text-[10px] text-blue-500 mt-0.5">Adelantos sin usar</p>
+            </CardContent>
+          </Card>
+        )}
+        <Card className={balanceNeto >= 0 ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30' : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30'}>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Balance Neto</p>
+            <p className={`text-xl font-bold ${balanceNeto >= 0 ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+              {fmt(Math.abs(balanceNeto))}
             </p>
+            <p className="text-[10px] text-gray-400 mt-0.5">{balanceNeto >= 0 ? 'A nuestro favor' : 'En contra'}</p>
           </CardContent>
         </Card>
       </div>
@@ -480,50 +497,70 @@ export const CuentaCorriente: React.FC = () => {
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
-                  <th className="px-6 py-3">Empresa</th>
-                  <th className="px-6 py-3 text-right">Nos Deben</th>
-                  <th className="px-6 py-3 text-right">Les Debemos</th>
-                  <th className="px-6 py-3 text-right">Balance</th>
-                  <th className="px-6 py-3 w-10"></th>
+                  <th className="px-4 py-3">Empresa</th>
+                  <th className="px-4 py-3 text-center">Tipo</th>
+                  <th className="px-4 py-3 text-right">Nos Deben</th>
+                  <th className="px-4 py-3 text-right">Les Debemos</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
-                {resumen.map((r) => (
+                {resumen.map((r) => {
+                  const deudaCli = r.deuda_cliente || Math.max(r.a_cobrar, 0)
+                  const creditoCli = r.credito_cliente || Math.max(-r.a_cobrar, 0)
+                  const deudaProv = r.deuda_proveedor || Math.max(r.a_pagar, 0)
+                  const creditoProv = r.credito_proveedor || Math.max(-r.a_pagar, 0)
+                  const tipo = r.tipo || 'cliente'
+                  const saldoNeto = r.saldo_neto ?? r.saldo
+
+                  return (
                   <React.Fragment key={r.id}>
                     <tr
-                      className="border-b dark:border-gray-700 hover:bg-gray-50 cursor-pointer even:bg-gray-50/50"
+                      className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer"
                       onClick={() => handleVerDetalle(r.id)}
                     >
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3">
                         <span className="font-medium text-gray-900 dark:text-gray-100">{r.name}</span>
-                        {r.cuit && (
-                          <span className="block text-xs text-gray-400 font-mono mt-0.5">
-                            {r.cuit}
-                          </span>
-                        )}
+                        {r.cuit && <span className="block text-xs text-gray-400 font-mono mt-0.5">{r.cuit}</span>}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        {r.a_cobrar > 0 ? (
-                          <span className="font-bold text-green-700">{fmt(r.a_cobrar)}</span>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${
+                          tipo === 'mixto' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
+                          tipo === 'proveedor' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' :
+                          'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                        }`}>{tipo === 'mixto' ? 'Cli+Prov' : tipo === 'proveedor' ? 'Proveedor' : 'Cliente'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {deudaCli > 0 ? (
+                          <span className="font-bold text-green-700 dark:text-green-400">{fmt(deudaCli)}</span>
+                        ) : creditoCli > 0 ? (
+                          <div>
+                            <span className="text-xs text-blue-600 dark:text-blue-400">Credito</span>
+                            <span className="block font-bold text-blue-600 dark:text-blue-400">{fmt(creditoCli)}</span>
+                          </div>
+                        ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {deudaProv > 0 ? (
+                          <span className="font-bold text-red-600 dark:text-red-400">{fmt(deudaProv)}</span>
+                        ) : creditoProv > 0 ? (
+                          <div>
+                            <span className="text-xs text-teal-600 dark:text-teal-400">A favor</span>
+                            <span className="block font-bold text-teal-600 dark:text-teal-400">{fmt(creditoProv)}</span>
+                          </div>
+                        ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {saldoNeto > 0.01 ? (
+                          <span className="text-xs font-semibold text-green-700 dark:text-green-400">Nos deben {fmt(saldoNeto)}</span>
+                        ) : saldoNeto < -0.01 ? (
+                          <span className="text-xs font-semibold text-red-600 dark:text-red-400">Debemos {fmt(Math.abs(saldoNeto))}</span>
                         ) : (
-                          <span className="text-gray-400">{fmt(0)}</span>
+                          <span className="text-xs text-gray-400">Saldado</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        {r.a_pagar > 0 ? (
-                          <span className="font-bold text-red-600">{fmt(r.a_pagar)}</span>
-                        ) : (
-                          <span className="text-gray-400">{fmt(0)}</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <span
-                          className={`font-bold text-lg ${r.saldo > 0 ? 'text-green-700' : r.saldo < 0 ? 'text-red-600' : 'text-gray-500'}`}
-                        >
-                          {fmt(r.saldo)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-blue-600">
+                      <td className="px-4 py-3 text-sm text-blue-600">
                         {selectedEnterprise === r.id ? '\u25b2' : '\u25bc'}
                       </td>
                     </tr>
@@ -695,7 +732,8 @@ export const CuentaCorriente: React.FC = () => {
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

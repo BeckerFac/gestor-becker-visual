@@ -137,6 +137,18 @@ export class CuentaCorrienteService {
         const aPagar = compras - pagosAplicados - adelantosPagos;
         const balance = aCobrar - aPagar;
 
+        // Semantic fields for clear UI
+        const deudaCliente = Math.max(aCobrar, 0);      // What the client owes us (always >= 0)
+        const creditoCliente = Math.max(-aCobrar, 0);    // Credit the client has (advances exceeding invoices)
+        const deudaProveedor = Math.max(aPagar, 0);      // What we owe the provider (always >= 0)
+        const creditoProveedor = Math.max(-aPagar, 0);   // Credit we have with provider
+        const saldoNeto = aCobrar - aPagar;              // Positive = they owe us, negative = we owe them
+
+        // Relationship type
+        const hasVentas = ventas > 0 || cobrosAplicados > 0 || adelantosCobros > 0;
+        const hasCompras = compras > 0 || pagosAplicados > 0 || adelantosPagos > 0;
+        const tipo = hasVentas && hasCompras ? 'mixto' : hasCompras ? 'proveedor' : 'cliente';
+
         return {
           ...r,
           total_ventas: ventas,
@@ -150,6 +162,13 @@ export class CuentaCorrienteService {
           a_cobrar: aCobrar,
           a_pagar: aPagar,
           saldo: balance,
+          // New semantic fields
+          deuda_cliente: deudaCliente,
+          credito_cliente: creditoCliente,
+          deuda_proveedor: deudaProveedor,
+          credito_proveedor: creditoProveedor,
+          saldo_neto: saldoNeto,
+          tipo,
         };
       });
     } catch (error) {
