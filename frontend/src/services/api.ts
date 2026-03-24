@@ -1845,6 +1845,48 @@ export const api = {
     const { data } = await client.delete(`/conciliacion/match/${lineId}`)
     return data
   },
+
+  // Accounting
+  getChartOfAccounts: async () => {
+    const { data } = await client.get('/accounting/chart')
+    return data
+  },
+  createAccount: async (accountData: any) => {
+    const { data } = await client.post('/accounting/chart', accountData)
+    return data
+  },
+  getAccountingEntries: async (filters?: any) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/accounting/entries?${params.toString()}`)
+    return data
+  },
+  createManualEntry: async (entryData: any) => {
+    const { data } = await client.post('/accounting/entries', entryData)
+    return data
+  },
+  deleteAccountingEntry: async (id: string) => {
+    const { data } = await client.delete(`/accounting/entries/${id}`)
+    return data
+  },
+  getAccountingBalance: async (filters?: any) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/accounting/balance?${params.toString()}`)
+    return data
+  },
+  seedChartOfAccounts: async () => {
+    const { data } = await client.post('/accounting/seed')
+    return data
+  },
 }
 
 export default api

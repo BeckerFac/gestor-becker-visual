@@ -50,7 +50,7 @@ interface AuthStore {
   setSubscription: (info: SubscriptionInfo) => void
 }
 
-const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports','crm']
+const ALL_MODULES = ['orders','invoices','products','inventory','purchases','cobros','pagos','cheques','enterprises','banks','customers','quotes','remitos','reports','crm','accounting']
 
 // Build a set of known sub-action keys for quick lookup
 const KNOWN_SUB_ACTIONS: Set<string> = new Set(

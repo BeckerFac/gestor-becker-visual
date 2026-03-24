@@ -1187,6 +1187,53 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_bsl_statement ON bank_statement_lines(statement_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_bsl_status ON bank_statement_lines(status)`);
 
+    // Accounting module tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chart_of_accounts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id),
+        code VARCHAR(20) NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        parent_id UUID REFERENCES chart_of_accounts(id),
+        level INTEGER DEFAULT 1,
+        is_header BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, code)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS journal_entries (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id),
+        entry_number SERIAL,
+        date DATE NOT NULL,
+        description TEXT,
+        reference_type VARCHAR(30),
+        reference_id UUID,
+        is_auto BOOLEAN DEFAULT true,
+        created_by UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS journal_entry_lines (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        entry_id UUID NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+        account_id UUID NOT NULL REFERENCES chart_of_accounts(id),
+        debit DECIMAL(12,2) DEFAULT 0,
+        credit DECIMAL(12,2) DEFAULT 0,
+        description TEXT
+      )
+    `);
+
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_coa_company ON chart_of_accounts(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_je_company_date ON journal_entries(company_id, date)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_je_reference ON journal_entries(reference_type, reference_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_jel_entry ON journal_entry_lines(entry_id)`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -1256,6 +1303,8 @@ async function applyRowLevelSecurity() {
     'retenciones',
     'padron_retenciones',
     'bank_statements',
+    'chart_of_accounts',
+    'journal_entries',
   ];
 
   for (const table of tablesWithCompanyId) {
@@ -1364,6 +1413,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'product_prices', fk: 'company_id' },
     { name: 'business_units', fk: 'company_id' },
     { name: 'purchase_invoices', fk: 'company_id' },
+    { name: 'chart_of_accounts', fk: 'company_id' },
+    { name: 'journal_entries', fk: 'company_id' },
   ];
 
   // Child tables accessed via parent FK (no direct company_id)
@@ -1393,6 +1444,7 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'purchase_invoice_items', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
     { name: 'cobro_invoice_item_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
     { name: 'pago_invoice_item_applications', parentTable: 'pagos', parentFk: 'pago_id' },
+    { name: 'journal_entry_lines', parentTable: 'journal_entries', parentFk: 'entry_id' },
   ];
 
   const result: Record<string, any[]> = {};

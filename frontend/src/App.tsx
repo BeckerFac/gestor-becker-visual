@@ -34,6 +34,7 @@ const PurchaseInvoices = React.lazy(() => import('@/pages/PurchaseInvoices').the
 const Cobros = React.lazy(() => import('@/pages/Cobros').then(m => ({ default: m.Cobros })))
 const Pagos = React.lazy(() => import('@/pages/Pagos').then(m => ({ default: m.Pagos })))
 const Retenciones = React.lazy(() => import('@/pages/Retenciones').then(m => ({ default: m.Retenciones })))
+const Contabilidad = React.lazy(() => import('@/pages/Contabilidad').then(m => ({ default: m.Contabilidad })))
 const CuentaCorriente = React.lazy(() => import('@/pages/CuentaCorriente').then(m => ({ default: m.CuentaCorriente })))
 const Users = React.lazy(() => import('@/pages/Users').then(m => ({ default: m.Users })))
 const Global = React.lazy(() => import('@/pages/Global').then(m => ({ default: m.Global })))
@@ -250,6 +251,7 @@ function App() {
         <Route path="/cobros" element={<ProtectedRoute module="cobros"><Cobros /></ProtectedRoute>} />
         <Route path="/pagos" element={<ProtectedRoute module="pagos"><Pagos /></ProtectedRoute>} />
         <Route path="/retenciones" element={<ProtectedRoute module="retenciones"><Retenciones /></ProtectedRoute>} />
+        <Route path="/contabilidad" element={<ProtectedRoute module="accounting"><Suspense fallback={<PageLoader />}><Contabilidad /></Suspense></ProtectedRoute>} />
         <Route path="/cuenta-corriente" element={<ProtectedRoute module="cuenta_corriente"><CuentaCorriente /></ProtectedRoute>} />
         <Route path="/cheques" element={<ProtectedRoute module="cheques"><Cheques /></ProtectedRoute>} />
         <Route path="/conciliacion" element={<ProtectedRoute module="cobros"><Suspense fallback={<PageLoader />}><Conciliacion /></Suspense></ProtectedRoute>} />

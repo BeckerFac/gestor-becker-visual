@@ -70,6 +70,7 @@ const navSections: NavSection[] = [
       { href: '/cuenta-corriente', label: 'Cuenta Corriente', icon: '📒', module: 'cuenta_corriente' },
       { href: '/cheques', label: 'Cheques', icon: '📝', module: 'cheques' },
       { href: '/conciliacion', label: 'Conciliacion', icon: '🏦', module: 'cobros' },
+      { href: '/contabilidad', label: 'Contabilidad', icon: '📕', module: 'accounting' },
       { href: '/reportes', label: 'Reportes', icon: '📈', module: 'reports' },
     ],
   },
@@ -96,6 +97,7 @@ const MODULE_KEY_MAP: Record<string, string> = {
   'reports': 'reports',
   'cuenta_corriente': 'cobros', // cuenta corriente shows if cobros is enabled
   'retenciones': 'pagos', // retenciones shows if pagos is enabled
+  'accounting': 'accounting', // contabilidad module
   'settings': 'settings', // always visible
   'users': 'users', // always visible
 }

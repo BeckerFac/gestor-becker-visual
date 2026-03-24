@@ -70,6 +70,7 @@ import { pagoApplicationsRouter } from './modules/pago-applications/pago-applica
 import { currencyRouter } from './modules/currency/currency.router';
 import { retencionesRouter } from './modules/retenciones/retenciones.router';
 import { conciliacionRouter } from './modules/conciliacion/conciliacion.router';
+import { accountingRouter } from './modules/accounting/accounting.router';
 
 export const app = express();
 
@@ -226,6 +227,7 @@ app.use('/api/pago-applications', authMiddleware, pagoApplicationsRouter);
 app.use('/api/currency', authMiddleware, currencyRouter);
 app.use('/api/retenciones', authMiddleware, retencionesRouter);
 app.use('/api/conciliacion', authMiddleware, conciliacionRouter);
+app.use('/api/accounting', authMiddleware, accountingRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);
