@@ -262,7 +262,7 @@ export class AccountingService {
         const num = r.invoice_number || '';
         const pvStr = pv ? String(pv).padStart(5, '0') : '00000';
         const numStr = num ? String(num).padStart(8, '0') : '00000000';
-        const comprobante = (invoiceType || pv || num)
+        const comprobante = (invoiceType || num)
           ? `${invoiceType} ${pvStr}-${numStr}`.trim()
           : 'S/C';
         const cbteTipo = CBTE_TIPO_MAP[invoiceType] || 0;

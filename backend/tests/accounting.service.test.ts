@@ -24,6 +24,7 @@ describe('AccountingService', () => {
         invoice_type: 'A',
         invoice_number: 1,
         punto_venta: 3,
+        afip_response: null,
         customer_name: 'Acme SA',
         customer_cuit: '30-12345678-9',
         neto_gravado: '10000',
@@ -73,6 +74,7 @@ describe('AccountingService', () => {
       expect(result.totals).toEqual({
         neto_gravado: 0,
         neto_no_gravado: 0,
+        op_exentas: 0,
         iva_27: 0,
         iva_21: 0,
         iva_10_5: 0,
@@ -80,6 +82,7 @@ describe('AccountingService', () => {
         iva_2_5: 0,
         iva_0: 0,
         total_iva: 0,
+        otros_tributos: 0,
         total: 0,
       })
     })
@@ -220,11 +223,15 @@ describe('AccountingService', () => {
       return {
         date: '2025-06-10',
         invoice_type: 'A',
-        invoice_number: 'A 0001-00000100',
+        punto_venta: '0001',
+        invoice_number: '00000100',
         enterprise_name: 'Proveedor SA',
         enterprise_cuit: '30-99887766-5',
         neto_gravado: '8000',
+        neto_no_gravado: '0',
+        op_exentas: '0',
         iva: '1680',
+        otros_tributos: '0',
         total: '9680',
         ...overrides,
       }
@@ -246,11 +253,14 @@ describe('AccountingService', () => {
       const { rows } = await service.getLibroIVACompras(COMPANY, '2025-06-01', '2025-06-30')
 
       expect(rows[0].date).toBe('2025-06-10')
-      expect(rows[0].comprobante).toBe('A A 0001-00000100')
+      expect(rows[0].comprobante).toBe('A 00001-00000100')
       expect(rows[0].enterprise_name).toBe('Proveedor SA')
       expect(rows[0].enterprise_cuit).toBe('30-99887766-5')
+      expect(rows[0].tipo_cbte).toBe(1)
+      expect(rows[0].cod_doc_emisor).toBe(80)
       expect(rows[0].neto_gravado).toBe(8000)
       expect(rows[0].iva).toBe(1680)
+      expect(rows[0].otros_tributos).toBe(0)
       expect(rows[0].total).toBe(9680)
     })
 
@@ -260,7 +270,7 @@ describe('AccountingService', () => {
       const result = await service.getLibroIVACompras(COMPANY, '2025-06-01', '2025-06-30')
 
       expect(result.rows).toEqual([])
-      expect(result.totals).toEqual({ neto_gravado: 0, iva: 0, total: 0 })
+      expect(result.totals).toEqual({ neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0 })
     })
 
     it('handles NULL subtotal (derives from total - vat)', async () => {
