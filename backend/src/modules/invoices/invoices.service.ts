@@ -176,14 +176,16 @@ export class InvoicesService {
         }).returning();
       }
 
-      // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, and currency via raw SQL (columns added by migration)
+      // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, currency, and retenciones_esperadas via raw SQL (columns added by migration)
       const currency = data.currency || 'ARS';
       const exchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+      const retencionesEsperadas = Array.isArray(data.retenciones_esperadas) ? JSON.stringify(data.retenciones_esperadas) : '[]';
       await db.execute(sql`
         UPDATE invoices SET order_id = ${data.order_id || null}, enterprise_id = ${enterpriseId},
           fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null},
           related_invoice_id = ${data.related_invoice_id || null},
-          currency = ${currency}, exchange_rate = ${exchangeRate}
+          currency = ${currency}, exchange_rate = ${exchangeRate},
+          retenciones_esperadas = ${retencionesEsperadas}::jsonb
         WHERE id = ${invoiceId}
       `);
 

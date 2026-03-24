@@ -362,6 +362,14 @@ export const Invoices: React.FC = () => {
   const [productSearch, setProductSearch] = useState('')
   const [productSearchIdx, setProductSearchIdx] = useState<number | null>(null)
 
+  // Expected withholdings (retenciones esperadas)
+  const [retencionesEsperadas, setRetencionesEsperadas] = useState([
+    { type: 'iibb', label: 'IIBB', enabled: false, rate: 3.5 },
+    { type: 'ganancias', label: 'Ganancias', enabled: false, rate: 2 },
+    { type: 'iva', label: 'IVA', enabled: false, rate: 50 },
+    { type: 'suss', label: 'SUSS', enabled: false, rate: 2 },
+  ])
+
   // Import modal
   const [showImportForm, setShowImportForm] = useState(false)
   const [importSaving, setImportSaving] = useState(false)
@@ -461,6 +469,12 @@ export const Invoices: React.FC = () => {
     setProductSearchIdx(null)
     setFormCurrency('ARS')
     setFormExchangeRate(null)
+    setRetencionesEsperadas([
+      { type: 'iibb', label: 'IIBB', enabled: false, rate: 3.5 },
+      { type: 'ganancias', label: 'Ganancias', enabled: false, rate: 2 },
+      { type: 'iva', label: 'IVA', enabled: false, rate: 50 },
+      { type: 'suss', label: 'SUSS', enabled: false, rate: 2 },
+    ])
     setFormStep(1)
     setShowForm(true)
     await loadFormData()
@@ -649,6 +663,13 @@ export const Invoices: React.FC = () => {
             tipo_expo: '1',
           },
         } : {}),
+        retenciones_esperadas: retencionesEsperadas
+          .filter(r => r.enabled)
+          .map(r => ({
+            type: r.type,
+            rate: r.rate,
+            estimated_amount: formTotals.total * (r.rate / 100),
+          })),
       })
       const msgType = isNcNdType(formInvoiceType) ? 'Comprobante' : 'Factura'
       toast.success(vistaMode === 'venta_fiscal' ? `${msgType} creado/a correctamente` : 'Comprobante creado correctamente')
@@ -1546,6 +1567,58 @@ export const Invoices: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {/* Expected withholdings section */}
+                {vistaMode === 'venta_fiscal' && formTotals.total > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-4 mt-3">
+                    <h4 className="font-medium text-sm mb-1 text-amber-900 dark:text-amber-200">Retenciones esperadas del cliente (estimado)</h4>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">Marca las retenciones que esperas que el cliente aplique. Se pre-llenaran al registrar el cobro.</p>
+                    <div className="space-y-2">
+                      {retencionesEsperadas.map((ret, idx) => {
+                        const estimatedAmount = formTotals.total * (ret.rate / 100)
+                        return (
+                          <div key={ret.type} className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={ret.enabled}
+                              onChange={() => setRetencionesEsperadas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, enabled: !r.enabled } : r
+                              ))}
+                              className="h-4 w-4 text-amber-600 rounded"
+                            />
+                            <span className="text-sm font-medium w-24 text-gray-800 dark:text-gray-200">{ret.label}</span>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                                value={ret.rate}
+                                onChange={e => setRetencionesEsperadas(prev => prev.map((r, i) =>
+                                  i === idx ? { ...r, rate: parseFloat(e.target.value) || 0 } : r
+                                ))}
+                                className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                                disabled={!ret.enabled}
+                              />
+                              <span className="text-xs text-gray-500">%</span>
+                            </div>
+                            {ret.enabled && (
+                              <span className="text-sm text-amber-700 dark:text-amber-300 font-medium ml-auto">
+                                ~ {formatCurrency(estimatedAmount, formCurrency)}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {retencionesEsperadas.some(r => r.enabled) && (
+                      <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between text-sm font-bold text-amber-900 dark:text-amber-200">
+                        <span>Total retenciones estimadas:</span>
+                        <span>{formatCurrency(retencionesEsperadas.filter(r => r.enabled).reduce((sum, r) => sum + formTotals.total * (r.rate / 100), 0), formCurrency)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex justify-between pt-2">
                   <Button variant="outline" onClick={() => setFormStep(1)}>Anterior</Button>

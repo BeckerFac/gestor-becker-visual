@@ -85,6 +85,7 @@ interface InvoiceForReceipt {
   customer?: { name: string } | null
   payment_status: string
   total_cobrado: string
+  retenciones_esperadas?: Array<{ type: string; rate: number; estimated_amount: number }>
 }
 
 interface OrderForReceipt {
@@ -268,6 +269,36 @@ export const Cobros: React.FC = () => {
     retencionesSufridas.filter(r => r.enabled).reduce((sum, r) => sum + r.amount, 0),
     [retencionesSufridas]
   )
+
+  // Pre-fill retenciones sufridas from selected invoices' retenciones_esperadas
+  const prevInvoiceKeysRef = useRef<string>('')
+  useEffect(() => {
+    const selectedIds = Object.keys(invoiceItems).filter(id => parseFloat(invoiceItems[id] || '0') > 0)
+    const key = selectedIds.sort().join(',')
+    if (key === prevInvoiceKeysRef.current) return
+    prevInvoiceKeysRef.current = key
+    if (selectedIds.length === 0) return
+
+    // Merge retenciones_esperadas from all selected invoices
+    const retMap: Record<string, { rate: number; totalEstimated: number }> = {}
+    for (const invId of selectedIds) {
+      const inv = invoicesForReceipt.find(i => i.id === invId)
+      if (!inv?.retenciones_esperadas?.length) continue
+      for (const ret of inv.retenciones_esperadas) {
+        if (!retMap[ret.type]) {
+          retMap[ret.type] = { rate: ret.rate, totalEstimated: 0 }
+        }
+        retMap[ret.type].totalEstimated += ret.estimated_amount || 0
+      }
+    }
+    if (Object.keys(retMap).length === 0) return
+
+    setRetencionesSufridas(prev => prev.map(r => {
+      const expected = retMap[r.type]
+      if (!expected) return r
+      return { ...r, enabled: true, rate: expected.rate, amount: Math.round(expected.totalEstimated * 100) / 100, base_amount: Math.round(expected.totalEstimated / (expected.rate / 100) * 100) / 100 }
+    }))
+  }, [invoiceItems, invoicesForReceipt])
 
   const handleCertUpload = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
