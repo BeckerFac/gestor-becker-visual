@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -465,7 +466,12 @@ export const CuentaCorriente: React.FC = () => {
             <CardContent className="pt-4 pb-3">
               <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Cobros Sin Asociar</p>
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalAdelantosRecibidos)}</p>
-              <p className="text-[10px] text-blue-500 mt-0.5">Cobros no vinculados a facturas — chequear en Cobros</p>
+              <div className="flex items-center justify-between mt-0.5">
+                <p className="text-[10px] text-blue-500">Cobros no vinculados a facturas</p>
+                <Link to="/cobros" className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 underline">
+                  Ver en Cobros
+                </Link>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -474,7 +480,12 @@ export const CuentaCorriente: React.FC = () => {
             <CardContent className="pt-4 pb-3">
               <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Pagos Sin Asociar</p>
               <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalAdelantosEntregados)}</p>
-              <p className="text-[10px] text-amber-500 mt-0.5">Pagos no vinculados a facturas — chequear en Pagos</p>
+              <div className="flex items-center justify-between mt-0.5">
+                <p className="text-[10px] text-amber-500">Pagos no vinculados a facturas</p>
+                <Link to="/pagos" className="text-[10px] font-semibold text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 underline">
+                  Ver en Pagos
+                </Link>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -488,6 +499,36 @@ export const CuentaCorriente: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Alert banners for unlinked payments */}
+      {totalAdelantosRecibidos > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <svg className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-sm text-blue-700 dark:text-blue-300">
+            Hay cobros por <span className="font-semibold">{fmt(totalAdelantosRecibidos)}</span> sin factura asociada.
+            Estos cobros ya figuran en el balance pero no estan vinculados a ninguna factura de venta.{' '}
+            <Link to="/cobros" className="font-semibold underline hover:text-blue-900 dark:hover:text-blue-100">
+              Ir a Cobros para vincularlos
+            </Link>
+          </p>
+        </div>
+      )}
+      {totalAdelantosEntregados > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <svg className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            Hay pagos por <span className="font-semibold">{fmt(totalAdelantosEntregados)}</span> sin factura asociada.
+            Estos pagos ya figuran en el balance pero no estan vinculados a ninguna factura de compra.{' '}
+            <Link to="/pagos" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
+              Ir a Pagos para vincularlos
+            </Link>
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
@@ -564,13 +605,13 @@ export const CuentaCorriente: React.FC = () => {
                           const advRec = (r as any).cobros_no_asociados || (r as any).adelantos_recibidos || r.adelantos_cobros || 0
                           const advEnt = (r as any).pagos_no_asociados || (r as any).adelantos_entregados || r.adelantos_pagos || 0
                           if (advRec > 0 && advEnt > 0) return (
-                            <div className="text-xs">
-                              <span className="text-blue-600" title="Cobros sin factura — chequear en Cobros">Cob: {fmt(advRec)}</span>
-                              <span className="block text-amber-600" title="Pagos sin factura — chequear en Pagos">Pag: {fmt(advEnt)}</span>
+                            <div className="text-xs" onClick={(e) => e.stopPropagation()}>
+                              <Link to="/cobros" className="text-blue-600 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Cobros sin factura — ir a Cobros para vincular">Cob: {fmt(advRec)}</Link>
+                              <Link to="/pagos" className="block text-amber-600 hover:text-amber-800 dark:hover:text-amber-300 underline" title="Pagos sin factura — ir a Pagos para vincular">Pag: {fmt(advEnt)}</Link>
                             </div>
                           )
-                          if (advRec > 0) return <span className="text-xs font-medium text-blue-600 dark:text-blue-400" title="Cobros sin factura — chequear en Cobros">{fmt(advRec)}</span>
-                          if (advEnt > 0) return <span className="text-xs font-medium text-amber-600 dark:text-amber-400" title="Pagos sin factura — chequear en Pagos">{fmt(advEnt)}</span>
+                          if (advRec > 0) return <Link to="/cobros" className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Cobros sin factura — ir a Cobros para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advRec)}</Link>
+                          if (advEnt > 0) return <Link to="/pagos" className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 underline" title="Pagos sin factura — ir a Pagos para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advEnt)}</Link>
                           return <span className="text-gray-300 dark:text-gray-600">-</span>
                         })()}
                       </td>
