@@ -53,10 +53,10 @@ export async function queryClients(
           MAX(i.invoice_date) as ultimo_pedido,
           COALESCE(SUM(
             CAST(i.total_amount AS decimal) - COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
             )
           ) FILTER (WHERE CAST(i.total_amount AS decimal) > COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
           )), 0) as saldo_pendiente,
           COUNT(i.id) as cantidad_pedidos
         FROM invoices i
@@ -103,10 +103,10 @@ export async function queryClients(
         MAX(i.invoice_date) as ultimo_pedido,
         COALESCE(SUM(
           CAST(i.total_amount AS decimal) - COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
           )
         ) FILTER (WHERE CAST(i.total_amount AS decimal) > COALESCE(
-          (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+          (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
         )), 0) as saldo_pendiente,
         COUNT(i.id) as cantidad_pedidos
       FROM invoices i
@@ -347,7 +347,7 @@ export async function queryBalances(
           COALESCE(e.name, c.name, 'Sin nombre') as nombre,
           COALESCE(SUM(
             CAST(i.total_amount AS decimal) - COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
             )
           ), 0) as por_cobrar,
           COUNT(*) as facturas_pendientes,
@@ -358,7 +358,7 @@ export async function queryBalances(
         WHERE i.company_id = $1
           AND i.status = 'authorized'
           AND CAST(i.total_amount AS decimal) > COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+            (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0
           )
           AND (e.name ILIKE $2 OR c.name ILIKE $2)
         GROUP BY COALESCE(e.name, c.name, 'Sin nombre')

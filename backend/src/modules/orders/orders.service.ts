@@ -269,6 +269,9 @@ export class OrdersService {
         orderProductType = itemTypes.join(', ').substring(0, 50);
       }
 
+      // --- BEGIN TRANSACTION ---
+      await db.execute(sql`BEGIN`);
+
       await db.execute(sql`
         INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, notes, created_by)
         VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${data.notes || null}, ${userId})
@@ -299,6 +302,9 @@ export class OrdersService {
         }
       }
 
+      // --- COMMIT TRANSACTION ---
+      await db.execute(sql`COMMIT`);
+
       // CRM Pipeline sync: order_created
       try {
         // If order has a quote_id, link both to same deal
@@ -321,6 +327,7 @@ export class OrdersService {
 
       return { id: orderId, status: 'pendiente' };
     } catch (error) {
+      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create order error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create order');
@@ -577,6 +584,9 @@ export class OrdersService {
       // Helper: undefined = keep old value, '' = set null, value = set value
       const v = (field: any) => field !== undefined ? (field === '' ? null : field) : undefined;
 
+      // --- BEGIN TRANSACTION ---
+      await db.execute(sql`BEGIN`);
+
       await db.execute(sql`
         UPDATE orders SET
           title = CASE WHEN ${data.title !== undefined} THEN ${v(data.title)} ELSE title END,
@@ -633,8 +643,12 @@ export class OrdersService {
         `);
       }
 
+      // --- COMMIT TRANSACTION ---
+      await db.execute(sql`COMMIT`);
+
       return { id: orderId, updated: true };
     } catch (error) {
+      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Update order error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update order');

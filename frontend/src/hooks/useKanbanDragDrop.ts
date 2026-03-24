@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   useSensor,
   useSensors,
@@ -20,6 +20,12 @@ interface UseKanbanDragDropOptions {
 export function useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData }: UseKanbanDragDropOptions) {
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null)
   const [sourceStageKey, setSourceStageKey] = useState<string | null>(null)
+
+  // Use a ref to access the latest dealsByStage inside callbacks
+  // without adding it as a dependency (which would recreate the callback
+  // on every state change and cause infinite re-render loops).
+  const dealsByStageRef = useRef(dealsByStage)
+  dealsByStageRef.current = dealsByStage
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -49,8 +55,9 @@ export function useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData }: U
     // Don't move to same stage
     if (toStageId === fromKey || toStageId === deal.stage_id) return
 
-    // Optimistic update: snapshot + move
-    const snapshot = Object.fromEntries(Object.entries(dealsByStage).map(([k, v]) => [k, [...v]]))
+    // Optimistic update: snapshot from ref + move
+    const current = dealsByStageRef.current
+    const snapshot = Object.fromEntries(Object.entries(current).map(([k, v]) => [k, [...v]]))
     setDealsByStage(prev => {
       const next = { ...prev }
       // Remove from source (check all keys that point to same array)
@@ -73,7 +80,7 @@ export function useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData }: U
       setDealsByStage(snapshot)
       toast.error(err?.response?.data?.error || err.message || 'Error al mover deal')
     }
-  }, [dealsByStage, setDealsByStage, loadData])
+  }, [setDealsByStage, loadData])
 
   const handleDragCancel = useCallback(() => {
     setActiveDeal(null)

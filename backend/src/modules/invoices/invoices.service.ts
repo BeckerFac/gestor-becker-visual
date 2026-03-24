@@ -122,6 +122,9 @@ export class InvoicesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
+      // -- BEGIN TRANSACTION: all DB writes from here until COMMIT --
+      await db.execute(sql`BEGIN`);
+
       if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
         // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
         await db.execute(sql`
@@ -242,8 +245,12 @@ export class InvoicesService {
         `);
       }
 
+      await db.execute(sql`COMMIT`);
+      // -- END TRANSACTION --
+
       return { id: invoiceId, order_id: data.order_id || null, enterprise_id: enterpriseId, fiscal_type: fiscalType };
     } catch (error) {
+      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create invoice error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create invoice');

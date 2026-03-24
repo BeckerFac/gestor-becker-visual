@@ -198,7 +198,7 @@ export const PLANS: Record<string, PlanDefinition> = {
     billingPeriod: 'monthly',
     priceArs: ESTANDAR_MONTHLY_PRICE,
     priceArsMonthly: ESTANDAR_MONTHLY_PRICE,
-    priceMpItemId: '', // TODO: Set after creating plan in MercadoPago
+    priceMpItemId: process.env.MP_ESTANDAR_MONTHLY_ID || '', // Configure in Render env vars before going live
     description: 'Todo lo esencial para facturar y gestionar tu negocio',
     limits: {
       invoicesPerMonth: 600,
@@ -221,7 +221,7 @@ export const PLANS: Record<string, PlanDefinition> = {
     billingPeriod: 'annual',
     priceArs: ESTANDAR_ANNUAL_PRICE,
     priceArsMonthly: ESTANDAR_ANNUAL_MONTHLY,
-    priceMpItemId: '', // TODO: Set after creating plan in MercadoPago
+    priceMpItemId: process.env.MP_ESTANDAR_ANNUAL_ID || '', // Configure in Render env vars before going live
     description: 'Todo lo esencial para facturar y gestionar tu negocio',
     limits: {
       invoicesPerMonth: 600,
@@ -244,7 +244,7 @@ export const PLANS: Record<string, PlanDefinition> = {
     billingPeriod: 'monthly',
     priceArs: PREMIUM_MONTHLY_PRICE,
     priceArsMonthly: PREMIUM_MONTHLY_PRICE,
-    priceMpItemId: '', // TODO: Set after creating plan in MercadoPago
+    priceMpItemId: process.env.MP_PREMIUM_MONTHLY_ID || '', // Configure in Render env vars before going live
     description: 'Sin limites, con IA y reportes avanzados',
     limits: {
       invoicesPerMonth: Infinity,
@@ -267,7 +267,7 @@ export const PLANS: Record<string, PlanDefinition> = {
     billingPeriod: 'annual',
     priceArs: PREMIUM_ANNUAL_PRICE,
     priceArsMonthly: PREMIUM_ANNUAL_MONTHLY,
-    priceMpItemId: '', // TODO: Set after creating plan in MercadoPago
+    priceMpItemId: process.env.MP_PREMIUM_ANNUAL_ID || '', // Configure in Render env vars before going live
     description: 'Sin limites, con IA y reportes avanzados',
     limits: {
       invoicesPerMonth: Infinity,

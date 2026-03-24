@@ -182,7 +182,7 @@ export const SecretarIAChatPanel: React.FC = () => {
   if (!isEnabled) return null
 
   // If plan doesn't include AI chat, show upgrade prompt (but always show for trial)
-  const planHasAiChat = hasFeature('ai_chat') || hasFeature('secretaria') || true // TODO: gate properly when billing is live
+  const planHasAiChat = hasFeature('ai_chat') || hasFeature('secretaria')
 
   if (!planHasAiChat && isOpen) {
     return (

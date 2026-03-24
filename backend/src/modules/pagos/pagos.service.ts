@@ -86,54 +86,64 @@ export class PagosService {
       throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia o cheque');
     }
 
+    const pagoId = uuid();
+    // Determine pending_status based on whether purchase_invoice_items are provided
+    const hasInvoiceItems = data.purchase_invoice_items && Array.isArray(data.purchase_invoice_items) && data.purchase_invoice_items.length > 0;
+    const pendingStatus = hasInvoiceItems ? null : 'pending_invoice';
+
     try {
-      const pagoId = uuid();
-      // Determine pending_status based on whether purchase_invoice_items are provided
-      const hasInvoiceItems = data.purchase_invoice_items && Array.isArray(data.purchase_invoice_items) && data.purchase_invoice_items.length > 0;
-      const pendingStatus = hasInvoiceItems ? null : 'pending_invoice';
+      // Transaction: all inserts succeed or all rollback
+      await db.execute(sql`BEGIN`);
+      try {
+        await db.execute(sql`
+          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by)
+          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
+        `);
 
-      await db.execute(sql`
-        INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by)
-        VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
-      `);
+        // Link pago to purchase invoices if items provided (N:N)
+        if (hasInvoiceItems) {
+          const piTotals = new Map<string, number>();
 
-      // Link pago to purchase invoices if items provided (N:N)
-      if (hasInvoiceItems) {
-        const piTotals = new Map<string, number>();
+          for (const item of data.purchase_invoice_items) {
+            if (!item.purchase_invoice_id) continue;
 
-        for (const item of data.purchase_invoice_items) {
-          if (!item.purchase_invoice_id) continue;
-
-          // If item has sub-items (item-level detail), process each
-          if (item.item_details && Array.isArray(item.item_details)) {
-            for (const detail of item.item_details) {
-              if (!detail.purchase_invoice_item_id || !detail.amount || parseFloat(detail.amount) <= 0) continue;
-              await db.execute(sql`
-                INSERT INTO pago_invoice_item_applications (id, pago_id, purchase_invoice_item_id, amount_applied, created_by)
-                VALUES (${uuid()}, ${pagoId}, ${detail.purchase_invoice_item_id}, ${parseFloat(detail.amount).toString()}, ${userId})
-                ON CONFLICT (pago_id, purchase_invoice_item_id) DO NOTHING
-              `);
+            // If item has sub-items (item-level detail), process each
+            if (item.item_details && Array.isArray(item.item_details)) {
+              for (const detail of item.item_details) {
+                if (!detail.purchase_invoice_item_id || !detail.amount || parseFloat(detail.amount) <= 0) continue;
+                await db.execute(sql`
+                  INSERT INTO pago_invoice_item_applications (id, pago_id, purchase_invoice_item_id, amount_applied, created_by)
+                  VALUES (${uuid()}, ${pagoId}, ${detail.purchase_invoice_item_id}, ${parseFloat(detail.amount).toString()}, ${userId})
+                  ON CONFLICT (pago_id, purchase_invoice_item_id) DO NOTHING
+                `);
+                const current = piTotals.get(item.purchase_invoice_id) || 0;
+                piTotals.set(item.purchase_invoice_id, current + parseFloat(detail.amount));
+              }
+            } else if (item.amount && parseFloat(item.amount) > 0) {
               const current = piTotals.get(item.purchase_invoice_id) || 0;
-              piTotals.set(item.purchase_invoice_id, current + parseFloat(detail.amount));
+              piTotals.set(item.purchase_invoice_id, current + parseFloat(item.amount));
             }
-          } else if (item.amount && parseFloat(item.amount) > 0) {
-            const current = piTotals.get(item.purchase_invoice_id) || 0;
-            piTotals.set(item.purchase_invoice_id, current + parseFloat(item.amount));
+          }
+
+          // Create invoice-level applications from totals
+          for (const [piId, totalAmount] of piTotals.entries()) {
+            await db.execute(sql`
+              INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
+              VALUES (${uuid()}, ${pagoId}, ${piId}, ${totalAmount.toString()}, ${userId})
+              ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
+            `);
+            await this.recalculatePurchaseInvoiceStatus(piId);
+            await this.recalculatePurchaseStatusFromInvoices(piId);
           }
         }
 
-        // Create invoice-level applications from totals
-        for (const [piId, totalAmount] of piTotals.entries()) {
-          await db.execute(sql`
-            INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
-            VALUES (${uuid()}, ${pagoId}, ${piId}, ${totalAmount.toString()}, ${userId})
-            ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
-          `);
-          await this.recalculatePurchaseInvoiceStatus(piId);
-          await this.recalculatePurchaseStatusFromInvoices(piId);
-        }
+        await db.execute(sql`COMMIT`);
+      } catch (txError) {
+        await db.execute(sql`ROLLBACK`);
+        throw txError;
       }
 
+      // SELECT result outside transaction (read-only)
       const result = await db.execute(sql`
         SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
@@ -155,24 +165,34 @@ export class PagosService {
 
   async deletePago(companyId: string, pagoId: string) {
     await this.ensureTables();
-    try {
-      const check = await db.execute(sql`SELECT id FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
-      const rows = (check as any).rows || check || [];
-      if (rows.length === 0) throw new ApiError(404, 'Pago not found');
+    // Validations outside transaction
+    const check = await db.execute(sql`SELECT id FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
+    const rows = (check as any).rows || check || [];
+    if (rows.length === 0) throw new ApiError(404, 'Pago not found');
 
+    try {
       // Get linked purchase invoices before deleting (for recalculation)
       const linkedPIs = await db.execute(sql`
         SELECT purchase_invoice_id FROM pago_invoice_applications WHERE pago_id = ${pagoId}
       `);
       const piIds = ((linkedPIs as any).rows || []).map((r: any) => r.purchase_invoice_id);
 
-      // Delete pago (CASCADE will delete pago_invoice_applications)
-      await db.execute(sql`DELETE FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
+      // Transaction: delete + recalculate atomically
+      await db.execute(sql`BEGIN`);
+      try {
+        // Delete pago (CASCADE will delete pago_invoice_applications)
+        await db.execute(sql`DELETE FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
 
-      // Recalculate payment_status for affected purchase invoices + cascade to purchases
-      for (const piId of piIds) {
-        await this.recalculatePurchaseInvoiceStatus(piId);
-        await this.recalculatePurchaseStatusFromInvoices(piId);
+        // Recalculate payment_status for affected purchase invoices + cascade to purchases
+        for (const piId of piIds) {
+          await this.recalculatePurchaseInvoiceStatus(piId);
+          await this.recalculatePurchaseStatusFromInvoices(piId);
+        }
+
+        await db.execute(sql`COMMIT`);
+      } catch (txError) {
+        await db.execute(sql`ROLLBACK`);
+        throw txError;
       }
 
       return { success: true };

@@ -182,6 +182,21 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
     )
   }, [search])
 
+  // Lost deal count — MUST be before any early return to respect Rules of Hooks
+  const lostCount = useMemo(() => lossStages.reduce((sum, s) => {
+    const key = s.name.toLowerCase()
+    return sum + (dealsByStage[key] || dealsByStage[s.id] || []).length
+  }, 0) || summary?.stages?.perdido?.count || 0, [lossStages, dealsByStage, summary])
+
+  // Mobile: list view — compute once
+  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
+
+  // Drag & drop
+  const dnd = useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData })
+
+  // Context menu
+  const contextMenu = useContextMenu<Deal>()
+
   if (loading) {
     return (
       <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: '400px' }}>
@@ -198,20 +213,6 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
       </div>
     )
   }
-
-  const lostCount = useMemo(() => lossStages.reduce((sum, s) => {
-    const key = s.name.toLowerCase()
-    return sum + (dealsByStage[key] || dealsByStage[s.id] || []).length
-  }, 0) || summary?.stages?.perdido?.count || 0, [lossStages, dealsByStage, summary])
-
-  // Mobile: list view — compute once
-  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
-
-  // Drag & drop
-  const dnd = useKanbanDragDrop({ dealsByStage, setDealsByStage, loadData })
-
-  // Context menu
-  const contextMenu = useContextMenu<Deal>()
 
   return (
     <div className="space-y-4">

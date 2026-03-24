@@ -129,6 +129,10 @@ export class CobrosService {
       `);
       const receiptNumber = parseInt(((nextNumResult as any).rows || [])[0]?.next_number || '1');
 
+      // Transaction: all inserts succeed or all rollback
+      await db.execute(sql`BEGIN`);
+      try {
+
       await db.execute(sql`
         INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by)
         VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId})
@@ -198,10 +202,10 @@ export class CobrosService {
         }
       }
 
-      // Recalculate order payment status (only if no invoice_items, to avoid dual recalculation)
-      // When invoice_items exist, recalculateOrderStatusFromInvoice already handles this above
-      if (data.order_id && !hasInvoiceItems) {
-        await this.recalculateOrderPaymentStatus(data.order_id);
+      await db.execute(sql`COMMIT`);
+      } catch (txError) {
+        try { await db.execute(sql`ROLLBACK`); } catch (e) { /* rollback best-effort */ }
+        throw txError;
       }
 
       const result = await db.execute(sql`
@@ -283,24 +287,30 @@ export class CobrosService {
       if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
       const orderId = rows[0].order_id;
 
+      // Transaction: get linked invoices + delete cobro atomically
+      let invoiceIds: string[] = [];
+      await db.execute(sql`BEGIN`);
+      try {
+
       // Get linked invoices before deleting (for recalculation)
       const linkedInvoices = await db.execute(sql`
         SELECT invoice_id FROM cobro_invoice_applications WHERE cobro_id = ${cobroId}
       `);
-      const invoiceIds = ((linkedInvoices as any).rows || []).map((r: any) => r.invoice_id);
+      invoiceIds = ((linkedInvoices as any).rows || []).map((r: any) => r.invoice_id);
 
       // Delete cobro (CASCADE will delete cobro_invoice_applications)
       await db.execute(sql`DELETE FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+
+      await db.execute(sql`COMMIT`);
+      } catch (txError) {
+        try { await db.execute(sql`ROLLBACK`); } catch (e) { /* rollback best-effort */ }
+        throw txError;
+      }
 
       // Recalculate payment_status for affected invoices + cascade to orders
       for (const invId of invoiceIds) {
         await this.recalculateInvoicePaymentStatus(invId);
         await this.recalculateOrderStatusFromInvoice(invId);
-      }
-
-      // Legacy fallback: also recalculate via direct order_id
-      if (orderId) {
-        await this.recalculateOrderPaymentStatus(orderId);
       }
 
       return { success: true };
@@ -375,6 +385,7 @@ export class CobrosService {
     }
   }
 
+  /** @deprecated Use recalculateOrderStatusFromInvoice instead. Legacy cobro_items path. */
   async recalculateOrderPaymentStatus(orderId: string) {
     try {
       const itemPaidResult = await db.execute(sql`

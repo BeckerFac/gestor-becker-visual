@@ -1,6 +1,5 @@
 import { db } from '../../config/db';
-import { invoices, payments, customers } from '../../db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 
@@ -12,14 +11,8 @@ export class CollectionsService {
           i.id, i.invoice_type, i.invoice_number, i.invoice_date, i.due_date,
           i.total_amount, i.status,
           json_build_object('name', c.name, 'cuit', c.cuit) as customer,
-          COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-            0
-          ) as paid_amount,
-          CAST(i.total_amount AS decimal) - COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-            0
-          ) as balance,
+          (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id) as paid_amount,
+          CAST(i.total_amount AS decimal) - (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id) as balance,
           CASE
             WHEN i.due_date IS NOT NULL THEN
               EXTRACT(DAY FROM NOW() - i.due_date)::integer
@@ -29,10 +22,7 @@ export class CollectionsService {
         LEFT JOIN customers c ON i.customer_id = c.id
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
-          AND CAST(i.total_amount AS decimal) > COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-            0
-          )
+          AND CAST(i.total_amount AS decimal) > (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id)
         ORDER BY i.due_date ASC NULLS LAST, i.invoice_date ASC
       `);
 
@@ -54,7 +44,7 @@ export class CollectionsService {
     try {
       // Verify invoice belongs to company
       const invoice = await db.execute(sql`
-        SELECT id, total_amount, status FROM invoices
+        SELECT id, total_amount, status, customer_id, enterprise_id, order_id FROM invoices
         WHERE id = ${invoiceId} AND company_id = ${companyId}
       `);
       const invoiceRows = (invoice as any).rows || invoice || [];
@@ -66,15 +56,15 @@ export class CollectionsService {
         throw new ApiError(400, 'Only authorized invoices can receive payments');
       }
 
-      // Check current balance
-      const paymentsResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total_paid
-        FROM payments WHERE invoice_id = ${invoiceId}
+      // Check current balance using cobro_invoice_applications (new system)
+      const appliedResult = await db.execute(sql`
+        SELECT COALESCE(SUM(CAST(amount_applied AS decimal)), 0) as total_applied
+        FROM cobro_invoice_applications WHERE invoice_id = ${invoiceId}
       `);
-      const paidRows = (paymentsResult as any).rows || paymentsResult || [];
-      const totalPaid = parseFloat(paidRows[0]?.total_paid || '0');
+      const appliedRows = (appliedResult as any).rows || appliedResult || [];
+      const totalApplied = parseFloat(appliedRows[0]?.total_applied || '0');
       const invoiceTotal = parseFloat(invoiceRows[0].total_amount);
-      const balance = invoiceTotal - totalPaid;
+      const balance = invoiceTotal - totalApplied;
 
       const paymentAmount = parseFloat(data.amount);
       if (paymentAmount <= 0) {
@@ -84,34 +74,42 @@ export class CollectionsService {
         throw new ApiError(400, `Payment amount ($${paymentAmount}) exceeds balance ($${balance.toFixed(2)})`);
       }
 
-      // Create payment
-      const paymentId = uuid();
-      await db.insert(payments).values({
-        id: paymentId,
-        invoice_id: invoiceId,
-        amount: paymentAmount.toString(),
-        method: data.method || 'transferencia',
-        payment_date: data.payment_date ? new Date(data.payment_date) : new Date(),
-        reference: data.reference || null,
-        notes: data.notes || null,
-        created_by: userId,
-      });
+      // Auto-generate receipt_number (sequential per company)
+      const nextNumResult = await db.execute(sql`
+        SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = ${companyId}
+      `);
+      const receiptNumber = parseInt(((nextNumResult as any).rows || [])[0]?.next_number || '1');
+
+      // Create cobro
+      const cobroId = uuid();
+      const paymentMethod = data.method || 'transferencia';
+      await db.execute(sql`
+        INSERT INTO cobros (id, company_id, enterprise_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_number, created_by)
+        VALUES (${cobroId}, ${companyId}, ${invoiceRows[0].enterprise_id || null}, ${invoiceId}, ${paymentAmount.toString()}, ${paymentMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${receiptNumber}, ${userId})
+      `);
+
+      // Create cobro_invoice_application linking cobro to invoice
+      await db.execute(sql`
+        INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
+        VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${paymentAmount.toString()}, ${userId})
+      `);
+
+      // Recalculate invoice payment status
+      await this.recalculateInvoicePaymentStatus(invoiceId);
+
+      // Recalculate order status if invoice is linked to an order
+      const invoiceOrderId = invoiceRows[0].order_id;
+      if (invoiceOrderId) {
+        await this.recalculateOrderStatusFromInvoice(invoiceId);
+      }
 
       const remainingBalance = Math.max(0, balance - paymentAmount);
 
-      // If fully paid, update linked order's payment_status
-      if (remainingBalance < 0.01) {
-        await db.execute(sql`
-          UPDATE orders SET payment_status = 'pagado', payment_method = ${data.method || 'transferencia'}, updated_at = NOW()
-          WHERE invoice_id = ${invoiceId} AND company_id = ${companyId}
-        `);
-      }
-
       return {
-        id: paymentId,
+        id: cobroId,
         invoice_id: invoiceId,
         amount: paymentAmount,
-        method: data.method,
+        method: paymentMethod,
         remaining_balance: remainingBalance,
       };
     } catch (error) {
@@ -159,39 +157,88 @@ export class CollectionsService {
     }
   }
 
+  private async recalculateInvoicePaymentStatus(invoiceId: string) {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          CAST(i.total_amount AS decimal) as total,
+          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
+        FROM invoices i
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        WHERE i.id = ${invoiceId}
+        GROUP BY i.id, i.total_amount
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const total = parseFloat(row.total);
+      const applied = parseFloat(row.applied);
+
+      let status = 'pendiente';
+      if (applied >= total && total > 0) status = 'pagado';
+      else if (applied > 0) status = 'parcial';
+
+      await db.execute(sql`
+        UPDATE invoices SET payment_status = ${status} WHERE id = ${invoiceId}
+      `);
+    } catch (error) {
+      console.warn('Recalculate invoice payment status error:', error);
+    }
+  }
+
+  private async recalculateOrderStatusFromInvoice(invoiceId: string) {
+    try {
+      const invResult = await db.execute(sql`SELECT order_id FROM invoices WHERE id = ${invoiceId}`);
+      const orderId = ((invResult as any).rows || [])[0]?.order_id;
+      if (!orderId) return;
+
+      const result = await db.execute(sql`
+        SELECT
+          CAST(o.total_amount AS decimal) as order_total,
+          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
+        FROM orders o
+        LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        WHERE o.id = ${orderId}
+        GROUP BY o.id, o.total_amount
+      `);
+      const row = ((result as any).rows || [])[0];
+      if (!row) return;
+
+      const orderTotal = parseFloat(row.order_total);
+      const totalPaid = parseFloat(row.total_paid);
+
+      let status = 'pendiente';
+      if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
+      else if (totalPaid > 0) status = 'parcial';
+
+      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+    } catch (error) {
+      console.warn('Recalculate order status from invoice error:', error);
+    }
+  }
+
   async getSummary(companyId: string) {
     try {
       const result = await db.execute(sql`
         SELECT
           COALESCE(SUM(
-            CAST(i.total_amount AS decimal) - COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-              0
-            )
+            CAST(i.total_amount AS decimal) - (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id)
           ), 0) as total_pending,
           COALESCE(SUM(
             CASE WHEN i.due_date IS NOT NULL AND i.due_date < NOW() THEN
-              CAST(i.total_amount AS decimal) - COALESCE(
-                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-                0
-              )
+              CAST(i.total_amount AS decimal) - (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id)
             ELSE 0 END
           ), 0) as total_overdue,
           COALESCE(SUM(
             CASE WHEN i.due_date IS NULL OR i.due_date >= NOW() THEN
-              CAST(i.total_amount AS decimal) - COALESCE(
-                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-                0
-              )
+              CAST(i.total_amount AS decimal) - (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id)
             ELSE 0 END
           ), 0) as total_upcoming
         FROM invoices i
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
-          AND CAST(i.total_amount AS decimal) > COALESCE(
-            (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id),
-            0
-          )
+          AND CAST(i.total_amount AS decimal) > (SELECT COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id)
       `);
 
       const rows = (result as any).rows || result || [];
