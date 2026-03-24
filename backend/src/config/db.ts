@@ -1237,6 +1237,64 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_je_reference ON journal_entries(reference_type, reference_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_jel_entry ON journal_entry_lines(entry_id)`);
 
+    // ===== INVOICE_ORDERS (N:N factura-pedido) =====
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS invoice_orders (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+          order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          UNIQUE(invoice_id, order_id)
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_orders_invoice ON invoice_orders(invoice_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_orders_order ON invoice_orders(order_id)`);
+    } catch (_) {}
+
+    // Backfill: migrate existing invoices.order_id → invoice_orders
+    try {
+      await pool.query(`
+        INSERT INTO invoice_orders (id, invoice_id, order_id)
+        SELECT gen_random_uuid(), id, order_id FROM invoices
+        WHERE order_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM invoice_orders io
+            WHERE io.invoice_id = invoices.id AND io.order_id = invoices.order_id
+          )
+        ON CONFLICT DO NOTHING
+      `);
+    } catch (_) {}
+
+    // ===== PURCHASE_INVOICE_PURCHASES (N:N factura compra-compra) =====
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS purchase_invoice_purchases (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          purchase_invoice_id UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+          purchase_id UUID NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          UNIQUE(purchase_invoice_id, purchase_id)
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_pip_pi ON purchase_invoice_purchases(purchase_invoice_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_pip_purchase ON purchase_invoice_purchases(purchase_id)`);
+    } catch (_) {}
+
+    // Backfill: migrate existing purchase_invoices.purchase_id → purchase_invoice_purchases
+    try {
+      await pool.query(`
+        INSERT INTO purchase_invoice_purchases (id, purchase_invoice_id, purchase_id)
+        SELECT gen_random_uuid(), id, purchase_id FROM purchase_invoices
+        WHERE purchase_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM purchase_invoice_purchases pip
+            WHERE pip.purchase_invoice_id = purchase_invoices.id AND pip.purchase_id = purchase_invoices.purchase_id
+          )
+        ON CONFLICT DO NOTHING
+      `);
+    } catch (_) {}
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -1448,6 +1506,8 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'cobro_invoice_item_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
     { name: 'pago_invoice_item_applications', parentTable: 'pagos', parentFk: 'pago_id' },
     { name: 'journal_entry_lines', parentTable: 'journal_entries', parentFk: 'entry_id' },
+    { name: 'invoice_orders', parentTable: 'invoices', parentFk: 'invoice_id' },
+    { name: 'purchase_invoice_purchases', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
   ];
 
   const result: Record<string, any[]> = {};

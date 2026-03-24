@@ -540,7 +540,15 @@ export const Invoices: React.FC = () => {
               subtotal: calcItemSubtotal(parseFloat(item.unit_price || '0'), parseFloat(item.pending_qty || item.quantity || '1')),
               order_item_id: item.id,
             }))
-          if (mapped.length > 0) setFormItems(mapped)
+          if (mapped.length > 0) {
+            setFormItems(prev => {
+              const existingIds = new Set(prev.filter(i => i.order_item_id).map(i => i.order_item_id))
+              const newOnly = mapped.filter(m => !existingIds.has(m.order_item_id))
+              if (newOnly.length === 0) return prev
+              const withContent = prev.filter(i => i.product_name.trim())
+              return withContent.length > 0 ? [...withContent, ...newOnly] : newOnly
+            })
+          }
         }
       } catch (e) {
         console.warn('Could not load order items for invoice:', e)
@@ -617,7 +625,7 @@ export const Invoices: React.FC = () => {
         customer_id: formCustomerId || null,
         enterprise_id: formEnterpriseId || null,
         invoice_type: vistaMode === 'venta_fiscal' ? formInvoiceType : undefined,
-        order_id: formOrderId || null,
+        order_id: null, // Backend derives order_ids from items' order_item_id
         related_invoice_id: isNcNdType(formInvoiceType) ? (formRelatedInvoiceId || null) : null,
         fiscal_type: vistaMode === 'venta_fiscal' ? 'fiscal' : 'no_fiscal',
         currency: formCurrency,
@@ -1374,9 +1382,9 @@ export const Invoices: React.FC = () => {
                   </button>
                 </div>
 
-                {formOrderId && formItems.some(i => i.order_item_id) && (
+                {formItems.some(i => i.order_item_id) && (
                   <div className="px-3 py-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
-                    Items cargados desde el pedido. Puede editarlos antes de facturar.
+                    Items cargados desde pedidos. Puede editarlos antes de facturar.
                   </div>
                 )}
 

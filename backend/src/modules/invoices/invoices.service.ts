@@ -204,6 +204,7 @@ export class InvoicesService {
       }
 
       // Add items
+      const collectedOrderItemIds: string[] = [];
       if (data.items && Array.isArray(data.items)) {
         let subtotal = 0;
         let vatAmount = 0;
@@ -270,6 +271,7 @@ export class InvoicesService {
             await db.execute(sql`
               UPDATE invoice_items SET order_item_id = ${item.order_item_id} WHERE id = ${itemId}
             `);
+            collectedOrderItemIds.push(item.order_item_id);
           }
         }
 
@@ -299,8 +301,39 @@ export class InvoicesService {
         }
       }
 
-      // Update order has_invoice flag if order_id provided
-      if (data.order_id) {
+      // Derive unique order_ids from invoice items that have order_item_id
+      if (collectedOrderItemIds.length > 0) {
+        const orderIdsResult = await db.execute(sql`
+          SELECT DISTINCT order_id FROM order_items
+          WHERE id = ANY(${collectedOrderItemIds})
+        `);
+        const orderIds = ((orderIdsResult as any).rows || []).map((r: any) => r.order_id).filter(Boolean);
+
+        // Insert into invoice_orders (N:N)
+        for (const orderId of orderIds) {
+          await db.execute(sql`
+            INSERT INTO invoice_orders (id, invoice_id, order_id)
+            VALUES (gen_random_uuid(), ${invoiceId}, ${orderId})
+            ON CONFLICT (invoice_id, order_id) DO NOTHING
+          `);
+        }
+
+        // Update has_invoice for ALL linked orders
+        for (const orderId of orderIds) {
+          await db.execute(sql`
+            UPDATE orders SET has_invoice = true, updated_at = NOW()
+            WHERE id = ${orderId} AND company_id = ${companyId}
+          `);
+        }
+
+        // Set invoices.order_id to first order (backward compat)
+        if (!data.order_id && orderIds.length > 0) {
+          await db.execute(sql`
+            UPDATE invoices SET order_id = ${orderIds[0]} WHERE id = ${invoiceId}
+          `);
+        }
+      } else if (data.order_id) {
+        // Legacy: single order_id provided directly
         await db.execute(sql`
           UPDATE orders SET has_invoice = true, updated_at = NOW()
           WHERE id = ${data.order_id} AND company_id = ${companyId}

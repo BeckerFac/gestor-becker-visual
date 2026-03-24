@@ -188,31 +188,38 @@ export class CollectionsService {
 
   private async recalculateOrderStatusFromInvoice(invoiceId: string) {
     try {
-      const invResult = await db.execute(sql`SELECT order_id FROM invoices WHERE id = ${invoiceId}`);
-      const orderId = ((invResult as any).rows || [])[0]?.order_id;
-      if (!orderId) return;
-
-      const result = await db.execute(sql`
-        SELECT
-          CAST(o.total_amount AS decimal) as order_total,
-          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
-        FROM orders o
-        LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
-        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
-        WHERE o.id = ${orderId}
-        GROUP BY o.id, o.total_amount
+      // Get all order_ids linked to this invoice (invoice_orders N:N + legacy invoices.order_id)
+      const orderIdsResult = await db.execute(sql`
+        SELECT order_id FROM invoice_orders WHERE invoice_id = ${invoiceId}
+        UNION
+        SELECT order_id FROM invoices WHERE id = ${invoiceId} AND order_id IS NOT NULL
       `);
-      const row = ((result as any).rows || [])[0];
-      if (!row) return;
+      const orderIds = ((orderIdsResult as any).rows || []).map((r: any) => r.order_id).filter(Boolean);
+      if (orderIds.length === 0) return;
 
-      const orderTotal = parseFloat(row.order_total);
-      const totalPaid = parseFloat(row.total_paid);
+      for (const orderId of orderIds) {
+        const result = await db.execute(sql`
+          SELECT
+            CAST(o.total_amount AS decimal) as order_total,
+            COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
+          FROM orders o
+          LEFT JOIN invoices i ON (i.order_id = o.id OR i.id IN (SELECT io.invoice_id FROM invoice_orders io WHERE io.order_id = o.id)) AND i.status != 'cancelled'
+          LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+          WHERE o.id = ${orderId}
+          GROUP BY o.id, o.total_amount
+        `);
+        const row = ((result as any).rows || [])[0];
+        if (!row) continue;
 
-      let status = 'pendiente';
-      if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
-      else if (totalPaid > 0) status = 'parcial';
+        const orderTotal = parseFloat(row.order_total);
+        const totalPaid = parseFloat(row.total_paid);
 
-      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+        let status = 'pendiente';
+        if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
+        else if (totalPaid > 0) status = 'parcial';
+
+        await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+      }
     } catch (error) {
       console.warn('Recalculate order status from invoice error:', error);
     }
