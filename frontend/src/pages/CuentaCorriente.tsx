@@ -25,6 +25,10 @@ interface EnterpriseSaldo {
   credito_cliente?: number
   deuda_proveedor?: number
   credito_proveedor?: number
+  adelantos_recibidos?: number
+  adelantos_entregados?: number
+  adelantos_cobros?: number
+  adelantos_pagos?: number
   saldo_neto?: number
   tipo?: string
 }
@@ -363,10 +367,11 @@ export const CuentaCorriente: React.FC = () => {
 
   const fmt = (n: number) => formatCurrency(n)
 
-  // Use semantic fields from backend (always >= 0)
+  // Totals from semantic fields
   const totalACobrar = resumen.reduce((s, r) => s + (r.deuda_cliente || Math.max(r.a_cobrar, 0)), 0)
   const totalAPagar = resumen.reduce((s, r) => s + (r.deuda_proveedor || Math.max(r.a_pagar, 0)), 0)
-  const totalCreditos = resumen.reduce((s, r) => s + (r.credito_cliente || 0) + (r.credito_proveedor || 0), 0)
+  const totalAdelantosRecibidos = resumen.reduce((s, r) => s + ((r as any).adelantos_recibidos || r.adelantos_cobros || 0), 0)
+  const totalAdelantosEntregados = resumen.reduce((s, r) => s + ((r as any).adelantos_entregados || r.adelantos_pagos || 0), 0)
   const balanceNeto = totalACobrar - totalAPagar
 
   // Legacy compat
@@ -455,12 +460,21 @@ export const CuentaCorriente: React.FC = () => {
             <p className="text-[10px] text-red-500 mt-0.5">{resumen.filter(r => (r.deuda_proveedor || Math.max(r.a_pagar, 0)) > 0).length} proveedores</p>
           </CardContent>
         </Card>
-        {totalCreditos > 0 && (
+        {totalAdelantosRecibidos > 0 && (
           <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Creditos Pendientes</p>
-              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalCreditos)}</p>
-              <p className="text-[10px] text-blue-500 mt-0.5">Adelantos sin usar</p>
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Adelantos Recibidos</p>
+              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalAdelantosRecibidos)}</p>
+              <p className="text-[10px] text-blue-500 mt-0.5">Cobros sin factura asignada</p>
+            </CardContent>
+          </Card>
+        )}
+        {totalAdelantosEntregados > 0 && (
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+            <CardContent className="pt-4 pb-3">
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Adelantos a Proveedores</p>
+              <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalAdelantosEntregados)}</p>
+              <p className="text-[10px] text-amber-500 mt-0.5">Pagos sin factura asignada</p>
             </CardContent>
           </Card>
         )}
@@ -499,9 +513,10 @@ export const CuentaCorriente: React.FC = () => {
                 <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-3">Empresa</th>
                   <th className="px-4 py-3 text-center">Tipo</th>
-                  <th className="px-4 py-3 text-right">Nos Deben</th>
-                  <th className="px-4 py-3 text-right">Les Debemos</th>
-                  <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 text-right">Pend. Cobro</th>
+                  <th className="px-4 py-3 text-right">Pend. Pago</th>
+                  <th className="px-4 py-3 text-right">Adelantos</th>
+                  <th className="px-4 py-3 text-center">Neto</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
@@ -531,31 +546,40 @@ export const CuentaCorriente: React.FC = () => {
                           'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
                         }`}>{tipo === 'mixto' ? 'Cli+Prov' : tipo === 'proveedor' ? 'Proveedor' : 'Cliente'}</span>
                       </td>
+                      {/* Pendiente de cobro (facturas - cobros aplicados) */}
                       <td className="px-4 py-3 text-right">
                         {deudaCli > 0 ? (
                           <span className="font-bold text-green-700 dark:text-green-400">{fmt(deudaCli)}</span>
-                        ) : creditoCli > 0 ? (
-                          <div>
-                            <span className="text-xs text-blue-600 dark:text-blue-400">Credito</span>
-                            <span className="block font-bold text-blue-600 dark:text-blue-400">{fmt(creditoCli)}</span>
-                          </div>
                         ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
                       </td>
+                      {/* Pendiente de pago (fact compra - pagos aplicados) */}
                       <td className="px-4 py-3 text-right">
                         {deudaProv > 0 ? (
                           <span className="font-bold text-red-600 dark:text-red-400">{fmt(deudaProv)}</span>
-                        ) : creditoProv > 0 ? (
-                          <div>
-                            <span className="text-xs text-teal-600 dark:text-teal-400">A favor</span>
-                            <span className="block font-bold text-teal-600 dark:text-teal-400">{fmt(creditoProv)}</span>
-                          </div>
                         ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
                       </td>
+                      {/* Adelantos (separados, no restan de deuda) */}
+                      <td className="px-4 py-3 text-right">
+                        {(() => {
+                          const advRec = (r as any).adelantos_recibidos || r.adelantos_cobros || 0
+                          const advEnt = (r as any).adelantos_entregados || r.adelantos_pagos || 0
+                          if (advRec > 0 && advEnt > 0) return (
+                            <div className="text-xs">
+                              <span className="text-blue-600">Rec: {fmt(advRec)}</span>
+                              <span className="block text-amber-600">Ent: {fmt(advEnt)}</span>
+                            </div>
+                          )
+                          if (advRec > 0) return <span className="text-xs font-medium text-blue-600 dark:text-blue-400">{fmt(advRec)}</span>
+                          if (advEnt > 0) return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">{fmt(advEnt)}</span>
+                          return <span className="text-gray-300 dark:text-gray-600">-</span>
+                        })()}
+                      </td>
+                      {/* Neto */}
                       <td className="px-4 py-3 text-center">
                         {saldoNeto > 0.01 ? (
-                          <span className="text-xs font-semibold text-green-700 dark:text-green-400">Nos deben {fmt(saldoNeto)}</span>
+                          <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">+{fmt(saldoNeto)}</span>
                         ) : saldoNeto < -0.01 ? (
-                          <span className="text-xs font-semibold text-red-600 dark:text-red-400">Debemos {fmt(Math.abs(saldoNeto))}</span>
+                          <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">-{fmt(Math.abs(saldoNeto))}</span>
                         ) : (
                           <span className="text-xs text-gray-400">Saldado</span>
                         )}

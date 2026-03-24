@@ -131,18 +131,29 @@ export class CuentaCorrienteService {
         const ajustesDebit = parseFloat(r.total_ajustes_debit || '0');
         const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
 
-        // A cobrar = ventas + ajustes_debit - cobros_aplicados - adelantos_cobros - ajustes_credit
-        const aCobrar = ventas + ajustesDebit - cobrosAplicados - adelantosCobros - ajustesCredit;
-        // A pagar = compras - pagos_aplicados - adelantos_pagos
-        const aPagar = compras - pagosAplicados - adelantosPagos;
-        const balance = aCobrar - aPagar;
+        // NEW LOGIC: Adelantos are SEPARATE — NOT subtracted from debt
+        //
+        // Facturas pendientes de cobro = facturas emitidas - cobros aplicados a esas facturas
+        // (Solo deuda real de facturas concretas, siempre >= 0)
+        const deudaCliente = Math.max(ventas + ajustesDebit - cobrosAplicados - ajustesCredit, 0);
+        //
+        // Adelantos recibidos = plata que nos dieron sin factura (se muestra APARTE)
+        // NO es deuda nuestra — es crédito del cliente para aplicar a futuras facturas
+        const adelantosRecibidos = adelantosCobros;
+        //
+        // Facturas de compra pendientes = compras facturadas - pagos aplicados
+        const deudaProveedor = Math.max(compras - pagosAplicados, 0);
+        //
+        // Adelantos a proveedor = pagos sin factura (se muestra APARTE)
+        const adelantosEntregados = adelantosPagos;
 
-        // Semantic fields for clear UI
-        const deudaCliente = Math.max(aCobrar, 0);      // What the client owes us (always >= 0)
-        const creditoCliente = Math.max(-aCobrar, 0);    // Credit the client has (advances exceeding invoices)
-        const deudaProveedor = Math.max(aPagar, 0);      // What we owe the provider (always >= 0)
-        const creditoProveedor = Math.max(-aPagar, 0);   // Credit we have with provider
-        const saldoNeto = aCobrar - aPagar;              // Positive = they owe us, negative = we owe them
+        // Saldo neto = deuda_cliente - deuda_proveedor
+        // (no incluye adelantos porque son operaciones separadas)
+        const saldoNeto = deudaCliente - deudaProveedor;
+
+        // Legacy compat
+        const aCobrar = deudaCliente;
+        const aPagar = deudaProveedor;
 
         // Relationship type
         const hasVentas = ventas > 0 || cobrosAplicados > 0 || adelantosCobros > 0;
@@ -152,21 +163,23 @@ export class CuentaCorrienteService {
         return {
           ...r,
           total_ventas: ventas,
-          total_cobros: cobrosAplicados + adelantosCobros,
+          total_cobros: cobrosAplicados,
           total_cobros_aplicados: cobrosAplicados,
-          adelantos_cobros: adelantosCobros,
+          adelantos_cobros: adelantosRecibidos,
           total_compras: compras,
-          total_pagos: pagosAplicados + adelantosPagos,
+          total_pagos: pagosAplicados,
           total_pagos_aplicados: pagosAplicados,
-          adelantos_pagos: adelantosPagos,
+          adelantos_pagos: adelantosEntregados,
           a_cobrar: aCobrar,
           a_pagar: aPagar,
-          saldo: balance,
-          // New semantic fields
+          saldo: saldoNeto,
+          // Semantic fields
           deuda_cliente: deudaCliente,
-          credito_cliente: creditoCliente,
+          credito_cliente: 0, // Adelantos ya no se muestran como "crédito" — se muestran aparte
           deuda_proveedor: deudaProveedor,
-          credito_proveedor: creditoProveedor,
+          credito_proveedor: 0,
+          adelantos_recibidos: adelantosRecibidos,
+          adelantos_entregados: adelantosEntregados,
           saldo_neto: saldoNeto,
           tipo,
         };
