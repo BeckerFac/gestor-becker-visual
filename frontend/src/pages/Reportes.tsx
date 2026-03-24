@@ -11,6 +11,7 @@ import { useCan } from '@/components/shared/PermissionGate'
 import { UpgradePrompt } from '@/components/shared/UpgradePrompt'
 import { LibroIVAVentasTab } from '@/components/reportes/LibroIVAVentasTab'
 import { LibroIVAComprasTab } from '@/components/reportes/LibroIVAComprasTab'
+import { ExportARCATxtButton } from '@/components/reportes/ExportARCATxt'
 import { PosicionIVATab } from '@/components/reportes/PosicionIVATab'
 import { FlujoCajaTab } from '@/components/reportes/FlujoCajaTab'
 import { VentasTab } from '@/components/reportes/VentasTab'
@@ -85,29 +86,43 @@ function isAccountingTab(tab: TabKey): boolean {
 
 const ventasExcelCols = [
   { key: 'invoice_date', label: 'Fecha', type: 'date' as const },
+  { key: 'tipo_cbte', label: 'Tipo Cbte' },
+  { key: 'punto_venta', label: 'Pto Vta' },
+  { key: 'numero_desde', label: 'Nro Desde' },
+  { key: 'numero_hasta', label: 'Nro Hasta' },
   { key: 'comprobante', label: 'Comprobante' },
-  { key: 'customer_name', label: 'Cliente' },
-  { key: 'customer_cuit', label: 'CUIT' },
-  { key: 'neto_gravado', label: 'Neto Gravado', type: 'currency' as const },
-  { key: 'neto_no_gravado', label: 'Neto No Gravado', type: 'currency' as const },
+  { key: 'cod_doc_receptor', label: 'Cod Doc' },
+  { key: 'nro_doc_receptor', label: 'Nro Doc' },
+  { key: 'customer_name', label: 'Denominacion' },
+  { key: 'neto_gravado', label: 'Imp Neto Gravado', type: 'currency' as const },
+  { key: 'neto_no_gravado', label: 'Imp No Gravado', type: 'currency' as const },
+  { key: 'op_exentas', label: 'Imp Op Exentas', type: 'currency' as const },
   { key: 'iva_27', label: 'IVA 27%', type: 'currency' as const },
   { key: 'iva_21', label: 'IVA 21%', type: 'currency' as const },
   { key: 'iva_10_5', label: 'IVA 10,5%', type: 'currency' as const },
   { key: 'iva_5', label: 'IVA 5%', type: 'currency' as const },
   { key: 'iva_2_5', label: 'IVA 2,5%', type: 'currency' as const },
-  { key: 'iva_0', label: 'IVA 0%', type: 'currency' as const },
   { key: 'total_iva', label: 'Total IVA', type: 'currency' as const },
-  { key: 'total', label: 'Total', type: 'currency' as const },
+  { key: 'otros_tributos', label: 'Otros Tributos', type: 'currency' as const },
+  { key: 'total', label: 'Imp Total', type: 'currency' as const },
 ]
 
 const comprasExcelCols = [
   { key: 'date', label: 'Fecha', type: 'date' as const },
+  { key: 'tipo_cbte', label: 'Tipo Cbte' },
+  { key: 'punto_venta', label: 'Pto Vta' },
+  { key: 'numero_desde', label: 'Nro Desde' },
+  { key: 'numero_hasta', label: 'Nro Hasta' },
   { key: 'comprobante', label: 'Comprobante' },
-  { key: 'enterprise_name', label: 'Proveedor' },
-  { key: 'enterprise_cuit', label: 'CUIT' },
-  { key: 'neto_gravado', label: 'Neto Gravado', type: 'currency' as const },
+  { key: 'cod_doc_emisor', label: 'Cod Doc' },
+  { key: 'nro_doc_emisor', label: 'Nro Doc' },
+  { key: 'enterprise_name', label: 'Denominacion' },
+  { key: 'neto_gravado', label: 'Imp Neto Gravado', type: 'currency' as const },
+  { key: 'neto_no_gravado', label: 'Imp No Gravado', type: 'currency' as const },
+  { key: 'op_exentas', label: 'Imp Op Exentas', type: 'currency' as const },
   { key: 'iva', label: 'IVA', type: 'currency' as const },
-  { key: 'total', label: 'Total', type: 'currency' as const },
+  { key: 'otros_tributos', label: 'Otros Tributos', type: 'currency' as const },
+  { key: 'total', label: 'Imp Total', type: 'currency' as const },
 ]
 
 const posicionExcelCols = [
@@ -319,9 +334,14 @@ export const Reportes: React.FC = () => {
           filename,
           totalsRow: {
             invoice_date: '',
+            tipo_cbte: '',
+            punto_venta: '',
+            numero_desde: '',
+            numero_hasta: '',
             comprobante: 'TOTALES',
+            cod_doc_receptor: '',
+            nro_doc_receptor: '',
             customer_name: '',
-            customer_cuit: '',
             ...ivaVentasTotals,
           },
           headerText,
@@ -333,9 +353,14 @@ export const Reportes: React.FC = () => {
           filename,
           totalsRow: {
             date: '',
+            tipo_cbte: '',
+            punto_venta: '',
+            numero_desde: '',
+            numero_hasta: '',
             comprobante: 'TOTALES',
+            cod_doc_emisor: '',
+            nro_doc_emisor: '',
             enterprise_name: '',
-            enterprise_cuit: '',
             ...ivaComprasTotals,
           },
           headerText,
@@ -383,8 +408,8 @@ export const Reportes: React.FC = () => {
   const skeletonConfig = useMemo(() => {
     if (isAccountingTab(activeTab)) {
       return {
-        cards: activeTab === 'iva_ventas' ? 4 : 3,
-        cols: activeTab === 'iva_ventas' ? 11 : activeTab === 'iva_compras' ? 7 : activeTab === 'posicion' ? 4 : 5,
+        cards: 4,
+        cols: activeTab === 'iva_ventas' ? 13 : activeTab === 'iva_compras' ? 10 : activeTab === 'posicion' ? 4 : 5,
       }
     }
     return { cards: 3, cols: 5 }
@@ -434,6 +459,15 @@ export const Reportes: React.FC = () => {
               </svg>
               Imprimir
             </Button>
+            {(activeTab === 'iva_ventas' || activeTab === 'iva_compras') && (
+              <ExportARCATxtButton
+                type={activeTab === 'iva_ventas' ? 'ventas' : 'compras'}
+                ventasRows={activeTab === 'iva_ventas' ? ivaVentasRows : undefined}
+                comprasRows={activeTab === 'iva_compras' ? ivaComprasRows : undefined}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+              />
+            )}
             {currentExcelData.data.length > 0 && (
               <ExportExcelButton
                 data={currentExcelData.data}

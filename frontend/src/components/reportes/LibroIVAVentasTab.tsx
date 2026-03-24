@@ -73,6 +73,14 @@ export const LibroIVAVentasTab: React.FC<Props> = ({ rows, totals }) => {
       ),
     },
     {
+      key: 'op_exentas',
+      label: 'Exento',
+      align: 'right' as const,
+      render: (row: IVAVentasRow) => (
+        <span className="text-gray-500 dark:text-gray-400 tabular-nums">{fmtCurrency(row.op_exentas)}</span>
+      ),
+    },
+    {
       key: 'iva_21',
       label: 'IVA 21%',
       align: 'right' as const,
@@ -105,6 +113,14 @@ export const LibroIVAVentasTab: React.FC<Props> = ({ rows, totals }) => {
       ),
     },
     {
+      key: 'otros_tributos',
+      label: 'Otros Trib.',
+      align: 'right' as const,
+      render: (row: IVAVentasRow) => (
+        <span className="text-gray-500 dark:text-gray-400 tabular-nums">{fmtCurrency(row.otros_tributos)}</span>
+      ),
+    },
+    {
       key: 'total',
       label: 'Total',
       align: 'right' as const,
@@ -119,10 +135,12 @@ export const LibroIVAVentasTab: React.FC<Props> = ({ rows, totals }) => {
       <td colSpan={4} className="px-3 py-3 text-gray-700 dark:text-gray-300">TOTALES</td>
       <td className="px-3 py-3 text-right text-gray-800 dark:text-gray-200 tabular-nums">{fmtCurrency(totals.neto_gravado ?? 0)}</td>
       <td className="px-3 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtCurrency(totals.neto_no_gravado ?? 0)}</td>
+      <td className="px-3 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtCurrency(totals.op_exentas ?? 0)}</td>
       <td className="px-3 py-3 text-right text-gray-800 dark:text-gray-200 tabular-nums">{fmtCurrency(totals.iva_21 ?? 0)}</td>
       <td className="px-3 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtCurrency(totals.iva_10_5 ?? 0)}</td>
       <td className="px-3 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtCurrency(totals.iva_27 ?? 0)}</td>
       <td className="px-3 py-3 text-right text-purple-700 dark:text-purple-400 tabular-nums">{fmtCurrency(totals.total_iva ?? 0)}</td>
+      <td className="px-3 py-3 text-right text-gray-600 dark:text-gray-400 tabular-nums">{fmtCurrency(totals.otros_tributos ?? 0)}</td>
       <td className="px-3 py-3 text-right text-gray-900 dark:text-gray-100 tabular-nums">{fmtCurrency(totals.total ?? 0)}</td>
     </tr>
   )

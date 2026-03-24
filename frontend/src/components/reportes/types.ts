@@ -2,11 +2,18 @@
 
 export interface IVAVentasRow {
   invoice_date: string
+  tipo_cbte: number
+  punto_venta: number
+  numero_desde: number
+  numero_hasta: number
   comprobante: string
+  cod_doc_receptor: number
+  nro_doc_receptor: string
   customer_name: string
   customer_cuit: string
   neto_gravado: number
   neto_no_gravado: number
+  op_exentas: number
   iva_27: number
   iva_21: number
   iva_10_5: number
@@ -14,16 +21,26 @@ export interface IVAVentasRow {
   iva_2_5: number
   iva_0: number
   total_iva: number
+  otros_tributos: number
   total: number
 }
 
 export interface IVAComprasRow {
   date: string
+  tipo_cbte: number
+  punto_venta: number
+  numero_desde: number
+  numero_hasta: number
   comprobante: string
+  cod_doc_emisor: number
+  nro_doc_emisor: string
   enterprise_name: string
   enterprise_cuit: string
   neto_gravado: number
+  neto_no_gravado: number
+  op_exentas: number
   iva: number
+  otros_tributos: number
   total: number
 }
 

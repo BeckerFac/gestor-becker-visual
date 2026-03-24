@@ -8,6 +8,32 @@ const MONTH_NAMES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
+// AFIP CbteTipo codes (RG 4597 Libro IVA Digital)
+const CBTE_TIPO_MAP: Record<string, number> = {
+  'A': 1, 'B': 6, 'C': 11,
+  'NDA': 2, 'NDB': 7, 'NDC': 12,
+  'NCA': 3, 'NCB': 8, 'NCC': 13,
+  'E': 19, 'NDE': 20, 'NCE': 21,
+  'FCE_A': 201, 'FCE_B': 206, 'FCE_C': 211,
+};
+
+// AFIP document type codes (RG 4597)
+function resolveDocTipo(cuit: string): number {
+  if (!cuit || cuit === '0' || cuit === '00000000000') return 99; // Consumidor Final
+  const clean = cuit.replace(/[-.\s]/g, '');
+  if (clean.length === 11) return 80; // CUIT
+  if (clean.length >= 7 && clean.length <= 8) return 96; // DNI
+  return 99; // Consumidor Final
+}
+
+// Resolve AFIP CbteTipo: prefer afip_response, fallback to letter map
+function resolveCbteTipo(invoiceType: string | null, afipResponse: any): number {
+  const fromAfip = afipResponse?.FeCabResp?.CbteTipo
+    ?? afipResponse?.FECAESolicitarResult?.FeCabResp?.CbteTipo;
+  if (fromAfip) return parseInt(String(fromAfip), 10);
+  return CBTE_TIPO_MAP[invoiceType || 'B'] || 6;
+}
+
 // Max rows for Libro IVA queries to prevent memory issues
 const LIBRO_MAX_ROWS = 10000;
 // Max months for monthly reports (Posicion IVA, Flujo de Caja)
@@ -92,6 +118,7 @@ export class AccountingService {
           i.invoice_type,
           i.invoice_number,
           COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 3) as punto_venta,
+          i.afip_response,
           COALESCE(c.name, 'Consumidor Final') as customer_name,
           COALESCE(c.cuit, '') as customer_cuit,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) > 0 THEN COALESCE(CAST(ii.subtotal AS decimal), 0) ELSE 0 END), 0) as neto_gravado,
@@ -121,15 +148,26 @@ export class AccountingService {
       `);
 
       const rows = ((result as any).rows || result || []).map((r: any) => {
-        const pvStr = String(r.punto_venta || 3).padStart(5, '0');
-        const numStr = String(r.invoice_number || 0).padStart(8, '0');
+        const puntoVenta = Number(r.punto_venta) || 3;
+        const invoiceNumber = Number(r.invoice_number) || 0;
+        const pvStr = String(puntoVenta).padStart(5, '0');
+        const numStr = String(invoiceNumber).padStart(8, '0');
+        const cbteTipo = resolveCbteTipo(r.invoice_type, r.afip_response);
+        const codDocReceptor = resolveDocTipo(r.customer_cuit);
         return {
           invoice_date: r.invoice_date,
+          tipo_cbte: cbteTipo,
+          punto_venta: puntoVenta,
+          numero_desde: invoiceNumber,
+          numero_hasta: invoiceNumber,
           comprobante: `${r.invoice_type || 'B'} ${pvStr}-${numStr}`,
+          cod_doc_receptor: codDocReceptor,
+          nro_doc_receptor: (r.customer_cuit || '').replace(/[-.\s]/g, ''),
           customer_name: r.customer_name,
           customer_cuit: r.customer_cuit,
           neto_gravado: parseFloat(r.neto_gravado) || 0,
           neto_no_gravado: parseFloat(r.neto_no_gravado) || 0,
+          op_exentas: 0,
           iva_27: parseFloat(r.iva_27) || 0,
           iva_21: parseFloat(r.iva_21) || 0,
           iva_10_5: parseFloat(r.iva_10_5) || 0,
@@ -137,6 +175,7 @@ export class AccountingService {
           iva_2_5: parseFloat(r.iva_2_5) || 0,
           iva_0: 0,
           total_iva: parseFloat(r.total_iva) || 0,
+          otros_tributos: 0,
           total: parseFloat(r.total) || 0,
         };
       });
@@ -146,6 +185,7 @@ export class AccountingService {
         (acc: any, row: any) => ({
           neto_gravado: acc.neto_gravado + row.neto_gravado,
           neto_no_gravado: acc.neto_no_gravado + row.neto_no_gravado,
+          op_exentas: acc.op_exentas + row.op_exentas,
           iva_27: acc.iva_27 + row.iva_27,
           iva_21: acc.iva_21 + row.iva_21,
           iva_10_5: acc.iva_10_5 + row.iva_10_5,
@@ -153,12 +193,13 @@ export class AccountingService {
           iva_2_5: acc.iva_2_5 + row.iva_2_5,
           iva_0: 0,
           total_iva: acc.total_iva + row.total_iva,
+          otros_tributos: acc.otros_tributos + row.otros_tributos,
           total: acc.total + row.total,
         }),
         {
-          neto_gravado: 0, neto_no_gravado: 0,
+          neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0,
           iva_27: 0, iva_21: 0, iva_10_5: 0, iva_5: 0, iva_2_5: 0, iva_0: 0,
-          total_iva: 0, total: 0,
+          total_iva: 0, otros_tributos: 0, total: 0,
         },
       );
 
@@ -192,10 +233,13 @@ export class AccountingService {
         SELECT
           TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') as date,
           pi.invoice_type,
-          COALESCE(pi.punto_venta, '') || '-' || pi.invoice_number as invoice_number,
+          COALESCE(pi.punto_venta, '') as punto_venta,
+          pi.invoice_number,
           COALESCE(e.name, 'Proveedor desconocido') as enterprise_name,
           COALESCE(e.cuit, '') as enterprise_cuit,
           COALESCE(CAST(pi.subtotal AS decimal), COALESCE(CAST(pi.total_amount AS decimal), 0) - COALESCE(CAST(pi.vat_amount AS decimal), 0)) as neto_gravado,
+          0 as neto_no_gravado,
+          0 as op_exentas,
           COALESCE(CAST(pi.vat_amount AS decimal), 0) as iva,
           COALESCE(CAST(pi.other_taxes AS decimal), 0) as otros_tributos,
           COALESCE(CAST(pi.total_amount AS decimal), 0) as total
@@ -214,17 +258,31 @@ export class AccountingService {
 
       const rows = ((result as any).rows || result || []).map((r: any) => {
         const invoiceType = r.invoice_type || '';
-        const invoiceNumber = r.invoice_number || '';
-        const comprobante = (invoiceType || invoiceNumber)
-          ? `${invoiceType} ${invoiceNumber}`.trim()
+        const pv = r.punto_venta || '';
+        const num = r.invoice_number || '';
+        const pvStr = pv ? String(pv).padStart(5, '0') : '00000';
+        const numStr = num ? String(num).padStart(8, '0') : '00000000';
+        const comprobante = (invoiceType || pv || num)
+          ? `${invoiceType} ${pvStr}-${numStr}`.trim()
           : 'S/C';
+        const cbteTipo = CBTE_TIPO_MAP[invoiceType] || 0;
+        const codDocEmisor = resolveDocTipo(r.enterprise_cuit);
         return {
           date: r.date,
+          tipo_cbte: cbteTipo,
+          punto_venta: pv ? parseInt(String(pv), 10) || 0 : 0,
+          numero_desde: num ? parseInt(String(num), 10) || 0 : 0,
+          numero_hasta: num ? parseInt(String(num), 10) || 0 : 0,
           comprobante,
+          cod_doc_emisor: codDocEmisor,
+          nro_doc_emisor: (r.enterprise_cuit || '').replace(/[-.\s]/g, ''),
           enterprise_name: r.enterprise_name,
           enterprise_cuit: r.enterprise_cuit,
           neto_gravado: parseFloat(r.neto_gravado) || 0,
+          neto_no_gravado: parseFloat(r.neto_no_gravado) || 0,
+          op_exentas: parseFloat(r.op_exentas) || 0,
           iva: parseFloat(r.iva) || 0,
+          otros_tributos: parseFloat(r.otros_tributos) || 0,
           total: parseFloat(r.total) || 0,
         };
       });
@@ -232,10 +290,13 @@ export class AccountingService {
       const rawTotals = rows.reduce(
         (acc: any, row: any) => ({
           neto_gravado: acc.neto_gravado + row.neto_gravado,
+          neto_no_gravado: acc.neto_no_gravado + row.neto_no_gravado,
+          op_exentas: acc.op_exentas + row.op_exentas,
           iva: acc.iva + row.iva,
+          otros_tributos: acc.otros_tributos + row.otros_tributos,
           total: acc.total + row.total,
         }),
-        { neto_gravado: 0, iva: 0, total: 0 },
+        { neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0 },
       );
 
       const totals = Object.fromEntries(
