@@ -64,6 +64,29 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   tarjeta: 'Tarjeta',
 }
 
+const RETENCION_LABELS: Record<string, string> = {
+  iibb: 'IIBB',
+  ganancias: 'Ganancias',
+  iva: 'IVA',
+  suss: 'SUSS',
+}
+
+interface RetencionRow {
+  type: string
+  enabled: boolean
+  base_amount: number
+  rate: number
+  amount: number
+  regime: string
+}
+
+const INITIAL_RETENCIONES: RetencionRow[] = [
+  { type: 'iibb', enabled: false, base_amount: 0, rate: 3.0, amount: 0, regime: '' },
+  { type: 'ganancias', enabled: false, base_amount: 0, rate: 2.0, amount: 0, regime: '' },
+  { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, regime: '' },
+  { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, regime: '' },
+]
+
 const DISMISSED_PENDING_KEY = 'gestia_dismissed_pending_pagos'
 
 function getDismissedPending(): string[] {
@@ -120,22 +143,59 @@ export const Pagos: React.FC = () => {
   const [formCurrency, setFormCurrency] = useState('ARS')
   const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
-  // Retention preview for pago creation
-  const [retencionPreview, setRetencionPreview] = useState<Array<{ type: string; rate: number; amount: number; regime: string | null }>>([])
+  // Retenciones manuales
+  const [retenciones, setRetenciones] = useState<RetencionRow[]>(INITIAL_RETENCIONES)
 
-  // Fetch retention preview when enterprise and amount change
+  const handleRetencionToggle = (idx: number) => {
+    setRetenciones(prev => prev.map((r, i) => i !== idx ? r : { ...r, enabled: !r.enabled }))
+  }
+
+  const handleRetencionChange = (idx: number, field: string, value: number) => {
+    setRetenciones(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      const updated = { ...r, [field]: value }
+      if (field === 'base_amount' || field === 'rate') {
+        updated.amount = Math.round(updated.base_amount * updated.rate) / 100
+      }
+      return updated
+    }))
+  }
+
+  const handleRetencionRegime = (idx: number, regime: string) => {
+    setRetenciones(prev => prev.map((r, i) => i !== idx ? r : { ...r, regime }))
+  }
+
+  const totalRetenciones = retenciones
+    .filter(r => r.enabled)
+    .reduce((sum, r) => sum + r.amount, 0)
+
+  // Pre-fill retenciones from padron when enterprise changes
   useEffect(() => {
-    if (form.enterprise_id && form.amount && parseFloat(form.amount) > 0) {
-      const timer = setTimeout(() => {
-        api.calculateRetenciones(form.enterprise_id, parseFloat(form.amount))
-          .then((data: any) => setRetencionPreview(data || []))
-          .catch(() => setRetencionPreview([]))
-      }, 500) // debounce
-      return () => clearTimeout(timer)
+    if (form.enterprise_id) {
+      api.calculateRetenciones(form.enterprise_id, parseFloat(form.amount || '0') || 0)
+        .then((data: any) => {
+          if (data && Array.isArray(data) && data.length > 0) {
+            setRetenciones(prev => prev.map(r => {
+              const match = data.find((d: any) => d.type === r.type)
+              if (match) {
+                return {
+                  ...r,
+                  enabled: true,
+                  rate: match.rate || r.rate,
+                  base_amount: match.base_amount || parseFloat(form.amount || '0') || 0,
+                  amount: match.amount || 0,
+                  regime: match.regime || '',
+                }
+              }
+              return r
+            }))
+          }
+        })
+        .catch(() => { /* no padron data, keep manual */ })
     } else {
-      setRetencionPreview([])
+      setRetenciones(INITIAL_RETENCIONES)
     }
-  }, [form.enterprise_id, form.amount])
+  }, [form.enterprise_id])
 
   const loadData = async () => {
     try {
@@ -281,6 +341,16 @@ export const Pagos: React.FC = () => {
           ? purchaseInvoiceItems.reduce((sum, i) => sum + i.amount, 0)
           : parseFloat(form.amount)
 
+        const enabledRetenciones = retenciones
+          .filter(r => r.enabled && r.amount > 0)
+          .map(r => ({
+            type: r.type,
+            base_amount: r.base_amount,
+            rate: r.rate,
+            amount: r.amount,
+            regime: r.regime || null,
+          }))
+
         await api.createPago({
           enterprise_id: form.enterprise_id || null,
           purchase_id: form.purchase_id || null,
@@ -293,6 +363,7 @@ export const Pagos: React.FC = () => {
           purchase_invoice_items: purchaseInvoiceItems.length > 0 ? purchaseInvoiceItems : undefined,
           currency: formCurrency,
           exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
+          retenciones: enabledRetenciones.length > 0 ? enabledRetenciones : undefined,
         })
         toast.success('Pago registrado correctamente')
       }
@@ -300,6 +371,7 @@ export const Pagos: React.FC = () => {
       setSelectedChequeId('')
       setFormCurrency('ARS')
       setFormExchangeRate(null)
+      setRetenciones(INITIAL_RETENCIONES)
       setForm({ enterprise_id: '', purchase_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
       await loadData()
     } catch (e: any) {
@@ -684,26 +756,61 @@ export const Pagos: React.FC = () => {
                 </div>
               )}
 
-              {/* Retention preview */}
-              {retencionPreview.length > 0 && (
-                <div className="col-span-full bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                  <p className="text-xs font-medium text-yellow-800 dark:text-yellow-200 mb-2">Retenciones automaticas (segun padron):</p>
-                  <div className="space-y-1">
-                    {retencionPreview.map((ret, idx) => (
-                      <div key={idx} className="flex justify-between text-xs">
-                        <span className="text-yellow-700 dark:text-yellow-300">{ret.type.toUpperCase()} ({ret.rate}%){ret.regime ? ` - Reg. ${ret.regime}` : ''}</span>
-                        <span className="font-medium text-yellow-800 dark:text-yellow-200">{formatCurrency(ret.amount)}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between text-xs font-bold border-t border-yellow-300 dark:border-yellow-700 pt-1 mt-1">
-                      <span className="text-yellow-800 dark:text-yellow-200">Neto a pagar</span>
-                      <span className="text-yellow-800 dark:text-yellow-200">
-                        {formatCurrency(parseFloat(form.amount) - retencionPreview.reduce((sum, r) => sum + r.amount, 0))}
+              {/* Retenciones */}
+              <div className="col-span-full border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <h4 className="font-medium mb-3 text-gray-800 dark:text-gray-200">Retenciones (opcional)</h4>
+                <div className="space-y-2">
+                  {retenciones.map((ret, idx) => (
+                    <div key={ret.type} className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={ret.enabled}
+                        onChange={() => handleRetencionToggle(idx)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type]}</span>
+                      <input
+                        type="number"
+                        placeholder="Base"
+                        step="0.01"
+                        min="0"
+                        value={ret.base_amount || ''}
+                        disabled={!ret.enabled}
+                        className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onChange={e => handleRetencionChange(idx, 'base_amount', parseFloat(e.target.value) || 0)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="%"
+                        step="0.01"
+                        min="0"
+                        value={ret.rate || ''}
+                        disabled={!ret.enabled}
+                        className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onChange={e => handleRetencionChange(idx, 'rate', parseFloat(e.target.value) || 0)}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Regimen"
+                        value={ret.regime}
+                        disabled={!ret.enabled}
+                        className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onChange={e => handleRetencionRegime(idx, e.target.value)}
+                      />
+                      <span className="w-28 text-right text-sm font-medium text-gray-700 dark:text-gray-300">
+                        $ {ret.amount.toFixed(2)}
                       </span>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              )}
+                {totalRetenciones > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm text-gray-700 dark:text-gray-300">
+                    <span>Neto a pagar: <b>$ {(hasPiItems ? piTotal : parseFloat(form.amount || '0')).toFixed(2)}</b></span>
+                    <span>Retenciones: <b>$ {totalRetenciones.toFixed(2)}</b></span>
+                    <span>Total que cancela: <b>$ {((hasPiItems ? piTotal : parseFloat(form.amount || '0')) + totalRetenciones).toFixed(2)}</b></span>
+                  </div>
+                )}
+              </div>
 
               <div className="flex items-end col-span-full">
                 <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Pago</Button>
