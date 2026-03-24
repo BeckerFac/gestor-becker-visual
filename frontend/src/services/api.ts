@@ -1887,6 +1887,31 @@ export const api = {
     const { data } = await client.post('/accounting/seed')
     return data
   },
+  getAccountingLedger: async (accountCode: string, dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams()
+    params.append('account_code', accountCode)
+    if (dateFrom) params.append('date_from', dateFrom)
+    if (dateTo) params.append('date_to', dateTo)
+    const { data } = await client.get(`/accounting/ledger?${params.toString()}`)
+    return data
+  },
+  getBalanceSheet: async (date?: string) => {
+    const params = new URLSearchParams()
+    if (date) params.append('date', date)
+    const { data } = await client.get(`/accounting/balance-sheet?${params.toString()}`)
+    return data
+  },
+  getIncomeStatement: async (dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams()
+    if (dateFrom) params.append('date_from', dateFrom)
+    if (dateTo) params.append('date_to', dateTo)
+    const { data } = await client.get(`/accounting/income-statement?${params.toString()}`)
+    return data
+  },
+  createOpeningEntry: async (date: string, balances: Array<{ account_code: string; debit: number; credit: number }>) => {
+    const { data } = await client.post('/accounting/opening-entry', { date, balances })
+    return data
+  },
 }
 
 export default api

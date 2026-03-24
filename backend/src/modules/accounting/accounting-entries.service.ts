@@ -56,6 +56,10 @@ interface CobroData {
   payment_method?: string;
   bank_id?: string;
   pending_status?: string | null;
+  currency?: string;
+  exchange_rate?: number | string;
+  original_exchange_rate?: number | string;
+  amount_foreign?: number | string;
 }
 
 interface PagoData {
@@ -68,6 +72,10 @@ interface PagoData {
   pending_status?: string | null;
   retenciones?: Array<{ type: string; amount: number }>;
   skip_accounting?: boolean;
+  currency?: string;
+  exchange_rate?: number | string;
+  original_exchange_rate?: number | string;
+  amount_foreign?: number | string;
 }
 
 interface PurchaseInvoiceData {
@@ -321,7 +329,7 @@ export class AccountingEntriesService {
     const amount = Number(cobro.amount);
     const date = cobro.date || new Date().toISOString().split('T')[0];
 
-    return this.createEntry({
+    const mainEntry = await this.createEntry({
       companyId: cobro.company_id,
       date,
       description: `Cobro registrado`,
@@ -333,6 +341,20 @@ export class AccountingEntriesService {
         { accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: 0, credit: amount, description: 'Deudores por Ventas' },
       ],
     });
+
+    // Exchange rate difference entry
+    await this.createExchangeDiffEntry({
+      companyId: cobro.company_id,
+      date,
+      referenceId: cobro.id,
+      currency: cobro.currency,
+      exchangeRate: cobro.exchange_rate,
+      originalExchangeRate: cobro.original_exchange_rate,
+      amountForeign: cobro.amount_foreign,
+      bankAccountCode: ACCOUNTS.CAJA,
+    });
+
+    return mainEntry;
   }
 
   /**
@@ -347,7 +369,7 @@ export class AccountingEntriesService {
     const amount = Number(pago.amount);
     const date = pago.date || new Date().toISOString().split('T')[0];
 
-    return this.createEntry({
+    const mainEntry = await this.createEntry({
       companyId: pago.company_id,
       date,
       description: `Pago registrado`,
@@ -359,6 +381,138 @@ export class AccountingEntriesService {
         { accountCode: ACCOUNTS.CAJA, debit: 0, credit: amount, description: 'Caja y Bancos' },
       ],
     });
+
+    // Exchange rate difference entry
+    await this.createExchangeDiffEntry({
+      companyId: pago.company_id,
+      date,
+      referenceId: pago.id,
+      currency: pago.currency,
+      exchangeRate: pago.exchange_rate,
+      originalExchangeRate: pago.original_exchange_rate,
+      amountForeign: pago.amount_foreign,
+      bankAccountCode: ACCOUNTS.CAJA,
+    });
+
+    return mainEntry;
+  }
+
+  /**
+   * Create an exchange rate difference entry when cobro/pago involves foreign currency.
+   * Compares current exchange rate vs original invoice exchange rate.
+   * Gain (positive diff): D: Bank / C: Dif Cambio Positiva
+   * Loss (negative diff): D: Dif Cambio Negativa / C: Bank
+   */
+  private async createExchangeDiffEntry(params: {
+    companyId: string;
+    date: string;
+    referenceId: string;
+    currency?: string;
+    exchangeRate?: number | string;
+    originalExchangeRate?: number | string;
+    amountForeign?: number | string;
+    bankAccountCode: string;
+  }): Promise<void> {
+    const { companyId, date, referenceId, currency, exchangeRate, originalExchangeRate, amountForeign, bankAccountCode } = params;
+
+    if (!currency || currency === 'ARS' || !exchangeRate || !originalExchangeRate) return;
+
+    const foreignAmount = parseFloat(amountForeign?.toString() || '0');
+    if (foreignAmount <= 0) return;
+
+    const currentARS = foreignAmount * parseFloat(exchangeRate.toString());
+    const originalARS = foreignAmount * parseFloat(originalExchangeRate.toString());
+    const diff = Math.round((currentARS - originalARS) * 100) / 100;
+
+    if (Math.abs(diff) <= 0.01) return;
+
+    const diffAccountCode = diff > 0 ? ACCOUNTS.DIF_CAMBIO_POS : ACCOUNTS.DIF_CAMBIO_NEG;
+    const diffAccountId = await this.getAccountId(companyId, diffAccountCode);
+    const bankAccountId = await this.getAccountId(companyId, bankAccountCode);
+
+    if (!diffAccountId || !bankAccountId) return;
+
+    const diffEntryResult = await db.execute(sql`
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+      VALUES (${companyId}, ${date}::date, ${'Diferencia de cambio ' + currency}, 'exchange_diff', ${referenceId}, true)
+      RETURNING id
+    `);
+    const diffEntryId = ((diffEntryResult as any).rows || [])[0]?.id;
+    if (!diffEntryId) return;
+
+    if (diff > 0) {
+      // Gain: D: Bank (more ARS) / C: Dif Cambio Positiva
+      await db.execute(sql`
+        INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description) VALUES
+        (${diffEntryId}, ${bankAccountId}, ${Math.abs(diff)}, 0, 'Diferencia TC favorable'),
+        (${diffEntryId}, ${diffAccountId}, 0, ${Math.abs(diff)}, 'Ganancia por tipo de cambio')
+      `);
+    } else {
+      // Loss: D: Dif Cambio Negativa / C: Bank (less ARS)
+      await db.execute(sql`
+        INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description) VALUES
+        (${diffEntryId}, ${diffAccountId}, ${Math.abs(diff)}, 0, 'Perdida por tipo de cambio'),
+        (${diffEntryId}, ${bankAccountId}, 0, ${Math.abs(diff)}, 'Diferencia TC desfavorable')
+      `);
+    }
+  }
+
+  /**
+   * Create an opening entry with initial balances.
+   * Only one opening entry per company is allowed.
+   */
+  async createOpeningEntry(companyId: string, date: string, balances: Array<{
+    account_code: string;
+    debit: number;
+    credit: number;
+  }>): Promise<{ id: string }> {
+    if (!await isAccountingEnabled(companyId)) {
+      throw new ApiError(400, 'Contabilidad no esta activada');
+    }
+
+    // Validate balance
+    const totalDebit = balances.reduce((s, b) => s + (b.debit || 0), 0);
+    const totalCredit = balances.reduce((s, b) => s + (b.credit || 0), 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      throw new ApiError(400, `El asiento no balancea: Debe $${totalDebit.toFixed(2)} != Haber $${totalCredit.toFixed(2)}`);
+    }
+
+    // Check no existing opening entry
+    const existing = await db.execute(sql`
+      SELECT id FROM journal_entries
+      WHERE company_id = ${companyId} AND reference_type = 'opening'
+      LIMIT 1
+    `);
+    if (((existing as any).rows || []).length > 0) {
+      throw new ApiError(400, 'Ya existe un asiento de apertura. Eliminelo primero si desea recrearlo.');
+    }
+
+    // Create entry
+    const entryResult = await db.execute(sql`
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+      VALUES (${companyId}, ${date}::date, 'Asiento de apertura', 'opening', ${companyId}, false)
+      RETURNING id
+    `);
+    const entryId = ((entryResult as any).rows || [])[0]?.id;
+    if (!entryId) {
+      throw new ApiError(500, 'Error creando asiento de apertura');
+    }
+
+    // Insert lines
+    for (const balance of balances) {
+      if (balance.debit === 0 && balance.credit === 0) continue;
+      const accountId = await this.getAccountId(companyId, balance.account_code);
+      if (!accountId) {
+        throw new ApiError(400, `Cuenta ${balance.account_code} no encontrada`);
+      }
+
+      await db.execute(sql`
+        INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description)
+        VALUES (${entryId}, ${accountId}, ${balance.debit || 0}, ${balance.credit || 0}, 'Saldo inicial')
+      `);
+    }
+
+    return { id: entryId };
   }
 
   /**
@@ -822,6 +976,238 @@ export class AccountingEntriesService {
         VALUES (${reverseId}, ${line.account_id}, ${parseFloat(line.credit) || 0}, ${parseFloat(line.debit) || 0}, ${'Anulacion: ' + (line.description || '')})
       `);
     }
+  }
+
+  /**
+   * Libro Mayor: detailed ledger for a specific account with running balance.
+   */
+  async getLedger(companyId: string, accountCode: string, filters?: { date_from?: string; date_to?: string }): Promise<any[]> {
+    const dateConditions: any[] = [];
+    if (filters?.date_from) {
+      dateConditions.push(sql`je.date >= ${filters.date_from}::date`);
+    }
+    if (filters?.date_to) {
+      dateConditions.push(sql`je.date <= ${filters.date_to}::date`);
+    }
+
+    const dateFilter = dateConditions.length > 0
+      ? sql`AND ${sql.join(dateConditions, sql` AND `)}`
+      : sql``;
+
+    const result = await db.execute(sql`
+      SELECT
+        je.date,
+        je.description as entry_description,
+        je.reference_type,
+        je.reference_id,
+        je.entry_number,
+        jel.debit::numeric as debit,
+        jel.credit::numeric as credit,
+        jel.description as line_description,
+        je.created_at,
+        coa.type as account_type
+      FROM journal_entry_lines jel
+      JOIN journal_entries je ON jel.entry_id = je.id
+      JOIN chart_of_accounts coa ON jel.account_id = coa.id
+      WHERE je.company_id = ${companyId}
+        AND coa.code = ${accountCode}
+        ${dateFilter}
+      ORDER BY je.date ASC, je.entry_number ASC, je.created_at ASC
+    `);
+
+    const rows = (result as any).rows || result || [];
+
+    // Calculate running balance (saldo progresivo)
+    // activo/egreso: saldo += debit - credit
+    // pasivo/ingreso/patrimonio: saldo += credit - debit
+    let runningBalance = 0;
+    const accountType = rows[0]?.account_type;
+    const isDebitNature = accountType === 'activo' || accountType === 'egreso';
+
+    return rows.map((row: any) => {
+      const debit = parseFloat(row.debit) || 0;
+      const credit = parseFloat(row.credit) || 0;
+
+      if (isDebitNature) {
+        runningBalance += debit - credit;
+      } else {
+        runningBalance += credit - debit;
+      }
+
+      return {
+        date: row.date,
+        entry_description: row.entry_description,
+        reference_type: row.reference_type,
+        reference_id: row.reference_id,
+        entry_number: row.entry_number,
+        debit,
+        credit,
+        line_description: row.line_description,
+        created_at: row.created_at,
+        account_type: row.account_type,
+        running_balance: Math.round(runningBalance * 100) / 100,
+      };
+    });
+  }
+
+  /**
+   * Balance General: assets, liabilities, equity grouped by type.
+   * activo = pasivo + patrimonio + resultado
+   */
+  async getBalanceSheet(companyId: string, date?: string): Promise<any> {
+    const dateFilter = date
+      ? sql`AND je.date <= ${date}::date`
+      : sql``;
+
+    const result = await db.execute(sql`
+      SELECT
+        coa.code,
+        coa.name,
+        coa.type,
+        coa.level,
+        coa.is_header,
+        COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
+        COALESCE(SUM(jel.credit), 0)::numeric as total_credit
+      FROM chart_of_accounts coa
+      LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
+      LEFT JOIN journal_entries je ON je.id = jel.entry_id
+        AND je.company_id = ${companyId}
+        ${dateFilter}
+      WHERE coa.company_id = ${companyId}
+        AND coa.type IN ('activo', 'pasivo', 'patrimonio', 'ingreso', 'egreso')
+      GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
+      HAVING COALESCE(SUM(jel.debit), 0) != 0 OR COALESCE(SUM(jel.credit), 0) != 0
+      ORDER BY coa.code
+    `);
+
+    const rows = (result as any).rows || result || [];
+
+    const activo: any[] = [];
+    const pasivo: any[] = [];
+    const patrimonio: any[] = [];
+    let totalActivo = 0;
+    let totalPasivo = 0;
+    let totalPatrimonio = 0;
+    let totalIngresos = 0;
+    let totalEgresos = 0;
+
+    for (const row of rows) {
+      const debit = parseFloat(row.total_debit) || 0;
+      const credit = parseFloat(row.total_credit) || 0;
+      let balance: number;
+
+      if (row.type === 'activo' || row.type === 'egreso') {
+        balance = debit - credit;
+      } else {
+        balance = credit - debit;
+      }
+
+      balance = Math.round(balance * 100) / 100;
+
+      const account = { code: row.code, name: row.name, type: row.type, level: row.level, balance };
+
+      switch (row.type) {
+        case 'activo':
+          activo.push(account);
+          totalActivo += balance;
+          break;
+        case 'pasivo':
+          pasivo.push(account);
+          totalPasivo += balance;
+          break;
+        case 'patrimonio':
+          patrimonio.push(account);
+          totalPatrimonio += balance;
+          break;
+        case 'ingreso':
+          totalIngresos += balance;
+          break;
+        case 'egreso':
+          totalEgresos += balance;
+          break;
+      }
+    }
+
+    const resultado = Math.round((totalIngresos - totalEgresos) * 100) / 100;
+    totalActivo = Math.round(totalActivo * 100) / 100;
+    totalPasivo = Math.round(totalPasivo * 100) / 100;
+    totalPatrimonio = Math.round(totalPatrimonio * 100) / 100;
+
+    return {
+      activo: { total: totalActivo, cuentas: activo },
+      pasivo: { total: totalPasivo, cuentas: pasivo },
+      patrimonio: { total: totalPatrimonio, cuentas: patrimonio },
+      resultado,
+      balanced: Math.abs(totalActivo - (totalPasivo + totalPatrimonio + resultado)) < 0.01,
+    };
+  }
+
+  /**
+   * Estado de Resultados: income vs expenses for a period.
+   */
+  async getIncomeStatement(companyId: string, filters?: { date_from?: string; date_to?: string }): Promise<any> {
+    const dateConditions: any[] = [];
+    if (filters?.date_from) {
+      dateConditions.push(sql`je.date >= ${filters.date_from}::date`);
+    }
+    if (filters?.date_to) {
+      dateConditions.push(sql`je.date <= ${filters.date_to}::date`);
+    }
+
+    const dateFilter = dateConditions.length > 0
+      ? sql`AND ${sql.join(dateConditions, sql` AND `)}`
+      : sql``;
+
+    const result = await db.execute(sql`
+      SELECT
+        coa.code,
+        coa.name,
+        coa.type,
+        coa.level,
+        COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
+        COALESCE(SUM(jel.credit), 0)::numeric as total_credit
+      FROM chart_of_accounts coa
+      LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
+      LEFT JOIN journal_entries je ON je.id = jel.entry_id
+        AND je.company_id = ${companyId}
+        ${dateFilter}
+      WHERE coa.company_id = ${companyId}
+        AND coa.type IN ('ingreso', 'egreso')
+      GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level
+      HAVING COALESCE(SUM(jel.debit), 0) != 0 OR COALESCE(SUM(jel.credit), 0) != 0
+      ORDER BY coa.code
+    `);
+
+    const rows = (result as any).rows || result || [];
+
+    const ingresos: any[] = [];
+    const egresos: any[] = [];
+    let totalIngresos = 0;
+    let totalEgresos = 0;
+
+    for (const row of rows) {
+      const debit = parseFloat(row.total_debit) || 0;
+      const credit = parseFloat(row.total_credit) || 0;
+
+      if (row.type === 'ingreso') {
+        const balance = Math.round((credit - debit) * 100) / 100;
+        ingresos.push({ code: row.code, name: row.name, level: row.level, balance });
+        totalIngresos += balance;
+      } else {
+        const balance = Math.round((debit - credit) * 100) / 100;
+        egresos.push({ code: row.code, name: row.name, level: row.level, balance });
+        totalEgresos += balance;
+      }
+    }
+
+    totalIngresos = Math.round(totalIngresos * 100) / 100;
+    totalEgresos = Math.round(totalEgresos * 100) / 100;
+
+    return {
+      ingresos: { total: totalIngresos, detalle: ingresos },
+      egresos: { total: totalEgresos, detalle: egresos },
+      resultado: Math.round((totalIngresos - totalEgresos) * 100) / 100,
+    };
   }
 }
 

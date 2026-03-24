@@ -70,9 +70,50 @@ export class AccountingController {
     res.json(data);
   }
 
+  async getLedger(req: AuthRequest, res: Response) {
+    const accountCode = req.query.account_code as string;
+    if (!accountCode) {
+      return res.status(400).json({ error: 'account_code es requerido' });
+    }
+    const data = await accountingEntriesService.getLedger(req.user!.company_id, accountCode, {
+      date_from: req.query.date_from as string,
+      date_to: req.query.date_to as string,
+    });
+    res.json(data);
+  }
+
+  async getBalanceSheet(req: AuthRequest, res: Response) {
+    const data = await accountingEntriesService.getBalanceSheet(
+      req.user!.company_id,
+      req.query.date as string,
+    );
+    res.json(data);
+  }
+
+  async getIncomeStatement(req: AuthRequest, res: Response) {
+    const data = await accountingEntriesService.getIncomeStatement(req.user!.company_id, {
+      date_from: req.query.date_from as string,
+      date_to: req.query.date_to as string,
+    });
+    res.json(data);
+  }
+
   async seedChart(req: AuthRequest, res: Response) {
     const data = await seedChartOfAccounts(req.user!.company_id);
     res.json(data);
+  }
+
+  async createOpeningEntry(req: AuthRequest, res: Response) {
+    const { date, balances } = req.body;
+    if (!date || !balances || !Array.isArray(balances) || balances.length === 0) {
+      return res.status(400).json({ error: 'date y balances son requeridos' });
+    }
+    const result = await accountingEntriesService.createOpeningEntry(
+      req.user!.company_id,
+      date,
+      balances,
+    );
+    res.status(201).json({ success: true, ...result });
   }
 
   async enableAccounting(req: AuthRequest, res: Response) {
