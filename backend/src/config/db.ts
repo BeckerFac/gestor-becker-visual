@@ -417,6 +417,7 @@ async function runAutoMigrations() {
     await pool.query(`UPDATE companies SET enabled_modules = array_append(enabled_modules, 'crm') WHERE enabled_modules IS NOT NULL AND NOT ('crm' = ANY(enabled_modules))`);
     // Ensure existing companies have 'secretaria' in enabled_modules
     await pool.query(`UPDATE companies SET enabled_modules = array_append(enabled_modules, 'secretaria') WHERE enabled_modules IS NOT NULL AND NOT ('secretaria' = ANY(enabled_modules))`);
+    await pool.query(`UPDATE companies SET enabled_modules = array_append(enabled_modules, 'audit_log') WHERE enabled_modules IS NOT NULL AND NOT ('audit_log' = ANY(enabled_modules))`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS condicion_iva VARCHAR(100)`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)`);
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS punto_venta INTEGER`);
