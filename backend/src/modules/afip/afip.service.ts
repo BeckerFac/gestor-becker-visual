@@ -11,7 +11,7 @@ import forge from 'node-forge'
 export interface AuthorizeInvoiceInput {
   invoiceId: string
   invoiceNumber: number
-  invoiceType: 'A' | 'B' | 'C' | 'FCE_A' | 'FCE_B' | 'FCE_C' | 'NC_FCE_A' | 'NC_FCE_B' | 'NC_FCE_C' | 'ND_FCE_A' | 'ND_FCE_B' | 'ND_FCE_C' | 'E' | 'ND_E' | 'NC_E'
+  invoiceType: 'A' | 'B' | 'C' | 'NC_A' | 'NC_B' | 'NC_C' | 'ND_A' | 'ND_B' | 'ND_C' | 'FCE_A' | 'FCE_B' | 'FCE_C' | 'NC_FCE_A' | 'NC_FCE_B' | 'NC_FCE_C' | 'ND_FCE_A' | 'ND_FCE_B' | 'ND_FCE_C' | 'E' | 'ND_E' | 'NC_E'
   customerCuit: string
   subtotal: number
   vat: number
@@ -66,6 +66,9 @@ interface WsaaToken {
 // AFIP Invoice type codes (CbteTipo)
 const INVOICE_TYPE_MAP: Record<string, number> = {
   'A': 1, 'B': 6, 'C': 11,
+  // Notas de Credito / Debito normales
+  'NC_A': 3, 'NC_B': 8, 'NC_C': 13,
+  'ND_A': 2, 'ND_B': 7, 'ND_C': 12,
   // FCE MiPyME (Factura de Credito Electronica)
   'FCE_A': 201, 'FCE_B': 206, 'FCE_C': 211,
   // NC FCE
@@ -78,6 +81,9 @@ const INVOICE_TYPE_MAP: Record<string, number> = {
 
 // FCE CbteTipo codes for quick lookup
 const FCE_CBTE_TIPOS = [201, 202, 203, 206, 207, 208, 211, 212, 213]
+
+// NC/ND normal CbteTipo codes (require CbtesAsoc)
+const NC_ND_CBTE_TIPOS = [2, 3, 7, 8, 12, 13]
 
 // Export CbteTipo codes
 const EXPORT_CBTE_TIPOS = [19, 20, 21]
@@ -500,9 +506,9 @@ export class AfipService {
       docNro = parseInt(cleanCuit)
     }
 
-    // Factura C (Monotributo): NO se informa IVA, todo va como ImpNeto
+    // Factura C / NC_C / ND_C (Monotributo): NO se informa IVA, todo va como ImpNeto
     // Factura A/B: se informa IVA desglosado
-    const isFacturaC = cbteTipo === 11
+    const isFacturaC = [11, 12, 13].includes(cbteTipo)
     const ivaItems = isFacturaC ? [] : this.buildIvaArray(input)
 
     // Calculate ImpTotConc (no gravado) and ImpOpEx (exento) from items with IVA 0%
@@ -534,11 +540,11 @@ export class AfipService {
       // Default logic based on invoice type and document type
       if (docTipo === 99) {
         condicionIvaReceptorId = 5 // Consumidor Final
-      } else if (cbteTipo === 1) {
-        // Factura A -> RI by default
+      } else if ([1, 2, 3].includes(cbteTipo)) {
+        // Tipo A (Factura/NC/ND) -> RI by default
         condicionIvaReceptorId = 1
-      } else if (cbteTipo === 11) {
-        // Factura C -> Consumidor Final by default
+      } else if ([11, 12, 13].includes(cbteTipo)) {
+        // Tipo C (Factura/NC/ND) -> Consumidor Final by default
         condicionIvaReceptorId = 5
       } else {
         // Factura B -> Consumidor Final by default
@@ -565,7 +571,12 @@ export class AfipService {
       fceFields.Opcionales = opcionales
     }
 
-    // CbtesAsoc for NC/ND FCE
+    // CbtesAsoc for NC/ND (both FCE and normal)
+    // NC/ND normal types (2,3,7,8,12,13) require CbtesAsoc just like FCE NC/ND
+    if (NC_ND_CBTE_TIPOS.includes(cbteTipo) && (!input.cbtesAsoc || input.cbtesAsoc.length === 0)) {
+      throw new Error('NC/ND requiere comprobante asociado (CbtesAsoc)')
+    }
+
     let cbtesAsocFields: any = {}
     if (input.cbtesAsoc && input.cbtesAsoc.length > 0) {
       cbtesAsocFields.CbtesAsoc = input.cbtesAsoc.map(asoc => ({

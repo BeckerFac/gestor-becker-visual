@@ -55,6 +55,9 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fch_serv_hasta DATE`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fch_vto_pago DATE`);
 
+      // NC/ND: related invoice (the original invoice being corrected)
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS related_invoice_id UUID REFERENCES invoices(id)`);
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Invoices migrations error:', error);
@@ -149,10 +152,11 @@ export class InvoicesService {
         }).returning();
       }
 
-      // Set order_id, enterprise_id, fiscal_type and business_unit_id via raw SQL (columns added by migration)
+      // Set order_id, enterprise_id, fiscal_type, business_unit_id, and related_invoice_id via raw SQL (columns added by migration)
       await db.execute(sql`
         UPDATE invoices SET order_id = ${data.order_id || null}, enterprise_id = ${enterpriseId},
-          fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null}
+          fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null},
+          related_invoice_id = ${data.related_invoice_id || null}
         WHERE id = ${invoiceId}
       `);
 
@@ -783,10 +787,12 @@ export class InvoicesService {
         await db.execute(sql`UPDATE invoices SET subtotal = ${neto.toFixed(2)}, vat_amount = ${iva.toFixed(2)}, total_amount = ${calculatedTotal.toFixed(2)} WHERE id = ${invoice.id}`);
       }
 
-      // (d) Factura A requires valid CUIT
-      if ((invoice.invoice_type || 'B') === 'A') {
+      // (d) Comprobante tipo A requires valid CUIT
+      const rawInvType = invoice.invoice_type || 'B';
+      const baseLetterForCuit = rawInvType.replace(/^(NC_|ND_)/, '');
+      if (baseLetterForCuit === 'A') {
         if (!customerCuit || !AfipService.isValidCuit(customerCuit)) {
-          throw new ApiError(400, 'Factura A requiere un CUIT valido del cliente (verificacion modulo 11)');
+          throw new ApiError(400, 'Comprobante tipo A requiere un CUIT valido del cliente (verificacion modulo 11)');
         }
       }
 
@@ -794,15 +800,19 @@ export class InvoicesService {
       // Get company tax condition
       const companyResult = await db.execute(sql`SELECT tax_condition FROM companies WHERE id = ${companyId}`);
       const companyTaxCondition = ((companyResult as any).rows || [])[0]?.tax_condition || '';
-      const invoiceType = (invoice.invoice_type || 'B') as 'A' | 'B' | 'C';
+      const invoiceType = (invoice.invoice_type || 'B') as string;
+
+      // Extract base letter from invoice type (e.g. NC_A -> A, ND_B -> B)
+      const baseLetter = invoiceType.replace(/^(NC_|ND_)/, '');
+      const isNcNd = invoiceType.startsWith('NC_') || invoiceType.startsWith('ND_');
 
       if (companyTaxCondition.toLowerCase().includes('monotribut')) {
-        if (invoiceType !== 'C') {
-          throw new ApiError(400, `Monotributistas solo pueden emitir Factura C (seleccionada: ${invoiceType})`);
+        if (baseLetter !== 'C') {
+          throw new ApiError(400, `Monotributistas solo pueden emitir comprobantes tipo C (seleccionado: ${invoiceType})`);
         }
       } else if (companyTaxCondition.toLowerCase().includes('responsable inscripto')) {
-        if (invoiceType === 'C') {
-          throw new ApiError(400, 'Responsables Inscriptos no pueden emitir Factura C');
+        if (baseLetter === 'C') {
+          throw new ApiError(400, 'Responsables Inscriptos no pueden emitir comprobantes tipo C');
         }
         // Get customer tax condition to validate A vs B
         if (invoice.customer_id) {
@@ -810,11 +820,11 @@ export class InvoicesService {
           const custTaxCond = ((custResult as any).rows || [])[0]?.tax_condition || '';
           const isRI = custTaxCond.toLowerCase().includes('responsable inscripto');
           const isMono = custTaxCond.toLowerCase().includes('monotribut');
-          if (invoiceType === 'A' && !isRI && !isMono) {
-            throw new ApiError(400, `Factura A solo para Responsables Inscriptos o Monotributistas. El cliente es: ${custTaxCond || 'sin condicion definida'}`);
+          if (baseLetter === 'A' && !isRI && !isMono) {
+            throw new ApiError(400, `Comprobante tipo A solo para Responsables Inscriptos o Monotributistas. El cliente es: ${custTaxCond || 'sin condicion definida'}`);
           }
-          if (invoiceType === 'B' && (isRI || isMono)) {
-            throw new ApiError(400, `Factura B no corresponde para clientes RI/Monotributistas. Use Factura A.`);
+          if (baseLetter === 'B' && (isRI || isMono)) {
+            throw new ApiError(400, `Comprobante tipo B no corresponde para clientes RI/Monotributistas. Use tipo A.`);
           }
         }
       }
@@ -827,10 +837,10 @@ export class InvoicesService {
         const isConsumidorFinal = !cleanCustCuit || cleanCustCuit.length !== 11;
         if (isConsumidorFinal) {
           condicionIvaReceptorId = 5; // Consumidor Final
-        } else if (invoiceType === 'A') {
-          condicionIvaReceptorId = 1; // RI (default for Factura A)
-        } else if (invoiceType === 'C') {
-          condicionIvaReceptorId = 5; // CF (default for Factura C)
+        } else if (baseLetter === 'A') {
+          condicionIvaReceptorId = 1; // RI (default for tipo A)
+        } else if (baseLetter === 'C') {
+          condicionIvaReceptorId = 5; // CF (default for tipo C)
         } else {
           condicionIvaReceptorId = 5; // CF (default for Factura B)
         }
@@ -856,10 +866,63 @@ export class InvoicesService {
         }
       }
 
+      // NC/ND: build CbtesAsoc from related invoice
+      let cbtesAsoc: AuthorizeInvoiceInput['cbtesAsoc'] = undefined;
+      if (isNcNd) {
+        // Load related_invoice_id
+        const relResult = await db.execute(sql`SELECT related_invoice_id FROM invoices WHERE id = ${invoiceId}`);
+        const relInvoiceId = ((relResult as any).rows || [])[0]?.related_invoice_id;
+        if (!relInvoiceId) {
+          throw new ApiError(400, 'NC/ND requiere una factura original asociada (related_invoice_id)');
+        }
+        // Get the original invoice data for CbtesAsoc
+        const origResult = await db.execute(sql`
+          SELECT i.invoice_type, i.invoice_number, i.invoice_date, i.cae,
+            (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta,
+            c.cuit as customer_cuit
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE i.id = ${relInvoiceId}
+        `);
+        const origInv = ((origResult as any).rows || [])[0];
+        if (!origInv) {
+          throw new ApiError(404, 'Factura original asociada no encontrada');
+        }
+        if (!origInv.cae) {
+          throw new ApiError(400, 'La factura original debe estar autorizada en AFIP para emitir NC/ND');
+        }
+
+        // Validate NC amount doesn't exceed original invoice total
+        if (invoiceType.startsWith('NC_')) {
+          const origTotal = await db.execute(sql`SELECT CAST(total_amount AS decimal) as total FROM invoices WHERE id = ${relInvoiceId}`);
+          const origTotalAmt = parseFloat(((origTotal as any).rows || [])[0]?.total || '0');
+          const ncAmt = parseFloat(invoice.total_amount?.toString() || '0');
+          if (ncAmt > origTotalAmt) {
+            throw new ApiError(400, `El monto de la NC ($${ncAmt}) no puede exceder el total de la factura original ($${origTotalAmt})`);
+          }
+        }
+
+        // Map original invoice_type to AFIP CbteTipo code
+        const ORIG_TYPE_MAP: Record<string, number> = { 'A': 1, 'B': 6, 'C': 11 };
+        const origCbteTipo = ORIG_TYPE_MAP[origInv.invoice_type] || 6;
+        const origPtoVta = origInv.punto_venta || puntoVenta;
+        const origDate = new Date(origInv.invoice_date);
+        const origFch = `${origDate.getFullYear()}${String(origDate.getMonth() + 1).padStart(2, '0')}${String(origDate.getDate()).padStart(2, '0')}`;
+        const origCuit = (origInv.customer_cuit || customerCuit || '').replace(/-/g, '');
+
+        cbtesAsoc = [{
+          tipo: origCbteTipo,
+          ptoVta: origPtoVta,
+          nro: origInv.invoice_number,
+          cuit: origCuit,
+          cbteFch: origFch,
+        }];
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
-        invoiceType: invoiceType,
+        invoiceType: invoiceType as AuthorizeInvoiceInput['invoiceType'],
         concepto,
         customerCuit,
         condicionIvaReceptorId,
@@ -877,6 +940,7 @@ export class InvoicesService {
           vatRate: parseFloat((i.vat_rate || '21').toString()),
           description: i.product_name || '',
         })),
+        cbtesAsoc,
       };
 
       // Authorize with AFIP (real or mock)
@@ -884,6 +948,22 @@ export class InvoicesService {
 
       // Save authorization result
       await afipService.saveAuthorizedInvoice(invoiceId, authorization);
+
+      // NC impact on saldos: create cobro_invoice_application to reduce original invoice balance
+      if (isNcNd && invoiceType.startsWith('NC_')) {
+        const relResult2 = await db.execute(sql`SELECT related_invoice_id FROM invoices WHERE id = ${invoiceId}`);
+        const relInvoiceId2 = ((relResult2 as any).rows || [])[0]?.related_invoice_id;
+        if (relInvoiceId2) {
+          const ncTotal = Math.abs(parseFloat(invoice.total_amount?.toString() || '0'));
+          if (ncTotal > 0) {
+            const appId = require('uuid').v4();
+            await db.execute(sql`
+              INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_at)
+              VALUES (${appId}, ${invoiceId}, ${relInvoiceId2}, ${ncTotal.toString()}, NOW())
+            `);
+          }
+        }
+      }
 
       // Return updated invoice
       const updated = await this.getInvoice(companyId, invoiceId);

@@ -60,13 +60,23 @@ interface OrderWithoutInvoice { id: string; order_number: number; title: string;
 // ---- Constants ----
 
 const INVOICE_TYPES = ['A', 'B', 'C'] as const
-type InvoiceType = typeof INVOICE_TYPES[number]
+const NC_ND_TYPES = ['NC_A', 'NC_B', 'NC_C', 'ND_A', 'ND_B', 'ND_C'] as const
+const ALL_INVOICE_TYPES = [...INVOICE_TYPES, ...NC_ND_TYPES] as const
+type InvoiceType = typeof ALL_INVOICE_TYPES[number]
 
-const INVOICE_TYPE_DESCRIPTIONS: Record<InvoiceType, string> = {
+const INVOICE_TYPE_DESCRIPTIONS: Record<string, string> = {
   A: 'Resp. Inscripto a Resp. Inscripto',
   B: 'Resp. Inscripto a Consumidor Final',
   C: 'Monotributo',
+  NC_A: 'Nota de Credito A',
+  NC_B: 'Nota de Credito B',
+  NC_C: 'Nota de Credito C',
+  ND_A: 'Nota de Debito A',
+  ND_B: 'Nota de Debito B',
+  ND_C: 'Nota de Debito C',
 }
+
+const isNcNdType = (t: string) => t.startsWith('NC_') || t.startsWith('ND_')
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: 'Borrador', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
@@ -85,6 +95,12 @@ const TYPE_BADGE_COLORS: Record<string, string> = {
   A: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
   B: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
   C: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  NC_A: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  NC_B: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  NC_C: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  ND_A: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  ND_B: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  ND_C: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
 }
 
 const VAT_RATES = [0, 10.5, 21, 27]
@@ -275,6 +291,8 @@ export const Invoices: React.FC = () => {
   const [formCustomerId, setFormCustomerId] = useState('')
   const [formInvoiceType, setFormInvoiceType] = useState<InvoiceType>('C')
   const [formOrderId, setFormOrderId] = useState('')
+  const [formRelatedInvoiceId, setFormRelatedInvoiceId] = useState('')
+  const [authorizedInvoices, setAuthorizedInvoices] = useState<Invoice[]>([])
 
   // Form - Step 2: Items
   const [formItems, setFormItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
@@ -386,6 +404,8 @@ export const Invoices: React.FC = () => {
   const closeForm = () => {
     setShowForm(false)
     setFormStep(1)
+    setFormRelatedInvoiceId('')
+    setAuthorizedInvoices([])
   }
 
   // Items management
@@ -455,6 +475,50 @@ export const Invoices: React.FC = () => {
     loadOrderItems()
   }, [formOrderId])
 
+  // Load authorized invoices for NC/ND related invoice selector
+  useEffect(() => {
+    if (!isNcNdType(formInvoiceType) || !formEnterpriseId) {
+      setAuthorizedInvoices([])
+      setFormRelatedInvoiceId('')
+      return
+    }
+    const loadAuthorized = async () => {
+      try {
+        const resp = await api.getInvoices({ enterprise_id: formEnterpriseId, status: 'authorized', fiscal_type: 'fiscal', limit: 200 })
+        // Filter to only base invoice types (A, B, C) - not other NC/ND
+        const filtered = (resp.items || []).filter((inv: Invoice) => ['A', 'B', 'C'].includes(inv.invoice_type))
+        setAuthorizedInvoices(filtered)
+      } catch (e) {
+        console.warn('Could not load authorized invoices:', e)
+      }
+    }
+    loadAuthorized()
+  }, [formInvoiceType, formEnterpriseId])
+
+  // When selecting a related invoice for NC, auto-fill items
+  useEffect(() => {
+    if (!formRelatedInvoiceId || !isNcNdType(formInvoiceType)) return
+    const loadRelatedItems = async () => {
+      try {
+        const inv = await api.getInvoice(formRelatedInvoiceId)
+        if (inv?.items?.length > 0) {
+          const mapped = inv.items.map((item: any) => ({
+            product_id: item.product_id || undefined,
+            product_name: item.product_name || '',
+            quantity: parseFloat(item.quantity || '1'),
+            unit_price: parseFloat(item.unit_price || '0'),
+            vat_rate: parseFloat(item.vat_rate || '21'),
+            subtotal: calcItemSubtotal(parseFloat(item.unit_price || '0'), parseFloat(item.quantity || '1')),
+          }))
+          setFormItems(mapped)
+        }
+      } catch (e) {
+        console.warn('Could not load related invoice items:', e)
+      }
+    }
+    loadRelatedItems()
+  }, [formRelatedInvoiceId])
+
   // Totals
 
   const formTotals = useMemo(() => {
@@ -464,7 +528,7 @@ export const Invoices: React.FC = () => {
     return { neto, iva, total }
   }, [formItems])
 
-  const isFormStep1Valid = !!formEnterpriseId
+  const isFormStep1Valid = !!formEnterpriseId && (vistaMode !== 'venta_fiscal' || !isNcNdType(formInvoiceType) || !!formRelatedInvoiceId)
   const isFormStep2Valid = formItems.length > 0 && formItems.every(i => i.product_name.trim() && i.unit_price >= 0 && i.quantity > 0)
 
   const handleCreateInvoice = async () => {
@@ -472,22 +536,25 @@ export const Invoices: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
+      const baseLetter = formInvoiceType.replace(/^(NC_|ND_)/, '')
       await api.createInvoice({
         customer_id: formCustomerId || null,
         enterprise_id: formEnterpriseId || null,
         invoice_type: vistaMode === 'venta_fiscal' ? formInvoiceType : undefined,
         order_id: formOrderId || null,
+        related_invoice_id: isNcNdType(formInvoiceType) ? (formRelatedInvoiceId || null) : null,
         fiscal_type: vistaMode === 'venta_fiscal' ? 'fiscal' : 'no_fiscal',
         items: formItems.map(item => ({
           product_id: item.product_id || null,
           product_name: item.product_name,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          vat_rate: vistaMode !== 'venta_fiscal' ? 0 : (formInvoiceType === 'C' ? 0 : item.vat_rate),
+          vat_rate: vistaMode !== 'venta_fiscal' ? 0 : (baseLetter === 'C' ? 0 : item.vat_rate),
           order_item_id: item.order_item_id || null,
         })),
       })
-      toast.success(vistaMode === 'venta_fiscal' ? 'Factura creada correctamente' : 'Comprobante creado correctamente')
+      const msgType = isNcNdType(formInvoiceType) ? 'Comprobante' : 'Factura'
+      toast.success(vistaMode === 'venta_fiscal' ? `${msgType} creado/a correctamente` : 'Comprobante creado correctamente')
       closeForm()
       await loadInvoices()
     } catch (e: any) {
@@ -836,6 +903,9 @@ export const Invoices: React.FC = () => {
                   {INVOICE_TYPES.map(t => (
                     <option key={t} value={t}>Factura {t}</option>
                   ))}
+                  {NC_ND_TYPES.map(t => (
+                    <option key={t} value={t}>{t.replace('_', ' ')}</option>
+                  ))}
                 </select>
               </div>
             )}
@@ -942,7 +1012,7 @@ export const Invoices: React.FC = () => {
                         <button
                           key={t}
                           type="button"
-                          onClick={() => setFormInvoiceType(t)}
+                          onClick={() => { setFormInvoiceType(t); setFormRelatedInvoiceId('') }}
                           className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                             formInvoiceType === t
                               ? 'border-blue-500 bg-blue-50'
@@ -954,6 +1024,54 @@ export const Invoices: React.FC = () => {
                         </button>
                       ))}
                     </div>
+                    {/* NC/ND options */}
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mt-4 mb-2">
+                      Notas de Credito / Debito
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {NC_ND_TYPES.map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => { setFormInvoiceType(t); setFormRelatedInvoiceId('') }}
+                          className={`text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                            formInvoiceType === t
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="text-sm font-bold mr-1">{t.replace('_', ' ')}</span>
+                          <span className="text-xs text-gray-500 block">{INVOICE_TYPE_DESCRIPTIONS[t]}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Related invoice selector for NC/ND */}
+                    {isNcNdType(formInvoiceType) && (
+                      <div className="mt-4">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">
+                          Factura Original <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                          value={formRelatedInvoiceId}
+                          onChange={e => setFormRelatedInvoiceId(e.target.value)}
+                        >
+                          <option value="">Seleccionar factura original...</option>
+                          {authorizedInvoices.map(inv => (
+                            <option key={inv.id} value={inv.id}>
+                              Factura {inv.invoice_type} {formatInvoiceNumber(inv)} - {formatCurrency(parseFloat(inv.total_amount))} {inv.customer?.name ? `(${inv.customer.name})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {authorizedInvoices.length === 0 && formEnterpriseId && (
+                          <p className="text-xs text-gray-500 mt-1">No hay facturas autorizadas para esta empresa.</p>
+                        )}
+                        {!formEnterpriseId && (
+                          <p className="text-xs text-amber-600 mt-1">Seleccione una empresa primero.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
