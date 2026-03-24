@@ -310,6 +310,32 @@ export class InvoicesService {
       await db.execute(sql`COMMIT`);
       // -- END TRANSACTION --
 
+      // Accounting entry for non-fiscal invoices (fiscal ones go through authorizeInvoice)
+      if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
+        try {
+          const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+          // Re-read totals after commit
+          const totalsResult = await db.execute(sql`SELECT subtotal, vat_amount, total_amount, invoice_date FROM invoices WHERE id = ${invoiceId}`);
+          const totalsRow = ((totalsResult as any).rows || [])[0];
+          const itemsResult = await db.execute(sql`SELECT quantity, unit_price, vat_rate FROM invoice_items WHERE invoice_id = ${invoiceId}`);
+          const itemsForAccounting = ((itemsResult as any).rows || []).map((i: any) => ({
+            quantity: Number(i.quantity || 1),
+            unit_price: parseFloat(i.unit_price?.toString() || '0'),
+            vat_rate: parseFloat((i.vat_rate || '21').toString()),
+          }));
+          await accountingEntriesService.createEntryForInvoice({
+            id: invoiceId,
+            company_id: companyId,
+            date: totalsRow?.invoice_date ? new Date(totalsRow.invoice_date).toISOString() : new Date().toISOString(),
+            total: parseFloat(totalsRow?.total_amount?.toString() || '0'),
+            subtotal: parseFloat(totalsRow?.subtotal?.toString() || '0'),
+            vat_amount: parseFloat(totalsRow?.vat_amount?.toString() || '0'),
+            invoice_type: fiscalType,
+            items: itemsForAccounting,
+          });
+        } catch (accErr) { console.warn('Accounting entry skipped (non-fiscal invoice):', (accErr as Error).message); }
+      }
+
       return { id: invoiceId, order_id: data.order_id || null, enterprise_id: enterpriseId, fiscal_type: fiscalType };
     } catch (error) {
       await db.execute(sql`ROLLBACK`).catch(() => {});
@@ -613,6 +639,10 @@ export class InvoicesService {
       throw new ApiError(500, 'Error al actualizar borrador');
     }
   }
+
+  // TODO [ACC-3.10]: When invoice cancellation is implemented (status -> 'cancelled'),
+  // add: accountingEntriesService.createReverseEntry(companyId, 'invoice', invoiceId)
+  // to generate the contra-entry that reverses the original accounting entry.
 
   async deleteDraftInvoice(companyId: string, invoiceId: string) {
     await this.ensureMigrations();
@@ -1098,6 +1128,26 @@ export class InvoicesService {
           },
         });
       } catch (e) { console.error('CRM sync error (invoice_authorized):', e); }
+
+      // Accounting entry
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        const itemsForAccounting = (itemsList || []).map((i: any) => ({
+          quantity: Number(i.quantity || 1),
+          unit_price: parseFloat(i.unit_price?.toString() || '0'),
+          vat_rate: parseFloat((i.vat_rate || '21').toString()),
+        }));
+        await accountingEntriesService.createEntryForInvoice({
+          id: invoiceId,
+          company_id: companyId,
+          date: invoice.invoice_date ? new Date(invoice.invoice_date).toISOString() : new Date().toISOString(),
+          total: parseFloat(updated.total_amount?.toString() || '0'),
+          subtotal: parseFloat(updated.subtotal?.toString() || updated.net_amount?.toString() || '0'),
+          vat_amount: parseFloat(updated.vat_amount?.toString() || '0'),
+          invoice_type: invoiceType,
+          items: itemsForAccounting,
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (invoice):', (accErr as Error).message); }
 
       return updated;
     } catch (error) {

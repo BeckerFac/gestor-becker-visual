@@ -576,6 +576,9 @@ async function runAutoMigrations() {
     // Admin: trial extension
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS trial_extended_days INTEGER DEFAULT 0`);
 
+    // Accounting module flag
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS accounting_enabled BOOLEAN DEFAULT false`);
+
     // ===== PORTAL: Enterprise access code & invoice enterprise_id =====
     await pool.query(`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS access_code VARCHAR(20) UNIQUE`);
     await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`);

@@ -176,6 +176,28 @@ export class PagosService {
         }
       }
 
+      // Accounting entry (after retentions are created)
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        const retResult = await db.execute(sql`
+          SELECT type, CAST(amount AS decimal) as amount FROM retenciones WHERE pago_id = ${pagoId}
+        `);
+        const retenciones = ((retResult as any).rows || []).map((r: any) => ({
+          type: r.type,
+          amount: parseFloat(r.amount || '0'),
+        }));
+        await accountingEntriesService.createEntryForPago({
+          id: pagoId,
+          company_id: companyId,
+          date: data.payment_date || new Date().toISOString(),
+          amount: data.amount,
+          payment_method: data.payment_method,
+          bank_id: data.bank_id,
+          pending_status: pendingStatus,
+          retenciones,
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (pago):', (accErr as Error).message); }
+
       // SELECT result outside transaction (read-only)
       const result = await db.execute(sql`
         SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
@@ -205,6 +227,13 @@ export class PagosService {
     const rows = (check as any).rows || check || [];
     if (rows.length === 0) throw new ApiError(404, 'Pago not found');
 
+    // Read pago data before delete (for accounting reversal)
+    let pagoForAccounting: any = null;
+    try {
+      const pagoResult = await db.execute(sql`SELECT id, company_id FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
+      pagoForAccounting = ((pagoResult as any).rows || [])[0];
+    } catch {}
+
     try {
       // Get linked purchase invoices before deleting (for recalculation)
       const linkedPIs = await db.execute(sql`
@@ -228,6 +257,14 @@ export class PagosService {
       } catch (txError) {
         await db.execute(sql`ROLLBACK`);
         throw txError;
+      }
+
+      // After delete, create reverse accounting entry
+      if (pagoForAccounting) {
+        try {
+          const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+          await accountingEntriesService.createReverseEntry(pagoForAccounting.company_id, 'pago', pagoId);
+        } catch (accErr) { console.warn('Accounting reversal skipped (pago):', (accErr as Error).message); }
       }
 
       return { success: true };

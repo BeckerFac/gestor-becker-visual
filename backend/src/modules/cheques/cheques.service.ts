@@ -87,12 +87,13 @@ export class ChequesService {
       }
 
       const result = await db.execute(sql`
-        SELECT id, status FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
+        SELECT id, status, amount, bank_id FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Cheque not found');
 
-      const currentStatus = rows[0].status;
+      const cheque = rows[0];
+      const currentStatus = cheque.status;
       const allowedTransitions = VALID_TRANSITIONS[currentStatus] || [];
       if (!allowedTransitions.includes(newStatus)) {
         throw new ApiError(400, `No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
@@ -121,6 +122,20 @@ export class ChequesService {
           WHERE id = ${chequeId}
         `);
       }
+
+      // Accounting entry for cheque transition
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        await accountingEntriesService.createEntryForChequeTransition({
+          id: chequeId,
+          company_id: companyId,
+          amount: cheque.amount,
+          old_status: currentStatus,
+          new_status: newStatus,
+          bank_id: cheque.bank_id || undefined,
+          date: new Date().toISOString(),
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (cheque):', (accErr as Error).message); }
 
       return { id: chequeId, status: newStatus };
     } catch (error) {
@@ -312,6 +327,18 @@ export class ChequesService {
     if (((entCheck as any).rows || []).length === 0) {
       throw new ApiError(400, 'Proveedor no valido');
     }
+
+    // Accounting entry for endorsement (cheque leaves our portfolio)
+    try {
+      const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+      await accountingEntriesService.createEntryForChequeTransition({
+        id: chequeId,
+        company_id: companyId,
+        amount: data.amount || chequeAmount,
+        old_status: 'a_cobrar',
+        new_status: 'endosado',
+      });
+    } catch (accErr) { console.warn('Accounting entry skipped (endorse):', (accErr as Error).message); }
 
     // CREATE pago
     const pagoId = uuid();

@@ -571,7 +571,22 @@ export class CuentaCorrienteService {
         VALUES (${companyId}, ${enterpriseId}, ${storedAmount}, ${data.reason.trim()}, ${data.adjustment_type}, ${data.created_by || null})
         RETURNING *
       `);
-      return ((result as any).rows || [])[0];
+      const adjustment = ((result as any).rows || [])[0];
+
+      // Accounting entry for CC adjustment
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        await accountingEntriesService.createEntryForAdjustment({
+          id: adjustment.id,
+          company_id: companyId,
+          enterprise_id: enterpriseId,
+          adjustment_type: data.adjustment_type,
+          amount: Math.abs(data.amount),
+          reason: data.reason,
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (adjustment):', (accErr as Error).message); }
+
+      return adjustment;
     } catch (error) {
       if (error instanceof ApiError) throw error;
       console.error('Create adjustment error:', error);

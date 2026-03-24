@@ -153,6 +153,25 @@ export class PurchaseInvoicesService {
       }
     }
 
+    // Accounting entry
+    try {
+      const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+      const piItems = (data.items || []).map((i: any) => ({
+        quantity: Number(i.quantity || 1),
+        unit_price: parseFloat(i.unit_price?.toString() || '0'),
+        vat_rate: parseFloat(((i as any).vat_rate || '21').toString()),
+      }));
+      await accountingEntriesService.createEntryForPurchaseInvoice({
+        id: piId,
+        company_id: companyId,
+        date: data.invoice_date,
+        total: data.total_amount,
+        subtotal: data.subtotal,
+        vat_amount: data.vat_amount,
+        items: piItems,
+      });
+    } catch (accErr) { console.warn('Accounting entry skipped (purchase_invoice):', (accErr as Error).message); }
+
     return this.getPurchaseInvoice(companyId, piId);
   }
 
@@ -258,6 +277,10 @@ export class PurchaseInvoicesService {
 
     return this.getPurchaseInvoice(companyId, piId);
   }
+
+  // TODO [ACC-3.11]: When purchase invoice cancellation is implemented (status -> 'cancelled'),
+  // add: accountingEntriesService.createReverseEntry(companyId, 'purchase_invoice', piId)
+  // to generate the contra-entry that reverses the original accounting entry.
 
   async deletePurchaseInvoice(companyId: string, piId: string) {
     // Check for linked pagos

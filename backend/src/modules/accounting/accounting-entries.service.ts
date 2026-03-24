@@ -2,6 +2,22 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
+// --- accounting_enabled cache & helper ---
+export const accountingEnabledCache = new Map<string, { enabled: boolean; expires: number }>();
+
+export async function isAccountingEnabled(companyId: string): Promise<boolean> {
+  const cached = accountingEnabledCache.get(companyId);
+  if (cached && Date.now() < cached.expires) return cached.enabled;
+
+  const result = await db.execute(sql`
+    SELECT accounting_enabled FROM companies WHERE id = ${companyId}
+  `);
+  const rows = (result as any).rows || [];
+  const enabled = rows[0]?.accounting_enabled === true;
+  accountingEnabledCache.set(companyId, { enabled, expires: Date.now() + 60000 }); // 60s cache
+  return enabled;
+}
+
 interface JournalLine {
   accountCode: string;
   debit: number;
@@ -20,13 +36,16 @@ interface CreateEntryParams {
   lines: JournalLine[];
 }
 
-interface InvoiceData {
+interface InvoiceEntryData {
   id: string;
   company_id: string;
   date?: string;
   total: number | string;
   subtotal?: number | string;
   vat_amount?: number | string;
+  invoice_type?: string;
+  fiscal_type?: string;
+  items?: Array<{ quantity: number; unit_price: number; vat_rate: number }>;
 }
 
 interface CobroData {
@@ -34,6 +53,9 @@ interface CobroData {
   company_id: string;
   date?: string;
   amount: number | string;
+  payment_method?: string;
+  bank_id?: string;
+  pending_status?: string | null;
 }
 
 interface PagoData {
@@ -41,6 +63,11 @@ interface PagoData {
   company_id: string;
   date?: string;
   amount: number | string;
+  payment_method?: string;
+  bank_id?: string;
+  pending_status?: string | null;
+  retenciones?: Array<{ type: string; amount: number }>;
+  skip_accounting?: boolean;
 }
 
 interface PurchaseInvoiceData {
@@ -50,18 +77,89 @@ interface PurchaseInvoiceData {
   total: number | string;
   subtotal?: number | string;
   vat_amount?: number | string;
+  items?: Array<{ quantity: number; unit_price: number; vat_rate: number }>;
 }
 
 // Account codes from the Argentine chart seed
-const ACCOUNTS = {
-  CAJA_BANCOS: '1.1',
-  DEUDORES_VENTAS: '1.2',
-  IVA_CREDITO: '1.5',
-  PROVEEDORES: '2.1',
-  IVA_DEBITO: '2.3',
+export const ACCOUNTS = {
+  // Activo - Disponibilidades
+  CAJA: '1.1.1',
+  BANCOS: '1.1.2', // header - subcuentas dinamicas
+  // Activo - Creditos
+  DEUDORES_VENTAS: '1.2.1',
+  DEUDORES_MOROSOS: '1.2.2',
+  // Activo - Otros Creditos
+  IVA_CF_21: '1.3.1',
+  IVA_CF_105: '1.3.2',
+  IVA_CF_27: '1.3.3',
+  IVA_CF_5: '1.3.4',
+  IVA_CF_25: '1.3.5',
+  RET_IIBB_SUFRIDA: '1.3.6',
+  RET_GANANCIAS_SUFRIDA: '1.3.7',
+  RET_IVA_SUFRIDA: '1.3.8',
+  PERCEPCION_IIBB_SUFRIDA: '1.3.9',
+  ANTICIPOS_PROVEEDORES: '1.3.10',
+  // Activo - Bienes de Cambio
+  MERCADERIAS: '1.4.1',
+  // Activo - Valores
+  CHEQUES_CARTERA: '1.5.1',
+  CHEQUES_DEPOSITADOS: '1.5.2',
+  // Pasivo
+  PROVEEDORES: '2.1.1',
+  IVA_DF_21: '2.2.1',
+  IVA_DF_105: '2.2.2',
+  IVA_DF_27: '2.2.3',
+  IVA_DF_5: '2.2.4',
+  IVA_DF_25: '2.2.5',
+  RET_IIBB_DEPOSITAR: '2.2.6',
+  RET_GANANCIAS_DEPOSITAR: '2.2.7',
+  RET_IVA_DEPOSITAR: '2.2.8',
+  RET_SUSS_DEPOSITAR: '2.2.9',
+  PERCEPCION_IIBB_DEPOSITAR: '2.2.10',
+  ANTICIPOS_CLIENTES: '2.3.1',
+  // Patrimonio
+  CAPITAL: '3.1',
+  RESULTADOS_ACUMULADOS: '3.2',
+  // Ingresos
   VENTAS: '4.1',
-  COSTO_VENTAS: '5.1',
+  OTROS_INGRESOS: '4.2',
+  DIF_CAMBIO_POS: '4.3',
+  AJUSTES_CC_ING: '4.4',
+  // Egresos
+  CMV: '5.1',
+  GASTOS_ADMIN: '5.2',
+  GASTOS_BANCARIOS: '5.3.1',
+  CHEQUES_RECHAZADOS: '5.4',
+  DIF_CAMBIO_NEG: '5.5',
+  AJUSTES_CC_EGR: '5.6',
+  AJUSTE_INVENTARIO: '5.7',
 } as const;
+
+// VAT rate -> IVA Debito Fiscal account code mapping
+const IVA_DF_MAP: Record<number, string> = {
+  21: ACCOUNTS.IVA_DF_21,
+  10.5: ACCOUNTS.IVA_DF_105,
+  27: ACCOUNTS.IVA_DF_27,
+  5: ACCOUNTS.IVA_DF_5,
+  2.5: ACCOUNTS.IVA_DF_25,
+};
+
+// VAT rate -> IVA Credito Fiscal account code mapping
+const IVA_CF_MAP: Record<number, string> = {
+  21: ACCOUNTS.IVA_CF_21,
+  10.5: ACCOUNTS.IVA_CF_105,
+  27: ACCOUNTS.IVA_CF_27,
+  5: ACCOUNTS.IVA_CF_5,
+  2.5: ACCOUNTS.IVA_CF_25,
+};
+
+// Retencion type -> account code mapping for pagos
+const RET_MAP: Record<string, string> = {
+  'iibb': ACCOUNTS.RET_IIBB_DEPOSITAR,
+  'ganancias': ACCOUNTS.RET_GANANCIAS_DEPOSITAR,
+  'iva': ACCOUNTS.RET_IVA_DEPOSITAR,
+  'suss': ACCOUNTS.RET_SUSS_DEPOSITAR,
+};
 
 export class AccountingEntriesService {
   /**
@@ -78,6 +176,16 @@ export class AccountingEntriesService {
       throw new ApiError(400, `Cuenta contable ${code} no encontrada. Ejecute el seed del plan de cuentas primero.`);
     }
     return rows[0].id;
+  }
+
+  /**
+   * Resolve account code to account ID, returning null if not found.
+   */
+  async getAccountId(companyId: string, code: string): Promise<string | null> {
+    const result = await db.execute(sql`
+      SELECT id FROM chart_of_accounts WHERE company_id = ${companyId} AND code = ${code}
+    `);
+    return ((result as any).rows || [])[0]?.id || null;
   }
 
   /**
@@ -125,30 +233,78 @@ export class AccountingEntriesService {
   }
 
   /**
-   * Auto journal entry when a sales invoice is authorized.
-   * D: Deudores por Ventas (total)
-   * C: Ventas (neto gravado)
-   * C: IVA Debito Fiscal (IVA)
+   * Auto journal entry when a sales invoice / NC / ND is authorized.
+   *
+   * FACTURA:  D: Deudores  C: Ventas + IVA DF (by rate)
+   * NC:       D: Ventas + IVA DF  C: Deudores  (reverse)
+   * ND:       D: Deudores  C: Otros Ingresos + IVA DF
+   *
+   * Supports multi-rate VAT breakdown when items with vat_rate are provided.
    */
-  async createEntryForInvoice(invoice: InvoiceData): Promise<any> {
+  async createEntryForInvoice(invoice: InvoiceEntryData): Promise<any> {
+    if (!await isAccountingEnabled(invoice.company_id)) return null;
+
     const total = Number(invoice.total);
-    const vat = Number(invoice.vat_amount || 0);
-    const neto = invoice.subtotal ? Number(invoice.subtotal) : total - vat;
     const date = invoice.date || new Date().toISOString().split('T')[0];
+    const invoiceType = invoice.invoice_type || '';
+    const isNC = invoiceType.startsWith('NC_');
+    const isND = invoiceType.startsWith('ND_');
 
-    const lines: JournalLine[] = [
-      { accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: total, credit: 0, description: 'Deudores por Ventas' },
-      { accountCode: ACCOUNTS.VENTAS, debit: 0, credit: neto, description: 'Ventas' },
-    ];
+    // Build VAT breakdown grouped by rate
+    const vatByRate = new Map<number, number>();
+    let neto: number;
 
-    if (vat > 0) {
-      lines.push({ accountCode: ACCOUNTS.IVA_DEBITO, debit: 0, credit: vat, description: 'IVA Debito Fiscal' });
+    if (invoice.items && invoice.items.length > 0) {
+      neto = 0;
+      for (const item of invoice.items) {
+        const lineNeto = item.quantity * item.unit_price;
+        neto += lineNeto;
+        const rate = item.vat_rate;
+        const lineVat = lineNeto * (rate / 100);
+        vatByRate.set(rate, (vatByRate.get(rate) || 0) + lineVat);
+      }
+    } else {
+      // Fallback: single global vat_amount at default 21%
+      const vat = Number(invoice.vat_amount || 0);
+      neto = invoice.subtotal ? Number(invoice.subtotal) : total - vat;
+      if (vat > 0) {
+        vatByRate.set(21, vat);
+      }
     }
+
+    // Round to 2 decimals
+    const r = (n: number) => Math.round(n * 100) / 100;
+
+    // Income account: Ventas for FC/NC, Otros Ingresos for ND
+    const incomeAccount = isND ? ACCOUNTS.OTROS_INGRESOS : ACCOUNTS.VENTAS;
+    const incomeLabel = isND ? 'Otros Ingresos' : 'Ventas';
+
+    const lines: JournalLine[] = [];
+
+    if (isNC) {
+      // NC reverses the invoice entry
+      lines.push({ accountCode: incomeAccount, debit: r(neto), credit: 0, description: incomeLabel });
+      for (const [rate, vatAmount] of vatByRate) {
+        const ivaAccount = IVA_DF_MAP[rate] || ACCOUNTS.IVA_DF_21;
+        lines.push({ accountCode: ivaAccount, debit: r(vatAmount), credit: 0, description: `IVA DF ${rate}%` });
+      }
+      lines.push({ accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: 0, credit: r(total), description: 'Deudores por Ventas' });
+    } else {
+      // FC or ND: same direction
+      lines.push({ accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: r(total), credit: 0, description: 'Deudores por Ventas' });
+      lines.push({ accountCode: incomeAccount, debit: 0, credit: r(neto), description: incomeLabel });
+      for (const [rate, vatAmount] of vatByRate) {
+        const ivaAccount = IVA_DF_MAP[rate] || ACCOUNTS.IVA_DF_21;
+        lines.push({ accountCode: ivaAccount, debit: 0, credit: r(vatAmount), description: `IVA DF ${rate}%` });
+      }
+    }
+
+    const descriptionPrefix = isNC ? 'Nota de Credito' : isND ? 'Nota de Debito' : 'Factura de venta';
 
     return this.createEntry({
       companyId: invoice.company_id,
       date,
-      description: `Factura de venta`,
+      description: descriptionPrefix,
       referenceType: 'invoice',
       referenceId: invoice.id,
       isAuto: true,
@@ -173,7 +329,7 @@ export class AccountingEntriesService {
       referenceId: cobro.id,
       isAuto: true,
       lines: [
-        { accountCode: ACCOUNTS.CAJA_BANCOS, debit: amount, credit: 0, description: 'Caja y Bancos' },
+        { accountCode: ACCOUNTS.CAJA, debit: amount, credit: 0, description: 'Caja y Bancos' },
         { accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: 0, credit: amount, description: 'Deudores por Ventas' },
       ],
     });
@@ -185,6 +341,9 @@ export class AccountingEntriesService {
    * C: Caja/Bancos (monto)
    */
   async createEntryForPago(pago: PagoData): Promise<any> {
+    // Skip accounting for cheque endorsements (handled by createEntryForChequeTransition)
+    if (pago.payment_method === 'cheque_endosado' || pago.skip_accounting) return null;
+
     const amount = Number(pago.amount);
     const date = pago.date || new Date().toISOString().split('T')[0];
 
@@ -197,7 +356,7 @@ export class AccountingEntriesService {
       isAuto: true,
       lines: [
         { accountCode: ACCOUNTS.PROVEEDORES, debit: amount, credit: 0, description: 'Proveedores' },
-        { accountCode: ACCOUNTS.CAJA_BANCOS, debit: 0, credit: amount, description: 'Caja y Bancos' },
+        { accountCode: ACCOUNTS.CAJA, debit: 0, credit: amount, description: 'Caja y Bancos' },
       ],
     });
   }
@@ -215,11 +374,11 @@ export class AccountingEntriesService {
     const date = pi.date || new Date().toISOString().split('T')[0];
 
     const lines: JournalLine[] = [
-      { accountCode: ACCOUNTS.COSTO_VENTAS, debit: neto, credit: 0, description: 'Compras / Gastos' },
+      { accountCode: ACCOUNTS.CMV, debit: neto, credit: 0, description: 'Compras / Gastos' },
     ];
 
     if (vat > 0) {
-      lines.push({ accountCode: ACCOUNTS.IVA_CREDITO, debit: vat, credit: 0, description: 'IVA Credito Fiscal' });
+      lines.push({ accountCode: ACCOUNTS.IVA_CF_21, debit: vat, credit: 0, description: 'IVA Credito Fiscal' });
     }
 
     lines.push({ accountCode: ACCOUNTS.PROVEEDORES, debit: 0, credit: total, description: 'Proveedores' });
@@ -424,6 +583,245 @@ export class AccountingEntriesService {
     `);
 
     return (result as any).rows || result || [];
+  }
+
+  /**
+   * Ensure a dynamic bank sub-account exists under 1.1.2 for a given bank.
+   * Returns the account code (e.g. '1.1.2.ab12cd34').
+   */
+  async ensureBankAccount(companyId: string, bankId: string): Promise<string> {
+    const bankCode = `1.1.2.${bankId.substring(0, 8)}`;
+
+    // Check if exists
+    const existing = await db.execute(sql`
+      SELECT code FROM chart_of_accounts
+      WHERE company_id = ${companyId} AND code = ${bankCode}
+    `);
+    const rows = (existing as any).rows || [];
+    if (rows.length > 0) return bankCode;
+
+    // Get bank name
+    const bankResult = await db.execute(sql`
+      SELECT name FROM banks WHERE id = ${bankId} AND company_id = ${companyId}
+    `);
+    const bankRows = (bankResult as any).rows || [];
+    const bankName = bankRows[0]?.name || 'Banco';
+
+    // Find parent account 1.1.2
+    const parentResult = await db.execute(sql`
+      SELECT id FROM chart_of_accounts
+      WHERE company_id = ${companyId} AND code = '1.1.2'
+    `);
+    const parentRows = (parentResult as any).rows || [];
+    const parentId = parentRows[0]?.id;
+
+    // Create dynamic bank account
+    await db.execute(sql`
+      INSERT INTO chart_of_accounts (company_id, code, name, type, parent_id, level, is_header)
+      VALUES (${companyId}, ${bankCode}, ${'Banco ' + bankName}, 'activo', ${parentId}, 4, false)
+      ON CONFLICT (company_id, code) DO NOTHING
+    `);
+
+    return bankCode;
+  }
+
+  /**
+   * Auto journal entry for cheque status transitions.
+   * Handles: depositado, cobrado, endosado, rechazado, a_cobrar (reverse).
+   */
+  async createEntryForChequeTransition(data: {
+    id: string;
+    company_id: string;
+    amount: number | string;
+    old_status: string;
+    new_status: string;
+    bank_id?: string;
+    date?: string;
+  }): Promise<void> {
+    if (!await isAccountingEnabled(data.company_id)) return;
+    const amount = parseFloat(data.amount?.toString() || '0');
+    if (amount <= 0) return;
+
+    let lines: Array<{accountCode: string; debit: number; credit: number; desc: string}> = [];
+
+    switch (data.new_status) {
+      case 'depositado':
+        // D: Cheques Depositados / C: Cheques en Cartera
+        lines = [
+          { accountCode: ACCOUNTS.CHEQUES_DEPOSITADOS, debit: amount, credit: 0, desc: 'Cheque depositado' },
+          { accountCode: ACCOUNTS.CHEQUES_CARTERA, debit: 0, credit: amount, desc: 'Cheque depositado' },
+        ];
+        break;
+
+      case 'cobrado': {
+        // D: Banco / C: Cheques Depositados (si venia de depositado) o Cheques Cartera (si directo)
+        const bankCode = data.bank_id
+          ? await this.ensureBankAccount(data.company_id, data.bank_id)
+          : ACCOUNTS.CAJA;
+        const creditCode = data.old_status === 'depositado'
+          ? ACCOUNTS.CHEQUES_DEPOSITADOS
+          : ACCOUNTS.CHEQUES_CARTERA;
+        lines = [
+          { accountCode: bankCode, debit: amount, credit: 0, desc: 'Cheque cobrado' },
+          { accountCode: creditCode, debit: 0, credit: amount, desc: 'Cheque cobrado' },
+        ];
+        break;
+      }
+
+      case 'endosado':
+        // D: Proveedores / C: Cheques en Cartera
+        lines = [
+          { accountCode: ACCOUNTS.PROVEEDORES, debit: amount, credit: 0, desc: 'Cheque endosado' },
+          { accountCode: ACCOUNTS.CHEQUES_CARTERA, debit: 0, credit: amount, desc: 'Cheque endosado' },
+        ];
+        break;
+
+      case 'rechazado': {
+        // D: Deudores (recrea deuda) / C: Cheques (segun estado previo)
+        const sourceCode = data.old_status === 'depositado'
+          ? ACCOUNTS.CHEQUES_DEPOSITADOS
+          : ACCOUNTS.CHEQUES_CARTERA;
+        lines = [
+          { accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: amount, credit: 0, desc: 'Cheque rechazado - recrea deuda' },
+          { accountCode: sourceCode, debit: 0, credit: amount, desc: 'Cheque rechazado' },
+        ];
+        break;
+      }
+
+      case 'a_cobrar':
+        // Vuelta a cartera = contra-asiento del estado anterior
+        await this.createReverseEntry(data.company_id, 'cheque_' + data.old_status, data.id);
+        return;
+
+      default:
+        return;
+    }
+
+    if (lines.length === 0) return;
+
+    // Resolver account IDs
+    const resolvedLines = [];
+    for (const line of lines) {
+      const accountId = await this.getAccountId(data.company_id, line.accountCode);
+      if (!accountId) return;
+      resolvedLines.push({ ...line, accountId });
+    }
+
+    // Crear asiento
+    const entryResult = await db.execute(sql`
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque ' + data.new_status}, ${'cheque_' + data.new_status}, ${data.id}, true)
+      RETURNING id
+    `);
+    const entryId = ((entryResult as any).rows || [])[0]?.id;
+    if (!entryId) return;
+
+    for (const line of resolvedLines) {
+      await db.execute(sql`
+        INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description)
+        VALUES (${entryId}, ${line.accountId}, ${line.debit}, ${line.credit}, ${line.desc})
+      `);
+    }
+  }
+
+  /**
+   * Auto journal entry for current account adjustments (debit/credit).
+   * Debit adjustment: D: Deudores por Ventas / C: Ajustes CC Egresos
+   * Credit adjustment: D: Ajustes CC Ingresos / C: Deudores por Ventas
+   */
+  async createEntryForAdjustment(data: {
+    id: string;
+    company_id: string;
+    enterprise_id: string;
+    adjustment_type: string; // 'debit' o 'credit'
+    amount: number | string;
+    reason?: string;
+    date?: string;
+  }): Promise<void> {
+    if (!await isAccountingEnabled(data.company_id)) return;
+    const amount = parseFloat(data.amount?.toString() || '0');
+    if (amount <= 0) return;
+
+    let debitCode: string;
+    let creditCode: string;
+    let desc: string;
+
+    if (data.adjustment_type === 'debit') {
+      // Aumenta deuda del cliente
+      debitCode = ACCOUNTS.DEUDORES_VENTAS;  // 1.2.1
+      creditCode = ACCOUNTS.AJUSTES_CC_EGR;  // 5.6
+      desc = 'Ajuste CC debito: ' + (data.reason || '');
+    } else {
+      // Disminuye deuda del cliente
+      debitCode = ACCOUNTS.AJUSTES_CC_ING;   // 4.4
+      creditCode = ACCOUNTS.DEUDORES_VENTAS; // 1.2.1
+      desc = 'Ajuste CC credito: ' + (data.reason || '');
+    }
+
+    const debitId = await this.getAccountId(data.company_id, debitCode);
+    const creditId = await this.getAccountId(data.company_id, creditCode);
+    if (!debitId || !creditId) return;
+
+    const entryResult = await db.execute(sql`
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${desc}, 'adjustment', ${data.id}, true)
+      RETURNING id
+    `);
+    const entryId = ((entryResult as any).rows || [])[0]?.id;
+    if (!entryId) return;
+
+    await db.execute(sql`
+      INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description)
+      VALUES
+        (${entryId}, ${debitId}, ${amount}, 0, ${desc}),
+        (${entryId}, ${creditId}, 0, ${amount}, ${desc})
+    `);
+  }
+
+  /**
+   * Create a reverse (contra) entry for a given reference, swapping debit/credit.
+   */
+  async createReverseEntry(companyId: string, referenceType: string, referenceId: string): Promise<void> {
+    if (!await isAccountingEnabled(companyId)) return;
+
+    // Find original entry
+    const entryResult = await db.execute(sql`
+      SELECT je.id, je.description, je.date
+      FROM journal_entries je
+      WHERE je.company_id = ${companyId}
+        AND je.reference_type = ${referenceType}
+        AND je.reference_id = ${referenceId}
+      ORDER BY je.created_at DESC LIMIT 1
+    `);
+    const entries = (entryResult as any).rows || [];
+    if (entries.length === 0) return; // No entry to reverse
+
+    const original = entries[0];
+
+    // Get original lines
+    const linesResult = await db.execute(sql`
+      SELECT account_id, debit, credit, description
+      FROM journal_entry_lines WHERE entry_id = ${original.id}
+    `);
+    const lines = (linesResult as any).rows || [];
+    if (lines.length === 0) return;
+
+    // Create reverse entry
+    const reverseResult = await db.execute(sql`
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+      VALUES (${companyId}, NOW(), ${'Anulacion: ' + (original.description || '')}, ${referenceType + '_reversal'}, ${referenceId}, true)
+      RETURNING id
+    `);
+    const reverseId = ((reverseResult as any).rows || [])[0]?.id;
+    if (!reverseId) return;
+
+    // Insert reversed lines (swap debit/credit)
+    for (const line of lines) {
+      await db.execute(sql`
+        INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description)
+        VALUES (${reverseId}, ${line.account_id}, ${parseFloat(line.credit) || 0}, ${parseFloat(line.debit) || 0}, ${'Anulacion: ' + (line.description || '')})
+      `);
+    }
   }
 }
 

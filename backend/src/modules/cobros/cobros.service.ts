@@ -211,6 +211,20 @@ export class CobrosService {
         throw txError;
       }
 
+      // Accounting entry
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        await accountingEntriesService.createEntryForCobro({
+          id: cobroId,
+          company_id: companyId,
+          date: data.payment_date || new Date().toISOString(),
+          amount: data.amount,
+          payment_method: data.payment_method,
+          bank_id: data.bank_id,
+          pending_status: pendingStatus,
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (cobro):', (accErr as Error).message); }
+
       const result = await db.execute(sql`
         SELECT c.*, e.name as enterprise_name, o.order_number, b.bank_name
         FROM cobros c
@@ -285,10 +299,16 @@ export class CobrosService {
   async deleteCobro(companyId: string, cobroId: string) {
     await this.ensureTables();
     try {
-      const check = await db.execute(sql`SELECT id, order_id FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+      const check = await db.execute(sql`SELECT id, order_id, company_id FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
       const orderId = rows[0].order_id;
+
+      // Read cobro data for accounting reversal BEFORE delete
+      let cobroForAccounting: any = null;
+      try {
+        cobroForAccounting = rows[0];
+      } catch {}
 
       // Transaction: get linked invoices + delete cobro atomically
       let invoiceIds: string[] = [];
@@ -314,6 +334,14 @@ export class CobrosService {
       for (const invId of invoiceIds) {
         await this.recalculateInvoicePaymentStatus(invId);
         await this.recalculateOrderStatusFromInvoice(invId);
+      }
+
+      // Accounting reversal entry
+      if (cobroForAccounting) {
+        try {
+          const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+          await accountingEntriesService.createReverseEntry(cobroForAccounting.company_id, 'cobro', cobroId);
+        } catch (accErr) { console.warn('Accounting reversal skipped (cobro):', (accErr as Error).message); }
       }
 
       return { success: true };

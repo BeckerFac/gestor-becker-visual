@@ -11,3 +11,4 @@ accountingRouter.post('/entries', authorize('accounting', 'create'), (req, res) 
 accountingRouter.delete('/entries/:id', authorize('accounting', 'delete'), (req, res) => accountingController.deleteEntry(req as any, res));
 accountingRouter.get('/balance', authorize('accounting', 'view'), (req, res) => accountingController.getBalance(req as any, res));
 accountingRouter.post('/seed', authorize('accounting', 'create'), (req, res) => accountingController.seedChart(req as any, res));
+accountingRouter.post('/enable', authorize('accounting', 'create'), (req, res) => accountingController.enableAccounting(req as any, res));

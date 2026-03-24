@@ -1,7 +1,9 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
-import { accountingEntriesService } from './accounting-entries.service';
-import { seedChartOfAccounts } from './chart-seed';
+import { db } from '../../config/db';
+import { sql } from 'drizzle-orm';
+import { accountingEntriesService, accountingEnabledCache } from './accounting-entries.service';
+import { seedChartOfAccounts, migrateChartOfAccounts } from './chart-seed';
 
 export class AccountingController {
   async getChartOfAccounts(req: AuthRequest, res: Response) {
@@ -71,6 +73,31 @@ export class AccountingController {
   async seedChart(req: AuthRequest, res: Response) {
     const data = await seedChartOfAccounts(req.user!.company_id);
     res.json(data);
+  }
+
+  async enableAccounting(req: AuthRequest, res: Response) {
+    const companyId = req.user!.company_id;
+
+    // 1. Set flag
+    await db.execute(sql`UPDATE companies SET accounting_enabled = true WHERE id = ${companyId}`);
+
+    // 2. Seed chart if needed
+    await seedChartOfAccounts(companyId);
+
+    // 3. Migrate if old chart exists
+    await migrateChartOfAccounts(companyId);
+
+    // 4. Add to enabled_modules
+    await db.execute(sql`
+      UPDATE companies SET enabled_modules = array_append(
+        COALESCE(enabled_modules, ARRAY[]::text[]), 'accounting'
+      ) WHERE id = ${companyId} AND NOT ('accounting' = ANY(COALESCE(enabled_modules, ARRAY[]::text[])))
+    `);
+
+    // 5. Clear cache
+    accountingEnabledCache.delete(companyId);
+
+    res.json({ success: true, message: 'Contabilidad activada' });
   }
 }
 
