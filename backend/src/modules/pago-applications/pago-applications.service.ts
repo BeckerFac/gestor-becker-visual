@@ -302,6 +302,7 @@ export class PagoApplicationsService {
     const result = await db.execute(sql`
       SELECT pi.id, pi.invoice_number, pi.invoice_type, pi.invoice_date,
         pi.total_amount, pi.payment_status, pi.status,
+        pi.retenciones_previstas,
         e.name as enterprise_name,
         pi.total_amount - COALESCE((SELECT SUM(CAST(pia.amount_applied AS decimal)) FROM pago_invoice_applications pia WHERE pia.purchase_invoice_id = pi.id), 0) as remaining_balance
       FROM purchase_invoices pi

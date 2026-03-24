@@ -77,6 +77,22 @@ export const PurchaseInvoices: React.FC = () => {
     notes: '',
   })
 
+  // Retenciones previstas (estimated withholdings)
+  const [retPrevistas, setRetPrevistas] = useState([
+    { type: 'iibb', label: 'IIBB', enabled: false, rate: 3.0 },
+    { type: 'ganancias', label: 'Ganancias', enabled: false, rate: 2.0 },
+    { type: 'iva', label: 'IVA', enabled: false, rate: 0 },
+    { type: 'suss', label: 'SUSS', enabled: false, rate: 0 },
+  ])
+
+  const retPrevistasEstimated = retPrevistas
+    .filter(r => r.enabled && r.rate > 0)
+    .map(r => ({
+      type: r.type,
+      rate: r.rate,
+      estimated_amount: Math.round(parseFloat(form.total_amount || '0') * r.rate) / 100,
+    }))
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
@@ -149,10 +165,12 @@ export const PurchaseInvoices: React.FC = () => {
         other_taxes: parseFloat(form.other_taxes) || 0,
         total_amount: parseFloat(form.total_amount),
         notes: form.notes || undefined,
-      })
+        retenciones_previstas: retPrevistasEstimated.length > 0 ? retPrevistasEstimated : undefined,
+      } as any)
       toast.success('Factura de compra registrada')
       setShowForm(false)
       setForm({ enterprise_id: '', purchase_id: '', invoice_type: 'A', punto_venta: '', invoice_number: '', invoice_date: new Date().toISOString().split('T')[0], cae: '', subtotal: '', vat_amount: '', other_taxes: '', total_amount: '', notes: '' })
+      setRetPrevistas(prev => prev.map(r => ({ ...r, enabled: false, rate: r.type === 'iibb' ? 3.0 : r.type === 'ganancias' ? 2.0 : 0 })))
       await loadData()
     } catch (e: any) {
       toast.error(e.message || 'Error al crear factura de compra')
@@ -302,6 +320,57 @@ export const PurchaseInvoices: React.FC = () => {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
               </div>
+
+              {/* Retenciones previstas */}
+              <div className="col-span-full border border-amber-200 dark:border-amber-800 rounded-lg p-4 bg-amber-50/50 dark:bg-amber-950/20">
+                <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">Retenciones previstas (estimado)</h4>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">Selecciona las retenciones que se aplicaran al momento de pagar. Son informativas.</p>
+                <div className="space-y-2">
+                  {retPrevistas.map((ret, idx) => {
+                    const estimated = ret.enabled && ret.rate > 0
+                      ? Math.round(parseFloat(form.total_amount || '0') * ret.rate) / 100
+                      : 0
+                    return (
+                      <div key={ret.type} className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={ret.enabled}
+                          onChange={() => setRetPrevistas(prev => prev.map((r, i) => i !== idx ? r : { ...r, enabled: !r.enabled }))}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm font-medium w-24">{ret.label}</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            value={ret.rate}
+                            onChange={e => setRetPrevistas(prev => prev.map((r, i) => i !== idx ? r : { ...r, rate: parseFloat(e.target.value) || 0 }))}
+                            disabled={!ret.enabled}
+                            className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm text-right bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
+                          />
+                          <span className="text-xs text-gray-500">%</span>
+                        </div>
+                        {ret.enabled && estimated > 0 && (
+                          <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
+                            ~ {formatCurrency(estimated)}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                {retPrevistasEstimated.length > 0 && parseFloat(form.total_amount || '0') > 0 && (
+                  <div className="mt-3 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between text-sm">
+                    <span className="text-amber-700 dark:text-amber-400">Total retenciones estimadas:</span>
+                    <span className="font-semibold text-amber-800 dark:text-amber-300">
+                      {formatCurrency(retPrevistasEstimated.reduce((sum, r) => sum + r.estimated_amount, 0))}
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-end">
                 <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Factura</Button>
               </div>

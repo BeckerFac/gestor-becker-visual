@@ -405,6 +405,7 @@ async function runAutoMigrations() {
     try { await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
     try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`); } catch (_) {}
     try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS retenciones_previstas JSONB DEFAULT '[]'::jsonb`); } catch (_) {}
 
     // --- Accounting report indexes (tables may not exist yet on first boot) ---
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoices_company_status_date ON invoices(company_id, status, invoice_date)`); } catch (_) {}
@@ -1146,6 +1147,9 @@ async function runAutoMigrations() {
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`); } catch (_) {}
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`); } catch (_) {}
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`); } catch (_) {}
+
+    // ===== RETENCIONES ESPERADAS on invoices (expected withholdings by client) =====
+    await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS retenciones_esperadas JSONB DEFAULT '[]'::jsonb`);
 
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_cobro ON retenciones(cobro_id) WHERE cobro_id IS NOT NULL`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_direction ON retenciones(direction)`); } catch (_) {}

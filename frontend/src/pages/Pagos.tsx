@@ -239,6 +239,46 @@ export const Pagos: React.FC = () => {
     setPiAmounts({})
   }, [form.enterprise_id])
 
+  // Pre-fill retenciones from purchase invoice retenciones_previstas
+  useEffect(() => {
+    const linkedPiIds = Object.entries(piAmounts)
+      .filter(([, amt]) => parseFloat(amt) > 0)
+      .map(([id]) => id)
+    if (linkedPiIds.length === 0) return
+
+    // Aggregate retenciones_previstas from all linked purchase invoices
+    const retMap = new Map<string, { rate: number; count: number }>()
+    for (const piId of linkedPiIds) {
+      const pi = purchaseInvoices.find((p: any) => p.id === piId)
+      const previstas = pi?.retenciones_previstas
+      if (Array.isArray(previstas)) {
+        for (const rp of previstas) {
+          const existing = retMap.get(rp.type)
+          if (existing) {
+            // Average rates if multiple invoices have different rates
+            existing.rate = (existing.rate * existing.count + rp.rate) / (existing.count + 1)
+            existing.count++
+          } else {
+            retMap.set(rp.type, { rate: rp.rate, count: 1 })
+          }
+        }
+      }
+    }
+
+    if (retMap.size > 0) {
+      const totalAmount = Object.values(piAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+      setRetenciones(prev => prev.map(r => {
+        const match = retMap.get(r.type)
+        if (match) {
+          const baseAmount = totalAmount
+          const amount = Math.round(baseAmount * match.rate) / 100
+          return { ...r, enabled: true, rate: match.rate, base_amount: baseAmount, amount }
+        }
+        return r
+      }))
+    }
+  }, [piAmounts, purchaseInvoices])
+
   // Calculate paid amounts per purchase from pagos data
   const paidByPurchase = useMemo(() => {
     const map = new Map<string, number>()
