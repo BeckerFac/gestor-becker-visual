@@ -1140,6 +1140,22 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_pago ON retenciones(pago_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_period ON retenciones(company_id, period)`);
 
+    // -- Retenciones: soporte sufridas + vinculacion a cobros/facturas --
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'practicada'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id) ON DELETE SET NULL`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`); } catch (_) {}
+
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_cobro ON retenciones(cobro_id) WHERE cobro_id IS NOT NULL`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_direction ON retenciones(direction)`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_invoice ON retenciones(invoice_id) WHERE invoice_id IS NOT NULL`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_pi ON retenciones(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL`); } catch (_) {}
+
+    // -- total_amount en cobros y pagos (amount + retenciones; NULL = backward compat) --
+    try { await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`); } catch (_) {}
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS padron_retenciones (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

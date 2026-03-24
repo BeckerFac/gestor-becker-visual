@@ -69,10 +69,21 @@ export class CobrosService {
 
       const result = await db.execute(sql`
         SELECT c.*,
+          COALESCE(c.total_amount, CAST(c.amount AS decimal)) as total_amount,
           e.name as enterprise_name,
           o.order_number, o.title as order_title,
           b.bank_name,
           c.receipt_image IS NOT NULL as has_receipt,
+          -- Retenciones sufridas linked to this cobro
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', r.id, 'type', r.type, 'rate', r.rate,
+              'base_amount', r.base_amount, 'amount', r.amount,
+              'certificate_file', r.certificate_file
+            ))
+            FROM retenciones r
+            WHERE r.cobro_id = c.id AND r.direction = 'sufrida'
+          ), '[]'::json) as retenciones_sufridas,
           -- Linked invoices via cobro_invoice_applications
           COALESCE((
             SELECT json_agg(json_build_object(
@@ -136,10 +147,26 @@ export class CobrosService {
       const cobroCurrency = data.currency || 'ARS';
       const cobroExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
 
+      // Calculate total_amount = amount + retenciones sufridas
+      const totalRetenciones = data.retenciones_sufridas?.reduce((s: number, r: any) => s + parseFloat(r.amount), 0) || 0;
+      const totalAmount = parseFloat(data.amount) + totalRetenciones;
+
       await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
+        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate)
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${totalAmount.toString()}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
       `);
+
+      // Create retenciones sufridas linked to this cobro
+      if (data.retenciones_sufridas && Array.isArray(data.retenciones_sufridas) && data.retenciones_sufridas.length > 0) {
+        const enterpriseId = data.enterprise_id || null;
+        const retencionDate = data.payment_date || new Date().toISOString();
+        for (const ret of data.retenciones_sufridas) {
+          await db.execute(sql`
+            INSERT INTO retenciones (id, company_id, type, enterprise_id, cobro_id, base_amount, rate, amount, certificate_file, date, created_by, direction)
+            VALUES (gen_random_uuid(), ${companyId}, ${ret.type}, ${enterpriseId}, ${cobroId}, ${parseFloat(ret.base_amount).toString()}, ${parseFloat(ret.rate).toString()}, ${parseFloat(ret.amount).toString()}, ${ret.certificate_file || null}, ${retencionDate}, ${userId}, 'sufrida')
+          `);
+        }
+      }
 
       // Create cheque if payment method is cheque and cheque_data provided
       if (data.payment_method === 'cheque' && data.cheque_data) {

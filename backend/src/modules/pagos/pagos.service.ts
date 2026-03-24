@@ -45,6 +45,7 @@ export class PagosService {
 
       const result = await db.execute(sql`
         SELECT p.*,
+          COALESCE(p.total_amount, CAST(p.amount AS decimal)) as total_amount,
           e.name as enterprise_name,
           pu.purchase_number,
           b.bank_name,
@@ -94,6 +95,15 @@ export class PagosService {
     const hasInvoiceItems = data.purchase_invoice_items && Array.isArray(data.purchase_invoice_items) && data.purchase_invoice_items.length > 0;
     const pendingStatus = hasInvoiceItems ? null : 'pending_invoice';
 
+    // Explicit retentions from user take priority over auto-calculation
+    const hasExplicitRetenciones = data.retenciones && Array.isArray(data.retenciones) && data.retenciones.length > 0;
+    const totalRetenciones = hasExplicitRetenciones
+      ? data.retenciones.reduce((sum: number, r: any) => sum + parseFloat(r.amount || 0), 0)
+      : 0;
+    // total_amount = net amount (what leaves bank) + retentions (what gets withheld)
+    // This represents the total amount that cancels against invoices
+    const totalAmount = parseFloat(data.amount) + totalRetenciones;
+
     try {
       // Transaction: all inserts succeed or all rollback
       await db.execute(sql`BEGIN`);
@@ -102,9 +112,21 @@ export class PagosService {
         const pagoExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
 
         await db.execute(sql`
-          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by, currency, exchange_rate)
-          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId}, ${pagoCurrency}, ${pagoExchangeRate})
+          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by, currency, exchange_rate)
+          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${totalAmount.toString()}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId}, ${pagoCurrency}, ${pagoExchangeRate})
         `);
+
+        // Create explicit retentions inside the transaction
+        if (hasExplicitRetenciones) {
+          const pagoDate = data.payment_date || new Date().toISOString();
+          const period = pagoDate.substring(0, 7);
+          for (const ret of data.retenciones) {
+            await db.execute(sql`
+              INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, base_amount, rate, amount, certificate_number, date, period, created_by, direction)
+              VALUES (${uuid()}, ${companyId}, ${ret.type}, ${ret.regime || null}, ${data.enterprise_id || null}, ${pagoId}, ${parseFloat(ret.base_amount).toString()}, ${parseFloat(ret.rate).toString()}, ${parseFloat(ret.amount).toString()}, ${ret.certificate_number || null}, ${pagoDate}, ${period}, ${userId}, 'practicada')
+            `);
+          }
+        }
 
         // Link pago to purchase invoices if items provided (N:N)
         if (hasInvoiceItems) {
@@ -120,10 +142,10 @@ export class PagosService {
           }
 
           // Create invoice-level applications from totals
-          for (const [piId, totalAmount] of piTotals.entries()) {
+          for (const [piId, piTotal] of piTotals.entries()) {
             await db.execute(sql`
               INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
-              VALUES (${uuid()}, ${pagoId}, ${piId}, ${totalAmount.toString()}, ${userId})
+              VALUES (${uuid()}, ${pagoId}, ${piId}, ${piTotal.toString()}, ${userId})
               ON CONFLICT (pago_id, purchase_invoice_id) DO NOTHING
             `);
             await this.recalculatePurchaseInvoiceStatus(piId);
@@ -137,8 +159,8 @@ export class PagosService {
         throw txError;
       }
 
-      // Auto-calculate retentions if enterprise has padron entries
-      if (data.enterprise_id) {
+      // Auto-calculate retentions ONLY if user did NOT send explicit retentions
+      if (!hasExplicitRetenciones && data.enterprise_id) {
         try {
           const retentions = await retencionesService.calculateRetentionsForPago(
             companyId, data.enterprise_id, parseFloat(data.amount)
@@ -157,6 +179,17 @@ export class PagosService {
               date: pagoDate,
               period,
             });
+          }
+          // Recalculate total_amount after auto-retentions
+          const autoRetResult = await db.execute(sql`
+            SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total_ret FROM retenciones WHERE pago_id = ${pagoId}
+          `);
+          const autoRetTotal = parseFloat(((autoRetResult as any).rows || [])[0]?.total_ret || '0');
+          if (autoRetTotal > 0) {
+            const newTotalAmount = parseFloat(data.amount) + autoRetTotal;
+            await db.execute(sql`
+              UPDATE pagos SET total_amount = ${newTotalAmount.toString()} WHERE id = ${pagoId}
+            `);
           }
         } catch (retError) {
           // Non-blocking: log but don't fail the pago

@@ -82,12 +82,14 @@ export class RetencionesService {
     regime?: string;
     enterprise_id?: string;
     pago_id?: string;
+    cobro_id?: string;
     base_amount: number;
     rate: number;
     amount: number;
     certificate_number?: string;
     date?: string;
     period?: string;
+    direction?: 'practicada' | 'sufrida';
   }) {
     const validTypes = ['iibb', 'ganancias', 'iva', 'suss'];
     if (!validTypes.includes(data.type)) {
@@ -107,12 +109,12 @@ export class RetencionesService {
 
     try {
       await db.execute(sql`
-        INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, base_amount, rate, amount, certificate_number, date, period, created_by)
+        INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, cobro_id, base_amount, rate, amount, certificate_number, date, period, created_by, direction)
         VALUES (
           ${id}, ${companyId}, ${data.type}, ${data.regime || null},
-          ${data.enterprise_id || null}, ${data.pago_id || null},
+          ${data.enterprise_id || null}, ${data.pago_id || null}, ${data.cobro_id || null},
           ${data.base_amount.toString()}, ${data.rate.toString()}, ${data.amount.toString()},
-          ${data.certificate_number || null}, ${retencionDate}, ${period}, ${userId}
+          ${data.certificate_number || null}, ${retencionDate}, ${period}, ${userId}, ${data.direction || null}
         )
       `);
 
