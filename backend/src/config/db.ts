@@ -973,6 +973,65 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_piia_pago ON pago_invoice_item_applications(pago_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_piia_pi_item ON pago_invoice_item_applications(purchase_invoice_item_id)`);
 
+    // ===== SAFETY NET: Ensure FK constraints on N:N application tables =====
+    // For DBs where tables were created before FK definitions were added inline
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE cobro_invoice_applications
+          ADD CONSTRAINT fk_cia_cobro FOREIGN KEY (cobro_id) REFERENCES cobros(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE cobro_invoice_applications
+          ADD CONSTRAINT fk_cia_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE pago_invoice_applications
+          ADD CONSTRAINT fk_pia_pago FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE pago_invoice_applications
+          ADD CONSTRAINT fk_pia_purchase_invoice FOREIGN KEY (purchase_invoice_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE cobro_invoice_item_applications
+          ADD CONSTRAINT fk_ciia_cobro FOREIGN KEY (cobro_id) REFERENCES cobros(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE cobro_invoice_item_applications
+          ADD CONSTRAINT fk_ciia_invoice_item FOREIGN KEY (invoice_item_id) REFERENCES invoice_items(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE pago_invoice_item_applications
+          ADD CONSTRAINT fk_piia_pago FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE pago_invoice_item_applications
+          ADD CONSTRAINT fk_piia_pi_item FOREIGN KEY (purchase_invoice_item_id) REFERENCES purchase_invoice_items(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `);
+
     // ===== AUTO-CREATE DEFAULT BUSINESS UNIT FOR EXISTING COMPANIES =====
     // Only creates if the company doesn't have any business_units yet
     await pool.query(`
@@ -1242,7 +1301,10 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'crm_deal_documents', parentTable: 'crm_deals', parentFk: 'deal_id' },
     { name: 'crm_deal_stage_history', parentTable: 'crm_deals', parentFk: 'deal_id' },
     { name: 'cobro_invoice_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
-    { name: 'pago_invoice_applications', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
+    { name: 'pago_invoice_applications', parentTable: 'pagos', parentFk: 'pago_id' },
+    { name: 'purchase_invoice_items', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
+    { name: 'cobro_invoice_item_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
+    { name: 'pago_invoice_item_applications', parentTable: 'pagos', parentFk: 'pago_id' },
   ];
 
   const result: Record<string, any[]> = {};
