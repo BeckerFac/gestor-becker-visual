@@ -160,6 +160,7 @@ describe('AccountingEntriesService', () => {
   // ── createEntryForCobro ──────────────────────────────────────────────────
   describe('createEntryForCobro', () => {
     it('should create entry for cash cobro (Caja)', async () => {
+      mockAccountingEnabled()
       // createEntry: entry INSERT + 2 lines (Caja, Deudores)
       mockCreateEntryFlow(2)
 
@@ -176,6 +177,7 @@ describe('AccountingEntriesService', () => {
     })
 
     it('should create entry for transfer cobro (uses Caja account)', async () => {
+      mockAccountingEnabled()
       mockCreateEntryFlow(2)
 
       const result = await service.createEntryForCobro({
@@ -192,6 +194,7 @@ describe('AccountingEntriesService', () => {
     })
 
     it('should create entry for cheque cobro (uses Caja account)', async () => {
+      mockAccountingEnabled()
       mockCreateEntryFlow(2)
 
       const result = await service.createEntryForCobro({
@@ -207,6 +210,7 @@ describe('AccountingEntriesService', () => {
     })
 
     it('should create entry for advance cobro (uses Caja account)', async () => {
+      mockAccountingEnabled()
       mockCreateEntryFlow(2)
 
       const result = await service.createEntryForCobro({
@@ -226,6 +230,7 @@ describe('AccountingEntriesService', () => {
   // ── createEntryForPago ───────────────────────────────────────────────────
   describe('createEntryForPago', () => {
     it('should create entry for pago without retentions', async () => {
+      mockAccountingEnabled()
       // createEntry: entry INSERT + 2 lines (Proveedores, Caja)
       mockCreateEntryFlow(2)
 
@@ -244,6 +249,7 @@ describe('AccountingEntriesService', () => {
     it('should create entry for pago with IIBB + Ganancias retentions (main entry only)', async () => {
       // The current implementation creates the main entry with Proveedores/Caja
       // Retentions are in the data but the main pago entry uses full amount
+      mockAccountingEnabled()
       mockCreateEntryFlow(2)
 
       const result = await service.createEntryForPago({
@@ -263,6 +269,8 @@ describe('AccountingEntriesService', () => {
     })
 
     it('should skip for cheque_endosado payment method', async () => {
+      mockAccountingEnabled()
+
       const result = await service.createEntryForPago({
         id: 'pago-3',
         company_id: 'company-1',
@@ -272,10 +280,12 @@ describe('AccountingEntriesService', () => {
       })
 
       expect(result).toBeNull()
-      expect(mockDbExecute).not.toHaveBeenCalled()
+      // Only isAccountingEnabled query should have been called
+      expect(mockDbExecute).toHaveBeenCalledTimes(1)
     })
 
     it('should create entry for advance pago (uses standard Proveedores/Caja)', async () => {
+      mockAccountingEnabled()
       mockCreateEntryFlow(2)
 
       const result = await service.createEntryForPago({
@@ -295,6 +305,7 @@ describe('AccountingEntriesService', () => {
   // ── createEntryForPurchaseInvoice ────────────────────────────────────────
   describe('createEntryForPurchaseInvoice', () => {
     it('should create entry with IVA CF 21%', async () => {
+      mockAccountingEnabled()
       // 3 lines: CMV(D), IVA CF 21%(D), Proveedores(C)
       mockCreateEntryFlow(3)
 
@@ -312,6 +323,7 @@ describe('AccountingEntriesService', () => {
     })
 
     it('should create entry with no IVA when vat_amount is 0', async () => {
+      mockAccountingEnabled()
       // 2 lines: CMV(D), Proveedores(C) - no IVA line
       mockCreateEntryFlow(2)
 
