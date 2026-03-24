@@ -1912,6 +1912,10 @@ export const api = {
     const { data } = await client.post('/accounting/opening-entry', { date, balances })
     return data
   },
+  enableAccounting: async () => {
+    const { data } = await client.post('/accounting/enable')
+    return data
+  },
 }
 
 export default api
