@@ -58,6 +58,11 @@ export class InvoicesService {
       // NC/ND: related invoice (the original invoice being corrected)
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS related_invoice_id UUID REFERENCES invoices(id)`);
 
+      // Multi-currency support
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS amount_foreign DECIMAL(12,2)`);
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Invoices migrations error:', error);
@@ -152,11 +157,14 @@ export class InvoicesService {
         }).returning();
       }
 
-      // Set order_id, enterprise_id, fiscal_type, business_unit_id, and related_invoice_id via raw SQL (columns added by migration)
+      // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, and currency via raw SQL (columns added by migration)
+      const currency = data.currency || 'ARS';
+      const exchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
       await db.execute(sql`
         UPDATE invoices SET order_id = ${data.order_id || null}, enterprise_id = ${enterpriseId},
           fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null},
-          related_invoice_id = ${data.related_invoice_id || null}
+          related_invoice_id = ${data.related_invoice_id || null},
+          currency = ${currency}, exchange_rate = ${exchangeRate}
         WHERE id = ${invoiceId}
       `);
 
@@ -232,13 +240,28 @@ export class InvoicesService {
 
         // Update invoice totals
         const total = subtotal + vatAmount;
-        await db.update(invoices)
-          .set({
-            subtotal: subtotal.toString(),
-            vat_amount: vatAmount.toString(),
-            total_amount: total.toString(),
-          })
-          .where(eq(invoices.id, invoiceId));
+        // If foreign currency, store original amount and convert total to ARS
+        if (currency !== 'ARS' && exchangeRate && exchangeRate > 0) {
+          const totalArs = total * exchangeRate;
+          const subtotalArs = subtotal * exchangeRate;
+          const vatArs = vatAmount * exchangeRate;
+          await db.update(invoices)
+            .set({
+              subtotal: subtotalArs.toString(),
+              vat_amount: vatArs.toString(),
+              total_amount: totalArs.toString(),
+            })
+            .where(eq(invoices.id, invoiceId));
+          await db.execute(sql`UPDATE invoices SET amount_foreign = ${total.toString()} WHERE id = ${invoiceId}`);
+        } else {
+          await db.update(invoices)
+            .set({
+              subtotal: subtotal.toString(),
+              vat_amount: vatAmount.toString(),
+              total_amount: total.toString(),
+            })
+            .where(eq(invoices.id, invoiceId));
+        }
       }
 
       // Update order has_invoice flag if order_id provided
@@ -919,6 +942,12 @@ export class InvoicesService {
         }];
       }
 
+      // Multi-currency: resolve AFIP currency codes
+      const invoiceCurrency = invoice.currency || 'ARS';
+      const AFIP_CURRENCY_MAP: Record<string, string> = { ARS: 'PES', USD: 'DOL', EUR: '060' };
+      const monId = AFIP_CURRENCY_MAP[invoiceCurrency] || 'PES';
+      const monCotiz = invoiceCurrency !== 'ARS' && invoice.exchange_rate ? parseFloat(invoice.exchange_rate.toString()) : 1;
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
@@ -934,6 +963,8 @@ export class InvoicesService {
         total: Math.abs(calculatedTotal - invoiceTotal) > 0.01 && invoiceTotal > 0 ? calculatedTotal : parseFloat(invoice.total_amount?.toString() || '0'),
         invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date) : new Date(),
         puntoVenta,
+        monId,
+        monCotiz,
         items: itemsList.map((i: any) => ({
           quantity: Number(i.quantity),
           unitPrice: parseFloat(i.unit_price?.toString() || '0'),

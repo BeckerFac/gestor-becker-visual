@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
+import { CurrencySelector } from '@/components/shared/CurrencySelector'
 
 // ---- Types ----
 
@@ -50,6 +51,9 @@ interface Invoice {
   fiscal_type?: string
   payment_status?: string
   total_cobrado?: string
+  currency?: string
+  exchange_rate?: string
+  amount_foreign?: string
 }
 
 interface Enterprise { id: string; name: string; cuit?: string | null }
@@ -293,6 +297,8 @@ export const Invoices: React.FC = () => {
   const [formOrderId, setFormOrderId] = useState('')
   const [formRelatedInvoiceId, setFormRelatedInvoiceId] = useState('')
   const [authorizedInvoices, setAuthorizedInvoices] = useState<Invoice[]>([])
+  const [formCurrency, setFormCurrency] = useState('ARS')
+  const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
   // Form - Step 2: Items
   const [formItems, setFormItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
@@ -396,6 +402,8 @@ export const Invoices: React.FC = () => {
     setFormItems([EMPTY_FORM_ITEM()])
     setProductSearch('')
     setProductSearchIdx(null)
+    setFormCurrency('ARS')
+    setFormExchangeRate(null)
     setFormStep(1)
     setShowForm(true)
     await loadFormData()
@@ -406,6 +414,8 @@ export const Invoices: React.FC = () => {
     setFormStep(1)
     setFormRelatedInvoiceId('')
     setAuthorizedInvoices([])
+    setFormCurrency('ARS')
+    setFormExchangeRate(null)
   }
 
   // Items management
@@ -544,6 +554,8 @@ export const Invoices: React.FC = () => {
         order_id: formOrderId || null,
         related_invoice_id: isNcNdType(formInvoiceType) ? (formRelatedInvoiceId || null) : null,
         fiscal_type: vistaMode === 'venta_fiscal' ? 'fiscal' : 'no_fiscal',
+        currency: formCurrency,
+        exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
         items: formItems.map(item => ({
           product_id: item.product_id || null,
           product_name: item.product_name,
@@ -1107,11 +1119,19 @@ export const Invoices: React.FC = () => {
                   </div>
                 )}
 
+                {/* Currency selector */}
+                <CurrencySelector
+                  currency={formCurrency}
+                  exchangeRate={formExchangeRate}
+                  onCurrencyChange={setFormCurrency}
+                  onExchangeRateChange={setFormExchangeRate}
+                />
+
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={closeForm}>Cancelar</Button>
                   <Button
                     variant="primary"
-                    disabled={!isFormStep1Valid}
+                    disabled={!isFormStep1Valid || (formCurrency !== 'ARS' && !formExchangeRate)}
                     onClick={() => setFormStep(2)}
                   >
                     Siguiente: Items
@@ -1303,19 +1323,25 @@ export const Invoices: React.FC = () => {
 
                 {/* Totals */}
                 <div className="flex justify-end">
-                  <div className="w-64 space-y-1 text-sm">
+                  <div className="w-72 space-y-1 text-sm">
                     <div className="flex justify-between text-gray-600 dark:text-gray-400">
                       <span>Neto gravado:</span>
-                      <span>{formatCurrency(formTotals.neto)}</span>
+                      <span>{formatCurrency(formTotals.neto, formCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-gray-600 dark:text-gray-400">
                       <span>IVA:</span>
-                      <span>{formatCurrency(formTotals.iva)}</span>
+                      <span>{formatCurrency(formTotals.iva, formCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-base font-bold border-t border-gray-200 pt-2 mt-2">
                       <span>Total:</span>
-                      <span className="text-green-700">{formatCurrency(formTotals.total)}</span>
+                      <span className="text-green-700">{formatCurrency(formTotals.total, formCurrency)}</span>
                     </div>
+                    {formCurrency !== 'ARS' && formExchangeRate && (
+                      <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400 border-t border-gray-100 pt-1 mt-1">
+                        <span>Total ARS (TC {formExchangeRate.toFixed(2)}):</span>
+                        <span>{formatCurrency(formTotals.total * formExchangeRate, 'ARS')}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1695,6 +1721,11 @@ export const Invoices: React.FC = () => {
                       {/* Total */}
                       <td className="px-2 py-2 text-right font-bold text-green-700 dark:text-green-400 text-sm">
                         {formatCurrency(parseFloat(invoice.total_amount || '0'))}
+                        {invoice.currency && invoice.currency !== 'ARS' && invoice.amount_foreign && (
+                          <p className="text-[10px] font-normal text-blue-600 dark:text-blue-400">
+                            {formatCurrency(parseFloat(invoice.amount_foreign), invoice.currency)}
+                          </p>
+                        )}
                       </td>
 
                       {/* Estado Pago */}

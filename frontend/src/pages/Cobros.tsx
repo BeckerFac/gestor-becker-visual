@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { CobroInvoiceLinker } from '@/components/cobros/CobroInvoiceLinker'
+import { CurrencySelector } from '@/components/shared/CurrencySelector'
 
 interface Enterprise { id: string; name: string }
 interface Order { id: string; order_number: number; title: string; total_amount: string; payment_status?: string; enterprise_id?: string; enterprise?: { id: string; name: string } | null; customer?: { id?: string; name?: string; enterprise_id?: string } }
@@ -239,6 +240,8 @@ export const Cobros: React.FC = () => {
     payment_date: new Date().toISOString().split('T')[0],
     notes: '',
   })
+  const [formCurrency, setFormCurrency] = useState('ARS')
+  const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
   // Cheque form state
   const [chequeForm, setChequeForm] = useState({ ...INITIAL_CHEQUE_FORM })
@@ -575,6 +578,8 @@ export const Cobros: React.FC = () => {
         payment_date: form.payment_date,
         notes: form.notes || null,
         invoice_items: hasInvoiceItems ? items : undefined,
+        currency: formCurrency,
+        exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
       }
 
       // Attach cheque data if payment method is cheque
@@ -594,6 +599,8 @@ export const Cobros: React.FC = () => {
       setShowForm(false)
       setInvoiceItems({})
       setOrderItems({})
+      setFormCurrency('ARS')
+      setFormExchangeRate(null)
       setShowInvoiceSection(false)
       setChequeForm({ ...INITIAL_CHEQUE_FORM })
       toast.success('Cobro registrado correctamente')
@@ -1049,6 +1056,14 @@ export const Cobros: React.FC = () => {
                 )}
                 <Input label="Referencia" placeholder="N transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
                 <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
+                <CurrencySelector
+                  currency={formCurrency}
+                  exchangeRate={formExchangeRate}
+                  onCurrencyChange={setFormCurrency}
+                  onExchangeRateChange={setFormExchangeRate}
+                  foreignAmount={parseFloat(form.amount || '0')}
+                  compact
+                />
               </div>
 
               {/* Cheque inline form */}

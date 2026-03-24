@@ -44,6 +44,9 @@ export interface AuthorizeInvoiceInput {
     cuit: string
     cbteFch: string        // YYYYMMDD
   }>
+  // Multi-currency support
+  monId?: string           // AFIP currency code (PES, DOL, 060, etc.)
+  monCotiz?: number        // Exchange rate (1 for ARS)
 }
 
 export interface AfipAuthorizationResult {
@@ -614,8 +617,8 @@ export class AfipService {
         ImpOpEx: this.round2(impOpEx),
         ImpIVA: isFacturaC ? 0 : this.round2(input.vat),
         ImpTrib: 0,
-        MonId: 'PES',
-        MonCotiz: 1,
+        MonId: input.monId || 'PES',
+        MonCotiz: input.monCotiz || 1,
         Iva: ivaItems,
         CondicionIVAReceptorId: condicionIvaReceptorId,
         ...serviceDateFields,

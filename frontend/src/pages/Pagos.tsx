@@ -17,6 +17,7 @@ import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { PagoInvoiceLinker } from '@/components/pagos/PagoInvoiceLinker'
+import { CurrencySelector } from '@/components/shared/CurrencySelector'
 
 interface Pago {
   id: string
@@ -119,6 +120,8 @@ export const Pagos: React.FC = () => {
     amount: '', payment_method: 'transferencia', bank_id: '',
     reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '',
   })
+  const [formCurrency, setFormCurrency] = useState('ARS')
+  const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
   // Retention preview for pago creation
   const [retencionPreview, setRetencionPreview] = useState<Array<{ type: string; rate: number; amount: number; regime: string | null }>>([])
@@ -307,11 +310,15 @@ export const Pagos: React.FC = () => {
           payment_date: form.payment_date,
           notes: form.notes || null,
           purchase_invoice_items: purchaseInvoiceItems.length > 0 ? purchaseInvoiceItems : undefined,
+          currency: formCurrency,
+          exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
         })
         toast.success('Pago registrado correctamente')
       }
       setShowForm(false)
       setSelectedChequeId('')
+      setFormCurrency('ARS')
+      setFormExchangeRate(null)
       setForm({ enterprise_id: '', purchase_id: '', amount: '', payment_method: 'transferencia', bank_id: '', reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' })
       await loadData()
     } catch (e: any) {
@@ -622,6 +629,14 @@ export const Pagos: React.FC = () => {
               )}
               <Input label="Referencia" placeholder="N° transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
               <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
+              <CurrencySelector
+                currency={formCurrency}
+                exchangeRate={formExchangeRate}
+                onCurrencyChange={setFormCurrency}
+                onExchangeRateChange={setFormExchangeRate}
+                foreignAmount={parseFloat(form.amount || '0')}
+                compact
+              />
               <div className="col-span-full">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
                 <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />

@@ -120,19 +120,22 @@ export class PurchaseInvoicesService {
     }
 
     const piId = uuid();
+    const piCurrency = (data as any).currency || 'ARS';
+    const piExchangeRate = (data as any).exchange_rate ? parseFloat((data as any).exchange_rate) : null;
+
     await db.execute(sql`
       INSERT INTO purchase_invoices (
         id, company_id, business_unit_id, enterprise_id, purchase_id,
         invoice_type, punto_venta, invoice_number, invoice_date,
         cae, cae_expiry_date,
         subtotal, vat_amount, other_taxes, total_amount,
-        notes, created_by
+        notes, created_by, currency, exchange_rate
       ) VALUES (
         ${piId}, ${companyId}, ${data.business_unit_id}, ${data.enterprise_id}, ${data.purchase_id || null},
         ${data.invoice_type}, ${data.punto_venta || null}, ${data.invoice_number}, ${data.invoice_date},
         ${data.cae || null}, ${data.cae_expiry_date || null},
         ${(data.subtotal || 0).toString()}, ${(data.vat_amount || 0).toString()}, ${(data.other_taxes || 0).toString()}, ${data.total_amount.toString()},
-        ${data.notes || null}, ${userId}
+        ${data.notes || null}, ${userId}, ${piCurrency}, ${piExchangeRate}
       )
     `);
 
