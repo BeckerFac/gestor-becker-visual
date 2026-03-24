@@ -40,6 +40,8 @@ interface Cobro {
   notes: string | null
   has_receipt: boolean
   item_count: number
+  total_amount?: string
+  retenciones_sufridas?: Array<{ type: string; amount: number }>
 }
 
 interface Receipt {
@@ -170,6 +172,13 @@ const CHEQUE_TYPES = [
   { value: 'diferido', label: 'Diferido' },
 ]
 
+const RETENCION_LABELS: Record<string, string> = {
+  iibb: 'IIBB',
+  ganancias: 'Ganancias',
+  iva: 'IVA',
+  suss: 'SUSS',
+}
+
 const INITIAL_CHEQUE_FORM = {
   number: '',
   bank: '',
@@ -239,6 +248,38 @@ export const Cobros: React.FC = () => {
 
   // Cheque form state
   const [chequeForm, setChequeForm] = useState({ ...INITIAL_CHEQUE_FORM })
+
+  // Retenciones sufridas state
+  const [retencionesSufridas, setRetencionesSufridas] = useState<Array<{
+    type: string;
+    enabled: boolean;
+    base_amount: number;
+    rate: number;
+    amount: number;
+    certificate_file: string;
+  }>>([
+    { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+  ])
+
+  const totalRetSufridas = useMemo(() =>
+    retencionesSufridas.filter(r => r.enabled).reduce((sum, r) => sum + r.amount, 0),
+    [retencionesSufridas]
+  )
+
+  const handleCertUpload = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setRetencionesSufridas(prev => prev.map((r, i) =>
+        i === idx ? { ...r, certificate_file: reader.result as string } : r
+      ));
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null)
@@ -474,6 +515,12 @@ export const Cobros: React.FC = () => {
       notes: '',
     })
     setChequeForm({ ...INITIAL_CHEQUE_FORM })
+    setRetencionesSufridas([
+      { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    ])
     setInvoiceItems({})
     setOrderItems({})
     setShowInvoiceSection(false)
@@ -555,6 +602,15 @@ export const Cobros: React.FC = () => {
         invoice_items: hasInvoiceItems ? items : undefined,
         currency: formCurrency,
         exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
+        retenciones_sufridas: retencionesSufridas
+          .filter(r => r.enabled && r.amount > 0)
+          .map(r => ({
+            type: r.type,
+            base_amount: r.base_amount || r.amount,
+            rate: r.rate || 0,
+            amount: r.amount,
+            certificate_file: r.certificate_file || null,
+          })),
       }
 
       // Attach cheque data if payment method is cheque
@@ -578,6 +634,12 @@ export const Cobros: React.FC = () => {
       setFormExchangeRate(null)
       setShowInvoiceSection(false)
       setChequeForm({ ...INITIAL_CHEQUE_FORM })
+      setRetencionesSufridas([
+        { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+        { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+        { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+        { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      ])
       toast.success('Cobro registrado correctamente')
       await loadData()
     } catch (e: any) {
@@ -1041,6 +1103,52 @@ export const Cobros: React.FC = () => {
                 />
               </div>
 
+              {/* Retenciones sufridas */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 mt-4">
+                <h4 className="font-medium mb-1 text-gray-900 dark:text-gray-100">Retenciones sufridas por el cliente</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Montos que el cliente retuvo al pagarte</p>
+                <div className="space-y-2">
+                  {retencionesSufridas.map((ret, idx) => (
+                    <div key={ret.type} className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={ret.enabled}
+                        onChange={() => setRetencionesSufridas(prev => prev.map((r, i) =>
+                          i === idx ? { ...r, enabled: !r.enabled, amount: !r.enabled ? r.amount : 0 } : r
+                        ))}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type] || ret.type}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Monto"
+                        value={ret.amount || ''}
+                        disabled={!ret.enabled}
+                        className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                          i === idx ? { ...r, amount: parseFloat(e.target.value) || 0 } : r
+                        ))}
+                      />
+                      {ret.enabled && (
+                        <label className="text-xs text-blue-600 cursor-pointer hover:underline">
+                          <input type="file" accept=".pdf" className="hidden" onChange={e => handleCertUpload(idx, e)} />
+                          {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
+                        </label>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {totalRetSufridas > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm text-gray-700 dark:text-gray-300">
+                    <span>Recibido: <b>$ {parseFloat(form.amount || '0').toFixed(2)}</b></span>
+                    <span>Retenciones: <b>$ {totalRetSufridas.toFixed(2)}</b></span>
+                    <span>Total que cancela factura: <b>$ {(parseFloat(form.amount || '0') + totalRetSufridas).toFixed(2)}</b></span>
+                  </div>
+                )}
+              </div>
+
               {/* Cheque inline form */}
               {form.payment_method === 'cheque' && (
                 <div className="border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-4 space-y-3">
@@ -1354,7 +1462,14 @@ export const Cobros: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(receipt.payment_date)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{getReceiptEnterpriseName(receipt)}</td>
-                    <td className="px-4 py-3 text-right"><span className="font-bold text-green-700 dark:text-green-400">{fmt(receipt.total_amount)}</span></td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="font-bold text-green-700 dark:text-green-400">{fmt(receipt.total_amount)}</span>
+                      {(receipt as any).retenciones_sufridas && (receipt as any).retenciones_sufridas.length > 0 && (
+                        <span className="ml-1.5 text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded-full" title={`Retenciones: ${fmt((receipt as any).retenciones_sufridas.reduce((s: number, r: any) => s + Number(r.amount || 0), 0))}`}>
+                          Ret.
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[receipt.payment_method || ''] || receipt.payment_method || '-'}</td>
                     <td className="px-4 py-3">{receipt.reference ? <span className="font-mono text-xs">{receipt.reference}</span> : '-'}</td>
                     <td className="px-4 py-3">
