@@ -44,6 +44,16 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS destination_country VARCHAR(5)`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS incoterms VARCHAR(10)`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_permit VARCHAR(50)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_client_name VARCHAR(200)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_client_address TEXT`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_client_tax_id VARCHAR(50)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS export_language INTEGER DEFAULT 1`);
+
+      // Extend invoice_type enum to support export types (E, NC_E, ND_E)
+      // ALTER TYPE ... ADD VALUE is idempotent with IF NOT EXISTS
+      await db.execute(sql`ALTER TYPE invoice_type ADD VALUE IF NOT EXISTS 'E'`).catch(() => {});
+      await db.execute(sql`ALTER TYPE invoice_type ADD VALUE IF NOT EXISTS 'NC_E'`).catch(() => {});
+      await db.execute(sql`ALTER TYPE invoice_type ADD VALUE IF NOT EXISTS 'ND_E'`).catch(() => {});
 
       // MercadoPago payment link columns
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link_url TEXT`);
@@ -133,6 +143,7 @@ export class InvoicesService {
       // -- BEGIN TRANSACTION: all DB writes from here until COMMIT --
       await db.execute(sql`BEGIN`);
 
+      const isExportType = ['E', 'NC_E', 'ND_E'].includes(invoiceType || '');
       if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
         // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
         await db.execute(sql`
@@ -141,12 +152,20 @@ export class InvoicesService {
           VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, NULL, ${nextNumber}, NOW(),
             '0', '0', '0', 'emitido', ${fiscalType}, ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
         `);
+      } else if (isExportType) {
+        // Export invoices: use raw SQL to handle extended enum values safely
+        await db.execute(sql`
+          INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+            subtotal, vat_amount, total_amount, status, created_by, created_at, updated_at)
+          VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, ${invoiceType}, ${nextNumber}, NOW(),
+            '0', '0', '0', 'draft', ${userId}, NOW(), NOW())
+        `);
       } else {
         await db.insert(invoices).values({
           id: invoiceId,
           company_id: companyId,
           customer_id: data.customer_id,
-          invoice_type: invoiceType!,
+          invoice_type: invoiceType! as any,
           invoice_number: nextNumber,
           invoice_date: new Date(),
           subtotal: '0',
@@ -167,6 +186,22 @@ export class InvoicesService {
           currency = ${currency}, exchange_rate = ${exchangeRate}
         WHERE id = ${invoiceId}
       `);
+
+      // Save export invoice (Tipo E) fields if provided
+      if (isExportType && data.export_data) {
+        await db.execute(sql`
+          UPDATE invoices SET
+            export_type = ${data.export_data.tipo_expo || '1'},
+            destination_country = ${data.export_data.destination_country || null},
+            incoterms = ${data.export_data.incoterms || null},
+            export_permit = ${data.export_data.export_permit || null},
+            export_client_name = ${data.export_data.client_name || null},
+            export_client_address = ${data.export_data.client_address || null},
+            export_client_tax_id = ${data.export_data.client_tax_id || null},
+            export_language = ${data.export_data.language || 1}
+          WHERE id = ${invoiceId}
+        `);
+      }
 
       // Add items
       if (data.items && Array.isArray(data.items)) {
@@ -948,6 +983,45 @@ export class InvoicesService {
       const monId = AFIP_CURRENCY_MAP[invoiceCurrency] || 'PES';
       const monCotiz = invoiceCurrency !== 'ARS' && invoice.exchange_rate ? parseFloat(invoice.exchange_rate.toString()) : 1;
 
+      // Build export data if this is a Tipo E invoice
+      const isExportInvoice = ['E', 'NC_E', 'ND_E'].includes(invoiceType);
+      let exportData: AuthorizeInvoiceInput['exportData'] | undefined;
+      if (isExportInvoice) {
+        const exportRow = await db.execute(sql`
+          SELECT export_type, destination_country, incoterms, export_permit,
+            export_client_name, export_client_address, export_client_tax_id, export_language
+          FROM invoices WHERE id = ${invoiceId}
+        `);
+        const exp = ((exportRow as any).rows || [])[0];
+        // AFIP country code mapping (common ones; destination_country stores AFIP code directly)
+        const dstCmp = parseInt(exp?.destination_country || '0') || 200;
+        // Country CUIT mapping (fallback to generic)
+        const COUNTRY_CUIT_MAP: Record<number, number> = {
+          200: 50000000016, // Argentina
+          203: 50000000028, // Brazil
+          205: 50000000032, // USA
+          212: 50000000044, // UK
+          219: 50000000056, // France
+          220: 50000000060, // Germany
+          224: 50000000068, // Italy
+          238: 50000000076, // Spain
+          249: 50000000084, // Uruguay
+          250: 50000000092, // Chile
+        };
+        exportData = {
+          dstCmp,
+          cliente: exp?.export_client_name || invoice.customer?.name || 'Foreign Client',
+          domicilioCliente: exp?.export_client_address || 'Address not specified',
+          idImpositivo: exp?.export_client_tax_id || '',
+          cuitPaisCliente: COUNTRY_CUIT_MAP[dstCmp] || 55000000016,
+          tipoExpo: parseInt(exp?.export_type || '1') || 1,
+          permisoExistente: exp?.export_permit ? 'S' : 'N',
+          idiomaCbte: parseInt(exp?.export_language || '1') || 1,
+          incoterms: exp?.incoterms || undefined,
+          formaPago: 'Wire Transfer',
+        };
+      }
+
       const authInput: AuthorizeInvoiceInput = {
         invoiceId,
         invoiceNumber: invoice.invoice_number,
@@ -972,6 +1046,7 @@ export class InvoicesService {
           description: i.product_name || '',
         })),
         cbtesAsoc,
+        exportData,
       };
 
       // Authorize with AFIP (real or mock)

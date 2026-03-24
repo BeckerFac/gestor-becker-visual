@@ -5,6 +5,7 @@ import { ApiError } from '../../middlewares/errorHandler'
 import axios from 'axios'
 import { XMLParser } from 'fast-xml-parser'
 import forge from 'node-forge'
+import { wsfexService, WsfexAuthorizeInput } from './wsfex.service'
 
 // ==================== TYPES ====================
 
@@ -47,6 +48,21 @@ export interface AuthorizeInvoiceInput {
   // Multi-currency support
   monId?: string           // AFIP currency code (PES, DOL, 060, etc.)
   monCotiz?: number        // Exchange rate (1 for ARS)
+  // Export invoice (Tipo E) - WSFEX fields
+  exportData?: {
+    dstCmp: number              // Destination country code (AFIP table)
+    cliente: string             // Foreign buyer name
+    domicilioCliente: string    // Foreign buyer address
+    idImpositivo: string        // Buyer tax ID
+    cuitPaisCliente: number     // Buyer country CUIT (AFIP code)
+    tipoExpo: number            // 1=Bienes, 2=Servicios, 4=Otros
+    permisoExistente: string    // 'S' or 'N'
+    idiomaCbte: number          // 1=Spanish, 2=English, 3=Portuguese
+    incoterms?: string          // FOB, CIF, EXW, etc.
+    incotermsDscrip?: string    // Incoterms description
+    obsComerciales?: string
+    formaPago?: string
+  }
 }
 
 export interface AfipAuthorizationResult {
@@ -131,6 +147,11 @@ export class AfipService {
     }
 
     try {
+      // Route export invoices (Tipo E, NC_E, ND_E) to WSFEX
+      const cbteTipo = INVOICE_TYPE_MAP[input.invoiceType] || 6
+      if (EXPORT_CBTE_TIPOS.includes(cbteTipo)) {
+        return await this.authorizeWithWsfex(company, input)
+      }
       return await this.authorizeWithAfip(company, input)
     } catch (error: any) {
       console.error('AFIP authorization error:', error.message)
@@ -200,9 +221,16 @@ export class AfipService {
       const company = await this.getCompany(companyId)
       if (!company.afip_cert || !company.afip_key) return 0
 
-      const { token, sign } = await this.getWsaaToken(company, 'wsfe')
-      const env = (company.afip_env === 'produccion') ? 'produccion' : 'homologacion'
       const cbteTipo = INVOICE_TYPE_MAP[invoiceType] || 6
+      const env = (company.afip_env === 'produccion') ? 'produccion' : 'homologacion'
+
+      // Route export types through WSFEX
+      if (EXPORT_CBTE_TIPOS.includes(cbteTipo)) {
+        const { token, sign } = await this.getWsaaToken(company, 'wsfex')
+        return await wsfexService.getLastCmp(env, token, sign, company.cuit, puntoVenta, cbteTipo)
+      }
+
+      const { token, sign } = await this.getWsaaToken(company, 'wsfe')
 
       const soapBody = this.buildFECompUltimoAutorizadoRequest(
         token, sign, company.cuit, puntoVenta, cbteTipo
@@ -682,6 +710,123 @@ export class AfipService {
       moneda: 'PES',
       tipoDocRec: docTipo,
       nroDocRec: docNro,
+      cae,
+      caeExpDate: caeExpirationDate,
+    })
+
+    return {
+      cae,
+      caeExpirationDate: caeExpirationDate.toISOString().split('T')[0],
+      invoiceNumber: cbteNro,
+      invoiceType: input.invoiceType,
+      qrCode: qrData,
+      afipResponse: result,
+    }
+  }
+
+  // ==================== WSFEX (EXPORT INVOICES) ====================
+
+  /**
+   * Authorize export invoice with WSFEX
+   */
+  private async authorizeWithWsfex(company: any, input: AuthorizeInvoiceInput): Promise<AfipAuthorizationResult> {
+    const { token, sign } = await this.getWsaaToken(company, 'wsfex')
+    const env = (company.afip_env === 'produccion') ? 'produccion' : 'homologacion'
+
+    const cbteTipo = INVOICE_TYPE_MAP[input.invoiceType] || 19
+    const ptoVta = input.puntoVenta || 1
+    const cleanCuit = company.cuit.replace(/-/g, '')
+
+    // Get last voucher number from WSFEX
+    const lastNumber = await wsfexService.getLastCmp(env, token, sign, cleanCuit, ptoVta, cbteTipo)
+    const cbteNro = lastNumber + 1
+
+    // Get last request ID
+    const lastId = await wsfexService.getLastId(env, token, sign, cleanCuit)
+    const requestId = lastId + 1
+
+    const fchDate = this.formatAfipDate(input.invoiceDate)
+
+    if (!input.exportData) {
+      throw new Error('Export invoice requires exportData fields (country, client, etc.)')
+    }
+
+    // Build items for WSFEX format
+    const wsfexItems = (input.items || []).map((item, idx) => ({
+      Item_Id: idx + 1,
+      Item_Pro_codigo: '',
+      Item_Pro_ds: item.description || `Item ${idx + 1}`,
+      Item_Pro_qty: item.quantity,
+      Item_Pro_umed: 7, // 7 = unidad
+      Item_Pro_precio_uni: this.round2(item.unitPrice),
+      Item_Pro_total_item: this.round2(item.quantity * item.unitPrice),
+    }))
+
+    // Build associated vouchers for NC/ND export
+    let cbtesAsoc: WsfexAuthorizeInput['CbtesAsoc'] | undefined
+    if (input.cbtesAsoc && input.cbtesAsoc.length > 0) {
+      cbtesAsoc = input.cbtesAsoc.map(asoc => ({
+        Cbte_tipo: asoc.tipo,
+        Cbte_punto_vta: asoc.ptoVta,
+        Cbte_nro: asoc.nro,
+        Cbte_cuit: parseInt(asoc.cuit.replace(/-/g, '')),
+      }))
+    }
+
+    const wsfexInput: WsfexAuthorizeInput = {
+      token,
+      sign,
+      cuit: cleanCuit,
+      Id: requestId,
+      Cbte_Tipo: cbteTipo,
+      Fecha_cbte: fchDate,
+      Punto_vta: ptoVta,
+      Cbte_nro: cbteNro,
+      Tipo_expo: input.exportData.tipoExpo || 1,
+      Permiso_existente: input.exportData.permisoExistente || 'N',
+      Dst_cmp: input.exportData.dstCmp,
+      Cliente: input.exportData.cliente,
+      Domicilio_cliente: input.exportData.domicilioCliente,
+      Cuit_pais_cliente: input.exportData.cuitPaisCliente,
+      Id_impositivo: input.exportData.idImpositivo,
+      Moneda_Id: input.monId || 'DOL',
+      Moneda_ctz: input.monCotiz || 1,
+      Obs_comerciales: input.exportData.obsComerciales,
+      Idioma_cbte: input.exportData.idiomaCbte || 1,
+      Incoterms: input.exportData.incoterms,
+      Incoterms_Ds: input.exportData.incotermsDscrip,
+      Forma_pago: input.exportData.formaPago,
+      Imp_total: this.round2(input.total),
+      Items: wsfexItems,
+      CbtesAsoc: cbtesAsoc,
+    }
+
+    const result = await wsfexService.authorize(env, wsfexInput)
+
+    const authResult = result.FEXResultAuth
+    if (!authResult || authResult.Resultado !== 'A') {
+      const obs = authResult?.Motivos_Obs || 'Sin observaciones'
+      throw new Error(`WSFEX no autorizo la factura de exportacion: ${obs}`)
+    }
+
+    const cae = String(authResult.Cae)
+    const caeExpStr = String(authResult.Fch_venc_Cae) // YYYYMMDD
+    const caeYear = parseInt(caeExpStr.substring(0, 4))
+    const caeMonth = parseInt(caeExpStr.substring(4, 6)) - 1
+    const caeDay = parseInt(caeExpStr.substring(6, 8))
+    const caeExpirationDate = new Date(caeYear, caeMonth, caeDay)
+
+    // Generate QR code for export invoice
+    const qrData = this.generateQrData({
+      fecha: input.invoiceDate,
+      cuit: company.cuit,
+      ptoVta,
+      tipoCmp: cbteTipo,
+      nroCmp: cbteNro,
+      importe: input.total,
+      moneda: input.monId || 'DOL',
+      tipoDocRec: 80,
+      nroDocRec: 0,
       cae,
       caeExpDate: caeExpirationDate,
     })

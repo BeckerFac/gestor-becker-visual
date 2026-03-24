@@ -237,6 +237,10 @@ export const invoices = pgTable('invoices', {
   destination_country: varchar('destination_country', { length: 5 }),
   incoterms: varchar('incoterms', { length: 10 }),
   export_permit: varchar('export_permit', { length: 50 }),
+  export_client_name: varchar('export_client_name', { length: 200 }),
+  export_client_address: text('export_client_address'),
+  export_client_tax_id: varchar('export_client_tax_id', { length: 50 }),
+  export_language: integer('export_language').default(1), // 1=Spanish, 2=English, 3=Portuguese
   created_by: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),

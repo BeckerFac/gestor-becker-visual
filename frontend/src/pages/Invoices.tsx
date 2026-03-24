@@ -64,14 +64,18 @@ interface OrderWithoutInvoice { id: string; order_number: number; title: string;
 // ---- Constants ----
 
 const INVOICE_TYPES = ['A', 'B', 'C'] as const
+const EXPORT_TYPES = ['E', 'NC_E', 'ND_E'] as const
 const NC_ND_TYPES = ['NC_A', 'NC_B', 'NC_C', 'ND_A', 'ND_B', 'ND_C'] as const
-const ALL_INVOICE_TYPES = [...INVOICE_TYPES, ...NC_ND_TYPES] as const
+const ALL_INVOICE_TYPES = [...INVOICE_TYPES, ...EXPORT_TYPES, ...NC_ND_TYPES] as const
 type InvoiceType = typeof ALL_INVOICE_TYPES[number]
 
 const INVOICE_TYPE_DESCRIPTIONS: Record<string, string> = {
   A: 'Resp. Inscripto a Resp. Inscripto',
   B: 'Resp. Inscripto a Consumidor Final',
   C: 'Monotributo',
+  E: 'Factura de Exportacion',
+  NC_E: 'Nota de Credito Exportacion',
+  ND_E: 'Nota de Debito Exportacion',
   NC_A: 'Nota de Credito A',
   NC_B: 'Nota de Credito B',
   NC_C: 'Nota de Credito C',
@@ -81,6 +85,48 @@ const INVOICE_TYPE_DESCRIPTIONS: Record<string, string> = {
 }
 
 const isNcNdType = (t: string) => t.startsWith('NC_') || t.startsWith('ND_')
+const isExportType = (t: string) => t === 'E' || t === 'NC_E' || t === 'ND_E'
+
+// Common AFIP destination country codes
+const EXPORT_COUNTRIES = [
+  { code: '203', name: 'Brasil' },
+  { code: '205', name: 'Estados Unidos' },
+  { code: '212', name: 'Reino Unido' },
+  { code: '219', name: 'Francia' },
+  { code: '220', name: 'Alemania' },
+  { code: '224', name: 'Italia' },
+  { code: '238', name: 'Espana' },
+  { code: '249', name: 'Uruguay' },
+  { code: '250', name: 'Chile' },
+  { code: '221', name: 'Paraguay' },
+  { code: '208', name: 'Colombia' },
+  { code: '235', name: 'Peru' },
+  { code: '232', name: 'Mexico' },
+  { code: '209', name: 'China' },
+  { code: '225', name: 'Japon' },
+  { code: '218', name: 'Canada' },
+  { code: '202', name: 'Australia' },
+] as const
+
+const INCOTERMS_OPTIONS = [
+  { code: 'FOB', desc: 'Free On Board' },
+  { code: 'CIF', desc: 'Cost Insurance Freight' },
+  { code: 'EXW', desc: 'Ex Works' },
+  { code: 'FCA', desc: 'Free Carrier' },
+  { code: 'CFR', desc: 'Cost and Freight' },
+  { code: 'CPT', desc: 'Carriage Paid To' },
+  { code: 'CIP', desc: 'Carriage Insurance Paid' },
+  { code: 'DAP', desc: 'Delivered at Place' },
+  { code: 'DPU', desc: 'Delivered at Place Unloaded' },
+  { code: 'DDP', desc: 'Delivered Duty Paid' },
+  { code: 'FAS', desc: 'Free Alongside Ship' },
+] as const
+
+const EXPORT_LANGUAGES = [
+  { code: 1, name: 'Espanol' },
+  { code: 2, name: 'Ingles' },
+  { code: 3, name: 'Portugues' },
+] as const
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: 'Borrador', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' },
@@ -105,6 +151,9 @@ const TYPE_BADGE_COLORS: Record<string, string> = {
   ND_A: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
   ND_B: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
   ND_C: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  E: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
+  NC_E: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  ND_E: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
 }
 
 const VAT_RATES = [0, 10.5, 21, 27]
@@ -300,6 +349,14 @@ export const Invoices: React.FC = () => {
   const [formCurrency, setFormCurrency] = useState('ARS')
   const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
+  // Form - Export (Tipo E) fields
+  const [exportCountry, setExportCountry] = useState('')
+  const [exportClientName, setExportClientName] = useState('')
+  const [exportClientAddress, setExportClientAddress] = useState('')
+  const [exportClientTaxId, setExportClientTaxId] = useState('')
+  const [exportIncoterms, setExportIncoterms] = useState('')
+  const [exportLanguage, setExportLanguage] = useState(1)
+
   // Form - Step 2: Items
   const [formItems, setFormItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
   const [productSearch, setProductSearch] = useState('')
@@ -416,6 +473,13 @@ export const Invoices: React.FC = () => {
     setAuthorizedInvoices([])
     setFormCurrency('ARS')
     setFormExchangeRate(null)
+    // Reset export fields
+    setExportCountry('')
+    setExportClientName('')
+    setExportClientAddress('')
+    setExportClientTaxId('')
+    setExportIncoterms('')
+    setExportLanguage(1)
   }
 
   // Items management
@@ -495,8 +559,8 @@ export const Invoices: React.FC = () => {
     const loadAuthorized = async () => {
       try {
         const resp = await api.getInvoices({ enterprise_id: formEnterpriseId, status: 'authorized', fiscal_type: 'fiscal', limit: 200 })
-        // Filter to only base invoice types (A, B, C) - not other NC/ND
-        const filtered = (resp.items || []).filter((inv: Invoice) => ['A', 'B', 'C'].includes(inv.invoice_type))
+        // Filter to only base invoice types (A, B, C, E) - not NC/ND
+        const filtered = (resp.items || []).filter((inv: Invoice) => ['A', 'B', 'C', 'E'].includes(inv.invoice_type))
         setAuthorizedInvoices(filtered)
       } catch (e) {
         console.warn('Could not load authorized invoices:', e)
@@ -538,7 +602,8 @@ export const Invoices: React.FC = () => {
     return { neto, iva, total }
   }, [formItems])
 
-  const isFormStep1Valid = !!formEnterpriseId && (vistaMode !== 'venta_fiscal' || !isNcNdType(formInvoiceType) || !!formRelatedInvoiceId)
+  const isExportFormValid = !isExportType(formInvoiceType) || (!!exportCountry && !!exportClientName && !!exportClientAddress)
+  const isFormStep1Valid = !!formEnterpriseId && (vistaMode !== 'venta_fiscal' || !isNcNdType(formInvoiceType) || !!formRelatedInvoiceId) && isExportFormValid
   const isFormStep2Valid = formItems.length > 0 && formItems.every(i => i.product_name.trim() && i.unit_price >= 0 && i.quantity > 0)
 
   const handleCreateInvoice = async () => {
@@ -547,6 +612,7 @@ export const Invoices: React.FC = () => {
     setError(null)
     try {
       const baseLetter = formInvoiceType.replace(/^(NC_|ND_)/, '')
+      const isExport = isExportType(formInvoiceType);
       await api.createInvoice({
         customer_id: formCustomerId || null,
         enterprise_id: formEnterpriseId || null,
@@ -561,9 +627,20 @@ export const Invoices: React.FC = () => {
           product_name: item.product_name,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          vat_rate: vistaMode !== 'venta_fiscal' ? 0 : (baseLetter === 'C' ? 0 : item.vat_rate),
+          vat_rate: vistaMode !== 'venta_fiscal' ? 0 : (isExport ? 0 : (baseLetter === 'C' ? 0 : item.vat_rate)),
           order_item_id: item.order_item_id || null,
         })),
+        ...(isExport ? {
+          export_data: {
+            destination_country: exportCountry,
+            client_name: exportClientName,
+            client_address: exportClientAddress,
+            client_tax_id: exportClientTaxId,
+            incoterms: exportIncoterms,
+            language: exportLanguage,
+            tipo_expo: '1',
+          },
+        } : {}),
       })
       const msgType = isNcNdType(formInvoiceType) ? 'Comprobante' : 'Factura'
       toast.success(vistaMode === 'venta_fiscal' ? `${msgType} creado/a correctamente` : 'Comprobante creado correctamente')
@@ -915,6 +992,9 @@ export const Invoices: React.FC = () => {
                   {INVOICE_TYPES.map(t => (
                     <option key={t} value={t}>Factura {t}</option>
                   ))}
+                  {EXPORT_TYPES.map(t => (
+                    <option key={t} value={t}>{t === 'E' ? 'Factura E (Export)' : t.replace('_', ' ')}</option>
+                  ))}
                   {NC_ND_TYPES.map(t => (
                     <option key={t} value={t}>{t.replace('_', ' ')}</option>
                   ))}
@@ -1036,6 +1116,28 @@ export const Invoices: React.FC = () => {
                         </button>
                       ))}
                     </div>
+                    {/* Export (Tipo E) */}
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mt-4 mb-2">
+                      Exportacion (Tipo E - WSFEX)
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {EXPORT_TYPES.map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => { setFormInvoiceType(t); setFormRelatedInvoiceId('') }}
+                          className={`text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                            formInvoiceType === t
+                              ? 'border-teal-500 bg-teal-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <span className="text-sm font-bold mr-1">{t.replace('_', ' ')}</span>
+                          <span className="text-xs text-gray-500 block">{INVOICE_TYPE_DESCRIPTIONS[t]}</span>
+                        </button>
+                      ))}
+                    </div>
+
                     {/* NC/ND options */}
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mt-4 mb-2">
                       Notas de Credito / Debito
@@ -1082,6 +1184,98 @@ export const Invoices: React.FC = () => {
                         {!formEnterpriseId && (
                           <p className="text-xs text-amber-600 mt-1">Seleccione una empresa primero.</p>
                         )}
+                      </div>
+                    )}
+
+                    {/* Export data fields for Tipo E */}
+                    {isExportType(formInvoiceType) && (
+                      <div className="mt-4 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-700 rounded-lg space-y-3">
+                        <h4 className="text-sm font-semibold text-teal-800 dark:text-teal-300">Datos de Exportacion (WSFEX)</h4>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                              Pais destino <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={exportCountry}
+                              onChange={e => setExportCountry(e.target.value)}
+                            >
+                              <option value="">Seleccionar pais...</option>
+                              {EXPORT_COUNTRIES.map(c => (
+                                <option key={c.code} value={c.code}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                              Incoterms
+                            </label>
+                            <select
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={exportIncoterms}
+                              onChange={e => setExportIncoterms(e.target.value)}
+                            >
+                              <option value="">Seleccionar...</option>
+                              {INCOTERMS_OPTIONS.map(i => (
+                                <option key={i.code} value={i.code}>{i.code} - {i.desc}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                            Nombre comprador <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                            placeholder="Nombre o razon social del comprador extranjero"
+                            value={exportClientName}
+                            onChange={e => setExportClientName(e.target.value)}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                            Direccion comprador <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                            placeholder="Direccion completa del comprador"
+                            value={exportClientAddress}
+                            onChange={e => setExportClientAddress(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                              Tax ID del comprador
+                            </label>
+                            <input
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              placeholder="Ej: US-EIN, CNPJ, VAT..."
+                              value={exportClientTaxId}
+                              onChange={e => setExportClientTaxId(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                              Idioma comprobante
+                            </label>
+                            <select
+                              className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                              value={exportLanguage}
+                              onChange={e => setExportLanguage(Number(e.target.value))}
+                            >
+                              {EXPORT_LANGUAGES.map(l => (
+                                <option key={l.code} value={l.code}>{l.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
