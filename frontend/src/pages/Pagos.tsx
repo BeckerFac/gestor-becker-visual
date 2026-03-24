@@ -59,7 +59,6 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   mercado_pago: 'Mercado Pago',
   transferencia: 'Transferencia',
   cheque: 'Cheque',
-  cheque_endosado: 'Cheque Endosado',
   tarjeta: 'Tarjeta',
 }
 
@@ -219,7 +218,7 @@ export const Pagos: React.FC = () => {
       setError('El monto debe ser mayor a 0')
       return
     }
-    if (form.payment_method === 'cheque_endosado') {
+    if (form.payment_method === 'cheque') {
       if (!selectedChequeId) {
         setError('Selecciona un cheque para endosar')
         return
@@ -237,7 +236,7 @@ export const Pagos: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      if (form.payment_method === 'cheque_endosado' && selectedChequeId) {
+      if (form.payment_method === 'cheque' && selectedChequeId) {
         // Endorse cheque to pay provider
         const result = await api.endorseCheque(selectedChequeId, {
           enterprise_id: form.enterprise_id,
@@ -310,8 +309,8 @@ export const Pagos: React.FC = () => {
 
   const fmt = (n: any) => formatCurrency(n)
   const fmtDate = (d: string) => formatDate(d)
-  const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
-  const showChequeSelector = form.payment_method === 'cheque_endosado'
+  const showBankSelector = form.payment_method === 'transferencia'
+  const showChequeSelector = form.payment_method === 'cheque'
 
   // Calculate total from purchase invoice amounts
   const piTotal = Object.values(piAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
@@ -537,7 +536,6 @@ export const Pagos: React.FC = () => {
                   <option value="mercado_pago">Mercado Pago</option>
                   <option value="transferencia">Transferencia</option>
                   <option value="cheque">Cheque</option>
-                  <option value="cheque_endosado">Cheque Endosado (usar cheque recibido)</option>
                   <option value="tarjeta">Tarjeta</option>
                 </select>
               </div>
