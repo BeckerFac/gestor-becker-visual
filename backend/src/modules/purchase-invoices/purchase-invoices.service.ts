@@ -181,11 +181,7 @@ export class PurchaseInvoicesService {
 
     const result = await db.execute(sql`
       SELECT pii.*,
-        CAST(pii.subtotal AS decimal) - COALESCE((
-          SELECT SUM(CAST(piia.amount_applied AS decimal))
-          FROM pago_invoice_item_applications piia
-          WHERE piia.purchase_invoice_item_id = pii.id
-        ), 0) as remaining
+        CAST(pii.subtotal AS decimal) as remaining
       FROM purchase_invoice_items pii
       WHERE pii.purchase_invoice_id = ${piId}
       ORDER BY pii.created_at ASC

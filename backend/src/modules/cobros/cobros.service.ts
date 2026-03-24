@@ -161,21 +161,7 @@ export class CobrosService {
         for (const item of data.invoice_items) {
           if (!item.invoice_id) continue;
 
-          // If item has sub-items (item-level detail), process each
-          if (item.item_details && Array.isArray(item.item_details)) {
-            for (const detail of item.item_details) {
-              if (!detail.invoice_item_id || !detail.amount || parseFloat(detail.amount) <= 0) continue;
-              // Insert item-level application
-              await db.execute(sql`
-                INSERT INTO cobro_invoice_item_applications (id, cobro_id, invoice_item_id, amount_applied, created_by)
-                VALUES (${uuid()}, ${cobroId}, ${detail.invoice_item_id}, ${parseFloat(detail.amount).toString()}, ${userId})
-                ON CONFLICT (cobro_id, invoice_item_id) DO NOTHING
-              `);
-              const current = invoiceTotals.get(item.invoice_id) || 0;
-              invoiceTotals.set(item.invoice_id, current + parseFloat(detail.amount));
-            }
-          } else if (item.amount && parseFloat(item.amount) > 0) {
-            // Fallback: total amount for the invoice (no item detail)
+          if (item.amount && parseFloat(item.amount) > 0) {
             const current = invoiceTotals.get(item.invoice_id) || 0;
             invoiceTotals.set(item.invoice_id, current + parseFloat(item.amount));
           }

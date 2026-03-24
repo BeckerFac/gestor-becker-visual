@@ -224,12 +224,6 @@ export const Cobros: React.FC = () => {
   const [invoicesForReceipt, setInvoicesForReceipt] = useState<InvoiceForReceipt[]>([])
   const [ordersForReceipt, setOrdersForReceipt] = useState<OrderForReceipt[]>([])
   const [invoiceItems, setInvoiceItems] = useState<Record<string, string>>({})
-  // Item-level amounts: key = invoice_item_id, value = amount string
-  const [itemAmounts, setItemAmounts] = useState<Record<string, string>>({})
-  // Which invoices are expanded to show items
-  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Set<string>>(new Set())
-  // Loaded invoice items cache
-  const [loadedInvoiceItems, setLoadedInvoiceItems] = useState<Record<string, any[]>>({})
   const [orderItems, setOrderItems] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     enterprise_id: '',
@@ -311,16 +305,6 @@ export const Cobros: React.FC = () => {
         (inv.payment_status !== 'pagado')
       )
       setInvoicesForReceipt(items)
-
-      // Auto-expand first invoice to show items immediately
-      if (items.length > 0) {
-        const firstId = items[0].id
-        try {
-          const invItems = await api.getInvoiceItemsWithRemaining(firstId)
-          setLoadedInvoiceItems(prev => ({ ...prev, [firstId]: invItems }))
-          setExpandedInvoiceIds(new Set([firstId]))
-        } catch { /* ignore */ }
-      }
 
       // Build orders without invoice that are not fully paid
       const allOrders = (ordersRes.items || ordersRes || []) as any[]
@@ -525,22 +509,13 @@ export const Cobros: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Build invoice_items with item_details for item-level trazabilidad
+    // Build invoice_items for invoice-level linking
     const items = Object.entries(invoiceItems)
       .filter(([_, amount]) => parseFloat(amount) > 0)
-      .map(([invoice_id, amount]) => {
-        // Gather item-level details for this invoice
-        const invoiceItemsList = loadedInvoiceItems[invoice_id] || []
-        const details = invoiceItemsList
-          .filter((ii: any) => itemAmounts[ii.id] && parseFloat(itemAmounts[ii.id]) > 0)
-          .map((ii: any) => ({ invoice_item_id: ii.id, amount: parseFloat(itemAmounts[ii.id]) }))
-
-        return {
-          invoice_id,
-          amount: parseFloat(amount),
-          item_details: details.length > 0 ? details : undefined,
-        }
-      })
+      .map(([invoice_id, amount]) => ({
+        invoice_id,
+        amount: parseFloat(amount),
+      }))
 
     const oItems = Object.entries(orderItems)
       .filter(([_, amount]) => parseFloat(amount) > 0)
@@ -1168,143 +1143,48 @@ export const Cobros: React.FC = () => {
                                   : inv.fiscal_type === 'no_fiscal'
                                     ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
                                     : `${inv.invoice_type || ''} ${String(inv.invoice_number).padStart(8, '0')}`
-                                const isExpanded = expandedInvoiceIds.has(inv.id)
-                                const invItems = loadedInvoiceItems[inv.id] || []
-
-                                const handleToggle = async () => {
-                                  const next = new Set(expandedInvoiceIds)
-                                  if (isExpanded) {
-                                    next.delete(inv.id)
-                                  } else {
-                                    next.add(inv.id)
-                                    if (!loadedInvoiceItems[inv.id]) {
-                                      try {
-                                        const items = await api.getInvoiceItemsWithRemaining(inv.id)
-                                        setLoadedInvoiceItems(prev => ({ ...prev, [inv.id]: items }))
-                                      } catch { /* ignore */ }
-                                    }
-                                  }
-                                  setExpandedInvoiceIds(next)
-                                }
-
-                                // Calculate total from item amounts for this invoice
-                                const itemTotal = invItems.reduce((s: number, ii: any) => s + (parseFloat(itemAmounts[ii.id] || '0') || 0), 0)
-
-                                // Sync invoice total from item amounts
-                                const effectiveAmount = isExpanded && itemTotal > 0 ? itemTotal.toFixed(2) : invoiceItems[inv.id] || ''
 
                                 return (
-                                  <React.Fragment key={inv.id}>
-                                    <tr className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                                      <td className="px-3 py-2">
-                                        <button type="button" onClick={handleToggle} className="flex items-center gap-1.5 font-mono text-xs font-semibold text-blue-700 dark:text-blue-400 hover:underline">
-                                          <span className="text-gray-400">{isExpanded ? '▼' : '▶'}</span>
-                                          {invLabel}
-                                        </button>
-                                      </td>
-                                      <td className="px-3 py-2 text-gray-700 dark:text-gray-300 text-sm">{inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'}</td>
-                                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400 text-sm">{fmt(total)}</td>
-                                      <td className="px-3 py-2 text-right text-green-600 text-sm">{fmt(cobrado)}</td>
-                                      <td className="px-3 py-2 text-right font-medium text-sm">{fmt(remaining)}</td>
-                                      <td className="px-3 py-2 text-right">
-                                        {remaining > 0 ? (
-                                          <div className="flex items-center gap-1 justify-end">
-                                            <input
-                                              type="number"
-                                              step="0.01"
-                                              min="0"
-                                              max={remaining}
-                                              placeholder="0.00"
-                                              value={effectiveAmount}
-                                              onChange={e => {
-                                                const val = e.target.value
-                                                setInvoiceItems(prev => {
-                                                  const next = { ...prev }
-                                                  if (val && parseFloat(val) > 0) next[inv.id] = val
-                                                  else delete next[inv.id]
-                                                  return next
-                                                })
-                                              }}
-                                              readOnly={isExpanded && itemTotal > 0}
-                                              className="w-24 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                                            />
-                                            <button type="button" onClick={() => {
-                                              setInvoiceItems(prev => ({ ...prev, [inv.id]: remaining.toFixed(2) }))
-                                            }} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Todo</button>
-                                          </div>
-                                        ) : (
-                                          <span className="text-xs text-green-600 font-medium">Completo</span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                    {/* Expanded items */}
-                                    {isExpanded && invItems.length > 0 && invItems.map((ii: any) => {
-                                      const itemRemaining = parseFloat(ii.remaining || '0')
-                                      return (
-                                        <tr key={ii.id} className="bg-blue-50/50 dark:bg-blue-950/10 border-t border-blue-100 dark:border-blue-900">
-                                          <td className="px-3 py-1.5 pl-8 text-xs text-gray-500" colSpan={2}>
-                                            <span className="font-medium text-gray-700 dark:text-gray-300">{ii.product_name}</span>
-                                            <span className="ml-2 text-gray-400">{parseFloat(ii.quantity)}x {fmt(ii.unit_price)}</span>
-                                          </td>
-                                          <td className="px-3 py-1.5 text-right text-xs">{fmt(ii.item_total || ii.subtotal)}</td>
-                                          <td className="px-3 py-1.5 text-right text-xs text-green-600">{fmt(parseFloat(ii.paid || '0'))}</td>
-                                          <td className="px-3 py-1.5 text-right text-xs font-medium">{fmt(itemRemaining)}</td>
-                                          <td className="px-3 py-1.5 text-right">
-                                            {itemRemaining > 0 ? (
-                                              <div className="flex items-center gap-1 justify-end">
-                                                <input
-                                                  type="number"
-                                                  step="0.01"
-                                                  min="0"
-                                                  max={itemRemaining}
-                                                  placeholder="0.00"
-                                                  value={itemAmounts[ii.id] || ''}
-                                                  onChange={e => {
-                                                    const val = e.target.value
-                                                    setItemAmounts(prev => {
-                                                      const next = { ...prev }
-                                                      if (val && parseFloat(val) > 0) next[ii.id] = val
-                                                      else delete next[ii.id]
-                                                      return next
-                                                    })
-                                                    // Auto-sync invoice total from items
-                                                    setTimeout(() => {
-                                                      const allItems = loadedInvoiceItems[inv.id] || []
-                                                      let newTotal = 0
-                                                      for (const it of allItems) {
-                                                        if (it.id === ii.id) newTotal += parseFloat(val || '0')
-                                                        else newTotal += parseFloat(itemAmounts[it.id] || '0')
-                                                      }
-                                                      if (newTotal > 0) {
-                                                        setInvoiceItems(prev => ({ ...prev, [inv.id]: newTotal.toFixed(2) }))
-                                                      }
-                                                    }, 0)
-                                                  }}
-                                                  className="w-24 px-2 py-1 border border-blue-300 dark:border-blue-700 rounded text-right text-xs bg-white dark:bg-gray-700 dark:text-gray-100"
-                                                />
-                                                <button type="button" onClick={() => {
-                                                  setItemAmounts(prev => ({ ...prev, [ii.id]: itemRemaining.toFixed(2) }))
-                                                  // Sync invoice total
-                                                  const allItems = loadedInvoiceItems[inv.id] || []
-                                                  let newTotal = 0
-                                                  for (const it of allItems) {
-                                                    if (it.id === ii.id) newTotal += itemRemaining
-                                                    else newTotal += parseFloat(itemAmounts[it.id] || '0')
-                                                  }
-                                                  setInvoiceItems(prev => ({ ...prev, [inv.id]: newTotal.toFixed(2) }))
-                                                }} className="text-xs text-blue-600 font-medium">Todo</button>
-                                              </div>
-                                            ) : (
-                                              <span className="text-xs text-green-500">Pagado</span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      )
-                                    })}
-                                    {isExpanded && invItems.length === 0 && (
-                                      <tr className="bg-blue-50/30 dark:bg-blue-950/10"><td colSpan={6} className="px-8 py-2 text-xs text-gray-400 italic">Sin items detallados</td></tr>
-                                    )}
-                                  </React.Fragment>
+                                  <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td className="px-3 py-2">
+                                      <span className="font-mono text-xs font-semibold text-blue-700 dark:text-blue-400">
+                                        {invLabel}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-700 dark:text-gray-300 text-sm">{inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400 text-sm">{fmt(total)}</td>
+                                    <td className="px-3 py-2 text-right text-green-600 text-sm">{fmt(cobrado)}</td>
+                                    <td className="px-3 py-2 text-right font-medium text-sm">{fmt(remaining)}</td>
+                                    <td className="px-3 py-2 text-right">
+                                      {remaining > 0 ? (
+                                        <div className="flex items-center gap-1 justify-end">
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            max={remaining}
+                                            placeholder="0.00"
+                                            value={invoiceItems[inv.id] || ''}
+                                            onChange={e => {
+                                              const val = e.target.value
+                                              setInvoiceItems(prev => {
+                                                const next = { ...prev }
+                                                if (val && parseFloat(val) > 0) next[inv.id] = val
+                                                else delete next[inv.id]
+                                                return next
+                                              })
+                                            }}
+                                            className="w-24 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                                          />
+                                          <button type="button" onClick={() => {
+                                            setInvoiceItems(prev => ({ ...prev, [inv.id]: remaining.toFixed(2) }))
+                                          }} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Todo</button>
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-green-600 font-medium">Completo</span>
+                                      )}
+                                    </td>
+                                  </tr>
                                 )
                               })}
                             </tbody>
@@ -1317,7 +1197,6 @@ export const Cobros: React.FC = () => {
                           <span className="text-xs text-gray-400 ml-2">(el monto del recibo se calculara automaticamente)</span>
                         </p>
                       )}
-                      <p className="text-xs text-blue-500 mt-2 italic">Click en ▶ para cobrar por item individual</p>
                     </div>
                   )}
 
