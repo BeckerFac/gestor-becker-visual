@@ -151,7 +151,18 @@ export const Pagos: React.FC = () => {
   useEffect(() => {
     if (form.enterprise_id) {
       api.getAvailablePurchaseInvoicesForLinking({ enterprise_id: form.enterprise_id })
-        .then(data => setPurchaseInvoices(data || []))
+        .then(async (data: any[]) => {
+          setPurchaseInvoices(data || [])
+          // Auto-expand first invoice to show items immediately
+          if (data && data.length > 0) {
+            const firstId = data[0].id
+            try {
+              const items = await api.getPurchaseInvoiceItems(firstId)
+              setLoadedPiItems(prev => ({ ...prev, [firstId]: items }))
+              setExpandedPiIds(new Set([firstId]))
+            } catch { /* ignore */ }
+          }
+        })
         .catch(() => setPurchaseInvoices([]))
     } else {
       setPurchaseInvoices([])
@@ -717,6 +728,7 @@ export const Pagos: React.FC = () => {
                           })}
                         </tbody>
                       </table>
+                      <p className="text-xs text-purple-500 mt-2 italic">Click en ▶ para pagar por item individual</p>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-400 italic">

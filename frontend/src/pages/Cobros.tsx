@@ -309,6 +309,16 @@ export const Cobros: React.FC = () => {
       )
       setInvoicesForReceipt(items)
 
+      // Auto-expand first invoice to show items immediately
+      if (items.length > 0) {
+        const firstId = items[0].id
+        try {
+          const invItems = await api.getInvoiceItemsWithRemaining(firstId)
+          setLoadedInvoiceItems(prev => ({ ...prev, [firstId]: invItems }))
+          setExpandedInvoiceIds(new Set([firstId]))
+        } catch { /* ignore */ }
+      }
+
       // Build orders without invoice that are not fully paid
       const allOrders = (ordersRes.items || ordersRes || []) as any[]
       // Get invoiced order IDs (orders that have a linked authorized invoice)
@@ -1292,6 +1302,7 @@ export const Cobros: React.FC = () => {
                           <span className="text-xs text-gray-400 ml-2">(el monto del recibo se calculara automaticamente)</span>
                         </p>
                       )}
+                      <p className="text-xs text-blue-500 mt-2 italic">Click en ▶ para cobrar por item individual</p>
                     </div>
                   )}
 
