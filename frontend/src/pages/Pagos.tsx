@@ -30,6 +30,7 @@ interface Pago {
   reference: string | null
   payment_date: string
   enterprise_tags?: { id: string; name: string; color: string }[]
+  retenciones?: Array<{ id: string; type: string; rate: string; amount: string; regime: string | null }>
   notes: string | null
 }
 
@@ -118,6 +119,23 @@ export const Pagos: React.FC = () => {
     amount: '', payment_method: 'transferencia', bank_id: '',
     reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '',
   })
+
+  // Retention preview for pago creation
+  const [retencionPreview, setRetencionPreview] = useState<Array<{ type: string; rate: number; amount: number; regime: string | null }>>([])
+
+  // Fetch retention preview when enterprise and amount change
+  useEffect(() => {
+    if (form.enterprise_id && form.amount && parseFloat(form.amount) > 0) {
+      const timer = setTimeout(() => {
+        api.calculateRetenciones(form.enterprise_id, parseFloat(form.amount))
+          .then((data: any) => setRetencionPreview(data || []))
+          .catch(() => setRetencionPreview([]))
+      }, 500) // debounce
+      return () => clearTimeout(timer)
+    } else {
+      setRetencionPreview([])
+    }
+  }, [form.enterprise_id, form.amount])
 
   const loadData = async () => {
     try {
@@ -738,6 +756,27 @@ export const Pagos: React.FC = () => {
                 </div>
               )}
 
+              {/* Retention preview */}
+              {retencionPreview.length > 0 && (
+                <div className="col-span-full bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                  <p className="text-xs font-medium text-yellow-800 dark:text-yellow-200 mb-2">Retenciones automaticas (segun padron):</p>
+                  <div className="space-y-1">
+                    {retencionPreview.map((ret, idx) => (
+                      <div key={idx} className="flex justify-between text-xs">
+                        <span className="text-yellow-700 dark:text-yellow-300">{ret.type.toUpperCase()} ({ret.rate}%){ret.regime ? ` - Reg. ${ret.regime}` : ''}</span>
+                        <span className="font-medium text-yellow-800 dark:text-yellow-200">{formatCurrency(ret.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-xs font-bold border-t border-yellow-300 dark:border-yellow-700 pt-1 mt-1">
+                      <span className="text-yellow-800 dark:text-yellow-200">Neto a pagar</span>
+                      <span className="text-yellow-800 dark:text-yellow-200">
+                        {formatCurrency(parseFloat(form.amount) - retencionPreview.reduce((sum, r) => sum + r.amount, 0))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-end col-span-full">
                 <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Pago</Button>
               </div>
@@ -818,7 +857,18 @@ export const Pagos: React.FC = () => {
                         <span className="font-mono text-xs bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">#{String(pago.purchase_number).padStart(4, '0')}</span>
                       ) : '-'}
                     </td>
-                    <td className="px-4 py-3 text-right"><span className="font-bold text-red-600">{fmt(pago.amount)}</span></td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="font-bold text-red-600">{fmt(pago.amount)}</span>
+                      {pago.retenciones && pago.retenciones.length > 0 && (
+                        <div className="flex flex-wrap gap-0.5 mt-0.5 justify-end">
+                          {pago.retenciones.map((ret) => (
+                            <span key={ret.id} className="text-[10px] bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 px-1 py-0.5 rounded">
+                              {ret.type.toUpperCase()} {parseFloat(ret.rate).toFixed(1)}% = {fmt(ret.amount)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm">{PAYMENT_METHOD_LABELS[pago.payment_method] || pago.payment_method}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{pago.bank_name || '-'}</td>
                     <td className="px-4 py-3">

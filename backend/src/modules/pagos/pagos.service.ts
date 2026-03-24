@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { retencionesService } from '../retenciones/retenciones.service';
 
 export class PagosService {
   private tablesEnsured = false;
@@ -64,7 +65,9 @@ export class PagosService {
           COALESCE((SELECT SUM(CAST(pia2.amount_applied AS decimal)) FROM pago_invoice_applications pia2 WHERE pia2.pago_id = p.id), 0) as total_assigned,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
-            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime))
+            FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN purchases pu ON p.purchase_id = pu.id
@@ -95,9 +98,12 @@ export class PagosService {
       // Transaction: all inserts succeed or all rollback
       await db.execute(sql`BEGIN`);
       try {
+        const pagoCurrency = data.currency || 'ARS';
+        const pagoExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+
         await db.execute(sql`
-          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by)
-          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId})
+          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by, currency, exchange_rate)
+          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${data.amount}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId}, ${pagoCurrency}, ${pagoExchangeRate})
         `);
 
         // Link pago to purchase invoices if items provided (N:N)
@@ -143,12 +149,41 @@ export class PagosService {
         throw txError;
       }
 
+      // Auto-calculate retentions if enterprise has padron entries
+      if (data.enterprise_id) {
+        try {
+          const retentions = await retencionesService.calculateRetentionsForPago(
+            companyId, data.enterprise_id, parseFloat(data.amount)
+          );
+          const pagoDate = data.payment_date || new Date().toISOString();
+          const period = pagoDate.substring(0, 7);
+          for (const ret of retentions) {
+            await retencionesService.createRetention(companyId, userId, {
+              type: ret.type,
+              regime: ret.regime || undefined,
+              enterprise_id: data.enterprise_id,
+              pago_id: pagoId,
+              base_amount: parseFloat(data.amount),
+              rate: ret.rate,
+              amount: ret.amount,
+              date: pagoDate,
+              period,
+            });
+          }
+        } catch (retError) {
+          // Non-blocking: log but don't fail the pago
+          console.warn('Auto-retention calculation warning:', retError);
+        }
+      }
+
       // SELECT result outside transaction (read-only)
       const result = await db.execute(sql`
         SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
-            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
+            WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime))
+            FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN purchases pu ON p.purchase_id = pu.id

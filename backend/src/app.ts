@@ -67,6 +67,9 @@ import { businessUnitsRouter } from './modules/business-units/business-units.rou
 import { cobroApplicationsRouter } from './modules/cobro-applications/cobro-applications.router';
 import { purchaseInvoicesRouter } from './modules/purchase-invoices/purchase-invoices.router';
 import { pagoApplicationsRouter } from './modules/pago-applications/pago-applications.router';
+import { currencyRouter } from './modules/currency/currency.router';
+import { retencionesRouter } from './modules/retenciones/retenciones.router';
+import { conciliacionRouter } from './modules/conciliacion/conciliacion.router';
 
 export const app = express();
 
@@ -220,6 +223,9 @@ app.use('/api/business-units', authMiddleware, businessUnitsRouter);
 app.use('/api/payment-applications', authMiddleware, cobroApplicationsRouter);
 app.use('/api/purchase-invoices', authMiddleware, purchaseInvoicesRouter);
 app.use('/api/pago-applications', authMiddleware, pagoApplicationsRouter);
+app.use('/api/currency', authMiddleware, currencyRouter);
+app.use('/api/retenciones', authMiddleware, retencionesRouter);
+app.use('/api/conciliacion', authMiddleware, conciliacionRouter);
 app.use('/api/receipts', authMiddleware, receiptsRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/crm', authMiddleware, crmRouter);

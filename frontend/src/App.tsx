@@ -25,6 +25,7 @@ const Orders = React.lazy(() => import('@/pages/Orders').then(m => ({ default: m
 const Quotes = React.lazy(() => import('@/pages/Quotes').then(m => ({ default: m.Quotes })))
 const CustomerPortal = React.lazy(() => import('@/pages/CustomerPortal').then(m => ({ default: m.CustomerPortal })))
 const Cheques = React.lazy(() => import('@/pages/Cheques').then(m => ({ default: m.Cheques })))
+const Conciliacion = React.lazy(() => import('@/pages/Conciliacion').then(m => ({ default: m.Conciliacion })))
 const Remitos = React.lazy(() => import('@/pages/Remitos').then(m => ({ default: m.Remitos })))
 const Banks = React.lazy(() => import('@/pages/Banks').then(m => ({ default: m.Banks })))
 const Enterprises = React.lazy(() => import('@/pages/Enterprises').then(m => ({ default: m.Enterprises })))
@@ -32,6 +33,7 @@ const Purchases = React.lazy(() => import('@/pages/Purchases').then(m => ({ defa
 const PurchaseInvoices = React.lazy(() => import('@/pages/PurchaseInvoices').then(m => ({ default: m.PurchaseInvoices })))
 const Cobros = React.lazy(() => import('@/pages/Cobros').then(m => ({ default: m.Cobros })))
 const Pagos = React.lazy(() => import('@/pages/Pagos').then(m => ({ default: m.Pagos })))
+const Retenciones = React.lazy(() => import('@/pages/Retenciones').then(m => ({ default: m.Retenciones })))
 const CuentaCorriente = React.lazy(() => import('@/pages/CuentaCorriente').then(m => ({ default: m.CuentaCorriente })))
 const Users = React.lazy(() => import('@/pages/Users').then(m => ({ default: m.Users })))
 const Global = React.lazy(() => import('@/pages/Global').then(m => ({ default: m.Global })))
@@ -247,8 +249,10 @@ function App() {
         <Route path="/inventory" element={<Navigate to="/products?tab=movimientos" replace />} />
         <Route path="/cobros" element={<ProtectedRoute module="cobros"><Cobros /></ProtectedRoute>} />
         <Route path="/pagos" element={<ProtectedRoute module="pagos"><Pagos /></ProtectedRoute>} />
+        <Route path="/retenciones" element={<ProtectedRoute module="retenciones"><Retenciones /></ProtectedRoute>} />
         <Route path="/cuenta-corriente" element={<ProtectedRoute module="cuenta_corriente"><CuentaCorriente /></ProtectedRoute>} />
         <Route path="/cheques" element={<ProtectedRoute module="cheques"><Cheques /></ProtectedRoute>} />
+        <Route path="/conciliacion" element={<ProtectedRoute module="cobros"><Suspense fallback={<PageLoader />}><Conciliacion /></Suspense></ProtectedRoute>} />
         <Route path="/reportes" element={<ProtectedRoute module="reports"><Reportes /></ProtectedRoute>} />
         <Route path="/remitos" element={<ProtectedRoute module="remitos"><Remitos /></ProtectedRoute>} />
         <Route path="/oportunidades" element={<ProtectedRoute module="crm"><Oportunidades /></ProtectedRoute>} />

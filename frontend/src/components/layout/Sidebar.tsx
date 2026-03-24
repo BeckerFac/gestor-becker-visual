@@ -66,8 +66,10 @@ const navSections: NavSection[] = [
     items: [
       { href: '/cobros', label: 'Cobros', icon: '💰', module: 'cobros' },
       { href: '/pagos', label: 'Pagos', icon: '💸', module: 'pagos' },
+      { href: '/retenciones', label: 'Retenciones', icon: '📎', module: 'retenciones' },
       { href: '/cuenta-corriente', label: 'Cuenta Corriente', icon: '📒', module: 'cuenta_corriente' },
       { href: '/cheques', label: 'Cheques', icon: '📝', module: 'cheques' },
+      { href: '/conciliacion', label: 'Conciliacion', icon: '🏦', module: 'cobros' },
       { href: '/reportes', label: 'Reportes', icon: '📈', module: 'reports' },
     ],
   },
@@ -93,6 +95,7 @@ const navSections: NavSection[] = [
 const MODULE_KEY_MAP: Record<string, string> = {
   'reports': 'reports',
   'cuenta_corriente': 'cobros', // cuenta corriente shows if cobros is enabled
+  'retenciones': 'pagos', // retenciones shows if pagos is enabled
   'settings': 'settings', // always visible
   'users': 'users', // always visible
 }

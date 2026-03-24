@@ -1021,6 +1021,49 @@ export const api = {
     return data
   },
 
+  // Currency / exchange rates
+  getCurrencyRate: async (currency: string = 'USD') => {
+    const { data } = await client.get(`/currency/rate?currency=${currency}`)
+    return data as { currency: string; rate: number; date: string }
+  },
+  getCurrencyRates: async () => {
+    const { data } = await client.get('/currency/rates')
+    return data as { rates: Record<string, number>; currencies: string[]; date: string }
+  },
+
+  // Retenciones (tax withholdings)
+  getRetenciones: async (filters?: any) => {
+    const params = new URLSearchParams()
+    if (filters) {
+      Object.entries(filters).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') params.append(key, String(val))
+      })
+    }
+    const { data } = await client.get(`/retenciones?${params.toString()}`)
+    return data
+  },
+  getRetencionesSummary: async (period?: string) => {
+    const params = period ? `?period=${period}` : ''
+    const { data } = await client.get(`/retenciones/summary${params}`)
+    return data
+  },
+  calculateRetenciones: async (enterpriseId: string, amount: number) => {
+    const { data } = await client.get(`/retenciones/calculate?enterprise_id=${enterpriseId}&amount=${amount}`)
+    return data
+  },
+  createRetencion: async (retencionData: any) => {
+    const { data } = await client.post('/retenciones', retencionData)
+    return data
+  },
+  importPadronRetenciones: async (source: string, csvData: string) => {
+    const { data } = await client.post('/retenciones/import-padron', { source, csv_data: csvData })
+    return data
+  },
+  deleteRetencion: async (id: string) => {
+    const { data } = await client.delete(`/retenciones/${id}`)
+    return data
+  },
+
   // Inventory
   getInventory: async () => {
     const { data } = await client.get('/inventory')
@@ -1774,6 +1817,32 @@ export const api = {
   },
   getAccountDeletionStatus: async () => {
     const { data } = await client.get('/account/deletion-status')
+    return data
+  },
+
+  // === Conciliacion Bancaria ===
+  uploadBankStatement: async (payload: { csvContent: string; bankId?: string; bankType?: string; fileName?: string; period?: string }) => {
+    const { data } = await client.post('/conciliacion/upload', payload)
+    return data
+  },
+  getBankStatements: async () => {
+    const { data } = await client.get('/conciliacion/statements')
+    return data
+  },
+  getBankStatement: async (id: string) => {
+    const { data } = await client.get(`/conciliacion/statements/${id}`)
+    return data
+  },
+  autoMatchStatement: async (id: string) => {
+    const { data } = await client.post(`/conciliacion/statements/${id}/auto-match`)
+    return data
+  },
+  manualMatch: async (lineId: string, type: 'cobro' | 'pago', matchId: string) => {
+    const { data } = await client.post('/conciliacion/match', { lineId, type, matchId })
+    return data
+  },
+  unmatchLine: async (lineId: string) => {
+    const { data } = await client.delete(`/conciliacion/match/${lineId}`)
     return data
   },
 }

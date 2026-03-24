@@ -395,6 +395,17 @@ async function runAutoMigrations() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_role_templates_company ON role_templates(company_id)`);
 
+    // --- Multi-currency support ---
+    try { await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS amount_foreign DECIMAL(12,2)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT 'ARS'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`); } catch (_) {}
+
     // --- Accounting report indexes (tables may not exist yet on first boot) ---
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoices_company_status_date ON invoices(company_id, status, invoice_date)`); } catch (_) {}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchases_company_status_date ON purchases(company_id, status, date)`); } catch (_) {}
@@ -1102,6 +1113,80 @@ async function runAutoMigrations() {
       `);
     } catch (_) {}
 
+    // --- Retenciones (tax withholdings: IIBB, Ganancias, IVA, SUSS) ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS retenciones (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        type VARCHAR(20) NOT NULL,
+        regime VARCHAR(100),
+        enterprise_id UUID REFERENCES enterprises(id),
+        pago_id UUID REFERENCES pagos(id) ON DELETE SET NULL,
+        base_amount DECIMAL(12,2) NOT NULL,
+        rate DECIMAL(8,4) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        certificate_number VARCHAR(50),
+        date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        period VARCHAR(7),
+        created_by UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_company ON retenciones(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_enterprise ON retenciones(enterprise_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_pago ON retenciones(pago_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_period ON retenciones(company_id, period)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS padron_retenciones (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        source VARCHAR(20) NOT NULL,
+        cuit VARCHAR(20) NOT NULL,
+        regime VARCHAR(100),
+        rate DECIMAL(8,4),
+        valid_from DATE,
+        valid_to DATE,
+        uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(company_id, source, cuit, regime)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_padron_company ON padron_retenciones(company_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_padron_cuit ON padron_retenciones(company_id, cuit)`);
+
+    // ===== BANK RECONCILIATION (conciliacion bancaria) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bank_statements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id),
+        bank_id UUID REFERENCES banks(id),
+        period VARCHAR(7),
+        file_name VARCHAR(255),
+        total_lines INTEGER DEFAULT 0,
+        matched_lines INTEGER DEFAULT 0,
+        uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_bank_statements_company ON bank_statements(company_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bank_statement_lines (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        statement_id UUID NOT NULL REFERENCES bank_statements(id) ON DELETE CASCADE,
+        line_date DATE NOT NULL,
+        description TEXT,
+        amount DECIMAL(12,2) NOT NULL,
+        reference VARCHAR(100),
+        matched_type VARCHAR(20),
+        matched_id UUID,
+        match_confidence DECIMAL(3,2),
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_bsl_statement ON bank_statement_lines(statement_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_bsl_status ON bank_statement_lines(status)`);
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
@@ -1168,6 +1253,9 @@ async function applyRowLevelSecurity() {
     'product_prices',
     'business_units',
     'purchase_invoices',
+    'retenciones',
+    'padron_retenciones',
+    'bank_statements',
   ];
 
   for (const table of tablesWithCompanyId) {
