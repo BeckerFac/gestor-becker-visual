@@ -131,29 +131,27 @@ export class CuentaCorrienteService {
         const ajustesDebit = parseFloat(r.total_ajustes_debit || '0');
         const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
 
-        // NEW LOGIC: Adelantos are SEPARATE — NOT subtracted from debt
+        // LOGIC: Balance reflects CASH REALITY (all money in/out)
+        // "Sin asociar" is informational only — the money already moved
         //
-        // Facturas pendientes de cobro = facturas emitidas - cobros aplicados a esas facturas
-        // (Solo deuda real de facturas concretas, siempre >= 0)
-        const deudaCliente = Math.max(ventas + ajustesDebit - cobrosAplicados - ajustesCredit, 0);
-        //
-        // Adelantos recibidos = plata que nos dieron sin factura (se muestra APARTE)
-        // NO es deuda nuestra — es crédito del cliente para aplicar a futuras facturas
-        const adelantosRecibidos = adelantosCobros;
-        //
-        // Facturas de compra pendientes = compras facturadas - pagos aplicados
-        const deudaProveedor = Math.max(compras - pagosAplicados, 0);
-        //
-        // Adelantos a proveedor = pagos sin factura (se muestra APARTE)
-        const adelantosEntregados = adelantosPagos;
+        const totalCobros = cobrosAplicados + adelantosCobros;
+        const totalPagos = pagosAplicados + adelantosPagos;
 
-        // Saldo neto = deuda_cliente - deuda_proveedor
-        // (no incluye adelantos porque son operaciones separadas)
-        const saldoNeto = deudaCliente - deudaProveedor;
+        // Facturas pendientes (paper debt — only applied cobros reduce this)
+        const pendienteCobro = Math.max(ventas + ajustesDebit - cobrosAplicados - ajustesCredit, 0);
+        const pendientePago = Math.max(compras - pagosAplicados, 0);
+
+        // Cobros/pagos sin factura asociada (info: "ir a vincular en Cobros/Pagos")
+        const cobrosNoAsociados = adelantosCobros;
+        const pagosNoAsociados = adelantosPagos;
+
+        // Balance REAL = todo el dinero que entró - todo el dinero que salió
+        // Incluye cobros y pagos sin asociar porque la plata ya se movió
+        const balanceReal = (ventas + ajustesDebit - totalCobros - ajustesCredit) - (compras - totalPagos);
 
         // Legacy compat
-        const aCobrar = deudaCliente;
-        const aPagar = deudaProveedor;
+        const aCobrar = pendienteCobro;
+        const aPagar = pendientePago;
 
         // Relationship type
         const hasVentas = ventas > 0 || cobrosAplicados > 0 || adelantosCobros > 0;
@@ -163,24 +161,26 @@ export class CuentaCorrienteService {
         return {
           ...r,
           total_ventas: ventas,
-          total_cobros: cobrosAplicados,
+          total_cobros: totalCobros,
           total_cobros_aplicados: cobrosAplicados,
-          adelantos_cobros: adelantosRecibidos,
+          cobros_no_asociados: cobrosNoAsociados,
+          adelantos_cobros: cobrosNoAsociados,
           total_compras: compras,
-          total_pagos: pagosAplicados,
+          total_pagos: totalPagos,
           total_pagos_aplicados: pagosAplicados,
-          adelantos_pagos: adelantosEntregados,
+          pagos_no_asociados: pagosNoAsociados,
+          adelantos_pagos: pagosNoAsociados,
           a_cobrar: aCobrar,
           a_pagar: aPagar,
-          saldo: saldoNeto,
+          saldo: balanceReal,
           // Semantic fields
-          deuda_cliente: deudaCliente,
-          credito_cliente: 0, // Adelantos ya no se muestran como "crédito" — se muestran aparte
-          deuda_proveedor: deudaProveedor,
+          deuda_cliente: pendienteCobro,
+          credito_cliente: 0,
+          deuda_proveedor: pendientePago,
           credito_proveedor: 0,
-          adelantos_recibidos: adelantosRecibidos,
-          adelantos_entregados: adelantosEntregados,
-          saldo_neto: saldoNeto,
+          adelantos_recibidos: cobrosNoAsociados,
+          adelantos_entregados: pagosNoAsociados,
+          saldo_neto: balanceReal,
           tipo,
         };
       });

@@ -463,18 +463,18 @@ export const CuentaCorriente: React.FC = () => {
         {totalAdelantosRecibidos > 0 && (
           <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Adelantos Recibidos</p>
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Cobros Sin Asociar</p>
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalAdelantosRecibidos)}</p>
-              <p className="text-[10px] text-blue-500 mt-0.5">Cobros sin factura asignada</p>
+              <p className="text-[10px] text-blue-500 mt-0.5">Cobros no vinculados a facturas — chequear en Cobros</p>
             </CardContent>
           </Card>
         )}
         {totalAdelantosEntregados > 0 && (
           <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Adelantos a Proveedores</p>
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Pagos Sin Asociar</p>
               <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalAdelantosEntregados)}</p>
-              <p className="text-[10px] text-amber-500 mt-0.5">Pagos sin factura asignada</p>
+              <p className="text-[10px] text-amber-500 mt-0.5">Pagos no vinculados a facturas — chequear en Pagos</p>
             </CardContent>
           </Card>
         )}
@@ -515,8 +515,8 @@ export const CuentaCorriente: React.FC = () => {
                   <th className="px-4 py-3 text-center">Tipo</th>
                   <th className="px-4 py-3 text-right">Pend. Cobro</th>
                   <th className="px-4 py-3 text-right">Pend. Pago</th>
-                  <th className="px-4 py-3 text-right">Adelantos</th>
-                  <th className="px-4 py-3 text-center">Neto</th>
+                  <th className="px-4 py-3 text-right" title="Cobros/pagos no vinculados a facturas. La plata ya se movio, cuenta en el balance.">Sin Asociar</th>
+                  <th className="px-4 py-3 text-center">Balance</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
@@ -558,19 +558,19 @@ export const CuentaCorriente: React.FC = () => {
                           <span className="font-bold text-red-600 dark:text-red-400">{fmt(deudaProv)}</span>
                         ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
                       </td>
-                      {/* Adelantos (separados, no restan de deuda) */}
-                      <td className="px-4 py-3 text-right">
+                      {/* Sin Asociar (cobros/pagos sin factura — la plata ya se movio, cuenta en balance) */}
+                      <td className="px-4 py-3 text-right" title="Cobros/pagos sin factura vinculada. Ir a Cobros o Pagos para asociar.">
                         {(() => {
-                          const advRec = (r as any).adelantos_recibidos || r.adelantos_cobros || 0
-                          const advEnt = (r as any).adelantos_entregados || r.adelantos_pagos || 0
+                          const advRec = (r as any).cobros_no_asociados || (r as any).adelantos_recibidos || r.adelantos_cobros || 0
+                          const advEnt = (r as any).pagos_no_asociados || (r as any).adelantos_entregados || r.adelantos_pagos || 0
                           if (advRec > 0 && advEnt > 0) return (
                             <div className="text-xs">
-                              <span className="text-blue-600">Rec: {fmt(advRec)}</span>
-                              <span className="block text-amber-600">Ent: {fmt(advEnt)}</span>
+                              <span className="text-blue-600" title="Cobros sin factura — chequear en Cobros">Cob: {fmt(advRec)}</span>
+                              <span className="block text-amber-600" title="Pagos sin factura — chequear en Pagos">Pag: {fmt(advEnt)}</span>
                             </div>
                           )
-                          if (advRec > 0) return <span className="text-xs font-medium text-blue-600 dark:text-blue-400">{fmt(advRec)}</span>
-                          if (advEnt > 0) return <span className="text-xs font-medium text-amber-600 dark:text-amber-400">{fmt(advEnt)}</span>
+                          if (advRec > 0) return <span className="text-xs font-medium text-blue-600 dark:text-blue-400" title="Cobros sin factura — chequear en Cobros">{fmt(advRec)}</span>
+                          if (advEnt > 0) return <span className="text-xs font-medium text-amber-600 dark:text-amber-400" title="Pagos sin factura — chequear en Pagos">{fmt(advEnt)}</span>
                           return <span className="text-gray-300 dark:text-gray-600">-</span>
                         })()}
                       </td>
