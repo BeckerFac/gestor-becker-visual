@@ -90,6 +90,7 @@ export class RetencionesService {
     date?: string;
     period?: string;
     direction?: 'practicada' | 'sufrida';
+    jurisdiction?: 'caba' | 'pba' | 'otra';
   }) {
     const validTypes = ['iibb', 'ganancias', 'iva', 'suss'];
     if (!validTypes.includes(data.type)) {
@@ -102,6 +103,13 @@ export class RetencionesService {
       throw new ApiError(400, 'La alicuota debe ser mayor o igual a 0');
     }
 
+    if (data.type === 'iibb' && !data.jurisdiction) {
+      throw new ApiError(400, 'Para retenciones IIBB debe especificar la jurisdiccion (caba, pba, otra)');
+    }
+    if (data.jurisdiction && !['caba', 'pba', 'otra'].includes(data.jurisdiction)) {
+      throw new ApiError(400, `Jurisdiccion invalida: ${data.jurisdiction}. Use: caba, pba, otra`);
+    }
+
     const id = uuid();
     const retencionDate = data.date || new Date().toISOString();
     // Auto-generate period from date if not provided (YYYY-MM)
@@ -109,12 +117,12 @@ export class RetencionesService {
 
     try {
       await db.execute(sql`
-        INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, cobro_id, base_amount, rate, amount, certificate_number, date, period, created_by, direction)
+        INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, cobro_id, base_amount, rate, amount, certificate_number, date, period, created_by, direction, jurisdiction)
         VALUES (
           ${id}, ${companyId}, ${data.type}, ${data.regime || null},
           ${data.enterprise_id || null}, ${data.pago_id || null}, ${data.cobro_id || null},
           ${data.base_amount.toString()}, ${data.rate.toString()}, ${data.amount.toString()},
-          ${data.certificate_number || null}, ${retencionDate}, ${period}, ${userId}, ${data.direction || null}
+          ${data.certificate_number || null}, ${retencionDate}, ${period}, ${userId}, ${data.direction || null}, ${data.jurisdiction || null}
         )
       `);
 

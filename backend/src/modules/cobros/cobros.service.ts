@@ -4,6 +4,22 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 
+interface PaymentMethodInput {
+  method: string;
+  amount: number;
+  bank_id?: string;
+  reference?: string;
+  cheque_data?: {
+    number: string;
+    bank: string;
+    drawer: string;
+    drawer_cuit?: string;
+    cheque_type: string;
+    issue_date: string;
+    due_date: string;
+  };
+}
+
 /**
  * CobrosService handles payment collection (cobranzas).
  *
@@ -105,6 +121,14 @@ export class CobrosService {
           ), '[]'::json) as linked_invoices,
           -- Total assigned to invoices
           COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 WHERE cia2.cobro_id = c.id), 0) as total_assigned,
+          -- Payment methods breakdown
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'id', rpm.id, 'method', rpm.method, 'amount', CAST(rpm.amount AS decimal),
+              'bank_id', rpm.bank_id, 'reference', rpm.reference, 'cheque_data', rpm.cheque_data
+            )) FROM receipt_payment_methods rpm WHERE rpm.cobro_id = c.id),
+            '[]'::json
+          ) as payment_methods,
           -- Enterprise tags
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags
         FROM cobros c
@@ -127,6 +151,33 @@ export class CobrosService {
     if (methodsRequiringBank.includes(data.payment_method) && !data.bank_id) {
       throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia o cheque');
     }
+
+    // B.1.2: Parse payment_methods with backward compat
+    const paymentMethods: PaymentMethodInput[] = data.payment_methods
+      ? data.payment_methods.map((pm: any) => ({
+          method: pm.method,
+          amount: parseFloat(pm.amount?.toString() || '0'),
+          bank_id: pm.bank_id,
+          reference: pm.reference,
+          cheque_data: pm.cheque_data,
+        }))
+      : [{
+          method: data.payment_method || 'efectivo',
+          amount: parseFloat(data.amount?.toString() || '0'),
+          bank_id: data.bank_id,
+          reference: data.reference,
+          cheque_data: data.cheque_data,
+        }];
+
+    // B.1.3: Validate SUM == total
+    const pmTotal = paymentMethods.reduce((s, pm) => s + pm.amount, 0);
+    const cobroAmount = parseFloat(data.amount?.toString() || '0');
+    if (Math.abs(pmTotal - cobroAmount) > 0.01) {
+      throw new ApiError(400, `Suma de formas de pago ($${pmTotal.toFixed(2)}) no coincide con total ($${cobroAmount.toFixed(2)})`);
+    }
+
+    // B.1.4: summaryMethod for the cobro header
+    const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
 
     try {
       const cobroId = uuid();
@@ -153,8 +204,17 @@ export class CobrosService {
 
       await db.execute(sql`
         INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${totalAmount.toString()}, ${data.payment_method}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
       `);
+
+      // B.1.4: Insert receipt_payment_methods for each payment method
+      for (const pm of paymentMethods) {
+        await db.execute(sql`
+          INSERT INTO receipt_payment_methods (cobro_id, method, amount, bank_id, reference, cheque_data)
+          VALUES (${cobroId}, ${pm.method}, ${pm.amount}, ${pm.bank_id || null}, ${pm.reference || null},
+                  ${pm.cheque_data ? JSON.stringify(pm.cheque_data) : null}::jsonb)
+        `);
+      }
 
       // Create retenciones sufridas linked to this cobro
       if (data.retenciones_sufridas && Array.isArray(data.retenciones_sufridas) && data.retenciones_sufridas.length > 0) {
@@ -168,14 +228,16 @@ export class CobrosService {
         }
       }
 
-      // Create cheque if payment method is cheque and cheque_data provided
-      if (data.payment_method === 'cheque' && data.cheque_data) {
-        const cd = data.cheque_data;
-        if (cd.number && cd.bank && cd.drawer && cd.issue_date && cd.due_date) {
-          const chequeId = uuid();
+      // B.1.5: Create cheques for each payment method that is cheque
+      for (const pm of paymentMethods) {
+        if (pm.method === 'cheque' && pm.cheque_data) {
           await db.execute(sql`
-            INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, business_unit_id, created_by)
-            VALUES (${chequeId}, ${companyId}, ${cd.number}, ${cd.bank}, ${cd.drawer}, ${cd.drawer_cuit || null}, ${cd.cheque_type || 'comun'}, ${data.amount.toString()}, ${cd.issue_date}, ${cd.due_date}, 'a_cobrar', ${cobroId}, ${data.business_unit_id || null}, ${userId})
+            INSERT INTO cheques (company_id, enterprise_id, cobro_id, cheque_number, bank_name,
+              amount, issue_date, payment_date, issuer_name, issuer_cuit, status, tipo, business_unit_id)
+            VALUES (${companyId}, ${data.enterprise_id}, ${cobroId}, ${pm.cheque_data.number},
+              ${pm.cheque_data.bank}, ${pm.amount}, ${pm.cheque_data.issue_date},
+              ${pm.cheque_data.due_date}, ${pm.cheque_data.drawer}, ${pm.cheque_data.drawer_cuit || null},
+              'a_cobrar', ${pm.cheque_data.cheque_type || 'comun'}, ${data.business_unit_id || null})
           `);
         }
       }
@@ -232,7 +294,7 @@ export class CobrosService {
           company_id: companyId,
           date: data.payment_date || new Date().toISOString(),
           amount: data.amount,
-          payment_method: data.payment_method,
+          payment_method: summaryMethod,
           bank_id: data.bank_id,
           pending_status: pendingStatus,
         });
