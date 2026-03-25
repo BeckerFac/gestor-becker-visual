@@ -50,7 +50,7 @@ export class CuentaCorrienteService {
           -- Adelantos cobros (monto NO asignado de cobros pending)
           COALESCE((
             SELECT SUM(
-              CAST(co.amount AS decimal) - COALESCE((
+              CAST(COALESCE(co.total_amount, co.amount) AS decimal) - COALESCE((
                 SELECT SUM(CAST(cia_inner.amount_applied AS decimal))
                 FROM cobro_invoice_applications cia_inner
                 WHERE cia_inner.cobro_id = co.id
@@ -86,7 +86,7 @@ export class CuentaCorrienteService {
           -- Adelantos pagos (monto NO asignado de pagos pending)
           COALESCE((
             SELECT SUM(
-              CAST(pa.amount AS decimal) - COALESCE((
+              CAST(COALESCE(pa.total_amount, pa.amount) AS decimal) - COALESCE((
                 SELECT SUM(CAST(pia_inner.amount_applied AS decimal))
                 FROM pago_invoice_applications pia_inner
                 WHERE pia_inner.pago_id = pa.id
@@ -266,7 +266,7 @@ export class CuentaCorrienteService {
         adelantosResult = await db.execute(sql`
           SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
             'Adelanto' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
-            CAST(COALESCE(co.amount, 0) AS decimal) - COALESCE((
+            CAST(COALESCE(co.total_amount, co.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(cia_d.amount_applied AS decimal)) FROM cobro_invoice_applications cia_d WHERE cia_d.cobro_id = co.id
             ), 0) as monto
           FROM cobros co
@@ -352,7 +352,7 @@ export class CuentaCorrienteService {
         adelantosPagosResult = await db.execute(sql`
           SELECT pa.id, 'adelanto_pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
             'Adelanto pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
-            CAST(COALESCE(pa.amount, 0) AS decimal) - COALESCE((
+            CAST(COALESCE(pa.total_amount, pa.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(pia_d.amount_applied AS decimal)) FROM pago_invoice_applications pia_d WHERE pia_d.pago_id = pa.id
             ), 0) as monto
           FROM pagos pa
@@ -486,7 +486,7 @@ export class CuentaCorrienteService {
         allAdelantos = await db.execute(sql`
           SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
             'Adelanto' || COALESCE(' — ' || co.payment_method, '') as descripcion,
-            CAST(COALESCE(co.amount, 0) AS decimal) - COALESCE((
+            CAST(COALESCE(co.total_amount, co.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(cia_p.amount_applied AS decimal)) FROM cobro_invoice_applications cia_p WHERE cia_p.cobro_id = co.id
             ), 0) as monto
           FROM cobros co

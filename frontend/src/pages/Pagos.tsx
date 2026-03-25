@@ -982,7 +982,7 @@ export const Pagos: React.FC = () => {
                           <button
                             onClick={() => setLinkingPago({
                               id: pago.id,
-                              amount: parseFloat(pago.amount || '0'),
+                              amount: Number(pago.total_amount || pago.amount || 0),
                               enterprise_id: pago.enterprise_id || undefined,
                             })}
                             className="text-purple-600 hover:text-purple-800 text-xs font-medium transition-colors"

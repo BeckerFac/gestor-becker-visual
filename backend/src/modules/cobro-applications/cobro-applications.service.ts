@@ -91,9 +91,14 @@ export class CobroApplicationsService {
     // Recalculate invoice payment_status
     await this.recalculateInvoicePaymentStatus(invoiceId);
 
-    // Recalculate order payment_status if invoice has order_id
-    if (invoice.order_id) {
-      await this.recalculateOrderPaymentStatusFromInvoices(invoice.order_id);
+    // Recalculate order payment_status for ALL linked orders (via invoice_orders + legacy order_id)
+    const linkedOrderIds = await db.execute(sql`
+      SELECT order_id FROM invoice_orders WHERE invoice_id = ${invoiceId}
+      UNION
+      SELECT order_id FROM invoices WHERE id = ${invoiceId} AND order_id IS NOT NULL
+    `);
+    for (const row of ((linkedOrderIds as any).rows || [])) {
+      await this.recalculateOrderPaymentStatusFromInvoices(row.order_id);
     }
 
     // Update cobro pending_status: once ANY invoice is linked, it's no longer "pending_invoice"
@@ -140,12 +145,14 @@ export class CobroApplicationsService {
     // Recalculate invoice payment_status
     await this.recalculateInvoicePaymentStatus(invoiceId);
 
-    // Recalculate order payment_status
-    const invoiceResult = await db.execute(sql`
-      SELECT order_id FROM invoices WHERE id = ${invoiceId}
+    // Recalculate order payment_status for ALL linked orders (via invoice_orders + legacy order_id)
+    const orderIdsResult = await db.execute(sql`
+      SELECT order_id FROM invoice_orders WHERE invoice_id = ${invoiceId}
+      UNION
+      SELECT order_id FROM invoices WHERE id = ${invoiceId} AND order_id IS NOT NULL
     `);
-    const orderId = ((invoiceResult as any).rows || [])[0]?.order_id;
-    if (orderId) {
+    const orderIds = ((orderIdsResult as any).rows || []).map((r: any) => r.order_id);
+    for (const orderId of orderIds) {
       await this.recalculateOrderPaymentStatusFromInvoices(orderId);
     }
 
@@ -227,12 +234,12 @@ export class CobroApplicationsService {
   async getCobroUnallocatedBalance(cobroId: string): Promise<number> {
     const result = await db.execute(sql`
       SELECT
-        CAST(c.amount AS decimal) as total,
+        CAST(COALESCE(c.total_amount, c.amount) AS decimal) as total,
         COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as allocated
       FROM cobros c
       LEFT JOIN cobro_invoice_applications cia ON cia.cobro_id = c.id
       WHERE c.id = ${cobroId}
-      GROUP BY c.id, c.amount
+      GROUP BY c.id, c.total_amount, c.amount
     `);
     const row = ((result as any).rows || [])[0];
     if (!row) return 0;
@@ -274,7 +281,7 @@ export class CobroApplicationsService {
    */
   async getCobroBalanceDetail(companyId: string, cobroId: string) {
     const cobroResult = await db.execute(sql`
-      SELECT c.id, c.amount, c.payment_method, c.payment_date, c.pending_status,
+      SELECT c.id, c.amount, c.total_amount, c.payment_method, c.payment_date, c.pending_status,
         e.name as enterprise_name
       FROM cobros c
       LEFT JOIN enterprises e ON c.enterprise_id = e.id
@@ -290,7 +297,7 @@ export class CobroApplicationsService {
 
     return {
       cobro_id: cobroId,
-      total_amount: parseFloat(cobro.amount),
+      total_amount: parseFloat(cobro.total_amount || cobro.amount),
       total_allocated: totalAllocated,
       unallocated,
       pending_status: cobro.pending_status,
@@ -343,8 +350,17 @@ export class CobroApplicationsService {
           CAST(o.total_amount AS decimal) as order_total,
           COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
         FROM orders o
-        LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
-        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        LEFT JOIN (
+          SELECT DISTINCT io.order_id, i.id as invoice_id
+          FROM invoices i
+          JOIN invoice_orders io ON io.invoice_id = i.id
+          WHERE i.status != 'cancelled'
+          UNION
+          SELECT i.order_id, i.id as invoice_id
+          FROM invoices i
+          WHERE i.order_id IS NOT NULL AND i.status != 'cancelled'
+        ) inv ON inv.order_id = o.id
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = inv.invoice_id
         WHERE o.id = ${orderId}
         GROUP BY o.id, o.total_amount
       `);
@@ -452,7 +468,7 @@ export class CobroApplicationsService {
       SELECT c.*,
         e.name as enterprise_name,
         b.bank_name,
-        c.amount - COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.cobro_id = c.id), 0) as unallocated_balance
+        COALESCE(c.total_amount, c.amount) - COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.cobro_id = c.id), 0) as unallocated_balance
       FROM cobros c
       LEFT JOIN enterprises e ON c.enterprise_id = e.id
       LEFT JOIN banks b ON c.bank_id = b.id

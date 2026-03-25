@@ -181,12 +181,12 @@ export class PagoApplicationsService {
   async getPagoUnallocatedBalance(pagoId: string): Promise<number> {
     const result = await db.execute(sql`
       SELECT
-        CAST(p.amount AS decimal) as total,
+        CAST(COALESCE(p.total_amount, p.amount) AS decimal) as total,
         COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as allocated
       FROM pagos p
       LEFT JOIN pago_invoice_applications pia ON pia.pago_id = p.id
       WHERE p.id = ${pagoId}
-      GROUP BY p.id, p.amount
+      GROUP BY p.id, p.total_amount, p.amount
     `);
     const row = ((result as any).rows || [])[0];
     if (!row) return 0;
@@ -268,14 +268,14 @@ export class PagoApplicationsService {
   async getCreditoProveedorDisponible(companyId: string, enterpriseId: string) {
     const result = await db.execute(sql`
       SELECT p.id, p.receipt_number, p.payment_date, p.payment_method,
-        CAST(p.amount AS decimal) as pago_total,
+        CAST(COALESCE(p.total_amount, p.amount) AS decimal) as pago_total,
         COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as aplicado,
-        CAST(p.amount AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as disponible
+        CAST(COALESCE(p.total_amount, p.amount) AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as disponible
       FROM pagos p
       LEFT JOIN pago_invoice_applications pia ON pia.pago_id = p.id
       WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
       GROUP BY p.id
-      HAVING CAST(p.amount AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) > 0.01
+      HAVING CAST(COALESCE(p.total_amount, p.amount) AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) > 0.01
       ORDER BY p.payment_date ASC
     `);
     return (result as any).rows || [];
@@ -341,7 +341,7 @@ export class PagoApplicationsService {
       SELECT p.*,
         e.name as enterprise_name,
         b.bank_name,
-        p.amount - COALESCE((SELECT SUM(CAST(pia.amount_applied AS decimal)) FROM pago_invoice_applications pia WHERE pia.pago_id = p.id), 0) as unallocated_balance
+        COALESCE(p.total_amount, p.amount) - COALESCE((SELECT SUM(CAST(pia.amount_applied AS decimal)) FROM pago_invoice_applications pia WHERE pia.pago_id = p.id), 0) as unallocated_balance
       FROM pagos p
       LEFT JOIN enterprises e ON p.enterprise_id = e.id
       LEFT JOIN banks b ON p.bank_id = b.id

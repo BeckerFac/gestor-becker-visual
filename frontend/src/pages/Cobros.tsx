@@ -349,7 +349,7 @@ export const Cobros: React.FC = () => {
         ...c,
         receipt_number: c.receipt_number || 0,
         payment_date: c.payment_date,
-        total_amount: c.amount,
+        total_amount: c.total_amount ?? c.amount,
         items: c.linked_invoices || [],
       }))
       setReceipts(unifiedReceipts)
