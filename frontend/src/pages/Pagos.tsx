@@ -198,7 +198,7 @@ export const Pagos: React.FC = () => {
     }
   }, [form.enterprise_id])
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true)
       const [pagosRes, entRes, purchRes, bankRes, chequesRes] = await Promise.all([
@@ -221,9 +221,9 @@ export const Pagos: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterEnterprise])
 
-  useEffect(() => { loadData() }, [filterEnterprise])
+  useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
 
   // Load purchase invoices for selected enterprise (for linking)
