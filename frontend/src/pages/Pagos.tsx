@@ -26,6 +26,7 @@ interface Pago {
   purchase_id: string | null
   purchase_number: number | null
   amount: string
+  total_amount?: string
   payment_method: string
   bank_name: string | null
   reference: string | null
