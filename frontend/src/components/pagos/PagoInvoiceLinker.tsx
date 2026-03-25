@@ -90,11 +90,11 @@ export const PagoInvoiceLinker: React.FC<PagoInvoiceLinkerProps> = ({
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Vincular pago a facturas de compra</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Vincular orden de pago a facturas de compra</h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xl">&times;</button>
           </div>
           <div className="mt-2 flex gap-4 text-sm">
-            <span className="text-gray-500">Monto pago: <span className="font-medium text-gray-900 dark:text-gray-100">{fmt(pagoAmount)}</span></span>
+            <span className="text-gray-500">Monto orden de pago: <span className="font-medium text-gray-900 dark:text-gray-100">{fmt(pagoAmount)}</span></span>
             <span className={cn('font-medium', remaining > 0 ? 'text-yellow-600' : remaining === 0 ? 'text-green-600' : 'text-red-600')}>
               Sin asignar: {fmt(remaining)}
             </span>
@@ -106,7 +106,7 @@ export const PagoInvoiceLinker: React.FC<PagoInvoiceLinkerProps> = ({
           <div className="mx-6 mt-4 px-4 py-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="text-sm text-purple-800 dark:text-purple-200">
-                Este proveedor tiene <span className="font-bold">{formatCurrency(creditoDisponible)}</span> de credito disponible de pagos anteriores
+                Este proveedor tiene <span className="font-bold">{formatCurrency(creditoDisponible)}</span> de credito disponible de ordenes de pago anteriores
               </div>
             </div>
           </div>

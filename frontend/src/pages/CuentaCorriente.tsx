@@ -83,11 +83,11 @@ const tipoLabels: Record<string, string> = {
   factura: 'Factura',
   venta: 'Factura',
   factura_compra: 'Fact. Compra',
-  cobro: 'Cobro',
-  adelanto: 'Adelanto',
-  adelanto_pago: 'Adelanto',
+  cobro: 'Recibo',
+  adelanto: 'Recibo (a favor)',
+  adelanto_pago: 'OP (a favor)',
   compra: 'Compra',
-  pago: 'Pago',
+  pago: 'Orden de Pago',
   ajuste: 'Ajuste',
   retencion_sufrida: 'Ret. Sufrida',
   retencion_practicada: 'Ret. Practicada',
@@ -397,7 +397,7 @@ export const CuentaCorriente: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cuenta Corriente</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Balance por empresa — facturas AFIP, compras, cobros y pagos
+            Balance por empresa — facturas AFIP, compras, recibos y ordenes de pago
           </p>
         </div>
         <ExportCSVButton
@@ -416,10 +416,10 @@ export const CuentaCorriente: React.FC = () => {
             { key: 'empresa', label: 'Empresa' },
             { key: 'cuit', label: 'CUIT' },
             { key: 'facturado', label: 'Facturado AFIP' },
-            { key: 'cobros', label: 'Cobros' },
+            { key: 'cobros', label: 'Recibos' },
             { key: 'a_cobrar', label: 'A Cobrar' },
             { key: 'compras', label: 'Compras' },
-            { key: 'pagos', label: 'Pagos' },
+            { key: 'pagos', label: 'Ordenes de Pago' },
             { key: 'a_pagar', label: 'A Pagar' },
             { key: 'balance', label: 'Balance' },
           ]}
@@ -441,10 +441,10 @@ export const CuentaCorriente: React.FC = () => {
             { key: 'empresa', label: 'Empresa' },
             { key: 'cuit', label: 'CUIT' },
             { key: 'facturado', label: 'Facturado AFIP', type: 'currency' as const },
-            { key: 'cobros', label: 'Cobros', type: 'currency' as const },
+            { key: 'cobros', label: 'Recibos', type: 'currency' as const },
             { key: 'a_cobrar', label: 'A Cobrar', type: 'currency' as const },
             { key: 'compras', label: 'Compras', type: 'currency' as const },
-            { key: 'pagos', label: 'Pagos', type: 'currency' as const },
+            { key: 'pagos', label: 'Ordenes de Pago', type: 'currency' as const },
             { key: 'a_pagar', label: 'A Pagar', type: 'currency' as const },
             { key: 'balance', label: 'Balance', type: 'currency' as const },
           ]}
@@ -471,12 +471,12 @@ export const CuentaCorriente: React.FC = () => {
         {totalAdelantosRecibidos > 0 && (
           <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Cobros Sin Asociar</p>
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Recibos Sin Asociar</p>
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{fmt(totalAdelantosRecibidos)}</p>
               <div className="flex items-center justify-between mt-0.5">
-                <p className="text-[10px] text-blue-500">Cobros no vinculados a facturas</p>
+                <p className="text-[10px] text-blue-500">Recibos no vinculados a facturas</p>
                 <Link to="/cobros" className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 underline">
-                  Ver en Cobros
+                  Ver en Recibos
                 </Link>
               </div>
             </CardContent>
@@ -485,12 +485,12 @@ export const CuentaCorriente: React.FC = () => {
         {totalAdelantosEntregados > 0 && (
           <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Pagos Sin Asociar</p>
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">OP Sin Asociar</p>
               <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{fmt(totalAdelantosEntregados)}</p>
               <div className="flex items-center justify-between mt-0.5">
-                <p className="text-[10px] text-amber-500">Pagos no vinculados a facturas</p>
+                <p className="text-[10px] text-amber-500">Ordenes de pago no vinculadas a facturas</p>
                 <Link to="/pagos" className="text-[10px] font-semibold text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 underline">
-                  Ver en Pagos
+                  Ver en Ordenes de Pago
                 </Link>
               </div>
             </CardContent>
@@ -514,10 +514,10 @@ export const CuentaCorriente: React.FC = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-sm text-blue-700 dark:text-blue-300">
-            Hay cobros por <span className="font-semibold">{fmt(totalAdelantosRecibidos)}</span> sin factura asociada.
-            Estos cobros ya figuran en el balance pero no estan vinculados a ninguna factura de venta.{' '}
+            Hay recibos por <span className="font-semibold">{fmt(totalAdelantosRecibidos)}</span> sin factura asociada.
+            Estos recibos ya figuran en el balance pero no estan vinculados a ninguna factura de venta.{' '}
             <Link to="/cobros" className="font-semibold underline hover:text-blue-900 dark:hover:text-blue-100">
-              Ir a Cobros para vincularlos
+              Ir a Recibos para vincularlos
             </Link>
           </p>
         </div>
@@ -528,10 +528,10 @@ export const CuentaCorriente: React.FC = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-sm text-amber-700 dark:text-amber-300">
-            Hay pagos por <span className="font-semibold">{fmt(totalAdelantosEntregados)}</span> sin factura asociada.
-            Estos pagos ya figuran en el balance pero no estan vinculados a ninguna factura de compra.{' '}
+            Hay ordenes de pago por <span className="font-semibold">{fmt(totalAdelantosEntregados)}</span> sin factura asociada.
+            Estas ordenes de pago ya figuran en el balance pero no estan vinculadas a ninguna factura de compra.{' '}
             <Link to="/pagos" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
-              Ir a Pagos para vincularlos
+              Ir a Ordenes de Pago para vincularlas
             </Link>
           </p>
         </div>
@@ -551,7 +551,7 @@ export const CuentaCorriente: React.FC = () => {
       ) : resumen.length === 0 ? (
         <EmptyState
           title="Sin movimientos"
-          description="Registra pedidos, compras, cobros o pagos para ver la cuenta corriente"
+          description="Registra pedidos, compras, recibos u ordenes de pago para ver la cuenta corriente"
         />
       ) : (
         <Card>
@@ -563,7 +563,7 @@ export const CuentaCorriente: React.FC = () => {
                   <th className="px-4 py-3 text-center">Tipo</th>
                   <th className="px-4 py-3 text-right">Pend. Cobro</th>
                   <th className="px-4 py-3 text-right">Pend. Pago</th>
-                  <th className="px-4 py-3 text-right" title="Cobros/pagos no vinculados a facturas. La plata ya se movio, cuenta en el balance.">Sin Asociar</th>
+                  <th className="px-4 py-3 text-right" title="Recibos/OP no vinculados a facturas. La plata ya se movio, cuenta en el balance.">Sin Asociar</th>
                   <th className="px-4 py-3 text-center">Balance</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
@@ -607,18 +607,18 @@ export const CuentaCorriente: React.FC = () => {
                         ) : <span className="text-gray-300 dark:text-gray-600">-</span>}
                       </td>
                       {/* Sin Asociar (cobros/pagos sin factura — la plata ya se movio, cuenta en balance) */}
-                      <td className="px-4 py-3 text-right" title="Cobros/pagos sin factura vinculada. Ir a Cobros o Pagos para asociar.">
+                      <td className="px-4 py-3 text-right" title="Recibos/OP sin factura vinculada. Ir a Recibos u Ordenes de Pago para asociar.">
                         {(() => {
                           const advRec = (r as any).cobros_no_asociados || (r as any).adelantos_recibidos || r.adelantos_cobros || 0
                           const advEnt = (r as any).pagos_no_asociados || (r as any).adelantos_entregados || r.adelantos_pagos || 0
                           if (advRec > 0 && advEnt > 0) return (
                             <div className="text-xs" onClick={(e) => e.stopPropagation()}>
-                              <Link to="/cobros" className="text-blue-600 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Cobros sin factura — ir a Cobros para vincular">Cob: {fmt(advRec)}</Link>
-                              <Link to="/pagos" className="block text-amber-600 hover:text-amber-800 dark:hover:text-amber-300 underline" title="Pagos sin factura — ir a Pagos para vincular">Pag: {fmt(advEnt)}</Link>
+                              <Link to="/cobros" className="text-blue-600 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Recibos sin factura — ir a Recibos para vincular">Rec: {fmt(advRec)}</Link>
+                              <Link to="/pagos" className="block text-amber-600 hover:text-amber-800 dark:hover:text-amber-300 underline" title="OP sin factura — ir a Ordenes de Pago para vincular">OP: {fmt(advEnt)}</Link>
                             </div>
                           )
-                          if (advRec > 0) return <Link to="/cobros" className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Cobros sin factura — ir a Cobros para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advRec)}</Link>
-                          if (advEnt > 0) return <Link to="/pagos" className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 underline" title="Pagos sin factura — ir a Pagos para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advEnt)}</Link>
+                          if (advRec > 0) return <Link to="/cobros" className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline" title="Recibos sin factura — ir a Recibos para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advRec)}</Link>
+                          if (advEnt > 0) return <Link to="/pagos" className="text-xs font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 underline" title="OP sin factura — ir a Ordenes de Pago para vincular" onClick={(e) => e.stopPropagation()}>{fmt(advEnt)}</Link>
                           return <span className="text-gray-300 dark:text-gray-600">-</span>
                         })()}
                       </td>
@@ -742,7 +742,7 @@ export const CuentaCorriente: React.FC = () => {
                                   />
                                 ) : (
                                   <p className="text-sm text-gray-400 py-2">
-                                    Sin movimientos de ventas o cobros.
+                                    Sin movimientos de ventas o recibos.
                                   </p>
                                 )}
                               </div>
@@ -768,7 +768,7 @@ export const CuentaCorriente: React.FC = () => {
                                   />
                                 ) : (
                                   <p className="text-sm text-gray-400 py-2">
-                                    Sin movimientos de compras o pagos.
+                                    Sin movimientos de compras u ordenes de pago.
                                   </p>
                                 )}
                               </div>

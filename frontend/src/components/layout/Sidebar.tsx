@@ -64,8 +64,8 @@ const navSections: NavSection[] = [
   {
     label: 'Finanzas',
     items: [
-      { href: '/cobros', label: 'Cobros', icon: '💰', module: 'cobros' },
-      { href: '/pagos', label: 'Pagos', icon: '💸', module: 'pagos' },
+      { href: '/cobros', label: 'Recibos', icon: '💰', module: 'cobros' },
+      { href: '/pagos', label: 'Ordenes de Pago', icon: '💸', module: 'pagos' },
       { href: '/retenciones', label: 'Retenciones', icon: '📎', module: 'retenciones' },
       { href: '/cuenta-corriente', label: 'Cuenta Corriente', icon: '📒', module: 'cuenta_corriente' },
       { href: '/cheques', label: 'Cheques', icon: '📝', module: 'cheques' },
@@ -149,7 +149,7 @@ export const Sidebar: React.FC = () => {
           { name: 'Facturas', data: d.facturas, columns: genericCols(d.facturas) },
           { name: 'Cotizaciones', data: d.cotizaciones, columns: genericCols(d.cotizaciones) },
           { name: 'Cheques', data: d.cheques, columns: genericCols(d.cheques) },
-          { name: 'Cobros', data: d.cobros, columns: genericCols(d.cobros) },
+          { name: 'Recibos', data: d.cobros, columns: genericCols(d.cobros) },
           { name: 'Inventario', data: d.inventario, columns: genericCols(d.inventario) },
           { name: 'Compras', data: d.compras, columns: genericCols(d.compras) },
         ].filter(s => s.data.length > 0),

@@ -249,7 +249,7 @@ export class CuentaCorrienteService {
       try {
         cobrosResult = await db.execute(sql`
           SELECT cia.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '')
+            'Recibo' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '')
             || ' → Fact ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
             CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
           FROM cobro_invoice_applications cia
@@ -265,7 +265,7 @@ export class CuentaCorrienteService {
       try {
         adelantosResult = await db.execute(sql`
           SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Adelanto' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
+            'Recibo (sin factura)' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
             CAST(COALESCE(co.total_amount, co.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(cia_d.amount_applied AS decimal)) FROM cobro_invoice_applications cia_d WHERE cia_d.cobro_id = co.id
             ), 0) as monto
@@ -335,7 +335,7 @@ export class CuentaCorrienteService {
       try {
         pagosResult = await db.execute(sql`
           SELECT pia.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '')
+            'Orden de Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '')
             || ' → Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
             CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
           FROM pago_invoice_applications pia
@@ -351,7 +351,7 @@ export class CuentaCorrienteService {
       try {
         adelantosPagosResult = await db.execute(sql`
           SELECT pa.id, 'adelanto_pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'Adelanto pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
+            'OP (sin factura)' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
             CAST(COALESCE(pa.total_amount, pa.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(pia_d.amount_applied AS decimal)) FROM pago_invoice_applications pia_d WHERE pia_d.pago_id = pa.id
             ), 0) as monto
@@ -472,7 +472,7 @@ export class CuentaCorrienteService {
       try {
         allCobros = await db.execute(sql`
           SELECT cia.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Cobro' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
+            'Recibo' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
             CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
           FROM cobro_invoice_applications cia
           JOIN cobros co ON cia.cobro_id = co.id
@@ -485,7 +485,7 @@ export class CuentaCorrienteService {
       try {
         allAdelantos = await db.execute(sql`
           SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Adelanto' || COALESCE(' — ' || co.payment_method, '') as descripcion,
+            'Recibo (sin factura)' || COALESCE(' — ' || co.payment_method, '') as descripcion,
             CAST(COALESCE(co.total_amount, co.amount, 0) AS decimal) - COALESCE((
               SELECT SUM(CAST(cia_p.amount_applied AS decimal)) FROM cobro_invoice_applications cia_p WHERE cia_p.cobro_id = co.id
             ), 0) as monto
@@ -552,7 +552,7 @@ export class CuentaCorrienteService {
       try {
         allPagos = await db.execute(sql`
           SELECT pia.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
+            'Orden de Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
             CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
           FROM pago_invoice_applications pia
           JOIN pagos pa ON pia.pago_id = pa.id

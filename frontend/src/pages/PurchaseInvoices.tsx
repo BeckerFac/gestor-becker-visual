@@ -502,7 +502,7 @@ export const PurchaseInvoices: React.FC = () => {
                         <tr className="bg-purple-50/50 dark:bg-purple-950/20">
                           <td colSpan={10} className="px-6 py-4">
                             <div className="space-y-3">
-                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Pagos vinculados</h4>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Ordenes de pago vinculadas</h4>
                               {expandedPagos.length > 0 ? (
                                 <div className="space-y-1">
                                   {expandedPagos.map((pago: any) => (

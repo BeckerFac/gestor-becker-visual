@@ -367,7 +367,7 @@ export const Pagos: React.FC = () => {
         if (result.excess > 0) {
           toast.success(`Cheque endosado. Exceso de ${formatCurrency(result.excess)} registrado como credito a favor en CC`)
         } else {
-          toast.success('Pago con cheque endosado registrado')
+          toast.success('Orden de pago con cheque endosado registrada')
         }
       } else {
         // Build purchase_invoice_items from piAmounts
@@ -406,7 +406,7 @@ export const Pagos: React.FC = () => {
           exchange_rate: formCurrency !== 'ARS' ? formExchangeRate : undefined,
           retenciones: enabledRetenciones.length > 0 ? enabledRetenciones : undefined,
         })
-        toast.success('Pago registrado correctamente')
+        toast.success('Orden de pago registrada correctamente')
       }
       setShowForm(false)
       setSelectedChequeId('')
@@ -427,7 +427,7 @@ export const Pagos: React.FC = () => {
     setDeleting(true)
     try {
       await api.deletePago(deleteTarget.id)
-      toast.success('Pago eliminado')
+      toast.success('Orden de pago eliminada')
       setDeleteTarget(null)
       await loadData()
     } catch (e: any) {
@@ -497,15 +497,15 @@ export const Pagos: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Pagos</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pagos realizados a empresas</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ordenes de Pago</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Ordenes de pago a proveedores</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={filteredPagos} columns={csvColumns} filename="pagos" />
           <ExportExcelButton data={filteredPagos} columns={csvColumns} filename="pagos" />
           <PermissionGate module="pagos" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={() => setShowForm(!showForm)}>
-              {showForm ? 'Cancelar' : '+ Registrar Pago'}
+              {showForm ? 'Cancelar' : '+ Nueva Orden de Pago'}
             </Button>
           </PermissionGate>
         </div>
@@ -648,7 +648,7 @@ export const Pagos: React.FC = () => {
 
       {showForm && (
         <Card className="animate-fadeIn">
-          <CardHeader><h3 className="text-lg font-semibold">Registrar Pago</h3></CardHeader>
+          <CardHeader><h3 className="text-lg font-semibold">Registrar Orden de Pago</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex flex-col gap-1">
@@ -854,7 +854,7 @@ export const Pagos: React.FC = () => {
               </div>
 
               <div className="flex items-end col-span-full">
-                <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Pago</Button>
+                <Button type="submit" variant="success" loading={saving} className="w-full">Registrar Orden de Pago</Button>
               </div>
             </form>
           </CardContent>
@@ -895,10 +895,10 @@ export const Pagos: React.FC = () => {
         <SkeletonTable rows={6} cols={5} />
       ) : filteredPagos.length === 0 ? (
         <EmptyState
-          title={isFiltered ? 'No hay pagos con estos filtros' : 'No hay pagos registrados'}
-          description={isFiltered ? undefined : 'Registra el primer pago para empezar a llevar el control'}
+          title={isFiltered ? 'No hay ordenes de pago con estos filtros' : 'No hay ordenes de pago registradas'}
+          description={isFiltered ? undefined : 'Registra la primera orden de pago para empezar a llevar el control'}
           variant={isFiltered ? 'filtered' : 'empty'}
-          actionLabel={isFiltered ? 'Limpiar filtros' : '+ Registrar Pago'}
+          actionLabel={isFiltered ? 'Limpiar filtros' : '+ Nueva Orden de Pago'}
           onAction={isFiltered ? clearFilters : () => setShowForm(true)}
         />
       ) : (

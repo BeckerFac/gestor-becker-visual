@@ -128,7 +128,7 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Vincular cobro a facturas
+              Vincular recibo a facturas
             </h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -138,7 +138,7 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
           </div>
           <div className="mt-2 flex gap-4 text-sm">
             <span className="text-gray-500 dark:text-gray-400">
-              Monto cobro: <span className="font-medium text-gray-900 dark:text-gray-100">${cobroAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+              Monto recibo: <span className="font-medium text-gray-900 dark:text-gray-100">${cobroAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
             </span>
             <span className={cn(
               'font-medium',
@@ -154,7 +154,7 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
           <div className="mx-6 mt-4 px-4 py-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="text-sm text-green-800 dark:text-green-200">
-                Esta empresa tiene <span className="font-bold">${creditoDisponible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span> de credito disponible de cobros anteriores
+                Esta empresa tiene <span className="font-bold">${creditoDisponible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span> de credito disponible de recibos anteriores
               </div>
             </div>
           </div>

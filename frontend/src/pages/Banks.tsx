@@ -225,7 +225,7 @@ export const Banks: React.FC = () => {
           {breakdown && breakdown.recent_movements.length > 0 && (
             <ExportCSVButton
               data={breakdown.recent_movements.map(m => ({
-                tipo: m.type === 'venta' ? 'Venta' : m.type === 'cobro' ? 'Cobro' : m.type === 'compra' ? 'Compra' : 'Pago',
+                tipo: m.type === 'venta' ? 'Venta' : m.type === 'cobro' ? 'Recibo' : m.type === 'compra' ? 'Compra' : 'Orden de Pago',
                 fecha: m.date,
                 detalle: m.detail,
                 empresa: m.enterprise_name,
@@ -248,7 +248,7 @@ export const Banks: React.FC = () => {
           {breakdown && breakdown.recent_movements.length > 0 && (
             <ExportExcelButton
               data={breakdown.recent_movements.map(m => ({
-                tipo: m.type === 'venta' ? 'Venta' : m.type === 'cobro' ? 'Cobro' : m.type === 'compra' ? 'Compra' : 'Pago',
+                tipo: m.type === 'venta' ? 'Venta' : m.type === 'cobro' ? 'Recibo' : m.type === 'compra' ? 'Compra' : 'Orden de Pago',
                 fecha: m.date,
                 detalle: m.detail,
                 empresa: m.enterprise_name,
@@ -703,7 +703,7 @@ export const Banks: React.FC = () => {
                                                   </td>
                                                   <td className="py-1.5 px-2">
                                                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isIncome ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
-                                                      {txn.type === 'cobro' ? 'Cobro' : txn.type === 'venta' ? 'Venta' : txn.type === 'pago' ? 'Pago' : 'Compra'}
+                                                      {txn.type === 'cobro' ? 'Recibo' : txn.type === 'venta' ? 'Venta' : txn.type === 'pago' ? 'Orden de Pago' : 'Compra'}
                                                     </span>
                                                   </td>
                                                   <td className={`py-1.5 px-2 text-right font-medium ${isIncome ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
@@ -756,7 +756,7 @@ export const Banks: React.FC = () => {
                     <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 text-sm">
                       <td className="px-4 py-2">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${MOVEMENT_COLORS[mov.type] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}>
-                          {mov.type === 'venta' ? 'Venta' : mov.type === 'cobro' ? 'Cobro' : mov.type === 'compra' ? 'Compra' : 'Pago'}
+                          {mov.type === 'venta' ? 'Venta' : mov.type === 'cobro' ? 'Recibo' : mov.type === 'compra' ? 'Compra' : 'Orden de Pago'}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(mov.date)}</td>

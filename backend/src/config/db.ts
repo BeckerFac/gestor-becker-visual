@@ -973,6 +973,21 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_ciia_cobro ON cobro_invoice_item_applications(cobro_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_ciia_invoice_item ON cobro_invoice_item_applications(invoice_item_id)`);
 
+    // ===== RECEIPT PAYMENT METHODS (multi-method payments on cobros) =====
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS receipt_payment_methods (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cobro_id UUID NOT NULL REFERENCES cobros(id) ON DELETE CASCADE,
+        method VARCHAR(50) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+        bank_id UUID,
+        reference VARCHAR(255),
+        cheque_data JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rpm_cobro ON receipt_payment_methods(cobro_id)`);
+
     // ===== PAGO PURCHASE INVOICE ITEM APPLICATIONS (item-level trazabilidad) =====
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pago_invoice_item_applications (
@@ -1147,6 +1162,7 @@ async function runAutoMigrations() {
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`); } catch (_) {}
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`); } catch (_) {}
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`); } catch (_) {}
+    await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`).catch(() => {});
 
     // ===== RETENCIONES ESPERADAS on invoices (expected withholdings by client) =====
     await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS retenciones_esperadas JSONB DEFAULT '[]'::jsonb`);
@@ -1525,6 +1541,7 @@ export async function exportCompanyData(companyId: string): Promise<{
     { name: 'purchase_invoice_items', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },
     { name: 'cobro_invoice_item_applications', parentTable: 'cobros', parentFk: 'cobro_id' },
     { name: 'pago_invoice_item_applications', parentTable: 'pagos', parentFk: 'pago_id' },
+    { name: 'receipt_payment_methods', parentTable: 'cobros', parentFk: 'cobro_id' },
     { name: 'journal_entry_lines', parentTable: 'journal_entries', parentFk: 'entry_id' },
     { name: 'invoice_orders', parentTable: 'invoices', parentFk: 'invoice_id' },
     { name: 'purchase_invoice_purchases', parentTable: 'purchase_invoices', parentFk: 'purchase_invoice_id' },

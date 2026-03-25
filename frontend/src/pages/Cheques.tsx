@@ -186,7 +186,7 @@ export const Cheques: React.FC = () => {
     { key: 'amount' as const, label: 'Monto', render: (v: any) => (
       <span className="font-bold text-green-700">{formatCurrency(parseFloat(v || '0'))}</span>
     )},
-    { key: 'due_date' as const, label: 'Cobro', render: (v: any, row: Cheque) => {
+    { key: 'due_date' as const, label: 'Recibo', render: (v: any, row: Cheque) => {
       const alert = getDueDateAlert(v, row.status)
       return (
         <div className="flex items-center gap-1.5">
@@ -196,7 +196,7 @@ export const Cheques: React.FC = () => {
       )
     }},
     { key: 'customer_name' as const, label: 'Cliente', render: (v: any) => v || '-' },
-    { key: 'cobro_id' as const, label: 'Cobro', render: (_: any, row: Cheque) => (
+    { key: 'cobro_id' as const, label: 'Recibo', render: (_: any, row: Cheque) => (
       <div onClick={e => e.stopPropagation()}>
         {row.cobro_id ? (
           <button

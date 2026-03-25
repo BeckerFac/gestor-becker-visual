@@ -13,7 +13,7 @@ const SECRETARIA_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
 
 const MODULE_LABELS: Record<string, string> = {
   orders: 'Pedidos', invoices: 'Facturas', products: 'Productos', quotes: 'Cotizaciones',
-  remitos: 'Remitos', purchases: 'Compras', cobros: 'Cobros', pagos: 'Pagos',
+  remitos: 'Remitos', purchases: 'Compras', cobros: 'Recibos', pagos: 'Ordenes de Pago',
   cheques: 'Cheques', enterprises: 'Empresas', banks: 'Bancos', users: 'Usuarios',
   inventory: 'Inventario', materials: 'Materiales', crm: 'Oportunidades', billing: 'Billing',
   secretaria: 'SecretarIA', cuenta_corriente: 'Cuenta Corriente', portal: 'Portal', settings: 'Config',

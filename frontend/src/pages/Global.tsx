@@ -47,8 +47,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'pedidos', label: 'Pedidos' },
   { key: 'cotizaciones', label: 'Cotizaciones' },
   { key: 'facturas', label: 'Facturas' },
-  { key: 'cobros', label: 'Cobros' },
-  { key: 'pagos', label: 'Pagos' },
+  { key: 'cobros', label: 'Recibos' },
+  { key: 'pagos', label: 'Ordenes de Pago' },
   { key: 'cuenta_corriente', label: 'Cuenta Corriente' },
   { key: 'cheques', label: 'Cheques' },
 ]
@@ -637,7 +637,7 @@ export const Global: React.FC = () => {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold">Cobros ({cobros.length})</span>
+                      <span className="font-semibold">Recibos ({cobros.length})</span>
                       {cobros.length > 0 && (
                         <span className="text-sm text-gray-500">
                           Total: {formatCurrency(cobros.reduce((sum: number, c: any) => sum + parseFloat(c.amount || '0'), 0))}
@@ -693,7 +693,7 @@ export const Global: React.FC = () => {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold">Pagos ({pagos.length})</span>
+                      <span className="font-semibold">Ordenes de Pago ({pagos.length})</span>
                       {pagos.length > 0 && (
                         <span className="text-sm text-gray-500">
                           Total: {formatCurrency(pagos.reduce((sum: number, p: any) => sum + parseFloat(p.amount || '0'), 0))}
@@ -767,7 +767,7 @@ export const Global: React.FC = () => {
                         </Card>
                         <Card className="border border-green-200 bg-green-50">
                           <CardContent className="pt-3 pb-2">
-                            <p className="text-xs text-green-700">Cobros</p>
+                            <p className="text-xs text-green-700">Recibos</p>
                             <p className="text-lg font-bold text-green-800">
                               {formatCurrency(cuentaCorriente.cuentas_a_cobrar?.total_cobros || 0)}
                             </p>
@@ -813,7 +813,7 @@ export const Global: React.FC = () => {
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
-                                        label={m.tipo === 'venta' ? 'Venta' : m.tipo === 'cobro' ? 'Cobro' : m.tipo}
+                                        label={m.tipo === 'venta' ? 'Venta' : m.tipo === 'cobro' ? 'Recibo' : m.tipo}
                                         color={m.tipo === 'venta' ? 'blue' : 'green'}
                                       />
                                     </td>
@@ -859,7 +859,7 @@ export const Global: React.FC = () => {
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
-                                        label={m.tipo === 'compra' ? 'Compra' : m.tipo === 'pago' ? 'Pago' : m.tipo}
+                                        label={m.tipo === 'compra' ? 'Compra' : m.tipo === 'pago' ? 'Orden de Pago' : m.tipo}
                                         color={m.tipo === 'compra' ? 'orange' : 'red'}
                                       />
                                     </td>

@@ -35,7 +35,7 @@ const DOC_LABELS: Record<string, string> = {
   quote: 'Cotizacion',
   order: 'Pedido',
   invoice: 'Factura',
-  cobro: 'Cobro',
+  cobro: 'Recibo',
 }
 
 const DOC_ROUTES: Record<string, string> = {

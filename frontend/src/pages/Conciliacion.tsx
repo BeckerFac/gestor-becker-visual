@@ -533,7 +533,7 @@ function ManualMatchSelector({
         <option value="">Seleccionar...</option>
         {sorted.slice(0, 20).map(c => (
           <option key={c.id} value={`${c.type}::${c.id}`}>
-            {c.type === 'cobro' ? 'Cobro' : 'Pago'} - {formatCurrency(c.amount)} - {c.enterprise_name || 'Sin empresa'} ({formatDate(c.payment_date)})
+            {c.type === 'cobro' ? 'Recibo' : 'Orden de Pago'} - {formatCurrency(c.amount)} - {c.enterprise_name || 'Sin empresa'} ({formatDate(c.payment_date)})
           </option>
         ))}
       </select>

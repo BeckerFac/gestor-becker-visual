@@ -671,7 +671,7 @@ export const Cobros: React.FC = () => {
         { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
         { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
       ])
-      toast.success('Cobro registrado correctamente')
+      toast.success('Recibo registrado correctamente')
       await loadData()
     } catch (e: any) {
       toast.error(e.response?.data?.error || e.message)
@@ -685,7 +685,7 @@ export const Cobros: React.FC = () => {
     setDeleting(true)
     try {
       await api.deleteCobro(deleteTarget.id)
-      toast.success('Cobro eliminado')
+      toast.success('Recibo eliminado')
       setDeleteTarget(null)
       await loadData()
     } catch (e: any) {
@@ -764,15 +764,15 @@ export const Cobros: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Cobros</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pagos recibidos de empresas</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Recibos</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Recibos de cobro</p>
         </div>
         <div className="flex items-center gap-2">
           <ExportCSVButton data={csvData} columns={csvColumns} filename="cobros" />
           <ExportExcelButton data={csvData} columns={csvColumns} filename="cobros" />
           <PermissionGate module="cobros" action="create">
             <Button variant={showForm ? 'danger' : 'primary'} onClick={() => showForm ? setShowForm(false) : handleOpenForm()}>
-              {showForm ? 'Cancelar' : '+ Registrar Cobro'}
+              {showForm ? 'Cancelar' : '+ Nuevo Recibo'}
             </Button>
           </PermissionGate>
         </div>
@@ -1091,7 +1091,7 @@ export const Cobros: React.FC = () => {
       {/* Form */}
       {showForm && (
         <Card id="registrar-cobro-form" className="animate-fadeIn" style={{ scrollMarginTop: '20px' }}>
-          <CardHeader><h3 className="text-lg font-semibold">Registrar Cobro</h3></CardHeader>
+          <CardHeader><h3 className="text-lg font-semibold">Registrar Recibo</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1420,7 +1420,7 @@ export const Cobros: React.FC = () => {
                   </span>
                 </div>
                 <Button type="submit" variant="success" loading={saving}>
-                  Registrar Cobro
+                  Registrar Recibo
                 </Button>
               </div>
             </form>
@@ -1462,10 +1462,10 @@ export const Cobros: React.FC = () => {
         <SkeletonTable rows={6} cols={6} />
       ) : filteredReceipts.length === 0 ? (
         <EmptyState
-          title={isFiltered ? 'No hay cobros con estos filtros' : 'No hay cobros registrados'}
-          description={isFiltered ? undefined : 'Registra el primer cobro para empezar a llevar el control'}
+          title={isFiltered ? 'No hay recibos con estos filtros' : 'No hay recibos registrados'}
+          description={isFiltered ? undefined : 'Registra el primer recibo para empezar a llevar el control'}
           variant={isFiltered ? 'filtered' : 'empty'}
-          actionLabel={isFiltered ? 'Limpiar filtros' : '+ Registrar Cobro'}
+          actionLabel={isFiltered ? 'Limpiar filtros' : '+ Nuevo Recibo'}
           onAction={isFiltered ? clearFilters : handleOpenForm}
         />
       ) : (

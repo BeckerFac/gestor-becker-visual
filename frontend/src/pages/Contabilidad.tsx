@@ -103,8 +103,8 @@ const TYPE_COLORS: Record<string, string> = {
 
 const REF_LABELS: Record<string, string> = {
   invoice: 'Factura',
-  cobro: 'Cobro',
-  pago: 'Pago',
+  cobro: 'Recibo',
+  pago: 'Orden de Pago',
   purchase_invoice: 'Factura Compra',
   adjustment: 'Ajuste',
 }
