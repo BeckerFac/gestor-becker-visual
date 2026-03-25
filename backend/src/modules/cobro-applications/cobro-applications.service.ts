@@ -367,6 +367,71 @@ export class CobroApplicationsService {
   }
 
   /**
+   * Get available credit (unallocated cobro balance) for an enterprise.
+   * Returns cobros with excess amounts not yet applied to invoices, ordered FIFO by date.
+   */
+  async getCreditoDisponible(companyId: string, enterpriseId: string) {
+    const result = await db.execute(sql`
+      SELECT c.id, c.receipt_number, c.payment_date, c.payment_method,
+        CAST(COALESCE(c.total_amount, c.amount) AS decimal) as cobro_total,
+        COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as aplicado,
+        CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as disponible
+      FROM cobros c
+      LEFT JOIN cobro_invoice_applications cia ON cia.cobro_id = c.id
+      WHERE c.company_id = ${companyId} AND c.enterprise_id = ${enterpriseId}
+      GROUP BY c.id
+      HAVING CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) > 0.01
+      ORDER BY c.payment_date ASC
+    `);
+    return (result as any).rows || [];
+  }
+
+  /**
+   * Apply credit from existing cobros (FIFO by date) to an invoice.
+   * Uses linkCobroToInvoice for each application so all validations and side-effects run.
+   */
+  async applyCredit(
+    companyId: string,
+    userId: string,
+    enterpriseId: string,
+    invoiceId: string,
+    maxAmount: number
+  ) {
+    if (!maxAmount || maxAmount <= 0) {
+      throw new ApiError(400, 'El monto maximo debe ser mayor a 0');
+    }
+
+    const creditos = await this.getCreditoDisponible(companyId, enterpriseId);
+    let remaining = maxAmount;
+    const applications: Array<{ cobro_id: string; receipt_number: string; amount: number }> = [];
+
+    for (const credito of creditos) {
+      if (remaining <= 0.01) break;
+      const disponible = parseFloat(credito.disponible);
+      const toApply = Math.min(disponible, remaining);
+
+      try {
+        await this.linkCobroToInvoice(companyId, userId, credito.id, invoiceId, toApply);
+        applications.push({
+          cobro_id: credito.id,
+          receipt_number: credito.receipt_number,
+          amount: toApply,
+        });
+        remaining -= toApply;
+      } catch (err: any) {
+        // Skip cobros that fail validation (e.g. different business unit, duplicate)
+        console.warn(`Skipping credit from cobro ${credito.id}: ${err.message}`);
+      }
+    }
+
+    return {
+      applied: maxAmount - remaining,
+      remaining,
+      applications,
+    };
+  }
+
+  /**
    * Get pending cobros (without invoice linkage) for an enterprise + business unit.
    * Used in CC and linking UI.
    */

@@ -67,6 +67,33 @@ export class CobroApplicationsController {
     res.json(data);
   }
 
+  async getCreditoDisponible(req: AuthRequest, res: Response) {
+    const enterpriseId = req.query.enterprise_id as string;
+    if (!enterpriseId) {
+      return res.status(400).json({ error: 'enterprise_id es requerido' });
+    }
+    const data = await cobroApplicationsService.getCreditoDisponible(
+      req.user!.company_id,
+      enterpriseId
+    );
+    res.json(data);
+  }
+
+  async applyCredit(req: AuthRequest, res: Response) {
+    const { enterprise_id, invoice_id, max_amount } = req.body;
+    if (!enterprise_id || !invoice_id || !max_amount) {
+      return res.status(400).json({ error: 'enterprise_id, invoice_id y max_amount son requeridos' });
+    }
+    const result = await cobroApplicationsService.applyCredit(
+      req.user!.company_id,
+      req.user!.id,
+      enterprise_id,
+      invoice_id,
+      parseFloat(max_amount)
+    );
+    res.json(result);
+  }
+
   async getAvailableInvoices(req: AuthRequest, res: Response) {
     const data = await cobroApplicationsService.getAvailableInvoicesForLinking(
       req.user!.company_id,

@@ -28,6 +28,8 @@ interface EnterpriseSaldo {
   credito_proveedor?: number
   adelantos_recibidos?: number
   adelantos_entregados?: number
+  retenciones_sufridas?: number
+  retenciones_practicadas?: number
   adelantos_cobros?: number
   adelantos_pagos?: number
   saldo_neto?: number
@@ -52,6 +54,7 @@ interface CuentaDetalle {
   total_compras?: number
   total_pagos?: number
   total_adelantos?: number
+  total_retenciones?: number
   saldo: number
 }
 
@@ -72,6 +75,8 @@ const tipoColors: Record<string, string> = {
   compra: 'bg-orange-100 text-orange-700',
   pago: 'bg-red-100 text-red-700',
   ajuste: 'bg-violet-100 text-violet-700',
+  retencion_sufrida: 'bg-teal-100 text-teal-700',
+  retencion_practicada: 'bg-teal-100 text-teal-700',
 }
 
 const tipoLabels: Record<string, string> = {
@@ -84,6 +89,8 @@ const tipoLabels: Record<string, string> = {
   compra: 'Compra',
   pago: 'Pago',
   ajuste: 'Ajuste',
+  retencion_sufrida: 'Ret. Sufrida',
+  retencion_practicada: 'Ret. Practicada',
 }
 
 interface MovimientosTableProps {

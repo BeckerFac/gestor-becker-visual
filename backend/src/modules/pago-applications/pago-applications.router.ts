@@ -18,6 +18,13 @@ pagoApplicationsRouter.get('/pagos/:pagoId/applications', authorize('pagos', 'vi
 pagoApplicationsRouter.get('/purchase-invoices/:purchaseInvoiceId/pagos', authorize('purchases', 'view'), (req, res) =>
   pagoApplicationsController.getPurchaseInvoicePagos(req as any, res));
 
+// Credit (saldo a favor proveedor) endpoints
+pagoApplicationsRouter.get('/credito-proveedor-disponible', authorize('pagos', 'view'), (req, res) =>
+  pagoApplicationsController.getCreditoProveedorDisponible(req as any, res));
+
+pagoApplicationsRouter.post('/apply-credit-proveedor', authorize('pagos', 'create'), (req, res) =>
+  pagoApplicationsController.applyCreditProveedor(req as any, res));
+
 // Discovery endpoints
 pagoApplicationsRouter.get('/pending-pagos', authorize('pagos', 'view'), (req, res) =>
   pagoApplicationsController.getPendingPagos(req as any, res));

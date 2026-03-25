@@ -261,6 +261,70 @@ export class PagoApplicationsService {
     }
   }
 
+  /**
+   * Get available credit (unallocated pago balance) for a provider enterprise.
+   * Returns pagos with excess amounts not yet applied to purchase invoices, ordered FIFO by date.
+   */
+  async getCreditoProveedorDisponible(companyId: string, enterpriseId: string) {
+    const result = await db.execute(sql`
+      SELECT p.id, p.receipt_number, p.payment_date, p.payment_method,
+        CAST(p.amount AS decimal) as pago_total,
+        COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as aplicado,
+        CAST(p.amount AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as disponible
+      FROM pagos p
+      LEFT JOIN pago_invoice_applications pia ON pia.pago_id = p.id
+      WHERE p.company_id = ${companyId} AND p.enterprise_id = ${enterpriseId}
+      GROUP BY p.id
+      HAVING CAST(p.amount AS decimal) - COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) > 0.01
+      ORDER BY p.payment_date ASC
+    `);
+    return (result as any).rows || [];
+  }
+
+  /**
+   * Apply credit from existing pagos (FIFO by date) to a purchase invoice.
+   * Uses linkPagoToPurchaseInvoice for each application so all validations and side-effects run.
+   */
+  async applyCreditProveedor(
+    companyId: string,
+    userId: string,
+    enterpriseId: string,
+    purchaseInvoiceId: string,
+    maxAmount: number
+  ) {
+    if (!maxAmount || maxAmount <= 0) {
+      throw new ApiError(400, 'El monto maximo debe ser mayor a 0');
+    }
+
+    const creditos = await this.getCreditoProveedorDisponible(companyId, enterpriseId);
+    let remaining = maxAmount;
+    const applications: Array<{ pago_id: string; receipt_number: string; amount: number }> = [];
+
+    for (const credito of creditos) {
+      if (remaining <= 0.01) break;
+      const disponible = parseFloat(credito.disponible);
+      const toApply = Math.min(disponible, remaining);
+
+      try {
+        await this.linkPagoToPurchaseInvoice(companyId, userId, credito.id, purchaseInvoiceId, toApply);
+        applications.push({
+          pago_id: credito.id,
+          receipt_number: credito.receipt_number,
+          amount: toApply,
+        });
+        remaining -= toApply;
+      } catch (err: any) {
+        console.warn(`Skipping credit from pago ${credito.id}: ${err.message}`);
+      }
+    }
+
+    return {
+      applied: maxAmount - remaining,
+      remaining,
+      applications,
+    };
+  }
+
   async getPendingPagos(companyId: string, filters: {
     enterprise_id?: string;
     business_unit_id?: string;

@@ -113,7 +113,25 @@ export class CuentaCorrienteService {
             FROM account_adjustments aa
             WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
               AND aa.adjustment_type = 'credit'
-          ), 0) as total_ajustes_credit
+          ), 0) as total_ajustes_credit,
+
+          -- Retenciones sufridas (el cliente nos retuvo — reduce lo que nos debe)
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM retenciones r
+            WHERE r.company_id = ${companyId}
+              AND r.enterprise_id = e.id
+              AND r.direction = 'sufrida'
+          ), 0) as total_retenciones_sufridas,
+
+          -- Retenciones practicadas (nosotros retuvimos al proveedor — reduce lo que le debemos)
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM retenciones r
+            WHERE r.company_id = ${companyId}
+              AND r.enterprise_id = e.id
+              AND r.direction = 'practicada'
+          ), 0) as total_retenciones_practicadas
 
         FROM enterprises e
         WHERE e.company_id = ${companyId}
@@ -130,16 +148,20 @@ export class CuentaCorrienteService {
         const adelantosPagos = parseFloat(r.total_adelantos_pagos || '0');
         const ajustesDebit = parseFloat(r.total_ajustes_debit || '0');
         const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
+        const retencionesSufridas = parseFloat(r.total_retenciones_sufridas || '0');
+        const retencionesPracticadas = parseFloat(r.total_retenciones_practicadas || '0');
 
         // LOGIC: Balance reflects CASH REALITY (all money in/out)
         // "Sin asociar" is informational only — the money already moved
+        // Retenciones: sufridas reduce deuda cliente, practicadas reduce deuda proveedor
+        // They are NOT included in cobro_invoice_applications (those only track net amount)
         //
         const totalCobros = cobrosAplicados + adelantosCobros;
         const totalPagos = pagosAplicados + adelantosPagos;
 
-        // Facturas pendientes (paper debt — only applied cobros reduce this)
-        const pendienteCobro = Math.max(ventas + ajustesDebit - cobrosAplicados - ajustesCredit, 0);
-        const pendientePago = Math.max(compras - pagosAplicados, 0);
+        // Facturas pendientes (paper debt — applied cobros + retenciones reduce this)
+        const pendienteCobro = Math.max(ventas + ajustesDebit - cobrosAplicados - retencionesSufridas - ajustesCredit, 0);
+        const pendientePago = Math.max(compras - pagosAplicados - retencionesPracticadas, 0);
 
         // Cobros/pagos sin factura asociada (info: "ir a vincular en Cobros/Pagos")
         const cobrosNoAsociados = adelantosCobros;
@@ -147,7 +169,8 @@ export class CuentaCorrienteService {
 
         // Balance REAL = todo el dinero que entró - todo el dinero que salió
         // Incluye cobros y pagos sin asociar porque la plata ya se movió
-        const balanceReal = (ventas + ajustesDebit - totalCobros - ajustesCredit) - (compras - totalPagos);
+        // Retenciones: sufridas son como cobros adicionales, practicadas como pagos adicionales
+        const balanceReal = (ventas + ajustesDebit - totalCobros - retencionesSufridas - ajustesCredit) - (compras - totalPagos - retencionesPracticadas);
 
         // Legacy compat
         const aCobrar = pendienteCobro;
@@ -178,6 +201,8 @@ export class CuentaCorrienteService {
           credito_cliente: 0,
           deuda_proveedor: pendientePago,
           credito_proveedor: 0,
+          retenciones_sufridas: retencionesSufridas,
+          retenciones_practicadas: retencionesPracticadas,
           adelantos_recibidos: cobrosNoAsociados,
           adelantos_entregados: pagosNoAsociados,
           saldo_neto: balanceReal,
@@ -251,6 +276,32 @@ export class CuentaCorrienteService {
         `);
       } catch (e) { console.error('CC detalle: adelantos query failed', (e as any)?.message); }
 
+      // Retenciones sufridas (el cliente nos retuvo — reduce deuda cliente)
+      let retencionesSufridasResult: any = { rows: [] };
+      try {
+        retencionesSufridasResult = await db.execute(sql`
+          SELECT r.id, 'retencion_sufrida' as tipo, COALESCE(r.date, r.created_at) as fecha,
+            'Ret. sufrida ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
+            CAST(COALESCE(r.amount, 0) AS decimal) as monto
+          FROM retenciones r
+          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
+            AND r.direction = 'sufrida'
+        `);
+      } catch (e) { console.error('CC detalle: retenciones sufridas query failed', (e as any)?.message); }
+
+      // Retenciones practicadas (nosotros retuvimos al proveedor — reduce deuda proveedor)
+      let retencionesPracticadasResult: any = { rows: [] };
+      try {
+        retencionesPracticadasResult = await db.execute(sql`
+          SELECT r.id, 'retencion_practicada' as tipo, COALESCE(r.date, r.created_at) as fecha,
+            'Ret. practicada ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
+            CAST(COALESCE(r.amount, 0) AS decimal) as monto
+          FROM retenciones r
+          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
+            AND r.direction = 'practicada'
+        `);
+      } catch (e) { console.error('CC detalle: retenciones practicadas query failed', (e as any)?.message); }
+
       // Ajustes manuales
       let adjustmentsResult: any = { rows: [] };
       try {
@@ -317,16 +368,20 @@ export class CuentaCorrienteService {
       const facturas = parseRows(invoicesResult);
       const cobros = parseRows(cobrosResult);
       const adelantos = parseRows(adelantosResult);
+      const retencionesSufridas = parseRows(retencionesSufridasResult);
+      const retencionesPracticadas = parseRows(retencionesPracticadasResult);
       const adjustments = parseRows(adjustmentsResult);
       const purchaseInvoices = parseRows(purchaseInvoicesResult);
       const pagos = parseRows(pagosResult);
       const adelantosPagos = parseRows(adelantosPagosResult);
 
       // Cuentas a Cobrar
+      // Retenciones sufridas van en haber (reducen lo que nos deben, como un cobro)
       const movsCobrar = [
         ...facturas.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
         ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
+        ...retencionesSufridas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
         ...adjustments.map((a: any) => ({
           ...a,
           debe: a.adjustment_type === 'debit' ? a.monto : 0,
@@ -341,10 +396,12 @@ export class CuentaCorrienteService {
       });
 
       // Cuentas a Pagar
+      // Retenciones practicadas van en haber (reducen lo que les debemos, como un pago)
       const movsPagar = [
         ...purchaseInvoices.map((p: any) => ({ ...p, debe: p.monto, haber: 0 })),
         ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto })),
         ...adelantosPagos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
+        ...retencionesPracticadas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
       ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
       let saldoPagar = 0;
@@ -360,6 +417,7 @@ export class CuentaCorrienteService {
           total_ventas: facturas.reduce((s: number, m: any) => s + m.monto, 0),
           total_cobros: cobros.reduce((s: number, m: any) => s + m.monto, 0),
           total_adelantos: adelantos.reduce((s: number, m: any) => s + m.monto, 0),
+          total_retenciones: retencionesSufridas.reduce((s: number, m: any) => s + m.monto, 0),
           saldo: saldoCobrar,
         },
         cuentas_a_pagar: {
@@ -367,6 +425,7 @@ export class CuentaCorrienteService {
           total_compras: purchaseInvoices.reduce((s: number, m: any) => s + m.monto, 0),
           total_pagos: pagos.reduce((s: number, m: any) => s + m.monto, 0),
           total_adelantos: adelantosPagos.reduce((s: number, m: any) => s + m.monto, 0),
+          total_retenciones: retencionesPracticadas.reduce((s: number, m: any) => s + m.monto, 0),
           saldo: saldoPagar,
         },
         balance_neto: saldoCobrar - saldoPagar,
@@ -449,6 +508,32 @@ export class CuentaCorrienteService {
         `);
       } catch (e) { console.error('PDF: adjustments query failed', (e as any)?.message); }
 
+      // Retenciones sufridas
+      let allRetSufridas: any = { rows: [] };
+      try {
+        allRetSufridas = await db.execute(sql`
+          SELECT r.id, 'retencion_sufrida' as tipo, COALESCE(r.date, r.created_at) as fecha,
+            'Ret. sufrida ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
+            CAST(COALESCE(r.amount, 0) AS decimal) as monto
+          FROM retenciones r
+          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
+            AND r.direction = 'sufrida'
+        `);
+      } catch (e) { console.error('PDF: retenciones sufridas query failed', (e as any)?.message); }
+
+      // Retenciones practicadas
+      let allRetPracticadas: any = { rows: [] };
+      try {
+        allRetPracticadas = await db.execute(sql`
+          SELECT r.id, 'retencion_practicada' as tipo, COALESCE(r.date, r.created_at) as fecha,
+            'Ret. practicada ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
+            CAST(COALESCE(r.amount, 0) AS decimal) as monto
+          FROM retenciones r
+          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
+            AND r.direction = 'practicada'
+        `);
+      } catch (e) { console.error('PDF: retenciones practicadas query failed', (e as any)?.message); }
+
       // Facturas de compra
       let allPurchaseInvoices: any = { rows: [] };
       try {
@@ -486,6 +571,8 @@ export class CuentaCorrienteService {
       const invoices = parseRows(allInvoices);
       const cobros = parseRows(allCobros);
       const adelantos = parseRows(allAdelantos);
+      const retSufridas = parseRows(allRetSufridas);
+      const retPracticadas = parseRows(allRetPracticadas);
       const adjustments = parseRows(allAdjustments);
       const purchaseInvoices = parseRows(allPurchaseInvoices);
       const pagos = parseRows(allPagos);
@@ -495,6 +582,7 @@ export class CuentaCorrienteService {
         ...invoices.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
         ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
+        ...retSufridas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
         ...adjustments.map((a: any) => ({
           ...a,
           debe: a.adjustment_type === 'debit' ? a.monto : 0,
@@ -502,6 +590,7 @@ export class CuentaCorrienteService {
         })),
         ...purchaseInvoices.map((p: any) => ({ ...p, debe: p.monto, haber: 0, isPagar: true })),
         ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto, isPagar: true })),
+        ...retPracticadas.map((r: any) => ({ ...r, debe: 0, haber: r.monto, isPagar: true })),
       ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
       let runningBalance = 0;

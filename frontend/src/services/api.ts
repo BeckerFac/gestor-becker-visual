@@ -296,6 +296,18 @@ export const api = {
     const { data } = await client.get('/payment-applications/available-invoices', { params: filters })
     return data
   },
+  getCreditoDisponible: async (enterpriseId: string) => {
+    const { data } = await client.get('/payment-applications/credito-disponible', { params: { enterprise_id: enterpriseId } })
+    return data
+  },
+  applyCredit: async (enterpriseId: string, invoiceId: string, maxAmount: number) => {
+    const { data } = await client.post('/payment-applications/apply-credit', {
+      enterprise_id: enterpriseId,
+      invoice_id: invoiceId,
+      max_amount: maxAmount,
+    })
+    return data
+  },
   getOrderRemainingToInvoice: async (orderId: string) => {
     const { data } = await client.get(`/invoices/order/${orderId}/remaining`)
     return data
@@ -379,6 +391,18 @@ export const api = {
   },
   getAvailablePurchaseInvoicesForLinking: async (filters?: { enterprise_id?: string; business_unit_id?: string }) => {
     const { data } = await client.get('/pago-applications/available-purchase-invoices', { params: filters })
+    return data
+  },
+  getCreditoProveedorDisponible: async (enterpriseId: string) => {
+    const { data } = await client.get('/pago-applications/credito-proveedor-disponible', { params: { enterprise_id: enterpriseId } })
+    return data
+  },
+  applyCreditProveedor: async (enterpriseId: string, purchaseInvoiceId: string, maxAmount: number) => {
+    const { data } = await client.post('/pago-applications/apply-credit-proveedor', {
+      enterprise_id: enterpriseId,
+      purchase_invoice_id: purchaseInvoiceId,
+      max_amount: maxAmount,
+    })
     return data
   },
 

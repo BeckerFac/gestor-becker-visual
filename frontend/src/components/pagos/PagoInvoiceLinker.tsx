@@ -25,6 +25,7 @@ export const PagoInvoiceLinker: React.FC<PagoInvoiceLinkerProps> = ({
   const [allocations, setAllocations] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [creditoDisponible, setCreditoDisponible] = useState(0)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -34,6 +35,16 @@ export const PagoInvoiceLinker: React.FC<PagoInvoiceLinkerProps> = ({
         business_unit_id: businessUnitId,
       })
       setAvailableInvoices(invoices || [])
+      // Load available credit for this provider
+      if (enterpriseId) {
+        try {
+          const creditos = await api.getCreditoProveedorDisponible(enterpriseId)
+          const totalCredito = creditos.reduce((sum: number, c: any) => sum + parseFloat(c.disponible || '0'), 0)
+          setCreditoDisponible(totalCredito)
+        } catch {
+          setCreditoDisponible(0)
+        }
+      }
     } catch {
       toast.error('Error cargando facturas de compra')
     } finally {
@@ -89,6 +100,17 @@ export const PagoInvoiceLinker: React.FC<PagoInvoiceLinkerProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Credit banner */}
+        {creditoDisponible > 0.01 && (
+          <div className="mx-6 mt-4 px-4 py-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-purple-800 dark:text-purple-200">
+                Este proveedor tiene <span className="font-bold">{formatCurrency(creditoDisponible)}</span> de credito disponible de pagos anteriores
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading ? (

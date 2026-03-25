@@ -36,6 +36,7 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [cobroBalance, setCobroBalance] = useState(cobroAmount)
+  const [creditoDisponible, setCreditoDisponible] = useState(0)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -51,6 +52,16 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
         setCobroBalance(balance.unallocated)
       } catch {
         setCobroBalance(cobroAmount)
+      }
+      // Load available credit for this enterprise
+      if (enterpriseId) {
+        try {
+          const creditos = await api.getCreditoDisponible(enterpriseId)
+          const totalCredito = creditos.reduce((sum: number, c: any) => sum + parseFloat(c.disponible || '0'), 0)
+          setCreditoDisponible(totalCredito)
+        } catch {
+          setCreditoDisponible(0)
+        }
       }
     } catch (err) {
       toast.error('Error cargando facturas')
@@ -137,6 +148,17 @@ export const CobroInvoiceLinker: React.FC<CobroInvoiceLinkerProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Credit banner */}
+        {creditoDisponible > 0.01 && (
+          <div className="mx-6 mt-4 px-4 py-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-green-800 dark:text-green-200">
+                Esta empresa tiene <span className="font-bold">${creditoDisponible.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span> de credito disponible de cobros anteriores
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-4">

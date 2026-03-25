@@ -42,6 +42,33 @@ export class PagoApplicationsController {
     res.json(data);
   }
 
+  async getCreditoProveedorDisponible(req: AuthRequest, res: Response) {
+    const enterpriseId = req.query.enterprise_id as string;
+    if (!enterpriseId) {
+      return res.status(400).json({ error: 'enterprise_id es requerido' });
+    }
+    const data = await pagoApplicationsService.getCreditoProveedorDisponible(
+      req.user!.company_id,
+      enterpriseId
+    );
+    res.json(data);
+  }
+
+  async applyCreditProveedor(req: AuthRequest, res: Response) {
+    const { enterprise_id, purchase_invoice_id, max_amount } = req.body;
+    if (!enterprise_id || !purchase_invoice_id || !max_amount) {
+      return res.status(400).json({ error: 'enterprise_id, purchase_invoice_id y max_amount son requeridos' });
+    }
+    const result = await pagoApplicationsService.applyCreditProveedor(
+      req.user!.company_id,
+      req.user!.id,
+      enterprise_id,
+      purchase_invoice_id,
+      parseFloat(max_amount)
+    );
+    res.json(result);
+  }
+
   async getAvailablePurchaseInvoices(req: AuthRequest, res: Response) {
     const data = await pagoApplicationsService.getAvailablePurchaseInvoicesForLinking(req.user!.company_id, {
       enterprise_id: req.query.enterprise_id as string,

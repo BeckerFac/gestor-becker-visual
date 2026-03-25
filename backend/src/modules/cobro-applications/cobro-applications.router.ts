@@ -24,6 +24,13 @@ cobroApplicationsRouter.get('/invoices/:invoiceId/cobros', authorize('invoices',
 cobroApplicationsRouter.get('/invoices/:invoiceId/balance', authorize('invoices', 'view'), (req, res) =>
   cobroApplicationsController.getInvoiceBalance(req as any, res));
 
+// Credit (saldo a favor) endpoints
+cobroApplicationsRouter.get('/credito-disponible', authorize('cobros', 'view'), (req, res) =>
+  cobroApplicationsController.getCreditoDisponible(req as any, res));
+
+cobroApplicationsRouter.post('/apply-credit', authorize('cobros', 'create'), (req, res) =>
+  cobroApplicationsController.applyCredit(req as any, res));
+
 // Discovery endpoints
 cobroApplicationsRouter.get('/pending-cobros', authorize('cobros', 'view'), (req, res) =>
   cobroApplicationsController.getPendingCobros(req as any, res));
