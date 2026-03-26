@@ -215,7 +215,7 @@ export class CuentaCorrienteService {
     }
   }
 
-  async getDetalle(companyId: string, enterpriseId: string, businessUnitId?: string) {
+  async getDetalle(companyId: string, enterpriseId: string, filters?: { dateFrom?: string; dateTo?: string; businessUnitId?: string }) {
     try {
       const entCheck = await db.execute(sql`
         SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
@@ -224,211 +224,115 @@ export class CuentaCorrienteService {
       if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entRows[0];
 
-      const buFilter = businessUnitId ? sql` AND business_unit_id = ${businessUnitId}` : sql``;
+      const buFilterInvoices = filters?.businessUnitId ? sql` AND i.business_unit_id = ${filters.businessUnitId}` : sql``;
+      const buFilterCobros = filters?.businessUnitId ? sql` AND c.business_unit_id = ${filters.businessUnitId}` : sql``;
+      const buFilterPurchase = filters?.businessUnitId ? sql` AND pi.business_unit_id = ${filters.businessUnitId}` : sql``;
+      const buFilterPagos = filters?.businessUnitId ? sql` AND p.business_unit_id = ${filters.businessUnitId}` : sql``;
 
-      // Facturas de venta (nos deben)
-      let invoicesResult: any = { rows: [] };
-      try {
-        invoicesResult = await db.execute(sql`
-          SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
-            'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' ||
-              LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
-            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto,
-            i.payment_status
+      const dateFromFilter = filters?.dateFrom ? sql` AND fecha >= ${filters.dateFrom}` : sql``;
+      const dateToFilter = filters?.dateTo ? sql` AND fecha <= ${filters.dateTo}` : sql``;
+
+      // Single UNION ALL query: 4 concepts + adjustments
+      const result = await db.execute(sql`
+        SELECT * FROM (
+          SELECT
+            i.invoice_date as fecha,
+            'fact_venta' as tipo,
+            COALESCE(i.invoice_type, '') || ' ' || i.invoice_number as nro_comprobante,
+            CAST(i.total_amount AS decimal) as debe,
+            0::decimal as haber,
+            'Factura ' || COALESCE(i.invoice_type, '') || ' ' || i.invoice_number as descripcion,
+            i.id as reference_id
           FROM invoices i
-          LEFT JOIN customers c ON i.customer_id = c.id
-          WHERE i.company_id = ${companyId}
-            AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status != 'cancelled'
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: invoices query failed', (e as any)?.message); }
+          WHERE i.enterprise_id = ${enterpriseId} AND i.company_id = ${companyId} AND i.status != 'cancelled'
+            ${buFilterInvoices}
 
-      // Cobros aplicados (nos pagaron - con detalle de factura)
-      let cobrosResult: any = { rows: [] };
-      try {
-        cobrosResult = await db.execute(sql`
-          SELECT cia.id, 'cobro' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Recibo' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '')
-            || ' → Fact ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
-            CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
-          FROM cobro_invoice_applications cia
-          JOIN cobros co ON cia.cobro_id = co.id
-          JOIN invoices i ON cia.invoice_id = i.id
-          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: cobros query failed', (e as any)?.message); }
+          UNION ALL
 
-      // Adelantos cobros (cobros sin factura)
-      let adelantosResult: any = { rows: [] };
-      try {
-        adelantosResult = await db.execute(sql`
-          SELECT co.id, 'adelanto' as tipo, COALESCE(co.payment_date, co.created_at) as fecha,
-            'Recibo (sin factura)' || COALESCE(' — ' || co.payment_method, '') || COALESCE(' — ' || co.reference, '') as descripcion,
-            CAST(COALESCE(co.total_amount, co.amount, 0) AS decimal) - COALESCE((
-              SELECT SUM(CAST(cia_d.amount_applied AS decimal)) FROM cobro_invoice_applications cia_d WHERE cia_d.cobro_id = co.id
-            ), 0) as monto
-          FROM cobros co
-          WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
-            AND co.pending_status = 'pending_invoice'
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: adelantos query failed', (e as any)?.message); }
+          SELECT
+            COALESCE(c.payment_date, c.created_at) as fecha,
+            'recibo' as tipo,
+            CAST(c.receipt_number AS text) as nro_comprobante,
+            0::decimal as debe,
+            CAST(COALESCE(c.total_amount, c.amount) AS decimal) as haber,
+            'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
+            c.id as reference_id
+          FROM cobros c
+          WHERE c.enterprise_id = ${enterpriseId} AND c.company_id = ${companyId}
+            ${buFilterCobros}
 
-      // Retenciones sufridas (el cliente nos retuvo — reduce deuda cliente)
-      let retencionesSufridasResult: any = { rows: [] };
-      try {
-        retencionesSufridasResult = await db.execute(sql`
-          SELECT r.id, 'retencion_sufrida' as tipo, COALESCE(r.date, r.created_at) as fecha,
-            'Ret. sufrida ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
-            CAST(COALESCE(r.amount, 0) AS decimal) as monto
-          FROM retenciones r
-          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
-            AND r.direction = 'sufrida'
-        `);
-      } catch (e) { console.error('CC detalle: retenciones sufridas query failed', (e as any)?.message); }
+          UNION ALL
 
-      // Retenciones practicadas (nosotros retuvimos al proveedor — reduce deuda proveedor)
-      let retencionesPracticadasResult: any = { rows: [] };
-      try {
-        retencionesPracticadasResult = await db.execute(sql`
-          SELECT r.id, 'retencion_practicada' as tipo, COALESCE(r.date, r.created_at) as fecha,
-            'Ret. practicada ' || UPPER(r.type) || COALESCE(' — ' || r.certificate_number, '') as descripcion,
-            CAST(COALESCE(r.amount, 0) AS decimal) as monto
-          FROM retenciones r
-          WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
-            AND r.direction = 'practicada'
-        `);
-      } catch (e) { console.error('CC detalle: retenciones practicadas query failed', (e as any)?.message); }
-
-      // Ajustes manuales
-      let adjustmentsResult: any = { rows: [] };
-      try {
-        adjustmentsResult = await db.execute(sql`
-          SELECT aa.id, 'ajuste' as tipo, aa.created_at as fecha,
-            'Ajuste' || COALESCE(' — ' || aa.reason, '') as descripcion,
-            CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) as monto,
-            aa.adjustment_type
-          FROM account_adjustments aa
-          WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
-        `);
-      } catch (e) { console.error('CC detalle: adjustments query failed', (e as any)?.message); }
-
-      // Facturas de compra (les debemos)
-      let purchaseInvoicesResult: any = { rows: [] };
-      try {
-        purchaseInvoicesResult = await db.execute(sql`
-          SELECT pi.id, 'factura_compra' as tipo, COALESCE(pi.invoice_date, pi.created_at) as fecha,
-            'Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
-            CAST(COALESCE(pi.total_amount, 0) AS decimal) as monto,
-            pi.payment_status
+          SELECT
+            pi.invoice_date as fecha,
+            'fact_compra' as tipo,
+            COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, '') as nro_comprobante,
+            CAST(pi.total_amount AS decimal) as debe,
+            0::decimal as haber,
+            'Fact. Compra ' || COALESCE(pi.invoice_type, '') || ' ' || COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, '') as descripcion,
+            pi.id as reference_id
           FROM purchase_invoices pi
-          WHERE pi.company_id = ${companyId} AND pi.enterprise_id = ${enterpriseId}
-            AND pi.status != 'cancelled'
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: purchase_invoices query failed', (e as any)?.message); }
+          WHERE pi.enterprise_id = ${enterpriseId} AND pi.company_id = ${companyId}
+            ${buFilterPurchase}
 
-      // Pagos aplicados (les pagamos)
-      let pagosResult: any = { rows: [] };
-      try {
-        pagosResult = await db.execute(sql`
-          SELECT pia.id, 'pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'Orden de Pago' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '')
-            || ' → Fact. Compra ' || pi.invoice_type || ' ' || pi.invoice_number as descripcion,
-            CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
-          FROM pago_invoice_applications pia
-          JOIN pagos pa ON pia.pago_id = pa.id
-          JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
-          WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: pagos query failed', (e as any)?.message); }
+          UNION ALL
 
-      // Adelantos pagos
-      let adelantosPagosResult: any = { rows: [] };
-      try {
-        adelantosPagosResult = await db.execute(sql`
-          SELECT pa.id, 'adelanto_pago' as tipo, COALESCE(pa.payment_date, pa.created_at) as fecha,
-            'OP (sin factura)' || COALESCE(' — ' || pa.payment_method, '') || COALESCE(' — ' || pa.reference, '') as descripcion,
-            CAST(COALESCE(pa.total_amount, pa.amount, 0) AS decimal) - COALESCE((
-              SELECT SUM(CAST(pia_d.amount_applied AS decimal)) FROM pago_invoice_applications pia_d WHERE pia_d.pago_id = pa.id
-            ), 0) as monto
-          FROM pagos pa
-          WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
-            AND pa.pending_status = 'pending_invoice'
-            ${buFilter}
-        `);
-      } catch (e) { console.error('CC detalle: adelantos pagos query failed', (e as any)?.message); }
+          SELECT
+            COALESCE(p.payment_date, p.created_at) as fecha,
+            'orden_pago' as tipo,
+            CAST(p.id AS text) as nro_comprobante,
+            0::decimal as debe,
+            CAST(COALESCE(p.total_amount, p.amount) AS decimal) as haber,
+            'Orden de Pago' as descripcion,
+            p.id as reference_id
+          FROM pagos p
+          WHERE p.enterprise_id = ${enterpriseId} AND p.company_id = ${companyId}
+            ${buFilterPagos}
 
-      const parseRows = (result: any) =>
-        ((result as any).rows || []).map((m: any) => ({ ...m, monto: parseFloat(m.monto || '0') }));
+          UNION ALL
 
-      const facturas = parseRows(invoicesResult);
-      const cobros = parseRows(cobrosResult);
-      const adelantos = parseRows(adelantosResult);
-      const retencionesSufridas = parseRows(retencionesSufridasResult);
-      const retencionesPracticadas = parseRows(retencionesPracticadasResult);
-      const adjustments = parseRows(adjustmentsResult);
-      const purchaseInvoices = parseRows(purchaseInvoicesResult);
-      const pagos = parseRows(pagosResult);
-      const adelantosPagos = parseRows(adelantosPagosResult);
+          SELECT
+            aa.created_at as fecha,
+            'ajuste' as tipo,
+            CAST(aa.id AS text) as nro_comprobante,
+            CASE WHEN aa.adjustment_type = 'debit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END as debe,
+            CASE WHEN aa.adjustment_type = 'credit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END as haber,
+            'Ajuste' || COALESCE(' — ' || aa.reason, '') as descripcion,
+            aa.id as reference_id
+          FROM account_adjustments aa
+          WHERE aa.enterprise_id = ${enterpriseId} AND aa.company_id = ${companyId}
+        ) movimientos
+        WHERE true ${dateFromFilter} ${dateToFilter}
+        ORDER BY fecha ASC, tipo ASC
+      `);
 
-      // Cuentas a Cobrar
-      // Retenciones sufridas van en haber (reducen lo que nos deben, como un cobro)
-      const movsCobrar = [
-        ...facturas.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
-        ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
-        ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
-        ...retencionesSufridas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
-        ...adjustments.map((a: any) => ({
-          ...a,
-          debe: a.adjustment_type === 'debit' ? a.monto : 0,
-          haber: a.adjustment_type === 'credit' ? a.monto : 0,
-        })),
-      ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+      const rows = ((result as any).rows || []) as any[];
 
-      let saldoCobrar = 0;
-      const movsCobrarConSaldo = movsCobrar.map((m: any) => {
-        saldoCobrar += m.debe - m.haber;
-        return { ...m, saldo: saldoCobrar };
+      // Running balance (saldo corrido progresivo)
+      let saldo = 0;
+      const movimientos = rows.map((r: any) => {
+        const debe = parseFloat(r.debe) || 0;
+        const haber = parseFloat(r.haber) || 0;
+        saldo += debe - haber;
+        return {
+          ...r,
+          debe,
+          haber,
+          saldo: Math.round(saldo * 100) / 100,
+        };
       });
 
-      // Cuentas a Pagar
-      // Retenciones practicadas van en haber (reducen lo que les debemos, como un pago)
-      const movsPagar = [
-        ...purchaseInvoices.map((p: any) => ({ ...p, debe: p.monto, haber: 0 })),
-        ...pagos.map((pa: any) => ({ ...pa, debe: 0, haber: pa.monto })),
-        ...adelantosPagos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
-        ...retencionesPracticadas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
-      ].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
-
-      let saldoPagar = 0;
-      const movsPagarConSaldo = movsPagar.map((m: any) => {
-        saldoPagar += m.debe - m.haber;
-        return { ...m, saldo: saldoPagar };
-      });
+      const totalDebe = movimientos.reduce((s: number, m: any) => s + m.debe, 0);
+      const totalHaber = movimientos.reduce((s: number, m: any) => s + m.haber, 0);
 
       return {
         enterprise,
-        cuentas_a_cobrar: {
-          movimientos: movsCobrarConSaldo,
-          total_ventas: facturas.reduce((s: number, m: any) => s + m.monto, 0),
-          total_cobros: cobros.reduce((s: number, m: any) => s + m.monto, 0),
-          total_adelantos: adelantos.reduce((s: number, m: any) => s + m.monto, 0),
-          total_retenciones: retencionesSufridas.reduce((s: number, m: any) => s + m.monto, 0),
-          saldo: saldoCobrar,
+        movimientos,
+        totales: {
+          debe: Math.round(totalDebe * 100) / 100,
+          haber: Math.round(totalHaber * 100) / 100,
+          saldo: Math.round((totalDebe - totalHaber) * 100) / 100,
         },
-        cuentas_a_pagar: {
-          movimientos: movsPagarConSaldo,
-          total_compras: purchaseInvoices.reduce((s: number, m: any) => s + m.monto, 0),
-          total_pagos: pagos.reduce((s: number, m: any) => s + m.monto, 0),
-          total_adelantos: adelantosPagos.reduce((s: number, m: any) => s + m.monto, 0),
-          total_retenciones: retencionesPracticadas.reduce((s: number, m: any) => s + m.monto, 0),
-          saldo: saldoPagar,
-        },
-        balance_neto: saldoCobrar - saldoPagar,
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;

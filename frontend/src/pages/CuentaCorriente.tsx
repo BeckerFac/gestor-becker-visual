@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { SkeletonTable } from '@/components/ui/Skeleton'
@@ -65,100 +65,31 @@ interface Detalle {
   balance_neto: number
 }
 
-const tipoColors: Record<string, string> = {
-  factura: 'bg-blue-100 text-blue-700',
-  venta: 'bg-blue-100 text-blue-700',
-  factura_compra: 'bg-purple-100 text-purple-700',
-  cobro: 'bg-green-100 text-green-700',
-  adelanto: 'bg-amber-100 text-amber-700',
-  adelanto_pago: 'bg-amber-100 text-amber-700',
-  compra: 'bg-orange-100 text-orange-700',
-  pago: 'bg-red-100 text-red-700',
-  ajuste: 'bg-violet-100 text-violet-700',
-  retencion_sufrida: 'bg-teal-100 text-teal-700',
-  retencion_practicada: 'bg-teal-100 text-teal-700',
+const tipoBadgeConfig: Record<string, { label: string; bg: string; text: string }> = {
+  fact_venta: { label: 'Factura Venta', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
+  factura: { label: 'Factura Venta', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
+  venta: { label: 'Factura Venta', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
+  recibo: { label: 'Recibo', bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-300' },
+  cobro: { label: 'Recibo', bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-300' },
+  adelanto: { label: 'Recibo (a favor)', bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-300' },
+  fact_compra: { label: 'Fact. Compra', bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-700 dark:text-purple-300' },
+  factura_compra: { label: 'Fact. Compra', bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-700 dark:text-purple-300' },
+  compra: { label: 'Fact. Compra', bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-700 dark:text-purple-300' },
+  orden_pago: { label: 'Orden de Pago', bg: 'bg-orange-100 dark:bg-orange-900/40', text: 'text-orange-700 dark:text-orange-300' },
+  pago: { label: 'Orden de Pago', bg: 'bg-orange-100 dark:bg-orange-900/40', text: 'text-orange-700 dark:text-orange-300' },
+  adelanto_pago: { label: 'OP (a favor)', bg: 'bg-orange-100 dark:bg-orange-900/40', text: 'text-orange-700 dark:text-orange-300' },
+  ajuste: { label: 'Ajuste', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300' },
+  retencion_sufrida: { label: 'Ret. Sufrida', bg: 'bg-teal-100 dark:bg-teal-900/40', text: 'text-teal-700 dark:text-teal-300' },
+  retencion_practicada: { label: 'Ret. Practicada', bg: 'bg-teal-100 dark:bg-teal-900/40', text: 'text-teal-700 dark:text-teal-300' },
 }
 
-const tipoLabels: Record<string, string> = {
-  factura: 'Factura',
-  venta: 'Factura',
-  factura_compra: 'Fact. Compra',
-  cobro: 'Recibo',
-  adelanto: 'Recibo (a favor)',
-  adelanto_pago: 'OP (a favor)',
-  compra: 'Compra',
-  pago: 'Orden de Pago',
-  ajuste: 'Ajuste',
-  retencion_sufrida: 'Ret. Sufrida',
-  retencion_practicada: 'Ret. Practicada',
+const defaultBadge = { label: 'Otro', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300' }
+
+const TipoBadge = ({ tipo }: { tipo: string }) => {
+  const c = tipoBadgeConfig[tipo] || defaultBadge
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>{c.label}</span>
 }
 
-interface MovimientosTableProps {
-  movimientos: Movimiento[]
-  saldo: number
-  fmt: (n: number) => string
-  formatDate: (d: string) => string
-  saldoLabel: string
-  saldoPositiveColor: string
-  debitLabel: string
-  creditLabel: string
-}
-
-const MovimientosTable: React.FC<MovimientosTableProps> = ({
-  movimientos,
-  saldo,
-  fmt,
-  formatDate,
-  saldoLabel,
-  saldoPositiveColor,
-  debitLabel,
-  creditLabel,
-}) => (
-  <table className="w-full text-sm">
-    <thead>
-      <tr className="text-left text-gray-500 border-b">
-        <th className="pb-2">Fecha</th>
-        <th className="pb-2">Tipo</th>
-        <th className="pb-2">Descripcion</th>
-        <th className="pb-2 text-right">{debitLabel}</th>
-        <th className="pb-2 text-right">{creditLabel}</th>
-        <th className="pb-2 text-right">Saldo</th>
-      </tr>
-    </thead>
-    <tbody>
-      {movimientos.map((m, idx) => (
-        <tr key={`${m.id}-${idx}`} className={`border-b border-gray-100 ${m.tipo === 'adelanto' || m.tipo === 'adelanto_pago' ? 'bg-amber-50/60 dark:bg-amber-950/10' : 'even:bg-gray-50/50'}`}>
-          <td className="py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
-          <td className="py-2">
-            <span
-              className={`px-2 py-0.5 rounded-full text-xs font-medium ${tipoColors[m.tipo] || 'bg-gray-100 text-gray-700 dark:text-gray-300'}`}
-            >
-              {tipoLabels[m.tipo] || m.tipo}
-            </span>
-          </td>
-          <td className="py-2 text-gray-700 dark:text-gray-300">{m.descripcion}</td>
-          <td className="py-2 text-right text-green-700">{m.debe > 0 ? fmt(m.debe) : ''}</td>
-          <td className="py-2 text-right text-red-600">{m.haber > 0 ? fmt(m.haber) : ''}</td>
-          <td className={`py-2 text-right font-medium ${m.saldo >= 0 ? saldoPositiveColor : 'text-red-600'}`}>
-            {fmt(m.saldo)}
-          </td>
-        </tr>
-      ))}
-    </tbody>
-    <tfoot>
-      <tr className="border-t-2 border-gray-300">
-        <td colSpan={5} className="py-3 font-bold text-right text-gray-700 dark:text-gray-300">
-          {saldoLabel}:
-        </td>
-        <td
-          className={`py-3 text-right font-bold text-base ${saldo >= 0 ? saldoPositiveColor : 'text-red-600'}`}
-        >
-          {fmt(saldo)}
-        </td>
-      </tr>
-    </tfoot>
-  </table>
-)
 
 interface AdjustmentFormProps {
   enterpriseId: string
@@ -301,6 +232,45 @@ export const CuentaCorriente: React.FC = () => {
   })
   const [pdfDateTo, setPdfDateTo] = useState<string>(() => new Date().toISOString().split('T')[0])
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [tiposVisibles, setTiposVisibles] = useState<Record<string, boolean>>({
+    fact_venta: true, recibo: true, fact_compra: true, orden_pago: true, ajuste: true,
+    factura: true, venta: true, cobro: true, adelanto: true, factura_compra: true,
+    compra: true, pago: true, adelanto_pago: true,
+    retencion_sufrida: true, retencion_practicada: true,
+  })
+
+  const toggleTipo = (tipo: string) => setTiposVisibles(prev => ({ ...prev, [tipo]: !prev[tipo] }))
+
+  const allMovimientos = useMemo(() => {
+    if (!detalle) return []
+    const cobrar = (detalle.cuentas_a_cobrar?.movimientos || [])
+    const pagar = (detalle.cuentas_a_pagar?.movimientos || [])
+    return [...cobrar, ...pagar].sort((a, b) =>
+      new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+    )
+  }, [detalle])
+
+  const movimientosFiltrados = useMemo(() => {
+    const filtered = allMovimientos.filter((m: Movimiento) => tiposVisibles[m.tipo] !== false)
+    let saldo = 0
+    return filtered.map((m: Movimiento) => {
+      saldo += (m.debe || 0) - (m.haber || 0)
+      return { ...m, saldo: Math.round(saldo * 100) / 100 }
+    })
+  }, [allMovimientos, tiposVisibles])
+
+  const filteredTotals = useMemo(() => {
+    const debe = movimientosFiltrados.reduce((s: number, m: Movimiento) => s + (m.debe || 0), 0)
+    const haber = movimientosFiltrados.reduce((s: number, m: Movimiento) => s + (m.haber || 0), 0)
+    const saldo = movimientosFiltrados.length > 0 ? movimientosFiltrados[movimientosFiltrados.length - 1].saldo : 0
+    return { debe, haber, saldo }
+  }, [movimientosFiltrados])
+
+  // Unique tipos present in current movimientos for filter buttons
+  const tiposPresentes = useMemo(() => {
+    const set = new Set(allMovimientos.map((m: Movimiento) => m.tipo))
+    return Array.from(set)
+  }, [allMovimientos])
 
   const loadResumen = async () => {
     try {
@@ -385,11 +355,6 @@ export const CuentaCorriente: React.FC = () => {
   // Legacy compat
   const totalNosDebem = totalACobrar
   const totalLesDebemos = totalAPagar
-
-  const hasMovimientosCobrar =
-    detalle && detalle.cuentas_a_cobrar.movimientos.length > 0
-  const hasMovimientosPagar =
-    detalle && detalle.cuentas_a_pagar.movimientos.length > 0
 
   return (
     <div className="space-y-6">
@@ -640,7 +605,7 @@ export const CuentaCorriente: React.FC = () => {
                     {/* Expanded detail */}
                     {selectedEnterprise === r.id && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-4 bg-gray-50 animate-slideDown">
+                        <td colSpan={7} className="px-6 py-4 bg-gray-50 animate-slideDown">
                           {loadingDetalle ? (
                             <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
@@ -724,74 +689,75 @@ export const CuentaCorriente: React.FC = () => {
                                 </button>
                               </div>
 
-                              {/* Cuentas a Cobrar */}
-                              <div>
-                                <h4 className="font-semibold text-green-700 mb-3 text-base border-b border-green-200 pb-2">
-                                  Cuentas a Cobrar — {detalle.enterprise.name}
-                                </h4>
-                                {hasMovimientosCobrar ? (
-                                  <MovimientosTable
-                                    movimientos={detalle.cuentas_a_cobrar.movimientos}
-                                    saldo={detalle.cuentas_a_cobrar.saldo}
-                                    fmt={fmt}
-                                    formatDate={formatDate}
-                                    saldoLabel="Saldo a cobrar"
-                                    saldoPositiveColor="text-green-700"
-                                    debitLabel="Facturado"
-                                    creditLabel="Cobrado"
-                                  />
-                                ) : (
-                                  <p className="text-sm text-gray-400 py-2">
-                                    Sin movimientos de ventas o recibos.
-                                  </p>
-                                )}
+                              {/* Filtro por tipo */}
+                              <div className="flex gap-2 flex-wrap mb-3">
+                                {tiposPresentes.map((tipo) => {
+                                  const visible = tiposVisibles[tipo] !== false
+                                  const cfg = tipoBadgeConfig[tipo] || defaultBadge
+                                  return (
+                                    <button key={tipo} onClick={() => toggleTipo(tipo)}
+                                      className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${visible ? cfg.bg + ' ' + cfg.text + ' border-transparent' : 'bg-white dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-700 line-through'}`}>
+                                      {cfg.label}
+                                    </button>
+                                  )
+                                })}
                               </div>
 
-                              {/* Divider */}
-                              <div className="border-t border-dashed border-gray-300" />
-
-                              {/* Cuentas a Pagar */}
-                              <div>
-                                <h4 className="font-semibold text-red-700 mb-3 text-base border-b border-red-200 pb-2">
-                                  Cuentas a Pagar — {detalle.enterprise.name}
-                                </h4>
-                                {hasMovimientosPagar ? (
-                                  <MovimientosTable
-                                    movimientos={detalle.cuentas_a_pagar.movimientos}
-                                    saldo={detalle.cuentas_a_pagar.saldo}
-                                    fmt={fmt}
-                                    formatDate={formatDate}
-                                    saldoLabel="Saldo a pagar"
-                                    saldoPositiveColor="text-red-600"
-                                    debitLabel="Comprado"
-                                    creditLabel="Pagado"
-                                  />
+                              {/* Tabla cronologica unificada */}
+                              <div className="overflow-x-auto">
+                                {movimientosFiltrados.length > 0 ? (
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="text-left text-xs text-gray-500 dark:text-gray-400 border-b">
+                                        <th className="pb-2 px-3">Fecha</th>
+                                        <th className="pb-2 px-3">Tipo</th>
+                                        <th className="pb-2 px-3">Comprobante</th>
+                                        <th className="pb-2 px-3">Descripcion</th>
+                                        <th className="pb-2 px-3 text-right">Debe</th>
+                                        <th className="pb-2 px-3 text-right">Haber</th>
+                                        <th className="pb-2 px-3 text-right">Saldo</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {movimientosFiltrados.map((m: any, i: number) => (
+                                        <tr key={i} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                                          <td className="py-2 px-3 text-gray-600 dark:text-gray-400">
+                                            {m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR') : '-'}
+                                          </td>
+                                          <td className="py-2 px-3">
+                                            <TipoBadge tipo={m.tipo} />
+                                          </td>
+                                          <td className="py-2 px-3 font-mono text-xs">{m.nro_comprobante || '-'}</td>
+                                          <td className="py-2 px-3">{m.descripcion}</td>
+                                          <td className="py-2 px-3 text-right font-medium">
+                                            {m.debe > 0 ? `$${m.debe.toLocaleString('es-AR', {minimumFractionDigits: 2})}` : ''}
+                                          </td>
+                                          <td className="py-2 px-3 text-right font-medium">
+                                            {m.haber > 0 ? `$${m.haber.toLocaleString('es-AR', {minimumFractionDigits: 2})}` : ''}
+                                          </td>
+                                          <td className={`py-2 px-3 text-right font-bold ${m.saldo >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                            ${Math.abs(m.saldo).toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                                            <span className="text-[10px] ml-0.5">{m.saldo >= 0 ? 'D' : 'H'}</span>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr className="border-t-2 font-bold">
+                                        <td colSpan={4} className="py-2 px-3">TOTALES</td>
+                                        <td className="py-2 px-3 text-right">${filteredTotals.debe.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-2 px-3 text-right">${filteredTotals.haber.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className={`py-2 px-3 text-right ${filteredTotals.saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                          ${Math.abs(filteredTotals.saldo).toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                                          <span className="text-[10px] ml-0.5">{filteredTotals.saldo >= 0 ? 'D' : 'H'}</span>
+                                        </td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
                                 ) : (
-                                  <p className="text-sm text-gray-400 py-2">
-                                    Sin movimientos de compras u ordenes de pago.
+                                  <p className="text-sm text-gray-400 py-4 text-center">
+                                    Sin movimientos registrados
                                   </p>
-                                )}
-                              </div>
-
-                              {/* Balance Neto */}
-                              <div className="border-t-2 border-gray-400 pt-4 flex items-center justify-end gap-4">
-                                <span className="text-base font-bold text-gray-700 dark:text-gray-300">
-                                  Balance Neto:
-                                </span>
-                                <span
-                                  className={`text-xl font-bold ${detalle.balance_neto >= 0 ? 'text-green-700' : 'text-red-600'}`}
-                                >
-                                  {fmt(detalle.balance_neto)}
-                                </span>
-                                {detalle.balance_neto > 0 && (
-                                  <span className="text-sm text-green-600 font-medium">
-                                    (a nuestro favor)
-                                  </span>
-                                )}
-                                {detalle.balance_neto < 0 && (
-                                  <span className="text-sm text-red-500 font-medium">
-                                    (en contra)
-                                  </span>
                                 )}
                               </div>
                             </div>

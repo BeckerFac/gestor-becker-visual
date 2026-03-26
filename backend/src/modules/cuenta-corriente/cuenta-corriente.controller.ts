@@ -17,7 +17,11 @@ export class CuentaCorrienteController {
     const data = await cuentaCorrienteService.getDetalle(
       req.user!.company_id,
       req.params.enterpriseId,
-      req.query.business_unit_id as string
+      {
+        dateFrom: req.query.date_from as string | undefined,
+        dateTo: req.query.date_to as string | undefined,
+        businessUnitId: req.query.business_unit_id as string | undefined,
+      }
     );
     res.json(data);
   }
