@@ -140,6 +140,7 @@ export class CobrosService {
       `);
       return (result as any).rows || result || [];
     } catch (error) {
+      console.error('getCobros error:', error);
       throw new ApiError(500, 'Failed to get cobros');
     }
   }

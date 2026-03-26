@@ -838,7 +838,7 @@ export class PdfService {
 
       // 2. Query payment methods
       const pmResult = await db.execute(sql`
-        SELECT rpm.*, b.name as bank_name
+        SELECT rpm.*, b.bank_name as bank_name
         FROM receipt_payment_methods rpm
         LEFT JOIN banks b ON rpm.bank_id = b.id
         WHERE rpm.cobro_id = ${cobroId}
@@ -900,7 +900,7 @@ export class PdfService {
     const esc = this.escapeHtml.bind(this)
 
     const receiptNumber = String(cobro.receipt_number || cobro.id?.slice(-8) || '0').padStart(8, '0')
-    const receiptDate = new Date(cobro.date || cobro.created_at).toLocaleDateString('es-AR')
+    const receiptDate = new Date(cobro.payment_date || cobro.created_at).toLocaleDateString('es-AR')
 
     const companyCuit = this.formatCuit(cobro.company_cuit || '')
     const enterpriseCuit = this.formatCuit(cobro.enterprise_cuit || '')

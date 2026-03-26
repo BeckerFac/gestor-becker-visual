@@ -5,16 +5,30 @@ import { pdfService } from '../pdf/pdf.service';
 
 export class CobrosController {
   async getCobros(req: AuthRequest, res: Response) {
-    const data = await cobrosService.getCobros(req.user!.company_id, {
-      enterprise_id: req.query.enterprise_id as string,
-      business_unit_id: req.query.business_unit_id as string,
-    });
-    res.json(data);
+    try {
+      const data = await cobrosService.getCobros(req.user!.company_id, {
+        enterprise_id: req.query.enterprise_id as string,
+        business_unit_id: req.query.business_unit_id as string,
+      });
+      res.json(data);
+    } catch (error) {
+      console.error('getCobros controller error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Error al obtener cobros';
+      res.status(status).json({ error: message });
+    }
   }
 
   async createCobro(req: AuthRequest, res: Response) {
-    const data = await cobrosService.createCobro(req.user!.company_id, req.user!.id, req.body);
-    res.status(201).json(data);
+    try {
+      const data = await cobrosService.createCobro(req.user!.company_id, req.user!.id, req.body);
+      res.status(201).json(data);
+    } catch (error) {
+      console.error('createCobro controller error:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Error al crear cobro';
+      res.status(status).json({ error: message });
+    }
   }
 
   async deleteCobro(req: AuthRequest, res: Response) {
@@ -38,10 +52,17 @@ export class CobrosController {
   }
 
   async getReceiptPdf(req: AuthRequest, res: Response) {
-    const pdf = await pdfService.generateReceiptPdf(req.params.id, req.user!.company_id);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=recibo-${req.params.id}.pdf`);
-    res.send(pdf);
+    try {
+      const pdf = await pdfService.generateReceiptPdf(req.params.id, req.user!.company_id);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename=recibo-${req.params.id}.pdf`);
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating receipt PDF:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Error al generar PDF del recibo';
+      res.status(status).json({ error: message });
+    }
   }
 }
 
