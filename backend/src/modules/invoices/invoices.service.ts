@@ -1278,6 +1278,65 @@ export class InvoicesService {
   }
 
   /**
+   * Get invoice detail for expandable row (items + cobros applied + balance).
+   */
+  async getInvoiceDetail(companyId: string, invoiceId: string) {
+    // Items
+    const itemsResult = await db.execute(sql`
+      SELECT ii.*, p.name as product_name, p.sku
+      FROM invoice_items ii
+      LEFT JOIN products p ON ii.product_id = p.id
+      WHERE ii.invoice_id = ${invoiceId}
+      ORDER BY ii.created_at ASC
+    `);
+    const items = (itemsResult as any).rows || [];
+
+    // Cobros aplicados
+    const cobrosResult = await db.execute(sql`
+      SELECT cia.amount_applied, cia.applied_at,
+        c.id as cobro_id, c.receipt_number, c.payment_date, c.payment_method,
+        CAST(c.amount AS decimal) as cobro_amount
+      FROM cobro_invoice_applications cia
+      JOIN cobros c ON cia.cobro_id = c.id
+      WHERE cia.invoice_id = ${invoiceId}
+      ORDER BY cia.applied_at ASC
+    `);
+    const cobros_aplicados = (cobrosResult as any).rows || [];
+
+    // Saldo pendiente
+    const totalApplied = cobros_aplicados.reduce((s: number, c: any) => s + parseFloat(c.amount_applied || 0), 0);
+
+    // Invoice data (para total)
+    const invResult = await db.execute(sql`
+      SELECT i.total_amount, i.subtotal, i.vat_amount, i.invoice_type, i.invoice_number,
+        e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address, e.tax_condition,
+        cust.name as customer_name
+      FROM invoices i
+      LEFT JOIN enterprises e ON i.enterprise_id = e.id
+      LEFT JOIN customers cust ON i.customer_id = cust.id
+      WHERE i.id = ${invoiceId} AND i.company_id = ${companyId}
+    `);
+    const invoice = ((invResult as any).rows || [])[0];
+    if (!invoice) return null;
+
+    const total = parseFloat(invoice.total_amount || 0);
+
+    return {
+      items,
+      cobros_aplicados,
+      saldo_pendiente: Math.max(total - totalApplied, 0),
+      total,
+      enterprise: {
+        name: invoice.enterprise_name,
+        cuit: invoice.enterprise_cuit,
+        address: invoice.enterprise_address,
+        tax_condition: invoice.tax_condition,
+      },
+      customer_name: invoice.customer_name,
+    };
+  }
+
+  /**
    * Get invoice items with payment remaining per item.
    */
   async getInvoiceItemsWithRemaining(companyId: string, invoiceId: string) {

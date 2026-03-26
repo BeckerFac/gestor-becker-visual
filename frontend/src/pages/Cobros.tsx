@@ -59,6 +59,27 @@ interface Receipt {
   reference: string | null
   pending_status: string | null
   total_assigned: number | string
+  enterprise_cuit?: string | null
+  payment_methods?: Array<{
+    method: string
+    amount: string
+    bank_id: string | null
+    bank_name?: string | null
+    reference: string | null
+    cheque_data?: {
+      number: string
+      bank: string
+      drawer: string
+      due_date: string
+    } | null
+  }>
+  retenciones_sufridas?: Array<{
+    id: string
+    type: string
+    amount: string | number
+    jurisdiction?: string | null
+    certificate_number?: string | null
+  }>
   linked_invoices: {
     id: string
     invoice_id: string
@@ -365,6 +386,9 @@ export const Cobros: React.FC = () => {
 
   // Linking state for existing cobros
   const [linkingCobro, setLinkingCobro] = useState<{ id: string; amount: number; enterprise_id?: string } | null>(null)
+
+  // Expandable receipt row
+  const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(null)
 
   // Pending orders state
   const [dismissedPendingCobros, setDismissedPendingCobros] = useState<string[]>(getDismissedPendingCobros())
@@ -1560,7 +1584,11 @@ export const Cobros: React.FC = () => {
               </thead>
               <tbody>
                 {paginatedReceipts.map(receipt => (
-                  <tr key={receipt.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                  <React.Fragment key={receipt.id}>
+                  <tr
+                    onClick={() => setExpandedReceiptId(prev => prev === receipt.id ? null : receipt.id)}
+                    className="border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  >
                     <td className="px-4 py-3 font-mono font-semibold text-gray-800 dark:text-gray-200">
                       #{String(receipt.receipt_number).padStart(6, '0')}
                     </td>
@@ -1633,6 +1661,128 @@ export const Cobros: React.FC = () => {
                       </div>
                     </td>
                   </tr>
+                  {expandedReceiptId === receipt.id && (
+                    <tr>
+                      <td colSpan={99} className="p-0">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-200 dark:border-gray-700 space-y-4">
+
+                          {/* Formas de Pago */}
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Formas de Pago</h4>
+                            <table className="w-full text-sm">
+                              <thead><tr className="text-left text-xs text-gray-500">
+                                <th className="pb-1">Metodo</th><th className="pb-1">Monto</th><th className="pb-1">Banco</th><th className="pb-1">Referencia</th>
+                              </tr></thead>
+                              <tbody>
+                                {(receipt.payment_methods && receipt.payment_methods.length > 0
+                                  ? receipt.payment_methods
+                                  : [{ method: receipt.payment_method || '', amount: receipt.amount, bank_id: null, bank_name: receipt.bank_name, reference: receipt.reference }]
+                                ).map((pm: any, i: number) => (
+                                  <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                                    <td className="py-1 capitalize">{PAYMENT_METHOD_LABELS[pm.method] || pm.method}</td>
+                                    <td className="py-1 font-medium">${parseFloat(pm.amount || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-1 text-gray-500">{pm.bank_name || '-'}</td>
+                                    <td className="py-1 text-gray-500">{pm.reference || '-'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Facturas Vinculadas */}
+                          {receipt.linked_invoices && receipt.linked_invoices.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Facturas Vinculadas</h4>
+                              <table className="w-full text-sm">
+                                <thead><tr className="text-left text-xs text-gray-500">
+                                  <th className="pb-1">Factura</th><th className="pb-1 text-right">Total</th><th className="pb-1 text-right">Aplicado</th><th className="pb-1 text-right">Pendiente</th>
+                                </tr></thead>
+                                <tbody>
+                                  {receipt.linked_invoices.map((inv) => {
+                                    const total = parseFloat(inv.invoice_total || '0')
+                                    const applied = parseFloat(inv.amount || '0')
+                                    return (
+                                      <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700">
+                                        <td className="py-1">{inv.invoice_type || ''} {inv.invoice_number}</td>
+                                        <td className="py-1 text-right">${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-1 text-right text-green-600">${applied.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-1 text-right text-amber-600">${(total - applied > 0.01 ? (total - applied) : 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Retenciones Sufridas */}
+                          {receipt.retenciones_sufridas && receipt.retenciones_sufridas.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Retenciones Sufridas</h4>
+                              <table className="w-full text-sm">
+                                <thead><tr className="text-left text-xs text-gray-500">
+                                  <th className="pb-1">Tipo</th><th className="pb-1">Jurisdiccion</th><th className="pb-1">N Certificado</th><th className="pb-1 text-right">Importe</th>
+                                </tr></thead>
+                                <tbody>
+                                  {receipt.retenciones_sufridas.map((ret) => (
+                                    <tr key={ret.id} className="border-t border-gray-100 dark:border-gray-700">
+                                      <td className="py-1 uppercase">{ret.type}</td>
+                                      <td className="py-1">{ret.jurisdiction ? ret.jurisdiction.toUpperCase() : '-'}</td>
+                                      <td className="py-1 font-mono text-xs">{ret.certificate_number || '-'}</td>
+                                      <td className="py-1 text-right font-medium">${parseFloat(String(ret.amount || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Datos Cheque */}
+                          {receipt.payment_methods?.some((pm) => pm.method === 'cheque' && pm.cheque_data) && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Cheques</h4>
+                              {receipt.payment_methods.filter((pm) => pm.method === 'cheque' && pm.cheque_data).map((pm, i) => (
+                                <div key={i} className="grid grid-cols-4 gap-2 text-sm border-l-2 border-amber-300 pl-3">
+                                  <div><span className="text-xs text-gray-500">N</span><br/>{pm.cheque_data?.number}</div>
+                                  <div><span className="text-xs text-gray-500">Banco</span><br/>{pm.cheque_data?.bank}</div>
+                                  <div><span className="text-xs text-gray-500">Librador</span><br/>{pm.cheque_data?.drawer}</div>
+                                  <div><span className="text-xs text-gray-500">Vencimiento</span><br/>{pm.cheque_data?.due_date}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Empresa */}
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm text-gray-500">
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{receipt.enterprise_name}</span>
+                              {receipt.enterprise_cuit && <span className="ml-2">CUIT: {receipt.enterprise_cuit}</span>}
+                            </div>
+                            {/* Saldos */}
+                            <div className="text-sm text-right">
+                              <span className="text-gray-500">Total: </span><span className="font-medium">${parseFloat(receipt.total_amount || receipt.amount || '0').toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                              {receipt.total_assigned && parseFloat(String(receipt.total_assigned)) > 0 && (
+                                <>
+                                  <span className="mx-2 text-gray-300">|</span>
+                                  <span className="text-gray-500">Asignado: </span><span className="text-green-600">${parseFloat(String(receipt.total_assigned)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Boton PDF */}
+                          <div className="flex gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <button
+                              onClick={async (e) => { e.stopPropagation(); try { const blob = await api.getReceiptPdf(receipt.id); const url = URL.createObjectURL(blob); window.open(url); } catch { alert('Error al generar PDF'); } }}
+                              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                            >Descargar PDF</button>
+                          </div>
+
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

@@ -41,6 +41,20 @@ export class InvoicesController {
     }
   }
 
+  async getInvoiceDetail(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
+      const detail = await invoicesService.getInvoiceDetail(req.user.company_id, req.params.id);
+      if (!detail) return res.status(404).json({ error: 'Factura no encontrada' });
+      res.json(detail);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Failed to get invoice detail' });
+    }
+  }
+
   async getInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');

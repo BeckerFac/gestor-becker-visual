@@ -127,6 +127,7 @@ export const Pagos: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [linkingPago, setLinkingPago] = useState<{ id: string; amount: number; enterprise_id?: string } | null>(null)
+  const [expandedPagoId, setExpandedPagoId] = useState<string | null>(null)
   const [dismissedPending, setDismissedPending] = useState<string[]>(getDismissedPending())
   const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
@@ -920,7 +921,11 @@ export const Pagos: React.FC = () => {
               </thead>
               <tbody>
                 {paginatedPagos.map(pago => (
-                  <tr key={pago.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                  <React.Fragment key={pago.id}>
+                  <tr
+                    onClick={() => setExpandedPagoId(prev => prev === pago.id ? null : pago.id)}
+                    className="border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  >
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(pago.payment_date)}</td>
                     <td className="px-4 py-3">
                       <div>
@@ -997,6 +1002,103 @@ export const Pagos: React.FC = () => {
                       </div>
                     </td>
                   </tr>
+                  {expandedPagoId === pago.id && (
+                    <tr>
+                      <td colSpan={99} className="p-0">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-200 dark:border-gray-700 space-y-4">
+
+                          {/* Formas de Pago */}
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Formas de Pago</h4>
+                            <table className="w-full text-sm">
+                              <thead><tr className="text-left text-xs text-gray-500">
+                                <th className="pb-1">Metodo</th><th className="pb-1">Monto</th><th className="pb-1">Banco</th><th className="pb-1">Referencia</th>
+                              </tr></thead>
+                              <tbody>
+                                {((pago as any).payment_methods && (pago as any).payment_methods.length > 0
+                                  ? (pago as any).payment_methods
+                                  : [{ method: pago.payment_method, amount: pago.amount, bank_id: null, bank_name: pago.bank_name, reference: pago.reference }]
+                                ).map((pm: any, i: number) => (
+                                  <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                                    <td className="py-1 capitalize">{PAYMENT_METHOD_LABELS[pm.method] || pm.method}</td>
+                                    <td className="py-1 font-medium">${parseFloat(pm.amount || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-1 text-gray-500">{pm.bank_name || '-'}</td>
+                                    <td className="py-1 text-gray-500">{pm.reference || '-'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Facturas de Compra Vinculadas */}
+                          {(pago as any).linked_purchase_invoices && (pago as any).linked_purchase_invoices.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Facturas de Compra Vinculadas</h4>
+                              <table className="w-full text-sm">
+                                <thead><tr className="text-left text-xs text-gray-500">
+                                  <th className="pb-1">Factura</th><th className="pb-1 text-right">Total</th><th className="pb-1 text-right">Aplicado</th><th className="pb-1 text-right">Pendiente</th>
+                                </tr></thead>
+                                <tbody>
+                                  {(pago as any).linked_purchase_invoices.map((inv: any) => {
+                                    const total = parseFloat(inv.invoice_total || '0')
+                                    const applied = parseFloat(inv.amount || '0')
+                                    return (
+                                      <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700">
+                                        <td className="py-1">{inv.invoice_type || ''} {inv.invoice_number}</td>
+                                        <td className="py-1 text-right">${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-1 text-right text-green-600">${applied.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-1 text-right text-amber-600">${(total - applied > 0.01 ? (total - applied) : 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Retenciones Practicadas */}
+                          {pago.retenciones && pago.retenciones.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Retenciones Practicadas</h4>
+                              <table className="w-full text-sm">
+                                <thead><tr className="text-left text-xs text-gray-500">
+                                  <th className="pb-1">Tipo</th><th className="pb-1">Regimen</th><th className="pb-1 text-right">Tasa</th><th className="pb-1 text-right">Importe</th>
+                                </tr></thead>
+                                <tbody>
+                                  {pago.retenciones.map((ret) => (
+                                    <tr key={ret.id} className="border-t border-gray-100 dark:border-gray-700">
+                                      <td className="py-1 uppercase">{ret.type}</td>
+                                      <td className="py-1">{ret.regime || '-'}</td>
+                                      <td className="py-1 text-right">{parseFloat(ret.rate).toFixed(1)}%</td>
+                                      <td className="py-1 text-right font-medium">${parseFloat(ret.amount).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {/* Empresa + Saldos */}
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm text-gray-500">
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{pago.enterprise_name || '-'}</span>
+                            </div>
+                            <div className="text-sm text-right">
+                              <span className="text-gray-500">Total: </span><span className="font-medium">${parseFloat(pago.total_amount || pago.amount || '0').toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                              {(pago as any).total_assigned && parseFloat(String((pago as any).total_assigned)) > 0 && (
+                                <>
+                                  <span className="mx-2 text-gray-300">|</span>
+                                  <span className="text-gray-500">Asignado: </span><span className="text-green-600">${parseFloat(String((pago as any).total_assigned)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

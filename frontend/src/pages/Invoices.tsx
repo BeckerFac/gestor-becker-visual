@@ -357,6 +357,10 @@ export const Invoices: React.FC = () => {
   const [exportIncoterms, setExportIncoterms] = useState('')
   const [exportLanguage, setExportLanguage] = useState(1)
 
+  // Expandable row detail
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
+  const [invoiceDetails, setInvoiceDetails] = useState<Record<string, any>>({})
+
   // Form - Step 2: Items
   const [formItems, setFormItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
   const [productSearch, setProductSearch] = useState('')
@@ -1927,7 +1931,20 @@ export const Invoices: React.FC = () => {
                   const isLinkOpen = linkDropdownInvoiceId === invoice.id
 
                   return (
-                    <tr key={invoice.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                    <React.Fragment key={invoice.id}>
+                    <tr
+                      className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
+                      onClick={async () => {
+                        if (expandedInvoiceId === invoice.id) { setExpandedInvoiceId(null); return; }
+                        setExpandedInvoiceId(invoice.id);
+                        if (!invoiceDetails[invoice.id]) {
+                          try {
+                            const detail = await api.getInvoiceDetail(invoice.id);
+                            setInvoiceDetails(prev => ({ ...prev, [invoice.id]: detail }));
+                          } catch { /* ignore */ }
+                        }
+                      }}
+                    >
                       {/* Comprobante: Tipo + Numero + CAE */}
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-1.5">
@@ -1949,7 +1966,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Empresa + Cliente + Pedido combined */}
-                      <td className="px-2 py-2 text-xs">
+                      <td className="px-2 py-2 text-xs" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <span className="font-medium text-gray-800 dark:text-gray-200">{invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}</span>
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
@@ -2004,7 +2021,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Estado Pago */}
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                         {(() => {
                           const ps = invoice.payment_status || 'pendiente'
                           const meta = PAYMENT_STATUS_MAP[ps]
@@ -2035,7 +2052,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Acciones */}
-                      <td className="px-2 py-2">
+                      <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-2">
                           {vistaMode === 'venta_fiscal' && invoice.status === 'draft' && (
                             <PermissionGate module="invoices" action="authorize_afip">
@@ -2098,6 +2115,84 @@ export const Invoices: React.FC = () => {
                         </div>
                       </td>
                     </tr>
+                    {expandedInvoiceId === invoice.id && (
+                      <tr>
+                        <td colSpan={99} className="p-0">
+                          <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t space-y-4">
+                            {invoiceDetails[invoice.id] ? (
+                              <>
+                                {/* Items */}
+                                <div>
+                                  <h4 className="text-sm font-semibold mb-2">Items Facturados</h4>
+                                  <table className="w-full text-sm">
+                                    <thead><tr className="text-xs text-gray-500">
+                                      <th className="text-left pb-1">Producto</th>
+                                      <th className="text-right pb-1">Cant.</th>
+                                      <th className="text-right pb-1">Precio</th>
+                                      <th className="text-right pb-1">IVA</th>
+                                      <th className="text-right pb-1">Subtotal</th>
+                                    </tr></thead>
+                                    <tbody>
+                                      {invoiceDetails[invoice.id].items.map((item: any) => (
+                                        <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
+                                          <td className="py-1">{item.product_name || item.description || 'Item'}</td>
+                                          <td className="py-1 text-right">{item.quantity}</td>
+                                          <td className="py-1 text-right">${parseFloat(item.unit_price || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                          <td className="py-1 text-right text-gray-500">{item.vat_rate || 21}%</td>
+                                          <td className="py-1 text-right font-medium">${(parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+
+                                {/* Recibos vinculados */}
+                                {invoiceDetails[invoice.id].cobros_aplicados?.length > 0 && (
+                                  <div>
+                                    <h4 className="text-sm font-semibold mb-2">Recibos Vinculados</h4>
+                                    <table className="w-full text-sm">
+                                      <thead><tr className="text-xs text-gray-500">
+                                        <th className="text-left pb-1">Recibo</th>
+                                        <th className="text-left pb-1">Fecha</th>
+                                        <th className="text-left pb-1">Metodo</th>
+                                        <th className="text-right pb-1">Aplicado</th>
+                                      </tr></thead>
+                                      <tbody>
+                                        {invoiceDetails[invoice.id].cobros_aplicados.map((c: any) => (
+                                          <tr key={c.cobro_id} className="border-t border-gray-100 dark:border-gray-700">
+                                            <td className="py-1">#{c.receipt_number}</td>
+                                            <td className="py-1">{c.payment_date ? new Date(c.payment_date).toLocaleDateString('es-AR') : '-'}</td>
+                                            <td className="py-1 capitalize">{c.payment_method}</td>
+                                            <td className="py-1 text-right text-green-600 font-medium">${parseFloat(c.amount_applied || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+
+                                {/* Saldo pendiente */}
+                                <div className="flex justify-between items-center pt-2 border-t">
+                                  <div className="text-sm">
+                                    <span className="font-medium">{invoiceDetails[invoice.id].enterprise?.name}</span>
+                                    {invoiceDetails[invoice.id].enterprise?.cuit && <span className="ml-2 text-gray-500">CUIT: {invoiceDetails[invoice.id].enterprise.cuit}</span>}
+                                  </div>
+                                  <div className="text-sm text-right">
+                                    <span>Saldo pendiente: </span>
+                                    <span className={invoiceDetails[invoice.id].saldo_pendiente > 0.01 ? 'font-bold text-amber-600' : 'font-bold text-green-600'}>
+                                      ${invoiceDetails[invoice.id].saldo_pendiente.toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                                    </span>
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-center text-gray-400 py-4">Cargando...</div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   )
                 })}
               </tbody>

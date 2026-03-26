@@ -786,6 +786,10 @@ export const api = {
     const { data } = await client.get(`/invoices/${id}`)
     return data
   },
+  getInvoiceDetail: async (invoiceId: string) => {
+    const { data } = await client.get(`/invoices/${invoiceId}/detail`)
+    return data
+  },
   updateDraftInvoice: async (id: string, updateData: any) => {
     const { data } = await client.put(`/invoices/${id}`, updateData)
     return data
