@@ -347,6 +347,54 @@ async function runAutoMigrations() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_msm_material ON material_stock_movements(material_id)`);
 
+    // --- Warehouses ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS warehouses (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        address TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_warehouses_company ON warehouses(company_id)`);
+
+    // --- Stock ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS stock (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+        quantity VARCHAR(50) DEFAULT '0',
+        min_level VARCHAR(50) DEFAULT '0',
+        max_level VARCHAR(50) DEFAULT '0',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(product_id, warehouse_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_product ON stock(product_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_warehouse ON stock(warehouse_id)`);
+
+    // --- Stock movements ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+        movement_type VARCHAR(50) NOT NULL,
+        quantity VARCHAR(50) NOT NULL DEFAULT '0',
+        reference_type VARCHAR(50),
+        reference_id UUID,
+        notes TEXT,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sm_product ON stock_movements(product_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sm_warehouse ON stock_movements(warehouse_id)`);
+
     // --- Cheque status history ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cheque_status_history (

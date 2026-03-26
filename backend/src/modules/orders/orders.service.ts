@@ -226,6 +226,7 @@ export class OrdersService {
 
   async createOrder(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
+    console.log('createOrder START', { companyId, userId, title: data?.title, itemCount: data?.items?.length || 0 });
     try {
       const orderId = uuid();
 
@@ -294,16 +295,16 @@ export class OrdersService {
         VALUES (${uuid()}, ${orderId}, 'pendiente', 'Pedido creado', ${userId})
       `);
 
-      // Deduct stock for items where deduct_stock is true
+      // --- COMMIT TRANSACTION ---
+      await db.execute(sql`COMMIT`);
+
+      // Deduct stock AFTER commit so a stock error doesn't abort the order transaction
       if (data.items && Array.isArray(data.items)) {
         const itemsToDeduct = data.items.filter((i: any) => i.deduct_stock);
         if (itemsToDeduct.length > 0) {
           await this.deductStockForOrder(companyId, orderId, userId, itemsToDeduct);
         }
       }
-
-      // --- COMMIT TRANSACTION ---
-      await db.execute(sql`COMMIT`);
 
       // CRM Pipeline sync: order_created
       try {
@@ -325,10 +326,11 @@ export class OrdersService {
         });
       } catch (e) { console.error('CRM sync error (order_created):', e); }
 
+      console.log('createOrder SUCCESS', { orderId, orderNumber });
       return { id: orderId, status: 'pendiente' };
     } catch (error) {
       await db.execute(sql`ROLLBACK`).catch(() => {});
-      console.error('Create order error:', error);
+      console.error('createOrder FAILED', { companyId, error });
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create order');
     }
