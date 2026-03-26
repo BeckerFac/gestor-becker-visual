@@ -1243,9 +1243,10 @@ export class InvoicesService {
     enterprise_id?: string;
     business_unit_id?: string;
   } = {}) {
-    let whereClause = sql`o.company_id = ${companyId} AND o.status != 'cancelado'`;
+    let whereClause = sql`o.company_id = ${companyId} AND o.status NOT IN ('cancelado', 'cancelled')`;
     if (filters.enterprise_id) {
-      whereClause = sql`${whereClause} AND o.enterprise_id = ${filters.enterprise_id}`;
+      // Match by enterprise_id OR by customer's enterprise_id
+      whereClause = sql`${whereClause} AND (o.enterprise_id = ${filters.enterprise_id} OR o.customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${filters.enterprise_id}))`;
     }
 
     // Use CTE to calculate invoiced quantities, then filter for remaining > 0
