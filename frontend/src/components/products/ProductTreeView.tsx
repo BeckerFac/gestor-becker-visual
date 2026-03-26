@@ -581,7 +581,7 @@ export const ProductTreeView: React.FC<ProductTreeViewProps> = ({
       const isExp = expanded.has(cat.id)
       return (
         <React.Fragment key={cat.id}>
-          {depth > 0 && <tr><td colSpan={99} className="h-2 border-0 bg-transparent" /></tr>}
+          {depth > 0 && <tr><td colSpan={7 + (hideCosts ? 0 : 2) + (hasStockProducts ? 1 : 0)} className="h-2 border-0 bg-transparent" /></tr>}
           <CategoryRow
             category={cat}
             depth={depth}

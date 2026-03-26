@@ -1004,7 +1004,7 @@ export const Pagos: React.FC = () => {
                   </tr>
                   {expandedPagoId === pago.id && (
                     <tr>
-                      <td colSpan={99} className="p-0">
+                      <td colSpan={9} className="p-0">
                         <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-200 dark:border-gray-700 space-y-4">
 
                           {/* Formas de Pago */}

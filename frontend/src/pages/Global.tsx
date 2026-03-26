@@ -756,12 +756,24 @@ export const Global: React.FC = () => {
                   ) : (
                     <>
                       {/* Summary Cards */}
+                      {(() => {
+                        const movimientos = cuentaCorriente.movimientos || [];
+                        const totalVentas = movimientos.filter((m: any) => m.tipo === 'fact_venta').reduce((s: number, m: any) => s + (m.debe || 0), 0);
+                        const totalCobros = movimientos.filter((m: any) => m.tipo === 'recibo').reduce((s: number, m: any) => s + (m.haber || 0), 0);
+                        const saldo = cuentaCorriente.totales?.saldo || 0;
+                        const movCobrar = movimientos.filter((m: any) => ['fact_venta', 'recibo'].includes(m.tipo));
+                        const movPagar = movimientos.filter((m: any) => ['fact_compra', 'orden_pago'].includes(m.tipo));
+                        const saldoCobrar = movCobrar.reduce((s: number, m: any) => s + (m.debe || 0) - (m.haber || 0), 0);
+                        const saldoPagar = movPagar.reduce((s: number, m: any) => s + (m.debe || 0) - (m.haber || 0), 0);
+
+                        return (
+                          <>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         <Card className="border border-blue-200 bg-blue-50">
                           <CardContent className="pt-3 pb-2">
                             <p className="text-xs text-blue-700">Ventas</p>
                             <p className="text-lg font-bold text-blue-800">
-                              {formatCurrency(cuentaCorriente.cuentas_a_cobrar?.total_ventas || 0)}
+                              {formatCurrency(totalVentas)}
                             </p>
                           </CardContent>
                         </Card>
@@ -769,28 +781,28 @@ export const Global: React.FC = () => {
                           <CardContent className="pt-3 pb-2">
                             <p className="text-xs text-green-700">Recibos</p>
                             <p className="text-lg font-bold text-green-800">
-                              {formatCurrency(cuentaCorriente.cuentas_a_cobrar?.total_cobros || 0)}
+                              {formatCurrency(totalCobros)}
                             </p>
                           </CardContent>
                         </Card>
-                        <Card className={`border ${(cuentaCorriente.balance_neto || 0) >= 0 ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+                        <Card className={`border ${saldo >= 0 ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
                           <CardContent className="pt-3 pb-2">
-                            <p className={`text-xs ${(cuentaCorriente.balance_neto || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>Balance Neto</p>
-                            <p className={`text-lg font-bold ${(cuentaCorriente.balance_neto || 0) >= 0 ? 'text-green-800' : 'text-red-800'}`}>
-                              {formatCurrency(cuentaCorriente.balance_neto || 0)}
+                            <p className={`text-xs ${saldo >= 0 ? 'text-green-700' : 'text-red-700'}`}>Balance Neto</p>
+                            <p className={`text-lg font-bold ${saldo >= 0 ? 'text-green-800' : 'text-red-800'}`}>
+                              {formatCurrency(saldo)}
                             </p>
                           </CardContent>
                         </Card>
                       </div>
 
                       {/* Cuentas a Cobrar */}
-                      {cuentaCorriente.cuentas_a_cobrar?.movimientos?.length > 0 && (
+                      {movCobrar.length > 0 && (
                         <Card>
                           <CardHeader>
                             <div className="flex items-center justify-between">
                               <span className="font-semibold">Cuentas a Cobrar</span>
-                              <span className={`text-sm font-bold ${(cuentaCorriente.cuentas_a_cobrar.saldo || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                Saldo: {formatCurrency(cuentaCorriente.cuentas_a_cobrar.saldo || 0)}
+                              <span className={`text-sm font-bold ${saldoCobrar >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                Saldo: {formatCurrency(saldoCobrar)}
                               </span>
                             </div>
                           </CardHeader>
@@ -800,6 +812,7 @@ export const Global: React.FC = () => {
                                 <tr className="border-b border-gray-200 bg-gray-50">
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Comprobante</th>
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Descripcion</th>
                                   <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Debe</th>
                                   <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Haber</th>
@@ -807,16 +820,17 @@ export const Global: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {cuentaCorriente.cuentas_a_cobrar.movimientos.map((m: any, idx: number) => (
-                                  <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
+                                {movCobrar.map((m: any, idx: number) => (
+                                  <tr key={`cobrar-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
-                                        label={m.tipo === 'venta' ? 'Venta' : m.tipo === 'cobro' ? 'Recibo' : m.tipo}
-                                        color={m.tipo === 'venta' ? 'blue' : 'green'}
+                                        label={m.tipo === 'fact_venta' ? 'Venta' : m.tipo === 'recibo' ? 'Recibo' : m.tipo}
+                                        color={m.tipo === 'fact_venta' ? 'blue' : 'green'}
                                       />
                                     </td>
+                                    <td className="px-4 py-2 font-mono text-xs text-gray-600 dark:text-gray-400">{m.nro_comprobante || '-'}</td>
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.descripcion}</td>
                                     <td className="px-4 py-2 text-right">{m.debe ? formatCurrency(m.debe) : '-'}</td>
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
@@ -830,13 +844,13 @@ export const Global: React.FC = () => {
                       )}
 
                       {/* Cuentas a Pagar */}
-                      {cuentaCorriente.cuentas_a_pagar?.movimientos?.length > 0 && (
+                      {movPagar.length > 0 && (
                         <Card>
                           <CardHeader>
                             <div className="flex items-center justify-between">
                               <span className="font-semibold">Cuentas a Pagar</span>
-                              <span className={`text-sm font-bold ${(cuentaCorriente.cuentas_a_pagar.saldo || 0) <= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                Saldo: {formatCurrency(cuentaCorriente.cuentas_a_pagar.saldo || 0)}
+                              <span className={`text-sm font-bold ${saldoPagar <= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                Saldo: {formatCurrency(saldoPagar)}
                               </span>
                             </div>
                           </CardHeader>
@@ -846,6 +860,7 @@ export const Global: React.FC = () => {
                                 <tr className="border-b border-gray-200 bg-gray-50">
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Fecha</th>
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Tipo</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Comprobante</th>
                                   <th className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">Descripcion</th>
                                   <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Debe</th>
                                   <th className="px-4 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">Haber</th>
@@ -853,16 +868,17 @@ export const Global: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {cuentaCorriente.cuentas_a_pagar.movimientos.map((m: any, idx: number) => (
-                                  <tr key={`${m.id}-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
+                                {movPagar.map((m: any, idx: number) => (
+                                  <tr key={`pagar-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
                                         status={m.tipo}
-                                        label={m.tipo === 'compra' ? 'Compra' : m.tipo === 'pago' ? 'Orden de Pago' : m.tipo}
-                                        color={m.tipo === 'compra' ? 'orange' : 'red'}
+                                        label={m.tipo === 'fact_compra' ? 'Compra' : m.tipo === 'orden_pago' ? 'Orden de Pago' : m.tipo}
+                                        color={m.tipo === 'fact_compra' ? 'orange' : 'red'}
                                       />
                                     </td>
+                                    <td className="px-4 py-2 font-mono text-xs text-gray-600 dark:text-gray-400">{m.nro_comprobante || '-'}</td>
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{m.descripcion}</td>
                                     <td className="px-4 py-2 text-right">{m.debe ? formatCurrency(m.debe) : '-'}</td>
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
@@ -874,6 +890,9 @@ export const Global: React.FC = () => {
                           </CardContent>
                         </Card>
                       )}
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                 </div>

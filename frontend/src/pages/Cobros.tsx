@@ -1663,7 +1663,7 @@ export const Cobros: React.FC = () => {
                   </tr>
                   {expandedReceiptId === receipt.id && (
                     <tr>
-                      <td colSpan={99} className="p-0">
+                      <td colSpan={9} className="p-0">
                         <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t border-gray-200 dark:border-gray-700 space-y-4">
 
                           {/* Formas de Pago */}
@@ -1741,7 +1741,7 @@ export const Cobros: React.FC = () => {
                           {receipt.payment_methods?.some((pm) => pm.method === 'cheque' && pm.cheque_data) && (
                             <div>
                               <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Cheques</h4>
-                              {receipt.payment_methods.filter((pm) => pm.method === 'cheque' && pm.cheque_data).map((pm, i) => (
+                              {(receipt.payment_methods || []).filter((pm: any) => pm.method === 'cheque' && pm.cheque_data).map((pm, i) => (
                                 <div key={i} className="grid grid-cols-4 gap-2 text-sm border-l-2 border-amber-300 pl-3">
                                   <div><span className="text-xs text-gray-500">N</span><br/>{pm.cheque_data?.number}</div>
                                   <div><span className="text-xs text-gray-500">Banco</span><br/>{pm.cheque_data?.bank}</div>

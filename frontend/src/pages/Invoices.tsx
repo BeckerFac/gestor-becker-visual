@@ -2117,7 +2117,7 @@ export const Invoices: React.FC = () => {
                     </tr>
                     {expandedInvoiceId === invoice.id && (
                       <tr>
-                        <td colSpan={99} className="p-0">
+                        <td colSpan={7} className="p-0">
                           <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t space-y-4">
                             {invoiceDetails[invoice.id] ? (
                               <>
