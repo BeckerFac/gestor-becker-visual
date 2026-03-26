@@ -327,14 +327,14 @@ describe('OrdersService', () => {
       let callIndex = 0
       mockDbExecute.mockImplementation(() => {
         callIndex++
-        // Migrations: ~9 calls
-        if (callIndex <= 9) return Promise.resolve({ rows: [] })
-        // Call 10: main order query
-        if (callIndex === 10) return Promise.resolve({ rows: [{ id: 'order-1', title: 'Test', customer: { id: 'c1', name: 'Client' } }] })
-        // Call 11: items query
-        if (callIndex === 11) return Promise.resolve({ rows: [{ id: 'item-1', product_name: 'Widget', quantity: '2' }] })
-        // Call 12: history query
-        if (callIndex === 12) return Promise.resolve({ rows: [{ id: 'h1', new_status: 'pendiente' }] })
+        // Migrations: ~10 calls
+        if (callIndex <= 10) return Promise.resolve({ rows: [] })
+        // Call 11: main order query
+        if (callIndex === 11) return Promise.resolve({ rows: [{ id: 'order-1', title: 'Test', customer: { id: 'c1', name: 'Client' } }] })
+        // Call 12: items query
+        if (callIndex === 12) return Promise.resolve({ rows: [{ id: 'item-1', product_name: 'Widget', quantity: '2' }] })
+        // Call 13: history query
+        if (callIndex === 13) return Promise.resolve({ rows: [{ id: 'h1', new_status: 'pendiente' }] })
         return Promise.resolve({ rows: [] })
       })
 
