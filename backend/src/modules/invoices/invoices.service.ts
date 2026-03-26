@@ -1243,14 +1243,15 @@ export class InvoicesService {
     enterprise_id?: string;
     business_unit_id?: string;
   } = {}) {
-    let whereClause = sql`o.company_id = ${companyId} AND o.status NOT IN ('cancelado', 'cancelled')`;
+    // Build query with pool.query for complex WHERE with subquery
+    const params: any[] = [companyId];
+    let enterpriseFilter = '';
     if (filters.enterprise_id) {
-      // Match by enterprise_id OR by customer's enterprise_id
-      whereClause = sql`${whereClause} AND (o.enterprise_id = ${filters.enterprise_id} OR o.customer_id IN (SELECT id FROM customers WHERE enterprise_id = ${filters.enterprise_id}))`;
+      params.push(filters.enterprise_id);
+      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR o.customer_id IN (SELECT id FROM customers WHERE enterprise_id = $${params.length}))`;
     }
 
-    // Use CTE to calculate invoiced quantities, then filter for remaining > 0
-    const result = await db.execute(sql`
+    const { rows } = await (await import('../../config/db')).pool.query(`
       WITH item_invoiced AS (
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
@@ -1271,11 +1272,12 @@ export class InvoicesService {
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN enterprises e ON o.enterprise_id = e.id
       LEFT JOIN item_invoiced inv ON inv.order_item_id = oi.id
-      WHERE ${whereClause}
+      WHERE o.company_id = $1 AND o.status NOT IN ('cancelado', 'cancelled')
+        ${enterpriseFilter}
         AND (CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0)) > 0
       ORDER BY o.order_number DESC, oi.created_at ASC
-    `);
-    return (result as any).rows || [];
+    `, params);
+    return rows || [];
   }
 
   /**
