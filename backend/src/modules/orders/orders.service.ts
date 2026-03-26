@@ -308,7 +308,11 @@ export class OrdersService {
       if (data.items && Array.isArray(data.items)) {
         const itemsToDeduct = data.items.filter((i: any) => i.deduct_stock);
         if (itemsToDeduct.length > 0) {
-          await this.deductStockForOrder(companyId, orderId, userId, itemsToDeduct);
+          try {
+            await this.deductStockForOrder(companyId, orderId, userId, itemsToDeduct);
+          } catch (stockErr) {
+            console.warn('Stock deduction failed (order saved successfully):', (stockErr as Error).message);
+          }
         }
       }
 
