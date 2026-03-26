@@ -325,12 +325,14 @@ export const Cobros: React.FC = () => {
     rate: number;
     amount: number;
     certificate_file: string;
+    certificate_number: string;
+    retention_date: string;
     jurisdiction?: string;
   }>>([
-    { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
-    { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-    { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-    { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '', jurisdiction: '' },
+    { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+    { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+    { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
   ])
 
   const totalRetSufridas = useMemo(() =>
@@ -551,10 +553,11 @@ export const Cobros: React.FC = () => {
     return map
   }, [cobros])
 
-  // Pending orders (pendiente or parcial payment_status, not dismissed, not cancelled)
+  // Pending orders (pendiente or parcial payment_status, has invoice, not dismissed, not cancelled)
   const pendingOrders = useMemo(() => {
     const allOrders = Array.isArray(orders) ? orders : []
     return allOrders
+      .filter((o: any) => (o as any).has_invoice === true)
       .filter((o: any) => o.payment_status === 'pendiente' || o.payment_status === 'parcial')
       .filter((o: any) => o.status !== 'cancelado')
       .filter(o => !dismissedPendingCobros.includes(o.id))
@@ -619,10 +622,10 @@ export const Cobros: React.FC = () => {
     setChequeForm({ ...INITIAL_CHEQUE_FORM })
     setPaymentMethods([{ ...INITIAL_PAYMENT_METHOD }])
     setRetencionesSufridas([
-      { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
-      { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-      { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-      { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '', jurisdiction: '' },
+      { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+      { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+      { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
     ])
     setInvoiceItems({})
     setOrderItems({})
@@ -728,6 +731,8 @@ export const Cobros: React.FC = () => {
             rate: r.rate || 0,
             amount: r.amount,
             certificate_file: r.certificate_file || null,
+            certificate_number: r.certificate_number || null,
+            retention_date: r.retention_date || null,
             jurisdiction: r.type === 'iibb' ? (r.jurisdiction || null) : undefined,
           })),
       }
@@ -747,10 +752,10 @@ export const Cobros: React.FC = () => {
       setChequeForm({ ...INITIAL_CHEQUE_FORM })
       setPaymentMethods([{ ...INITIAL_PAYMENT_METHOD }])
       setRetencionesSufridas([
-        { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
-        { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-        { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
-        { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+        { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '', jurisdiction: '' },
+        { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+        { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
+        { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', certificate_number: '', retention_date: '' },
       ])
       toast.success('Recibo registrado correctamente')
       await loadData()
@@ -1264,44 +1269,70 @@ export const Cobros: React.FC = () => {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Montos que el cliente retuvo al pagarte</p>
                 <div className="space-y-2">
                   {retencionesSufridas.map((ret, idx) => (
-                    <div key={ret.type} className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={ret.enabled}
-                        onChange={() => setRetencionesSufridas(prev => prev.map((r, i) =>
-                          i === idx ? { ...r, enabled: !r.enabled, amount: !r.enabled ? r.amount : 0 } : r
-                        ))}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type] || ret.type}</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Monto"
-                        value={ret.amount || ''}
-                        disabled={!ret.enabled}
-                        className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                          i === idx ? { ...r, amount: parseFloat(e.target.value) || 0 } : r
-                        ))}
-                      />
+                    <div key={ret.type}>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={ret.enabled}
+                          onChange={() => setRetencionesSufridas(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, enabled: !r.enabled, amount: !r.enabled ? r.amount : 0 } : r
+                          ))}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type] || ret.type}</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Monto"
+                          value={ret.amount || ''}
+                          disabled={!ret.enabled}
+                          className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, amount: parseFloat(e.target.value) || 0 } : r
+                          ))}
+                        />
+                        {ret.enabled && (
+                          <label className="text-xs text-blue-600 cursor-pointer hover:underline">
+                            <input type="file" accept=".pdf" className="hidden" onChange={e => handleCertUpload(idx, e)} />
+                            {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
+                          </label>
+                        )}
+                      </div>
                       {ret.enabled && (
-                        <label className="text-xs text-blue-600 cursor-pointer hover:underline">
-                          <input type="file" accept=".pdf" className="hidden" onChange={e => handleCertUpload(idx, e)} />
-                          {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
-                        </label>
-                      )}
-                      {ret.type === 'iibb' && ret.enabled && (
-                        <select value={ret.jurisdiction || ''} onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                          i === idx ? { ...r, jurisdiction: e.target.value } : r
-                        ))}
-                          className="rounded border p-1.5 text-sm dark:bg-gray-800 dark:border-gray-600">
-                          <option value="">Jurisdiccion...</option>
-                          <option value="caba">CABA</option>
-                          <option value="pba">Provincia de Buenos Aires</option>
-                          <option value="otra">Otra jurisdiccion</option>
-                        </select>
+                        <div className="grid grid-cols-4 gap-2 mt-1 ml-7">
+                          <div>
+                            <label className="text-xs text-gray-500">N° Certificado</label>
+                            <input type="text" maxLength={14} placeholder="14 digitos"
+                              value={ret.certificate_number || ''}
+                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, certificate_number: e.target.value } : r
+                              ))}
+                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">Fecha retencion</label>
+                            <input type="date" value={ret.retention_date || ''}
+                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, retention_date: e.target.value } : r
+                              ))}
+                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
+                          </div>
+                          {ret.type === 'iibb' && (
+                            <div>
+                              <label className="text-xs text-gray-500">Jurisdiccion</label>
+                              <select value={ret.jurisdiction || ''} onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, jurisdiction: e.target.value } : r
+                              ))}
+                                className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100">
+                                <option value="">Seleccionar...</option>
+                                <option value="caba">CABA</option>
+                                <option value="pba">Provincia de Buenos Aires</option>
+                                <option value="otra">Otra jurisdiccion</option>
+                              </select>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}
