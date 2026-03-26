@@ -47,22 +47,10 @@ interface Movimiento {
   saldo: number
 }
 
-interface CuentaDetalle {
-  movimientos: Movimiento[]
-  total_ventas?: number
-  total_cobros?: number
-  total_compras?: number
-  total_pagos?: number
-  total_adelantos?: number
-  total_retenciones?: number
-  saldo: number
-}
-
 interface Detalle {
   enterprise: { id: string; name: string; cuit: string | null }
-  cuentas_a_cobrar: CuentaDetalle & { total_ventas: number; total_cobros: number }
-  cuentas_a_pagar: CuentaDetalle & { total_compras: number; total_pagos: number }
-  balance_neto: number
+  movimientos: Movimiento[]
+  totales: { debe: number; haber: number; saldo: number }
 }
 
 const tipoBadgeConfig: Record<string, { label: string; bg: string; text: string }> = {
@@ -243,11 +231,7 @@ export const CuentaCorriente: React.FC = () => {
 
   const allMovimientos = useMemo(() => {
     if (!detalle) return []
-    const cobrar = (detalle.cuentas_a_cobrar?.movimientos || [])
-    const pagar = (detalle.cuentas_a_pagar?.movimientos || [])
-    return [...cobrar, ...pagar].sort((a, b) =>
-      new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
-    )
+    return detalle.movimientos || []
   }, [detalle])
 
   const movimientosFiltrados = useMemo(() => {
@@ -617,35 +601,23 @@ export const CuentaCorriente: React.FC = () => {
                               />
 
                               {/* Mini summary cards */}
-                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                                 <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
-                                  <span className="text-xs text-blue-600 dark:text-blue-400 block">Facturado</span>
-                                  <span className="text-sm font-bold text-blue-700 dark:text-blue-300">{fmt(detalle.cuentas_a_cobrar.total_ventas)}</span>
+                                  <span className="text-xs text-blue-600 dark:text-blue-400 block">Total Debe</span>
+                                  <span className="text-sm font-bold text-blue-700 dark:text-blue-300">{fmt(detalle.totales.debe)}</span>
                                 </div>
                                 <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2">
-                                  <span className="text-xs text-green-600 dark:text-green-400 block">Cobrado</span>
-                                  <span className="text-sm font-bold text-green-700 dark:text-green-300">{fmt(detalle.cuentas_a_cobrar.total_cobros)}</span>
+                                  <span className="text-xs text-green-600 dark:text-green-400 block">Total Haber</span>
+                                  <span className="text-sm font-bold text-green-700 dark:text-green-300">{fmt(detalle.totales.haber)}</span>
                                 </div>
-                                {(detalle.cuentas_a_cobrar.total_adelantos || 0) > 0 && (
-                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                                    <span className="text-xs text-amber-600 dark:text-amber-400 block">Adelantos sin asignar</span>
-                                    <span className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(detalle.cuentas_a_cobrar.total_adelantos || 0)}</span>
-                                  </div>
-                                )}
-                                <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2">
-                                  <span className="text-xs text-purple-600 dark:text-purple-400 block">Compras</span>
-                                  <span className="text-sm font-bold text-purple-700 dark:text-purple-300">{fmt(detalle.cuentas_a_pagar.total_compras)}</span>
+                                <div className={`${detalle.totales.saldo >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'} border rounded-lg px-3 py-2`}>
+                                  <span className={`text-xs block ${detalle.totales.saldo >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>Saldo</span>
+                                  <span className={`text-sm font-bold ${detalle.totales.saldo >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{fmt(detalle.totales.saldo)}</span>
                                 </div>
-                                <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
-                                  <span className="text-xs text-red-600 dark:text-red-400 block">Pagado</span>
-                                  <span className="text-sm font-bold text-red-700 dark:text-red-300">{fmt(detalle.cuentas_a_pagar.total_pagos)}</span>
+                                <div className="bg-gray-50 dark:bg-gray-950/30 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
+                                  <span className="text-xs text-gray-600 dark:text-gray-400 block">Movimientos</span>
+                                  <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{detalle.movimientos.length}</span>
                                 </div>
-                                {(detalle.cuentas_a_pagar.total_adelantos || 0) > 0 && (
-                                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                                    <span className="text-xs text-amber-600 dark:text-amber-400 block">Adelantos a proveedor</span>
-                                    <span className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(detalle.cuentas_a_pagar.total_adelantos || 0)}</span>
-                                  </div>
-                                )}
                               </div>
 
                               {/* Date range filter & PDF download */}
