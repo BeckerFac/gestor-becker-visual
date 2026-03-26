@@ -69,6 +69,7 @@ interface FormItem {
   product_type: string
   deduct_stock: boolean
   category_ids: string[]
+  vat_rate: number
 }
 
 interface InvoicingStatusData {
@@ -128,6 +129,15 @@ const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
 
 const INVOICE_TYPES = ['A', 'B', 'C']
 
+const VAT_RATE_OPTIONS = [
+  { value: 0, label: '0%' },
+  { value: 2.5, label: '2.5%' },
+  { value: 5, label: '5%' },
+  { value: 10.5, label: '10.5%' },
+  { value: 21, label: '21%' },
+  { value: 27, label: '27%' },
+]
+
 const emptyFormItem = (): FormItem => ({
   product_id: '',
   product_name: '',
@@ -138,6 +148,7 @@ const emptyFormItem = (): FormItem => ({
   product_type: 'otro',
   deduct_stock: true,
   category_ids: [],
+  vat_rate: 21,
 })
 
 const ORDER_DRAFT_KEY = 'bv_order_draft'
@@ -191,7 +202,7 @@ export const Orders: React.FC = () => {
   const [formTitle, setFormTitle] = useState('')
   const [form, setForm] = useState({
     description: '', customer_id: '',
-    vat_rate: '21', estimated_delivery: '',
+    estimated_delivery: '',
     priority: 'normal', notes: '', payment_method: '', bank_id: '',
   })
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
@@ -240,7 +251,7 @@ export const Orders: React.FC = () => {
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
-    setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
+    setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
     setFormTitle('')
@@ -364,6 +375,7 @@ export const Orders: React.FC = () => {
             item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).category_name || (product as any).product_type || 'otro'
+            item.vat_rate = parseFloat(product.pricing?.vat_rate || '21') || 21
             setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
 
             // If a price criteria is selected, try to use criteria price
@@ -454,8 +466,17 @@ export const Orders: React.FC = () => {
 
   const getFormTotals = () => {
     const subtotal = formItems.reduce((sum, item) => sum + getFormItemSubtotal(item), 0)
-    const vat = subtotal * (parseFloat(form.vat_rate) || 0) / 100
-    return { subtotal, vat, total: subtotal + vat }
+    // Calculate VAT per item, grouped by rate
+    const vatByRate: Record<number, number> = {}
+    let totalVat = 0
+    for (const item of formItems) {
+      const itemNet = item.quantity * item.unit_price
+      const rate = item.vat_rate ?? 21
+      const itemVat = itemNet * rate / 100
+      totalVat += itemVat
+      vatByRate[rate] = (vatByRate[rate] || 0) + itemVat
+    }
+    return { subtotal, vat: totalVat, total: subtotal + totalVat, vatByRate }
   }
 
   // --- Order creation ---
@@ -482,7 +503,6 @@ export const Orders: React.FC = () => {
         bank_id: form.bank_id || null,
         quantity: formItems.reduce((sum, i) => sum + i.quantity, 0),
         unit_price: formItems[0]?.unit_price || 0,
-        vat_rate: parseFloat(form.vat_rate),
         total_amount: totals.total,
         estimated_delivery: form.estimated_delivery || null,
         priority: form.priority,
@@ -497,6 +517,7 @@ export const Orders: React.FC = () => {
           cost: item.cost || 0,
           product_type: item.product_type || 'otro',
           deduct_stock: item.deduct_stock || false,
+          vat_rate: item.vat_rate ?? 21,
         })),
       }
       if (editingOrderId) {
@@ -512,7 +533,7 @@ export const Orders: React.FC = () => {
       setHasDraft(false)
       setFormEnterpriseId('')
       setFormTitle('')
-      setForm({ description: '', customer_id: '', vat_rate: '21', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
+      setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
       setFormItems([emptyFormItem()])
       await loadData()
     } catch (e: any) {
@@ -535,6 +556,7 @@ export const Orders: React.FC = () => {
       product_type: item.product_type || 'otro',
       deduct_stock: item.deduct_stock || false,
       category_ids: [],
+      vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
     }))
 
     setEditingOrderId(order.id)
@@ -542,7 +564,6 @@ export const Orders: React.FC = () => {
     setForm({
       description: order.description || '',
       customer_id: order.customer?.id || '',
-      vat_rate: order.vat_rate?.toString() || '21',
       estimated_delivery: order.estimated_delivery || '',
       priority: order.priority || 'normal',
       notes: order.notes || '',
@@ -1140,7 +1161,7 @@ export const Orders: React.FC = () => {
                 <div className="space-y-3">
                   {formItems.map((item, idx) => (
                     <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
-                      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                      <div className="grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
                         {/* Product type / category filter */}
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Tipo/Categoria<HelpTip text="Selecciona una o mas categorias para filtrar los productos disponibles. Podes configurar categorias desde Productos > Categorias." /></label>
@@ -1332,6 +1353,19 @@ export const Orders: React.FC = () => {
                           )}
                         </div>
                         {/* Cost tracked internally from product pricing, not shown to user */}
+                        {/* IVA per item */}
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-medium text-gray-500">IVA %</label>
+                          <select
+                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            value={item.vat_rate}
+                            onChange={e => updateFormItem(idx, 'vat_rate', parseFloat(e.target.value))}
+                          >
+                            {VAT_RATE_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </div>
                         {/* Subtotal + remove */}
                         <div className="flex items-end gap-2">
                           <div className="flex-1 flex flex-col gap-1">
@@ -1382,31 +1416,20 @@ export const Orders: React.FC = () => {
 
                 {/* Totals */}
                 <div className="mt-4 flex justify-end">
-                  <div className="w-72 space-y-1">
-                    <div className="flex items-center justify-between gap-4 mb-1">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">% IVA:</span>
-                      <input
-                        type="number" step="0.01" placeholder="21"
-                        list="order-vat-rate-list"
-                        className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm w-20 bg-white dark:bg-gray-700 dark:text-gray-100"
-                        value={form.vat_rate}
-                        onChange={e => setForm({ ...form, vat_rate: e.target.value })}
-                      />
-                      <datalist id="order-vat-rate-list">
-                        <option value="0">0%</option>
-                        <option value="10.5">10.5%</option>
-                        <option value="21">21%</option>
-                        <option value="27">27%</option>
-                      </datalist>
-                    </div>
+                  <div className="w-80 space-y-1">
                     <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                       <span>Subtotal Neto:</span>
                       <span className="font-medium">{formatCurrency(formTotals.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                      <span>IVA ({form.vat_rate}%):</span>
-                      <span className="font-medium">{formatCurrency(formTotals.vat)}</span>
-                    </div>
+                    {Object.entries(formTotals.vatByRate)
+                      .sort(([a], [b]) => Number(a) - Number(b))
+                      .map(([rate, amount]) => (
+                        <div key={rate} className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                          <span>IVA {rate}%:</span>
+                          <span className="font-medium">{formatCurrency(amount as number)}</span>
+                        </div>
+                      ))
+                    }
                     <div className="flex justify-between text-lg font-bold text-green-800 dark:text-green-400 pt-2 border-t border-gray-300 dark:border-gray-600">
                       <span>TOTAL:</span>
                       <span>{formatCurrency(formTotals.total)}</span>
