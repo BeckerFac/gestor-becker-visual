@@ -73,9 +73,19 @@ class ErrorBoundary extends React.Component<
     return { hasError: true, error }
   }
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Report to Sentry if available (install @sentry/react when ready)
+    // Auto-recover from stale SW cache (dynamically imported module errors)
+    const msg = error?.message || '';
+    if (msg.includes('dynamically imported') || msg.includes('Failed to fetch') || msg.includes('Loading chunk') || msg.includes('Loading module')) {
+      console.warn('Stale cache detected, clearing SW and reloading...');
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(r => r.forEach(reg => reg.unregister()));
+        caches.keys().then(names => names.forEach(name => caches.delete(name)));
+      }
+      setTimeout(() => window.location.reload(), 500);
+      return;
+    }
+    // Report to Sentry if available
     try {
-      // Dynamic import to avoid build errors when Sentry isn't installed
       const Sentry = (window as any).__SENTRY__;
       if (Sentry?.captureException) {
         const eventId = Sentry.captureException(error, {
@@ -84,7 +94,7 @@ class ErrorBoundary extends React.Component<
         this.setState({ eventId })
       }
     } catch {
-      // Sentry not available, silently continue
+      // Sentry not available
     }
     console.error('React ErrorBoundary caught:', error, errorInfo)
   }
