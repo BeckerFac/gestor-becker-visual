@@ -816,6 +816,354 @@ export class PdfService {
 </html>`;
   }
 
+  async generateReceiptPdf(cobroId: string, companyId: string): Promise<Buffer> {
+    try {
+      await this.initialize()
+
+      // 1. Query cobro data with enterprise and company info
+      const cobroResult = await db.execute(sql`
+        SELECT c.*, e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address,
+          e.tax_condition as enterprise_tax_condition,
+          comp.name as company_name, comp.cuit as company_cuit, comp.address as company_address,
+          comp.tax_condition as company_tax_condition
+        FROM cobros c
+        LEFT JOIN enterprises e ON c.enterprise_id = e.id
+        LEFT JOIN companies comp ON c.company_id = comp.id
+        WHERE c.id = ${cobroId} AND c.company_id = ${companyId}
+      `)
+      const cobro = ((cobroResult as any).rows || [])[0]
+      if (!cobro) {
+        throw new ApiError(404, 'Cobro not found')
+      }
+
+      // 2. Query payment methods
+      const pmResult = await db.execute(sql`
+        SELECT rpm.*, b.name as bank_name
+        FROM receipt_payment_methods rpm
+        LEFT JOIN banks b ON rpm.bank_id = b.id
+        WHERE rpm.cobro_id = ${cobroId}
+      `)
+      const paymentMethods = (pmResult as any).rows || []
+
+      // 3. Query retenciones
+      const retResult = await db.execute(sql`
+        SELECT * FROM retenciones WHERE cobro_id = ${cobroId}
+      `)
+      const retenciones = (retResult as any).rows || []
+
+      // 4. Query linked invoices
+      const invResult = await db.execute(sql`
+        SELECT cia.amount_applied, i.invoice_number, i.invoice_type, i.total_amount,
+          CAST(i.total_amount AS decimal) - COALESCE(
+            (SELECT SUM(CAST(cia2.amount_applied AS decimal))
+             FROM cobro_invoice_applications cia2
+             WHERE cia2.invoice_id = i.id), 0
+          ) as saldo_pendiente
+        FROM cobro_invoice_applications cia
+        JOIN invoices i ON cia.invoice_id = i.id
+        WHERE cia.cobro_id = ${cobroId}
+      `)
+      const linkedInvoices = (invResult as any).rows || []
+
+      // 5. Generate HTML
+      const html = this.generateReceiptHtml({ cobro, paymentMethods, retenciones, linkedInvoices })
+
+      // 6. Render PDF with Puppeteer
+      if (!this.browser) {
+        throw new Error('Browser not initialized')
+      }
+
+      const page = await this.browser.newPage()
+      await page.setContent(html, { waitUntil: 'networkidle0' })
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+      })
+
+      await page.close()
+
+      return pdf
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(500, 'Receipt PDF generation failed')
+    }
+  }
+
+  private generateReceiptHtml(data: {
+    cobro: any
+    paymentMethods: any[]
+    retenciones: any[]
+    linkedInvoices: any[]
+  }): string {
+    const { cobro, paymentMethods, retenciones, linkedInvoices } = data
+    const esc = this.escapeHtml.bind(this)
+
+    const receiptNumber = String(cobro.receipt_number || cobro.id?.slice(-8) || '0').padStart(8, '0')
+    const receiptDate = new Date(cobro.date || cobro.created_at).toLocaleDateString('es-AR')
+
+    const companyCuit = this.formatCuit(cobro.company_cuit || '')
+    const enterpriseCuit = this.formatCuit(cobro.enterprise_cuit || '')
+
+    // Totals
+    const totalPaymentMethods = paymentMethods.reduce(
+      (sum: number, pm: any) => sum + parseFloat(pm.amount || '0'), 0
+    )
+    const totalRetenciones = retenciones.reduce(
+      (sum: number, r: any) => sum + parseFloat(r.amount || '0'), 0
+    )
+    const totalRecibo = parseFloat(cobro.total_amount || '0')
+
+    // Payment method label mapping
+    const methodLabels: Record<string, string> = {
+      'cash': 'Efectivo',
+      'check': 'Cheque',
+      'transfer': 'Transferencia',
+      'credit_card': 'Tarjeta de Credito',
+      'debit_card': 'Tarjeta de Debito',
+      'echeq': 'E-Cheq',
+      'other': 'Otro',
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Recibo X ${receiptNumber}</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #222; font-size: 11px; line-height: 1.4; }
+
+    .header {
+      background: #1a1a2e; color: #fff; padding: 16px 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0;
+    }
+    .header-title { font-size: 22px; font-weight: bold; letter-spacing: 3px; }
+    .header-right { text-align: right; }
+    .header-letter {
+      display: inline-block; background: #fff; color: #1a1a2e;
+      font-size: 28px; font-weight: bold; width: 40px; height: 40px;
+      line-height: 40px; text-align: center; border-radius: 4px; margin-bottom: 4px;
+    }
+    .header-number {
+      font-size: 16px; font-family: 'Courier New', monospace; font-weight: bold;
+    }
+    .header-date { font-size: 12px; margin-top: 4px; }
+
+    .section { border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px; }
+    .section-title {
+      font-size: 10px; font-weight: bold; color: #1a1a2e;
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;
+      border-bottom: 1px solid #eee; padding-bottom: 4px;
+    }
+    .data-grid { display: flex; gap: 30px; }
+    .data-col { flex: 1; }
+    .data-row { display: flex; margin-bottom: 2px; }
+    .data-label { font-size: 10px; color: #666; min-width: 110px; }
+    .data-value { font-size: 11px; font-weight: 600; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead th {
+      background: #f0f0f0; border: 1px solid #ccc; padding: 6px 8px;
+      font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;
+    }
+    thead th.left { text-align: left; }
+    thead th.right { text-align: right; }
+    tbody td { border: 1px solid #ddd; padding: 5px 8px; font-size: 11px; }
+    tbody td.center { text-align: center; }
+    tbody td.right { text-align: right; font-family: 'Courier New', monospace; }
+
+    .totals-box {
+      border: 2px solid #1a1a2e; margin-top: 12px; margin-bottom: 12px;
+    }
+    .totals-row {
+      display: flex; justify-content: flex-end; padding: 5px 16px;
+      border-bottom: 1px solid #eee;
+    }
+    .totals-row:last-child { border-bottom: none; }
+    .totals-label { font-size: 11px; min-width: 200px; text-align: right; padding-right: 20px; }
+    .totals-amount {
+      font-size: 11px; font-family: 'Courier New', monospace;
+      font-weight: bold; min-width: 120px; text-align: right;
+    }
+    .totals-row.grand {
+      background: #1a1a2e; color: #fff; padding: 10px 16px;
+    }
+    .totals-row.grand .totals-label,
+    .totals-row.grand .totals-amount { font-size: 14px; font-weight: bold; }
+
+    .observations {
+      border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px;
+      min-height: 40px;
+    }
+    .obs-title { font-size: 10px; font-weight: bold; color: #666; margin-bottom: 4px; }
+
+    .footer {
+      text-align: center; font-size: 9px; color: #999; padding-top: 8px;
+      border-top: 1px solid #ddd; margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <div>
+      <div class="header-title">RECIBO</div>
+    </div>
+    <div class="header-right">
+      <div class="header-letter">X</div>
+      <div class="header-number">N° ${receiptNumber}</div>
+      <div class="header-date">Fecha: ${receiptDate}</div>
+    </div>
+  </div>
+
+  <!-- EMISOR -->
+  <div class="section">
+    <div class="section-title">Datos del Emisor</div>
+    <div class="data-grid">
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(cobro.company_name)}</span></div>
+        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(companyCuit)}</span></div>
+      </div>
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(cobro.company_address || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.company_tax_condition || '-')}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECEPTOR -->
+  <div class="section">
+    <div class="section-title">Datos del Receptor</div>
+    <div class="data-grid">
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(cobro.enterprise_name || '-')}</span></div>
+        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(enterpriseCuit || '-')}</span></div>
+      </div>
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(cobro.enterprise_address || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.enterprise_tax_condition || '-')}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FORMAS DE PAGO -->
+  ${paymentMethods.length > 0 ? `
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Formas de Pago</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 25%;">Metodo</th>
+          <th class="left" style="width: 25%;">Banco</th>
+          <th class="left" style="width: 30%;">Referencia</th>
+          <th class="right" style="width: 20%;">Monto</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${paymentMethods.map((pm: any) => `
+        <tr>
+          <td>${esc(methodLabels[pm.method] || pm.method || '-')}</td>
+          <td>${esc(pm.bank_name || '-')}</td>
+          <td>${esc(pm.reference || pm.check_number || '-')}</td>
+          <td class="right">$ ${parseFloat(pm.amount || '0').toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- RETENCIONES -->
+  ${retenciones.length > 0 ? `
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Retenciones</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 20%;">Tipo</th>
+          <th class="left" style="width: 20%;">Jurisdiccion</th>
+          <th class="left" style="width: 20%;">N° Cert.</th>
+          <th style="width: 20%;">Fecha</th>
+          <th class="right" style="width: 20%;">Importe</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${retenciones.map((r: any) => `
+        <tr>
+          <td>${esc(r.type || r.retention_type || '-')}</td>
+          <td>${esc(r.jurisdiction || '-')}</td>
+          <td>${esc(r.certificate_number || '-')}</td>
+          <td class="center">${r.date ? new Date(r.date).toLocaleDateString('es-AR') : '-'}</td>
+          <td class="right">$ ${parseFloat(r.amount || '0').toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- COMPROBANTES CANCELADOS -->
+  ${linkedInvoices.length > 0 ? `
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Comprobantes Cancelados</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 30%;">Factura</th>
+          <th class="right" style="width: 23%;">Total</th>
+          <th class="right" style="width: 23%;">Aplicado</th>
+          <th class="right" style="width: 24%;">Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${linkedInvoices.map((inv: any) => `
+        <tr>
+          <td>${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
+          <td class="right">$ ${parseFloat(inv.total_amount || '0').toFixed(2)}</td>
+          <td class="right">$ ${parseFloat(inv.amount_applied || '0').toFixed(2)}</td>
+          <td class="right">$ ${parseFloat(inv.saldo_pendiente || '0').toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- TOTALES -->
+  <div class="totals-box">
+    ${paymentMethods.length > 0 ? `
+    <div class="totals-row">
+      <span class="totals-label">Total Formas de Pago:</span>
+      <span class="totals-amount">$ ${totalPaymentMethods.toFixed(2)}</span>
+    </div>
+    ` : ''}
+    ${retenciones.length > 0 ? `
+    <div class="totals-row">
+      <span class="totals-label">Total Retenciones:</span>
+      <span class="totals-amount">$ ${totalRetenciones.toFixed(2)}</span>
+    </div>
+    ` : ''}
+    <div class="totals-row grand">
+      <span class="totals-label">TOTAL RECIBO:</span>
+      <span class="totals-amount">$ ${totalRecibo.toFixed(2)}</span>
+    </div>
+  </div>
+
+  <!-- OBSERVACIONES -->
+  <div class="observations">
+    <div class="obs-title">Observaciones</div>
+    ${esc(cobro.notes || cobro.observations || '')}
+  </div>
+
+  <div class="footer">
+    Recibo generado el ${new Date().toLocaleDateString('es-AR')} - Documento no fiscal
+  </div>
+
+</body>
+</html>`
+  }
+
   async close() {
     if (this.browser) {
       await this.browser.close()

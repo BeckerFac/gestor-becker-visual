@@ -916,6 +916,10 @@ export const api = {
     const { data } = await client.get(`/cobros/${id}/receipt`)
     return data
   },
+  getReceiptPdf: async (cobroId: string): Promise<Blob> => {
+    const response = await client.get(`/cobros/${cobroId}/pdf`, { responseType: 'blob' })
+    return response.data
+  },
 
   // Receipts (recibos)
   getReceipts: async () => {

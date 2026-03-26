@@ -190,6 +190,21 @@ const INITIAL_CHEQUE_FORM = {
   due_date: '',
 }
 
+interface PaymentMethodRow {
+  method: string
+  amount: string
+  bank_id: string
+  reference: string
+  cheque_data: {
+    number: string; bank: string; drawer: string; drawer_cuit: string;
+    cheque_type: string; issue_date: string; due_date: string;
+  } | null
+}
+
+const INITIAL_PAYMENT_METHOD: PaymentMethodRow = {
+  method: 'transferencia', amount: '', bank_id: '', reference: '', cheque_data: null
+}
+
 const DISMISSED_PENDING_COBROS_KEY = 'gestia_dismissed_pending_cobros'
 
 function getDismissedPendingCobros(): string[] {
@@ -247,7 +262,38 @@ export const Cobros: React.FC = () => {
   const [formCurrency, setFormCurrency] = useState('ARS')
   const [formExchangeRate, setFormExchangeRate] = useState<number | null>(null)
 
-  // Cheque form state
+  // Multiple payment methods state
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRow[]>([
+    { ...INITIAL_PAYMENT_METHOD }
+  ])
+
+  const addPaymentMethod = () => setPaymentMethods(prev => [...prev, { method: 'efectivo', amount: '', bank_id: '', reference: '', cheque_data: null }])
+
+  const removePaymentMethod = (index: number) => setPaymentMethods(prev => prev.filter((_, i) => i !== index))
+
+  const updatePaymentMethod = (index: number, field: string, value: string) => {
+    setPaymentMethods(prev => prev.map((pm, i) => {
+      if (i !== index) return pm
+      if (field === 'method' && value === 'cheque' && !pm.cheque_data) {
+        return { ...pm, [field]: value, cheque_data: { number: '', bank: '', drawer: '', drawer_cuit: '', cheque_type: 'comun', issue_date: '', due_date: '' } }
+      }
+      if (field === 'method' && value !== 'cheque') {
+        return { ...pm, [field]: value, cheque_data: null }
+      }
+      return { ...pm, [field]: value }
+    }))
+  }
+
+  const updateChequeData = (index: number, field: string, value: string) => {
+    setPaymentMethods(prev => prev.map((pm, i) => i !== index || !pm.cheque_data ? pm : { ...pm, cheque_data: { ...pm.cheque_data, [field]: value } }))
+  }
+
+  const paymentMethodsTotal = useMemo(() =>
+    paymentMethods.reduce((s, pm) => s + (parseFloat(pm.amount) || 0), 0),
+    [paymentMethods]
+  )
+
+  // Cheque form state (legacy, kept for backward compat)
   const [chequeForm, setChequeForm] = useState({ ...INITIAL_CHEQUE_FORM })
 
   // Retenciones sufridas state
@@ -258,8 +304,9 @@ export const Cobros: React.FC = () => {
     rate: number;
     amount: number;
     certificate_file: string;
+    jurisdiction?: string;
   }>>([
-    { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+    { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
     { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
     { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
     { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
@@ -546,8 +593,9 @@ export const Cobros: React.FC = () => {
       notes: '',
     })
     setChequeForm({ ...INITIAL_CHEQUE_FORM })
+    setPaymentMethods([{ ...INITIAL_PAYMENT_METHOD }])
     setRetencionesSufridas([
-      { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+      { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
       { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
       { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
       { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
@@ -601,33 +649,48 @@ export const Cobros: React.FC = () => {
 
     const hasInvoiceItems = items.length > 0
     const hasOrderItems = oItems.length > 0
-    const directAmount = parseFloat(form.amount || '0')
 
-    if (!hasInvoiceItems && !hasOrderItems && directAmount <= 0) {
+    const pmTotal = paymentMethods.reduce((s, pm) => s + (parseFloat(pm.amount) || 0), 0)
+
+    if (!hasInvoiceItems && !hasOrderItems && pmTotal <= 0) {
       toast.error('Ingresa un monto o selecciona facturas/pedidos a cobrar')
       return
     }
 
-    // Validate cheque fields if payment method is cheque
-    if (form.payment_method === 'cheque') {
-      if (!chequeForm.number || !chequeForm.bank || !chequeForm.drawer || !chequeForm.issue_date || !chequeForm.due_date) {
-        toast.error('Completa todos los campos obligatorios del cheque')
-        return
+    // Validate cheque fields for any cheque payment method
+    for (const pm of paymentMethods) {
+      if (pm.method === 'cheque' && pm.cheque_data) {
+        if (!pm.cheque_data.number || !pm.cheque_data.bank || !pm.cheque_data.drawer || !pm.cheque_data.issue_date || !pm.cheque_data.due_date) {
+          toast.error('Completa todos los campos obligatorios del cheque')
+          return
+        }
       }
     }
 
     setSaving(true)
     setError(null)
     try {
-      const finalAmount = hasInvoiceItems ? items.reduce((s, i) => s + i.amount, 0) : directAmount
+      const finalAmount = hasInvoiceItems ? items.reduce((s, i) => s + i.amount, 0) : pmTotal
+
+      // Build payment_methods array from the multi-row form
+      const paymentMethodsPayload = paymentMethods
+        .filter(pm => parseFloat(pm.amount) > 0)
+        .map(pm => ({
+          method: pm.method,
+          amount: parseFloat(pm.amount),
+          bank_id: pm.bank_id || undefined,
+          reference: pm.reference || undefined,
+          cheque_data: pm.cheque_data || undefined,
+        }))
 
       // Use createCobro with invoice_items for N:N linking
       const cobroPayload: any = {
         enterprise_id: form.enterprise_id || null,
         amount: finalAmount,
-        payment_method: form.payment_method,
-        bank_id: form.bank_id || null,
-        reference: form.reference || null,
+        payment_method: paymentMethodsPayload[0]?.method || 'transferencia',
+        bank_id: paymentMethodsPayload[0]?.bank_id || null,
+        reference: paymentMethodsPayload[0]?.reference || null,
+        payment_methods: paymentMethodsPayload,
         payment_date: form.payment_date,
         notes: form.notes || null,
         invoice_items: hasInvoiceItems ? items : undefined,
@@ -641,20 +704,13 @@ export const Cobros: React.FC = () => {
             rate: r.rate || 0,
             amount: r.amount,
             certificate_file: r.certificate_file || null,
+            jurisdiction: r.type === 'iibb' ? (r.jurisdiction || null) : undefined,
           })),
       }
 
-      // Attach cheque data if payment method is cheque
-      if (form.payment_method === 'cheque') {
-        cobroPayload.cheque_data = {
-          number: chequeForm.number,
-          bank: chequeForm.bank,
-          cheque_type: chequeForm.cheque_type,
-          drawer: chequeForm.drawer,
-          drawer_cuit: chequeForm.drawer_cuit || null,
-          issue_date: chequeForm.issue_date,
-          due_date: chequeForm.due_date,
-        }
+      // Attach cheque data for backward compat if first payment method is cheque
+      if (paymentMethodsPayload[0]?.method === 'cheque' && paymentMethodsPayload[0]?.cheque_data) {
+        cobroPayload.cheque_data = paymentMethodsPayload[0].cheque_data
       }
 
       await api.createCobro(cobroPayload)
@@ -665,8 +721,9 @@ export const Cobros: React.FC = () => {
       setFormExchangeRate(null)
       setShowInvoiceSection(false)
       setChequeForm({ ...INITIAL_CHEQUE_FORM })
+      setPaymentMethods([{ ...INITIAL_PAYMENT_METHOD }])
       setRetencionesSufridas([
-        { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
+        { type: 'iibb', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '', jurisdiction: '' },
         { type: 'ganancias', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
         { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
         { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, certificate_file: '' },
@@ -697,6 +754,7 @@ export const Cobros: React.FC = () => {
 
   const fmt = (n: any) => formatCurrency(n)
   const fmtDate = (d: string) => formatDate(d)
+  // showBankSelector kept for backward compat references
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
 
   // Filtered + paginated receipts
@@ -1094,7 +1152,7 @@ export const Cobros: React.FC = () => {
           <CardHeader><h3 className="text-lg font-semibold">Registrar Recibo</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value })}>
@@ -1102,36 +1160,78 @@ export const Cobros: React.FC = () => {
                     {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
                   </select>
                 </div>
-                <Input label="Monto *" type="number" step="0.01" min="0.01" placeholder="0.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Metodo de Pago *</label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="mercado_pago">Mercado Pago</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="tarjeta">Tarjeta</option>
-                  </select>
-                </div>
-                {showBankSelector && (
-                  <BankSelector
-                    banks={banks}
-                    value={form.bank_id}
-                    onChange={bankId => setForm({ ...form, bank_id: bankId })}
-                    onBanksChange={setBanks}
-                    label="Banco"
-                  />
-                )}
-                <Input label="Referencia" placeholder="N transferencia, cheque, etc." value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} />
                 <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />
                 <CurrencySelector
                   currency={formCurrency}
                   exchangeRate={formExchangeRate}
                   onCurrencyChange={setFormCurrency}
                   onExchangeRateChange={setFormExchangeRate}
-                  foreignAmount={parseFloat(form.amount || '0')}
+                  foreignAmount={paymentMethodsTotal}
                   compact
                 />
+              </div>
+
+              {/* Formas de Pago (multiple) */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">Formas de Pago</label>
+                {paymentMethods.map((pm, i) => (
+                  <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-3">
+                        <label className="text-xs text-gray-500">Metodo</label>
+                        <select className="w-full rounded border p-2 text-sm dark:bg-gray-800" value={pm.method} onChange={e => updatePaymentMethod(i, 'method', e.target.value)}>
+                          <option value="efectivo">Efectivo</option>
+                          <option value="transferencia">Transferencia</option>
+                          <option value="cheque">Cheque</option>
+                          <option value="tarjeta">Tarjeta</option>
+                          <option value="mercado_pago">Mercado Pago</option>
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs text-gray-500">Monto *</label>
+                        <input type="number" className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="0.00" value={pm.amount} onChange={e => updatePaymentMethod(i, 'amount', e.target.value)} />
+                      </div>
+                      {(pm.method === 'transferencia') && (
+                        <div className="col-span-3">
+                          <label className="text-xs text-gray-500">Banco</label>
+                          <select className="w-full rounded border p-2 text-sm dark:bg-gray-800" value={pm.bank_id} onChange={e => updatePaymentMethod(i, 'bank_id', e.target.value)}>
+                            <option value="">Seleccionar...</option>
+                            {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <div className={pm.method === 'transferencia' ? 'col-span-3' : 'col-span-6'}>
+                        <label className="text-xs text-gray-500">Referencia</label>
+                        <input className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="N comprobante" value={pm.reference} onChange={e => updatePaymentMethod(i, 'reference', e.target.value)} />
+                      </div>
+                      {paymentMethods.length > 1 && (
+                        <div className="col-span-1 flex items-end">
+                          <button type="button" onClick={() => removePaymentMethod(i)} className="p-2 text-red-500 hover:text-red-700">X</button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Cheque inline fields */}
+                    {pm.method === 'cheque' && pm.cheque_data && (
+                      <div className="grid grid-cols-4 gap-2 mt-2 pl-4 border-l-2 border-amber-300">
+                        <input placeholder="N Cheque" value={pm.cheque_data.number} onChange={e => updateChequeData(i, 'number', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="Banco emisor" value={pm.cheque_data.bank} onChange={e => updateChequeData(i, 'bank', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="Librador" value={pm.cheque_data.drawer} onChange={e => updateChequeData(i, 'drawer', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="CUIT librador" value={pm.cheque_data.drawer_cuit} onChange={e => updateChequeData(i, 'drawer_cuit', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <select value={pm.cheque_data.cheque_type} onChange={e => updateChequeData(i, 'cheque_type', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800">
+                          <option value="comun">Comun</option>
+                          <option value="diferido">Diferido</option>
+                          <option value="cruzado">Cruzado</option>
+                        </select>
+                        <input type="date" placeholder="Emision" value={pm.cheque_data.issue_date} onChange={e => updateChequeData(i, 'issue_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input type="date" placeholder="Vencimiento" value={pm.cheque_data.due_date} onChange={e => updateChequeData(i, 'due_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button type="button" onClick={addPaymentMethod} className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">+ Agregar forma de pago</button>
+                <div className="text-right text-sm font-medium">
+                  Total: ${paymentMethodsTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                </div>
               </div>
 
               {/* Retenciones sufridas */}
@@ -1168,55 +1268,28 @@ export const Cobros: React.FC = () => {
                           {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
                         </label>
                       )}
+                      {ret.type === 'iibb' && ret.enabled && (
+                        <select value={ret.jurisdiction || ''} onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                          i === idx ? { ...r, jurisdiction: e.target.value } : r
+                        ))}
+                          className="rounded border p-1.5 text-sm dark:bg-gray-800 dark:border-gray-600">
+                          <option value="">Jurisdiccion...</option>
+                          <option value="caba">CABA</option>
+                          <option value="pba">Provincia de Buenos Aires</option>
+                          <option value="otra">Otra jurisdiccion</option>
+                        </select>
+                      )}
                     </div>
                   ))}
                 </div>
                 {totalRetSufridas > 0 && (
                   <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm text-gray-700 dark:text-gray-300">
-                    <span>Recibido: <b>$ {parseFloat(form.amount || '0').toFixed(2)}</b></span>
+                    <span>Recibido: <b>$ {paymentMethodsTotal.toFixed(2)}</b></span>
                     <span>Retenciones: <b>$ {totalRetSufridas.toFixed(2)}</b></span>
-                    <span>Total que cancela factura: <b>$ {(parseFloat(form.amount || '0') + totalRetSufridas).toFixed(2)}</b></span>
+                    <span>Total que cancela factura: <b>$ {(paymentMethodsTotal + totalRetSufridas).toFixed(2)}</b></span>
                   </div>
                 )}
               </div>
-
-              {/* Cheque inline form */}
-              {form.payment_method === 'cheque' && (
-                <div className="border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-4 space-y-3">
-                  <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200">Datos del Cheque</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <Input label="Numero de cheque *" placeholder="Ej: 12345678" value={chequeForm.number} onChange={e => setChequeForm({ ...chequeForm, number: e.target.value })} required />
-                    <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco *</label>
-                      <div className="relative">
-                        <input
-                          list="cheque-bank-list"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Escribir o seleccionar banco..."
-                          value={chequeForm.bank}
-                          onChange={e => setChequeForm({ ...chequeForm, bank: e.target.value })}
-                          required
-                        />
-                        <datalist id="cheque-bank-list">
-                          {banks.map(b => <option key={b.id} value={b.bank_name} />)}
-                        </datalist>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de cheque *</label>
-                      <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={chequeForm.cheque_type} onChange={e => setChequeForm({ ...chequeForm, cheque_type: e.target.value })}>
-                        {CHEQUE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
-                    </div>
-                    <Input label="Librador *" placeholder="Nombre del emisor" value={chequeForm.drawer} onChange={e => setChequeForm({ ...chequeForm, drawer: e.target.value })} required />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Input label="CUIT del librador" placeholder="20-12345678-9" value={chequeForm.drawer_cuit} onChange={e => setChequeForm({ ...chequeForm, drawer_cuit: e.target.value })} />
-                    <DateInput label="Fecha de emision *" value={chequeForm.issue_date} onChange={val => setChequeForm({ ...chequeForm, issue_date: val })} required />
-                    <DateInput label="Fecha de cobro *" value={chequeForm.due_date} onChange={val => setChequeForm({ ...chequeForm, due_date: val })} required />
-                  </div>
-                </div>
-              )}
 
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
@@ -1416,7 +1489,7 @@ export const Cobros: React.FC = () => {
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <div className="text-sm text-gray-600 dark:text-gray-400">
                   Total: <span className="font-bold text-lg text-green-700 ml-2">
-                    {fmt(linkedTotal > 0 ? linkedTotal : parseFloat(form.amount || '0'))}
+                    {fmt(linkedTotal > 0 ? linkedTotal : paymentMethodsTotal)}
                   </span>
                 </div>
                 <Button type="submit" variant="success" loading={saving}>

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { cobrosService } from './cobros.service';
+import { pdfService } from '../pdf/pdf.service';
 
 export class CobrosController {
   async getCobros(req: AuthRequest, res: Response) {
@@ -34,6 +35,13 @@ export class CobrosController {
   async getCobroReceipt(req: AuthRequest, res: Response) {
     const data = await cobrosService.getCobroReceipt(req.user!.company_id, req.params.id);
     res.json(data);
+  }
+
+  async getReceiptPdf(req: AuthRequest, res: Response) {
+    const pdf = await pdfService.generateReceiptPdf(req.params.id, req.user!.company_id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=recibo-${req.params.id}.pdf`);
+    res.send(pdf);
   }
 }
 

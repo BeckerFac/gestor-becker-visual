@@ -8,5 +8,6 @@ cobrosRouter.get('/', authorize('cobros', 'view'), (req, res) => cobrosControlle
 cobrosRouter.get('/summary', authorize('cobros', 'view'), (req, res) => cobrosController.getSummary(req as any, res));
 cobrosRouter.get('/order/:orderId/payment-details', authorize('cobros', 'view'), (req, res) => cobrosController.getOrderPaymentDetails(req as any, res));
 cobrosRouter.get('/:id/receipt', authorize('cobros', 'view'), (req, res) => cobrosController.getCobroReceipt(req as any, res));
+cobrosRouter.get('/:id/pdf', authorize('cobros', 'view'), (req, res) => cobrosController.getReceiptPdf(req as any, res));
 cobrosRouter.post('/', authorize('cobros', 'create'), (req, res) => cobrosController.createCobro(req as any, res));
 cobrosRouter.delete('/:id', authorize('cobros', 'delete'), (req, res) => cobrosController.deleteCobro(req as any, res));
