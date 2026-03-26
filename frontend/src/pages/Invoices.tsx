@@ -343,7 +343,7 @@ export const Invoices: React.FC = () => {
   const [formEnterpriseId, setFormEnterpriseId] = useState('')
   const [formCustomerId, setFormCustomerId] = useState('')
   const [formInvoiceType, setFormInvoiceType] = useState<InvoiceType>('C')
-  const [formOrderId, setFormOrderId] = useState('')
+  // formOrderId removed: invoices can now link to N orders via item-level order_item_id
   const [formRelatedInvoiceId, setFormRelatedInvoiceId] = useState('')
   const [authorizedInvoices, setAuthorizedInvoices] = useState<Invoice[]>([])
   const [formCurrency, setFormCurrency] = useState('ARS')
@@ -467,7 +467,6 @@ export const Invoices: React.FC = () => {
     setFormEnterpriseId('')
     setFormCustomerId('')
     setFormInvoiceType('C')
-    setFormOrderId('')
     setFormItems([EMPTY_FORM_ITEM()])
     setProductSearch('')
     setProductSearchIdx(null)
@@ -540,40 +539,7 @@ export const Invoices: React.FC = () => {
     setProductSearchIdx(null)
   }
 
-  // Auto-fill items from order
-  useEffect(() => {
-    if (!formOrderId) return
-    const loadOrderItems = async () => {
-      try {
-        const uninvoiced = await api.getOrderUninvoicedItems(formOrderId)
-        if (uninvoiced && uninvoiced.length > 0) {
-          const mapped: InvoiceItem[] = uninvoiced
-            .filter((item: any) => parseFloat(item.pending_qty || '0') > 0)
-            .map((item: any) => ({
-              product_id: item.product_id || undefined,
-              product_name: item.product_name || '',
-              quantity: parseFloat(item.pending_qty || item.quantity || '1'),
-              unit_price: parseFloat(item.unit_price || '0'),
-              vat_rate: 21,
-              subtotal: calcItemSubtotal(parseFloat(item.unit_price || '0'), parseFloat(item.pending_qty || item.quantity || '1')),
-              order_item_id: item.id,
-            }))
-          if (mapped.length > 0) {
-            setFormItems(prev => {
-              const existingIds = new Set(prev.filter(i => i.order_item_id).map(i => i.order_item_id))
-              const newOnly = mapped.filter(m => !existingIds.has(m.order_item_id))
-              if (newOnly.length === 0) return prev
-              const withContent = prev.filter(i => i.product_name.trim())
-              return withContent.length > 0 ? [...withContent, ...newOnly] : newOnly
-            })
-          }
-        }
-      } catch (e) {
-        console.warn('Could not load order items for invoice:', e)
-      }
-    }
-    loadOrderItems()
-  }, [formOrderId])
+  // Items from orders are now imported via OrderItemsImporter (multi-order support)
 
   // Load authorized invoices for NC/ND related invoice selector
   useEffect(() => {
@@ -918,11 +884,7 @@ export const Invoices: React.FC = () => {
     cae: inv.cae || '',
   }))
 
-  // Filtered orders for form link dropdown (only for selected enterprise)
-  const filteredOrdersForForm = useMemo(() => {
-    if (!formEnterpriseId) return ordersWithoutInvoice
-    return ordersWithoutInvoice.filter(o => o.enterprise?.id === formEnterpriseId)
-  }, [ordersWithoutInvoice, formEnterpriseId])
+  // filteredOrdersForForm removed: order selection moved to OrderItemsImporter in step 2
 
   // ---- Product search dropdown for form items ----
 
@@ -1320,31 +1282,7 @@ export const Invoices: React.FC = () => {
                   </div>
                 )}
 
-                {/* Link to order (optional) */}
-                {ordersWithoutInvoice.length > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Asociar a Pedido <span className="text-xs text-gray-400">(opcional)</span>
-                    </label>
-                    <select
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                      value={formOrderId}
-                      onChange={e => { setFormOrderId(e.target.value); if (!e.target.value) setFormItems([EMPTY_FORM_ITEM()]) }}
-                    >
-                      <option value="">Sin asociar</option>
-                      {filteredOrdersForForm.map(o => (
-                        <option key={o.id} value={o.id}>
-                          #{String(o.order_number).padStart(4, '0')} - {o.title}
-                          {o.customer_name ? ` | ${o.customer_name}` : ''}
-                          {' '}— {formatCurrency(parseFloat(o.total_amount || '0'))}
-                        </option>
-                      ))}
-                    </select>
-                    {filteredOrdersForForm.length === 0 && formEnterpriseId && (
-                      <p className="text-xs text-gray-400">No hay pedidos sin factura para esta empresa.</p>
-                    )}
-                  </div>
-                )}
+                {/* Order association moved to Step 2 via OrderItemsImporter (supports N orders) */}
 
                 {/* Currency selector */}
                 <CurrencySelector
@@ -1391,11 +1329,11 @@ export const Invoices: React.FC = () => {
                       </span>
                     </>
                   )}
-                  {formOrderId && (
+                  {formItems.some(i => i.order_item_id) && (
                     <>
                       <span className="text-blue-400">›</span>
-                      <span className="text-blue-600 font-mono">
-                        #{String(ordersWithoutInvoice.find(o => o.id === formOrderId)?.order_number || 0).padStart(4, '0')}
+                      <span className="text-blue-600 text-xs">
+                        {formItems.filter(i => i.order_item_id).length} items de pedidos
                       </span>
                     </>
                   )}
