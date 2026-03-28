@@ -1363,7 +1363,7 @@ export const Invoices: React.FC = () => {
                         product_name: oi.product_name || '',
                         quantity: qty,
                         unit_price: price,
-                        vat_rate: 21,
+                        vat_rate: parseFloat(oi.vat_rate || '21'),
                         subtotal: qty * price,
                         order_item_id: oi.order_item_id,
                       }

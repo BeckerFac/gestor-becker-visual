@@ -1266,6 +1266,7 @@ export class InvoicesService {
         CAST(oi.quantity AS decimal) as quantity,
         CAST(oi.unit_price AS decimal) as unit_price,
         CAST(oi.subtotal AS decimal) as subtotal,
+        COALESCE(CAST(oi.vat_rate AS decimal), 21) as vat_rate,
         COALESCE(inv.qty_invoiced, 0) as qty_invoiced,
         CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) as qty_remaining
       FROM order_items oi
