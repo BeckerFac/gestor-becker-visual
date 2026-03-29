@@ -1323,13 +1323,19 @@ export class InvoicesService {
    * Get invoice detail for expandable row (items + cobros applied + balance).
    */
   async getInvoiceDetail(companyId: string, invoiceId: string) {
-    // Items
+    // Items (with order info for grouping)
     const itemsResult = await db.execute(sql`
-      SELECT ii.*, p.name as product_name, p.sku
+      SELECT ii.*, p.name as product_name, p.sku,
+        oi_ref.order_id,
+        o_ref.order_number, o_ref.title as order_title,
+        e_ref.name as order_enterprise_name
       FROM invoice_items ii
       LEFT JOIN products p ON ii.product_id = p.id
+      LEFT JOIN order_items oi_ref ON ii.order_item_id = oi_ref.id
+      LEFT JOIN orders o_ref ON oi_ref.order_id = o_ref.id
+      LEFT JOIN enterprises e_ref ON o_ref.enterprise_id = e_ref.id
       WHERE ii.invoice_id = ${invoiceId}
-      ORDER BY ii.created_at ASC
+      ORDER BY o_ref.order_number ASC NULLS LAST, ii.created_at ASC
     `);
     const items = (itemsResult as any).rows || [];
 

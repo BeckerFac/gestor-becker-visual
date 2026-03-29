@@ -2079,29 +2079,73 @@ export const Invoices: React.FC = () => {
                           <div className="p-4 bg-gray-50 dark:bg-gray-800/30 border-t space-y-4">
                             {invoiceDetails[invoice.id] ? (
                               <>
-                                {/* Items */}
+                                {/* Items agrupados por pedido */}
                                 <div>
                                   <h4 className="text-sm font-semibold mb-2">Items Facturados</h4>
-                                  <table className="w-full text-sm">
-                                    <thead><tr className="text-xs text-gray-500">
-                                      <th className="text-left pb-1">Producto</th>
-                                      <th className="text-right pb-1">Cant.</th>
-                                      <th className="text-right pb-1">Precio</th>
-                                      <th className="text-right pb-1">IVA</th>
-                                      <th className="text-right pb-1">Subtotal</th>
-                                    </tr></thead>
-                                    <tbody>
-                                      {invoiceDetails[invoice.id].items.map((item: any) => (
-                                        <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
-                                          <td className="py-1">{item.product_name || item.description || 'Item'}</td>
-                                          <td className="py-1 text-right">{item.quantity}</td>
-                                          <td className="py-1 text-right">${parseFloat(item.unit_price || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                                          <td className="py-1 text-right text-gray-500">{item.vat_rate || 21}%</td>
-                                          <td className="py-1 text-right font-medium">${(parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
+                                  {(() => {
+                                    const items = invoiceDetails[invoice.id]?.items || []
+
+                                    // Group by order_id (null = no order)
+                                    const groups = new Map<string, { order_number: number | null; order_title: string | null; enterprise_name: string | null; items: any[] }>()
+
+                                    for (const item of items) {
+                                      const key = item.order_id || '__no_order__'
+                                      if (!groups.has(key)) {
+                                        groups.set(key, {
+                                          order_number: item.order_number || null,
+                                          order_title: item.order_title || null,
+                                          enterprise_name: item.order_enterprise_name || null,
+                                          items: []
+                                        })
+                                      }
+                                      groups.get(key)!.items.push(item)
+                                    }
+
+                                    if (groups.size === 0) return <p className="text-xs text-gray-400 italic">Sin items</p>
+
+                                    return Array.from(groups.entries()).map(([key, group]) => {
+                                      const groupSubtotal = group.items.reduce((s: number, it: any) => s + parseFloat(it.quantity || 0) * parseFloat(it.unit_price || 0), 0)
+
+                                      return (
+                                        <div key={key} className="mb-4">
+                                          {/* Group header */}
+                                          <div className="flex items-center justify-between mb-1.5">
+                                            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                              {group.order_number
+                                                ? <>Pedido <span className="font-mono">#{String(group.order_number).padStart(4, '0')}</span> — {group.order_title || ''}</>
+                                                : 'Items sin pedido vinculado'
+                                              }
+                                            </p>
+                                            <span className="text-xs text-gray-500">
+                                              Subtotal: ${groupSubtotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                                            </span>
+                                          </div>
+
+                                          {/* Items table for this group */}
+                                          <table className="w-full text-sm">
+                                            <thead><tr className="text-xs text-gray-500 dark:text-gray-400">
+                                              <th className="text-left pb-1">Producto</th>
+                                              <th className="text-right pb-1">Cant.</th>
+                                              <th className="text-right pb-1">Precio</th>
+                                              <th className="text-right pb-1">IVA</th>
+                                              <th className="text-right pb-1">Subtotal</th>
+                                            </tr></thead>
+                                            <tbody>
+                                              {group.items.map((item: any) => (
+                                                <tr key={item.id} className="border-t border-gray-100 dark:border-gray-700">
+                                                  <td className="py-1">{item.product_name || item.description || 'Item'}</td>
+                                                  <td className="py-1 text-right">{parseFloat(item.quantity || 0)}</td>
+                                                  <td className="py-1 text-right">${parseFloat(item.unit_price || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                  <td className="py-1 text-right text-gray-500">{item.vat_rate || 21}%</td>
+                                                  <td className="py-1 text-right font-medium">${(parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )
+                                    })
+                                  })()}
                                 </div>
 
                                 {/* Recibos vinculados */}
