@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { invoices, invoice_items, customers } from '../../db/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
@@ -1265,12 +1265,11 @@ export class InvoicesService {
       enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.enterprise_id = $${params.length}))`;
     }
     // Ensure required columns exist before query
-    const { pool: dbPool } = await import('../../config/db');
-    try { await dbPool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
-    try { await dbPool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21'); } catch {}
-    try { await dbPool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT FALSE'); } catch {}
+    try { await pool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
+    try { await pool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21'); } catch {}
+    try { await pool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT FALSE'); } catch {}
 
-    const { rows } = await dbPool.query(`
+    const { rows } = await pool.query(`
       WITH item_invoiced AS (
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
