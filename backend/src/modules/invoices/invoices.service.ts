@@ -1243,6 +1243,7 @@ export class InvoicesService {
     enterprise_id?: string;
     business_unit_id?: string;
   } = {}) {
+    await this.ensureMigrations();
     // Build query with pool.query for complex WHERE with subquery
     const params: any[] = [companyId];
     let enterpriseFilter = '';
