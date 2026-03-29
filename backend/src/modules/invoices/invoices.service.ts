@@ -1254,13 +1254,18 @@ export class InvoicesService {
     business_unit_id?: string;
   } = {}) {
     await this.ensureMigrations();
+    try {
     // Build query with pool.query for complex WHERE with subquery
     const params: any[] = [companyId];
     let enterpriseFilter = '';
     if (filters.enterprise_id) {
       params.push(filters.enterprise_id);
-      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR o.customer_id IN (SELECT id FROM customers WHERE enterprise_id = $${params.length}))`;
+      // Match orders by enterprise_id directly, or by customer linked to that enterprise
+      // Use LEFT JOIN approach to avoid subquery on customers.enterprise_id which may not exist yet
+      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.enterprise_id = $${params.length}))`;
     }
+    // Also ensure customers table has enterprise_id column
+    try { await (await import('../../config/db')).pool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
 
     const { rows } = await (await import('../../config/db')).pool.query(`
       WITH item_invoiced AS (
@@ -1290,7 +1295,12 @@ export class InvoicesService {
         AND oi.quantity IS NOT NULL AND CAST(oi.quantity AS decimal) > 0
       ORDER BY o.order_number DESC, oi.created_at ASC
     `, params);
+    console.log('getAvailableOrderItemsForInvoicing:', { companyId, filters, resultCount: rows?.length || 0 });
     return rows || [];
+  } catch (err) {
+    console.error('getAvailableOrderItemsForInvoicing ERROR:', (err as Error).message, { companyId, filters });
+    throw err;
+  }
   }
 
   /**
