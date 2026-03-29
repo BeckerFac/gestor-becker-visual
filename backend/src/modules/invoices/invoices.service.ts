@@ -315,11 +315,14 @@ export class InvoicesService {
 
       // Derive unique order_ids from invoice items that have order_item_id
       if (collectedOrderItemIds.length > 0) {
-        const orderIdsResult = await db.execute(sql`
-          SELECT DISTINCT order_id FROM order_items
-          WHERE id = ANY(${collectedOrderItemIds})
-        `);
-        const orderIds = ((orderIdsResult as any).rows || []).map((r: any) => r.order_id).filter(Boolean);
+        // Query each order_item_id individually to avoid drizzle array issues
+        const orderIdSet = new Set<string>();
+        for (const oiId of collectedOrderItemIds) {
+          const oiResult = await db.execute(sql`SELECT order_id FROM order_items WHERE id = ${oiId}`);
+          const orderId = ((oiResult as any).rows || [])[0]?.order_id;
+          if (orderId) orderIdSet.add(orderId);
+        }
+        const orderIds = Array.from(orderIdSet);
 
         // Insert into invoice_orders (N:N)
         for (const orderId of orderIds) {
@@ -386,7 +389,7 @@ export class InvoicesService {
       await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create invoice error:', error);
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to create invoice');
+      throw new ApiError(500, `Failed to create invoice: ${(error as Error).message}`);
     }
   }
 

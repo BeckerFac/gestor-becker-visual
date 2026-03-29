@@ -277,7 +277,7 @@ const OrderItemsImporter: React.FC<{
                       <span className="text-gray-400">{parseFloat(oi.quantity)}x ${parseFloat(oi.unit_price).toLocaleString('es-AR')}</span>
                       <span className="text-orange-600">Disponible: {remaining}</span>
                       <input
-                        type="number" min="0" max={remaining} step="0.01"
+                        type="number" min="0" max={remaining} step="1"
                         placeholder="0"
                         value={selectedQty[oi.order_item_id] || ''}
                         onChange={e => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: e.target.value }))}
