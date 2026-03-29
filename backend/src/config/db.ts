@@ -935,6 +935,35 @@ async function runAutoMigrations() {
     await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
     await pool.query(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS business_unit_id UUID REFERENCES business_units(id)`);
 
+    // Backfill: assign default business_unit_id to records that have NULL
+    // This ensures old records show up in filtered views
+    try {
+      await pool.query(`
+        UPDATE orders SET business_unit_id = (SELECT id FROM business_units WHERE company_id = orders.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = orders.company_id)
+      `);
+      await pool.query(`
+        UPDATE cobros SET business_unit_id = (SELECT id FROM business_units WHERE company_id = cobros.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = cobros.company_id)
+      `);
+      await pool.query(`
+        UPDATE pagos SET business_unit_id = (SELECT id FROM business_units WHERE company_id = pagos.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = pagos.company_id)
+      `);
+      await pool.query(`
+        UPDATE invoices SET business_unit_id = (SELECT id FROM business_units WHERE company_id = invoices.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = invoices.company_id)
+      `);
+      await pool.query(`
+        UPDATE purchases SET business_unit_id = (SELECT id FROM business_units WHERE company_id = purchases.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = purchases.company_id)
+      `);
+      await pool.query(`
+        UPDATE cheques SET business_unit_id = (SELECT id FROM business_units WHERE company_id = cheques.company_id ORDER BY sort_order ASC, created_at ASC LIMIT 1)
+        WHERE business_unit_id IS NULL AND EXISTS (SELECT 1 FROM business_units WHERE company_id = cheques.company_id)
+      `);
+    } catch (e) { console.warn('Backfill business_unit_id:', (e as Error).message); }
+
     // ===== UNIFY: Add receipt_number to cobros (from receipts system) =====
     await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS receipt_number INTEGER`);
 

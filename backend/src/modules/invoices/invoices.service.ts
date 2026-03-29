@@ -1287,6 +1287,7 @@ export class InvoicesService {
       WHERE o.company_id = $1 AND o.status NOT IN ('cancelado', 'cancelled')
         ${enterpriseFilter}
         AND (CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0)) > 0
+        AND oi.quantity IS NOT NULL AND CAST(oi.quantity AS decimal) > 0
       ORDER BY o.order_number DESC, oi.created_at ASC
     `, params);
     return rows || [];
