@@ -52,6 +52,59 @@ router.get('/health/debug-orders', async (_req: Request, res: Response) => {
   }
 });
 
+// TEMPORARY: Test the exact query that available-order-items uses
+router.get('/health/test-available-items', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.query.company_id as string || '2ce2b767-145b-460f-a153-64c2aeee578c';
+    const enterpriseId = req.query.enterprise_id as string;
+
+    // Ensure columns exist
+    await pool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID').catch(() => {});
+    await pool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21').catch(() => {});
+    await pool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT FALSE').catch(() => {});
+
+    const params: any[] = [companyId];
+    let enterpriseFilter = '';
+    if (enterpriseId) {
+      params.push(enterpriseId);
+      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.enterprise_id = $${params.length}))`;
+    }
+
+    const { rows } = await pool.query(`
+      WITH item_invoiced AS (
+        SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
+        FROM invoice_items ii
+        JOIN invoices i ON ii.invoice_id = i.id
+        WHERE i.status != 'cancelled' AND ii.order_item_id IS NOT NULL
+        GROUP BY ii.order_item_id
+      )
+      SELECT
+        o.id as order_id, o.order_number, o.title as order_title, o.enterprise_id,
+        e.name as enterprise_name,
+        oi.id as order_item_id, oi.product_id, oi.product_name, oi.description,
+        CAST(oi.quantity AS decimal) as quantity,
+        CAST(oi.unit_price AS decimal) as unit_price,
+        CAST(oi.subtotal AS decimal) as subtotal,
+        COALESCE(CAST(oi.vat_rate AS decimal), 21) as vat_rate,
+        COALESCE(inv.qty_invoiced, 0) as qty_invoiced,
+        CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) as qty_remaining
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN enterprises e ON o.enterprise_id = e.id
+      LEFT JOIN item_invoiced inv ON inv.order_item_id = oi.id
+      WHERE o.company_id = $1 AND o.status NOT IN ('cancelado', 'cancelled')
+        ${enterpriseFilter}
+        AND (CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0)) > 0
+        AND oi.quantity IS NOT NULL AND CAST(oi.quantity AS decimal) > 0
+      ORDER BY o.order_number DESC, oi.created_at ASC
+    `, params);
+
+    res.json({ count: rows.length, params, enterpriseFilter, rows: rows.slice(0, 5) });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message, stack: (err as Error).stack?.split('\n').slice(0, 5) });
+  }
+});
+
 // Detailed health check - includes DB, memory, uptime
 // In production, limit information disclosed to prevent reconnaissance
 router.get('/health/detailed', async (_req: Request, res: Response) => {
