@@ -42,6 +42,7 @@ interface Invoice {
   enterprise?: { id: string; name: string } | null
   enterprise_tags?: { id: string; name: string; color: string }[]
   order?: { id: string; order_number: number; title: string } | null
+  linked_orders?: Array<{ order_id: string; order_number: number; order_title: string }>
   subtotal: string
   vat_amount: string
   total_amount: string
@@ -876,7 +877,14 @@ export const Invoices: React.FC = () => {
     invoice_date: inv.invoice_date,
     enterprise_name: inv.enterprise?.name || '',
     customer_name: inv.customer?.name || 'Consumidor Final',
-    order_ref: inv.order ? `#${String(inv.order.order_number).padStart(4, '0')}` : '-',
+    order_ref: (() => {
+      const ords = inv.linked_orders && inv.linked_orders.length > 0
+        ? inv.linked_orders
+        : inv.order
+          ? [{ order_number: inv.order.order_number }]
+          : [];
+      return ords.length > 0 ? ords.map(o => `#${String(o.order_number).padStart(4, '0')}`).join(', ') : '-';
+    })(),
     total_amount: inv.total_amount,
     total_cobrado: inv.total_cobrado || '0',
     payment_status_label: PAYMENT_STATUS_MAP[inv.payment_status || '']?.label || '',
@@ -1910,15 +1918,27 @@ export const Invoices: React.FC = () => {
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
                         </div>
                         <p className="text-gray-500 dark:text-gray-400">{invoice.customer?.name || 'Consumidor Final'}</p>
-                        {vistaMode === 'venta_fiscal' && invoice.order && (
-                          <p className="text-[10px] mt-0.5">
-                            <button onClick={(e) => { e.stopPropagation(); navigate('/orders') }} className="font-mono text-blue-600 hover:underline">
-                              Pedido #{String(invoice.order.order_number).padStart(4, '0')}
-                            </button>
-                            <button onClick={() => setUnlinkTarget(invoice.id)} className="ml-1 text-red-400 hover:text-red-600">x</button>
-                          </p>
-                        )}
-                        {vistaMode === 'venta_fiscal' && !invoice.order && (
+                        {vistaMode === 'venta_fiscal' && (() => {
+                          const orders = invoice.linked_orders && invoice.linked_orders.length > 0
+                            ? invoice.linked_orders
+                            : invoice.order
+                              ? [{ order_number: invoice.order.order_number, order_id: invoice.order.id, order_title: invoice.order.title }]
+                              : [];
+                          if (orders.length > 0) return (
+                            <div className="flex flex-wrap gap-1 mt-0.5">
+                              {orders.map((lo, idx) => (
+                                <span key={idx} className="inline-block px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[10px] font-mono dark:bg-indigo-900/40 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/60" onClick={(e) => { e.stopPropagation(); navigate('/orders') }}>
+                                  #{String(lo.order_number).padStart(4, '0')}
+                                </span>
+                              ))}
+                              {orders.length === 1 && (
+                                <button onClick={(e) => { e.stopPropagation(); setUnlinkTarget(invoice.id) }} className="text-red-400 hover:text-red-600 text-[10px]">x</button>
+                              )}
+                            </div>
+                          );
+                          return null;
+                        })()}
+                        {vistaMode === 'venta_fiscal' && !(invoice.linked_orders && invoice.linked_orders.length > 0) && !invoice.order && (
                           <div className="relative mt-0.5">
                             <button
                               onClick={() => {

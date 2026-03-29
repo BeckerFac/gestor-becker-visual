@@ -459,6 +459,17 @@ export class InvoicesService {
           CASE WHEN o.id IS NOT NULL THEN
             json_build_object('id', o.id, 'order_number', o.order_number, 'title', o.title, 'total_amount', o.total_amount)
           ELSE NULL END as "order",
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'order_id', o_link.id,
+              'order_number', o_link.order_number,
+              'order_title', o_link.title
+            ) ORDER BY o_link.order_number DESC)
+            FROM invoice_orders io
+            JOIN orders o_link ON io.order_id = o_link.id
+            WHERE io.invoice_id = i.id),
+            '[]'::json
+          ) as linked_orders,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta,
           -- total_cobrado using cobro_invoice_applications (N:N correct system)
