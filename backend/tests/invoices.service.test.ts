@@ -19,6 +19,7 @@ describe('InvoicesService', () => {
     it('creates fiscal invoice in draft status', async () => {
       // migrations
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       // next number query
       mockDbRows([{ next_number: '10' }])
       // customer enterprise lookup
@@ -39,6 +40,7 @@ describe('InvoicesService', () => {
 
     it('creates no_fiscal invoice with status emitido', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       // next number for no_fiscal
       mockDbRows([{ next_number: '1' }])
       // customer enterprise
@@ -58,6 +60,7 @@ describe('InvoicesService', () => {
 
     it('creates interno invoice', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // raw INSERT
@@ -72,6 +75,7 @@ describe('InvoicesService', () => {
 
     it('creates invoice with items and calculates totals', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // no customer enterprise
       mockDbVoid() // INSERT invoice
@@ -96,6 +100,7 @@ describe('InvoicesService', () => {
 
     it('validates quantity is greater than zero', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // INSERT invoice
@@ -112,6 +117,7 @@ describe('InvoicesService', () => {
 
     it('validates unit_price max boundary', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
@@ -128,6 +134,7 @@ describe('InvoicesService', () => {
 
     it('resolves enterprise_id from customer when not provided', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       // customer enterprise lookup returns enterprise
       mockDbRows([{ enterprise_id: 'resolved-ent' }])
@@ -272,6 +279,7 @@ describe('InvoicesService', () => {
   describe('edge cases', () => {
     it('handles invoice with negative amount in validation', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
