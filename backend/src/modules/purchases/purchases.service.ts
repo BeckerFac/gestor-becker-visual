@@ -134,6 +134,16 @@ export class PurchasesService {
 
   async createPurchase(companyId: string, userId: string, data: any) {
     await this.ensureTables();
+
+    // Auto-assign default business_unit_id if not provided
+    if (!data.business_unit_id) {
+      try {
+        const buResult = await db.execute(sql`SELECT id FROM business_units WHERE company_id = ${companyId} ORDER BY sort_order ASC, created_at ASC LIMIT 1`);
+        const defaultBu = ((buResult as any).rows || [])[0];
+        if (defaultBu) data.business_unit_id = defaultBu.id;
+      } catch { /* no business units yet */ }
+    }
+
     try {
       const purchaseId = uuid();
 

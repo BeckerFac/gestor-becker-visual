@@ -87,6 +87,14 @@ export class PurchaseInvoicesService {
     items?: Array<{ product_name: string; description?: string; quantity: number; unit_price: number }>;
     retenciones_previstas?: Array<{ type: string; rate: number; estimated_amount: number }>;
   }) {
+    // Auto-assign default business_unit_id if not provided
+    if (!data.business_unit_id) {
+      try {
+        const buResult = await db.execute(sql`SELECT id FROM business_units WHERE company_id = ${companyId} ORDER BY sort_order ASC, created_at ASC LIMIT 1`);
+        const defaultBu = ((buResult as any).rows || [])[0];
+        if (defaultBu) data.business_unit_id = defaultBu.id;
+      } catch { /* no business units yet */ }
+    }
     if (!data.business_unit_id) throw new ApiError(400, 'Razon social requerida');
     if (!data.enterprise_id) throw new ApiError(400, 'Proveedor requerido');
     if (!data.invoice_type) throw new ApiError(400, 'Tipo de factura requerido');
