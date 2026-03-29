@@ -467,7 +467,7 @@ export class InvoicesService {
             ) ORDER BY o_link.order_number DESC)
             FROM invoice_orders io
             JOIN orders o_link ON io.order_id = o_link.id
-            WHERE io.invoice_id = i.id),
+            WHERE io.invoice_id = i.id AND o_link.company_id = ${companyId}),
             '[]'::json
           ) as linked_orders,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
