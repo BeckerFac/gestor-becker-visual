@@ -28,6 +28,30 @@ router.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+// TEMPORARY: Diagnostic endpoint to debug order_items issue
+router.get('/health/debug-orders', async (_req: Request, res: Response) => {
+  try {
+    const orders = await pool.query('SELECT id, order_number, title, status, enterprise_id, business_unit_id, created_at FROM orders ORDER BY created_at DESC LIMIT 5');
+    const orderItems = await pool.query('SELECT oi.id, oi.order_id, oi.product_name, oi.quantity, oi.unit_price, oi.vat_rate, oi.deduct_stock FROM order_items oi ORDER BY oi.created_at DESC LIMIT 10');
+    const invoiceItems = await pool.query('SELECT ii.order_item_id, ii.quantity, i.status as invoice_status FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id WHERE ii.order_item_id IS NOT NULL LIMIT 20');
+    const customers = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'enterprise_id'");
+    const orderItemsCols = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'order_items' ORDER BY ordinal_position");
+    const bus = await pool.query('SELECT id, name, company_id FROM business_units LIMIT 5');
+
+    res.json({
+      recent_orders: orders.rows,
+      recent_order_items: orderItems.rows,
+      invoice_items_with_order_link: invoiceItems.rows,
+      customers_has_enterprise_id: customers.rows.length > 0,
+      order_items_columns: orderItemsCols.rows.map((r: any) => r.column_name),
+      business_units: bus.rows,
+      orders_without_items: (await pool.query('SELECT o.id, o.order_number FROM orders o WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id) ORDER BY o.created_at DESC LIMIT 5')).rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message, stack: (err as Error).stack?.split('\n').slice(0, 5) });
+  }
+});
+
 // Detailed health check - includes DB, memory, uptime
 // In production, limit information disclosed to prevent reconnaissance
 router.get('/health/detailed', async (_req: Request, res: Response) => {

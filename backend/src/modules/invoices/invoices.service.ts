@@ -1264,10 +1264,13 @@ export class InvoicesService {
       // Use LEFT JOIN approach to avoid subquery on customers.enterprise_id which may not exist yet
       enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.enterprise_id = $${params.length}))`;
     }
-    // Also ensure customers table has enterprise_id column
-    try { await (await import('../../config/db')).pool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
+    // Ensure required columns exist before query
+    const { pool: dbPool } = await import('../../config/db');
+    try { await dbPool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
+    try { await dbPool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21'); } catch {}
+    try { await dbPool.query('ALTER TABLE order_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT FALSE'); } catch {}
 
-    const { rows } = await (await import('../../config/db')).pool.query(`
+    const { rows } = await dbPool.query(`
       WITH item_invoiced AS (
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
