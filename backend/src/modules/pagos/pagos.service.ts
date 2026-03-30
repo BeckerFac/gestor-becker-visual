@@ -47,6 +47,7 @@ export class PagosService {
         SELECT p.*,
           COALESCE(p.total_amount, CAST(p.amount AS decimal)) as total_amount,
           e.name as enterprise_name,
+          e.cuit as enterprise_cuit,
           pu.purchase_number,
           b.bank_name,
           -- Linked purchase invoices
@@ -67,7 +68,7 @@ export class PagosService {
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime))
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number))
             FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
@@ -234,7 +235,7 @@ export class PagosService {
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime))
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number))
             FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id

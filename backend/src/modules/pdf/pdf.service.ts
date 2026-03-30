@@ -1164,6 +1164,336 @@ export class PdfService {
 </html>`
   }
 
+  async generatePaymentPdf(pagoId: string, companyId: string): Promise<Buffer> {
+    try {
+      await this.initialize()
+
+      // 1. Query pago data with enterprise and company info
+      const pagoResult = await db.execute(sql`
+        SELECT p.*, e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address,
+          e.tax_condition as enterprise_tax_condition,
+          comp.name as company_name, comp.cuit as company_cuit, comp.address as company_address,
+          comp.tax_condition as company_tax_condition,
+          b.bank_name
+        FROM pagos p
+        LEFT JOIN enterprises e ON p.enterprise_id = e.id
+        LEFT JOIN companies comp ON p.company_id = comp.id
+        LEFT JOIN banks b ON p.bank_id = b.id
+        WHERE p.id = ${pagoId} AND p.company_id = ${companyId}
+      `)
+      const pago = ((pagoResult as any).rows || [])[0]
+      if (!pago) {
+        throw new ApiError(404, 'Pago not found')
+      }
+
+      // 2. Query retenciones practicadas
+      const retResult = await db.execute(sql`
+        SELECT * FROM retenciones WHERE pago_id = ${pagoId} AND direction = 'practicada'
+      `)
+      const retenciones = (retResult as any).rows || []
+
+      // 3. Query linked purchase invoices
+      const invResult = await db.execute(sql`
+        SELECT pia.amount_applied, pi.invoice_number, pi.invoice_type, pi.total_amount,
+          CAST(pi.total_amount AS decimal) - COALESCE(
+            (SELECT SUM(CAST(pia2.amount_applied AS decimal))
+             FROM pago_invoice_applications pia2
+             WHERE pia2.purchase_invoice_id = pi.id), 0
+          ) as saldo_pendiente
+        FROM pago_invoice_applications pia
+        JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+        WHERE pia.pago_id = ${pagoId}
+      `)
+      const linkedInvoices = (invResult as any).rows || []
+
+      // 4. Generate HTML
+      const html = this.generatePaymentHtml({ pago, retenciones, linkedInvoices })
+
+      // 5. Render PDF with Puppeteer
+      if (!this.browser) {
+        throw new Error('Browser not initialized')
+      }
+
+      const page = await this.browser.newPage()
+      await page.setContent(html, { waitUntil: 'networkidle0' })
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+      })
+
+      await page.close()
+
+      return pdf
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(500, 'Payment PDF generation failed')
+    }
+  }
+
+  private generatePaymentHtml(data: {
+    pago: any
+    retenciones: any[]
+    linkedInvoices: any[]
+  }): string {
+    const { pago, retenciones, linkedInvoices } = data
+    const esc = this.escapeHtml.bind(this)
+
+    const paymentNumber = String(pago.id?.slice(-8) || '0').padStart(8, '0')
+    const paymentDate = new Date(pago.payment_date || pago.created_at).toLocaleDateString('es-AR')
+
+    const companyCuit = this.formatCuit(pago.company_cuit || '')
+    const enterpriseCuit = this.formatCuit(pago.enterprise_cuit || '')
+
+    const totalRetenciones = retenciones.reduce(
+      (sum: number, r: any) => sum + parseFloat(r.amount || '0'), 0
+    )
+    const totalPago = parseFloat(pago.total_amount || pago.amount || '0')
+
+    const methodLabels: Record<string, string> = {
+      'efectivo': 'Efectivo',
+      'transferencia': 'Transferencia',
+      'cheque': 'Cheque',
+      'mercado_pago': 'Mercado Pago',
+      'tarjeta': 'Tarjeta',
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Orden de Pago ${paymentNumber}</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #222; font-size: 11px; line-height: 1.4; }
+
+    .header {
+      background: #1a1a2e; color: #fff; padding: 16px 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0;
+    }
+    .header-title { font-size: 22px; font-weight: bold; letter-spacing: 3px; }
+    .header-right { text-align: right; }
+    .header-letter {
+      display: inline-block; background: #fff; color: #1a1a2e;
+      font-size: 28px; font-weight: bold; width: 40px; height: 40px;
+      line-height: 40px; text-align: center; border-radius: 4px; margin-bottom: 4px;
+    }
+    .header-number {
+      font-size: 16px; font-family: 'Courier New', monospace; font-weight: bold;
+    }
+    .header-date { font-size: 12px; margin-top: 4px; }
+
+    .section { border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px; }
+    .section-title {
+      font-size: 10px; font-weight: bold; color: #1a1a2e;
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;
+      border-bottom: 1px solid #eee; padding-bottom: 4px;
+    }
+    .data-grid { display: flex; gap: 30px; }
+    .data-col { flex: 1; }
+    .data-row { display: flex; margin-bottom: 2px; }
+    .data-label { font-size: 10px; color: #666; min-width: 110px; }
+    .data-value { font-size: 11px; font-weight: 600; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead th {
+      background: #f0f0f0; border: 1px solid #ccc; padding: 6px 8px;
+      font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;
+    }
+    thead th.left { text-align: left; }
+    thead th.right { text-align: right; }
+    tbody td { border: 1px solid #ddd; padding: 5px 8px; font-size: 11px; }
+    tbody td.center { text-align: center; }
+    tbody td.right { text-align: right; font-family: 'Courier New', monospace; }
+
+    .totals-box {
+      border: 2px solid #1a1a2e; margin-top: 12px; margin-bottom: 12px;
+    }
+    .totals-row {
+      display: flex; justify-content: flex-end; padding: 5px 16px;
+      border-bottom: 1px solid #eee;
+    }
+    .totals-row:last-child { border-bottom: none; }
+    .totals-label { font-size: 11px; min-width: 200px; text-align: right; padding-right: 20px; }
+    .totals-amount {
+      font-size: 11px; font-family: 'Courier New', monospace;
+      font-weight: bold; min-width: 120px; text-align: right;
+    }
+    .totals-row.grand {
+      background: #1a1a2e; color: #fff; padding: 10px 16px;
+    }
+    .totals-row.grand .totals-label,
+    .totals-row.grand .totals-amount { font-size: 14px; font-weight: bold; }
+
+    .observations {
+      border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px;
+      min-height: 40px;
+    }
+    .obs-title { font-size: 10px; font-weight: bold; color: #666; margin-bottom: 4px; }
+
+    .footer {
+      text-align: center; font-size: 9px; color: #999; padding-top: 8px;
+      border-top: 1px solid #ddd; margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <div>
+      <div class="header-title">ORDEN DE PAGO</div>
+    </div>
+    <div class="header-right">
+      <div class="header-letter">X</div>
+      <div class="header-number">N° ${paymentNumber}</div>
+      <div class="header-date">Fecha: ${paymentDate}</div>
+    </div>
+  </div>
+
+  <!-- EMISOR -->
+  <div class="section">
+    <div class="section-title">Datos del Emisor</div>
+    <div class="data-grid">
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(pago.company_name)}</span></div>
+        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(companyCuit)}</span></div>
+      </div>
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(pago.company_address || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(pago.company_tax_condition || '-')}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROVEEDOR -->
+  <div class="section">
+    <div class="section-title">Datos del Proveedor</div>
+    <div class="data-grid">
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(pago.enterprise_name || '-')}</span></div>
+        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(enterpriseCuit || '-')}</span></div>
+      </div>
+      <div class="data-col">
+        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(pago.enterprise_address || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(pago.enterprise_tax_condition || '-')}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FORMA DE PAGO -->
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Forma de Pago</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 25%;">Metodo</th>
+          <th class="left" style="width: 25%;">Banco</th>
+          <th class="left" style="width: 30%;">Referencia</th>
+          <th class="right" style="width: 20%;">Monto</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${esc(methodLabels[pago.payment_method] || pago.payment_method || '-')}</td>
+          <td>${esc(pago.bank_name || '-')}</td>
+          <td>${esc(pago.reference || '-')}</td>
+          <td class="right">$ ${parseFloat(pago.amount || '0').toFixed(2)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- RETENCIONES PRACTICADAS -->
+  ${retenciones.length > 0 ? `
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Retenciones Practicadas</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 15%;">Tipo</th>
+          <th class="left" style="width: 15%;">Regimen</th>
+          <th class="left" style="width: 15%;">Jurisdiccion</th>
+          <th class="left" style="width: 15%;">N° Cert.</th>
+          <th style="width: 10%;">Tasa</th>
+          <th class="right" style="width: 15%;">Importe</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${retenciones.map((r: any) => `
+        <tr>
+          <td>${esc((r.type || '').toUpperCase())}</td>
+          <td>${esc(r.regime || '-')}</td>
+          <td>${esc(r.jurisdiction || '-')}</td>
+          <td>${esc(r.certificate_number || '-')}</td>
+          <td class="center">${r.rate ? parseFloat(r.rate).toFixed(1) + '%' : '-'}</td>
+          <td class="right">$ ${parseFloat(r.amount || '0').toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- FACTURAS DE COMPRA CANCELADAS -->
+  ${linkedInvoices.length > 0 ? `
+  <div class="section" style="padding: 0;">
+    <div class="section-title" style="padding: 10px 16px 4px;">Facturas de Compra Canceladas</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width: 30%;">Factura</th>
+          <th class="right" style="width: 23%;">Total</th>
+          <th class="right" style="width: 23%;">Aplicado</th>
+          <th class="right" style="width: 24%;">Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${linkedInvoices.map((inv: any) => `
+        <tr>
+          <td>${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
+          <td class="right">$ ${parseFloat(inv.total_amount || '0').toFixed(2)}</td>
+          <td class="right">$ ${parseFloat(inv.amount_applied || '0').toFixed(2)}</td>
+          <td class="right">$ ${parseFloat(inv.saldo_pendiente || '0').toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- TOTALES -->
+  <div class="totals-box">
+    <div class="totals-row">
+      <span class="totals-label">Importe Neto:</span>
+      <span class="totals-amount">$ ${parseFloat(pago.amount || '0').toFixed(2)}</span>
+    </div>
+    ${retenciones.length > 0 ? `
+    <div class="totals-row">
+      <span class="totals-label">Total Retenciones:</span>
+      <span class="totals-amount">$ ${totalRetenciones.toFixed(2)}</span>
+    </div>
+    ` : ''}
+    <div class="totals-row grand">
+      <span class="totals-label">TOTAL ORDEN DE PAGO:</span>
+      <span class="totals-amount">$ ${totalPago.toFixed(2)}</span>
+    </div>
+  </div>
+
+  <!-- OBSERVACIONES -->
+  <div class="observations">
+    <div class="obs-title">Observaciones</div>
+    ${esc(pago.notes || '')}
+  </div>
+
+  <div class="footer">
+    Orden de pago generada el ${new Date().toLocaleDateString('es-AR')} - Documento no fiscal
+  </div>
+
+</body>
+</html>`
+  }
+
   async close() {
     if (this.browser) {
       await this.browser.close()

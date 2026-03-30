@@ -7,4 +7,5 @@ export const pagosRouter = Router();
 pagosRouter.get('/', authorize('pagos', 'view'), (req, res) => pagosController.getPagos(req as any, res));
 pagosRouter.get('/summary', authorize('pagos', 'view'), (req, res) => pagosController.getSummary(req as any, res));
 pagosRouter.post('/', authorize('pagos', 'create'), (req, res) => pagosController.createPago(req as any, res));
+pagosRouter.get('/:id/pdf', authorize('pagos', 'view'), (req, res) => pagosController.getPagoPdf(req as any, res));
 pagosRouter.delete('/:id', authorize('pagos', 'delete'), (req, res) => pagosController.deletePago(req as any, res));

@@ -22,6 +22,7 @@ import { CurrencySelector } from '@/components/shared/CurrencySelector'
 interface Pago {
   id: string
   enterprise_name: string | null
+  enterprise_cuit?: string
   enterprise_id: string | null
   purchase_id: string | null
   purchase_number: number | null
@@ -32,7 +33,7 @@ interface Pago {
   reference: string | null
   payment_date: string
   enterprise_tags?: { id: string; name: string; color: string }[]
-  retenciones?: Array<{ id: string; type: string; rate: string; amount: string; regime: string | null }>
+  retenciones?: Array<{ id: string; type: string; rate: string; amount: string; regime: string | null; jurisdiction?: string | null; certificate_number?: string | null }>
   notes: string | null
 }
 
@@ -1062,14 +1063,16 @@ export const Pagos: React.FC = () => {
                               <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Retenciones Practicadas</h4>
                               <table className="w-full text-sm">
                                 <thead><tr className="text-left text-xs text-gray-500">
-                                  <th className="pb-1">Tipo</th><th className="pb-1">Regimen</th><th className="pb-1 text-right">Tasa</th><th className="pb-1 text-right">Importe</th>
+                                  <th className="pb-1">Tipo</th><th className="pb-1">Regimen</th><th className="pb-1">Tasa</th><th className="pb-1">Jurisdiccion</th><th className="pb-1">N° Certificado</th><th className="pb-1 text-right">Importe</th>
                                 </tr></thead>
                                 <tbody>
                                   {pago.retenciones.map((ret) => (
                                     <tr key={ret.id} className="border-t border-gray-100 dark:border-gray-700">
-                                      <td className="py-1 uppercase">{ret.type}</td>
+                                      <td className="py-1 uppercase">{RETENCION_LABELS[ret.type] || ret.type}</td>
                                       <td className="py-1">{ret.regime || '-'}</td>
-                                      <td className="py-1 text-right">{parseFloat(ret.rate).toFixed(1)}%</td>
+                                      <td className="py-1">{parseFloat(ret.rate).toFixed(1)}%</td>
+                                      <td className="py-1">{ret.jurisdiction || '-'}</td>
+                                      <td className="py-1">{ret.certificate_number || '-'}</td>
                                       <td className="py-1 text-right font-medium">${parseFloat(ret.amount).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                                     </tr>
                                   ))}
@@ -1078,10 +1081,22 @@ export const Pagos: React.FC = () => {
                             </div>
                           )}
 
+                          {/* Cheques */}
+                          {pago.payment_method === 'cheque' && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Cheque</h4>
+                              <div className="grid grid-cols-4 gap-2 text-sm border-l-2 border-amber-300 pl-3">
+                                <div><span className="text-xs text-gray-500">Referencia</span><br/>{pago.reference || '-'}</div>
+                                <div><span className="text-xs text-gray-500">Banco</span><br/>{pago.bank_name || '-'}</div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Empresa + Saldos */}
                           <div className="flex items-center justify-between">
                             <div className="text-sm text-gray-500">
                               <span className="font-medium text-gray-700 dark:text-gray-300">{pago.enterprise_name || '-'}</span>
+                              {pago.enterprise_cuit && <span className="ml-2 text-gray-500">CUIT: {pago.enterprise_cuit}</span>}
                             </div>
                             <div className="text-sm text-right">
                               <span className="text-gray-500">Total: </span><span className="font-medium">${parseFloat(pago.total_amount || pago.amount || '0').toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
@@ -1092,6 +1107,23 @@ export const Pagos: React.FC = () => {
                                 </>
                               )}
                             </div>
+                          </div>
+
+                          {/* Boton PDF */}
+                          <div className="flex gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                try {
+                                  const blob = await api.getPagoPdf(pago.id)
+                                  const url = URL.createObjectURL(blob)
+                                  window.open(url)
+                                } catch {
+                                  alert('Error al generar PDF')
+                                }
+                              }}
+                              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                            >Descargar PDF</button>
                           </div>
 
                         </div>

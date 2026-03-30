@@ -1048,6 +1048,10 @@ export const api = {
     const { data } = await client.delete(`/pagos/${id}`)
     return data
   },
+  getPagoPdf: async (pagoId: string): Promise<Blob> => {
+    const response = await client.get(`/pagos/${pagoId}/pdf`, { responseType: 'blob' })
+    return response.data
+  },
   getPagosSummary: async () => {
     const { data } = await client.get('/pagos/summary')
     return data
