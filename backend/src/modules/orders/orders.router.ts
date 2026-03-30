@@ -8,6 +8,7 @@ ordersRouter.get('/', authorize('orders', 'view'), (req, res) => ordersControlle
 ordersRouter.post('/', authorize('orders', 'create'), (req, res) => ordersController.createOrder(req as any, res));
 ordersRouter.get('/without-invoice', authorize('orders', 'view'), (req, res) => ordersController.getOrdersWithoutInvoice(req as any, res));
 ordersRouter.get('/:id/invoicing-status', authorize('orders', 'view'), (req, res) => ordersController.getInvoicingStatus(req as any, res));
+ordersRouter.get('/:id/invoicing-detail', authorize('orders', 'view'), (req, res) => ordersController.getOrderInvoicingDetail(req as any, res));
 ordersRouter.get('/:id/uninvoiced-items', authorize('orders', 'view'), (req, res) => ordersController.getUninvoicedItems(req as any, res));
 ordersRouter.get('/:id/bom-check', authorize('orders', 'view'), (req, res) => ordersController.checkBOMAvailability(req as any, res));
 ordersRouter.get('/:id', authorize('orders', 'view'), (req, res) => ordersController.getOrder(req as any, res));

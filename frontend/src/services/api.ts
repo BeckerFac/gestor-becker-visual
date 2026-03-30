@@ -1175,6 +1175,10 @@ export const api = {
     const { data } = await client.get(`/orders/${orderId}/uninvoiced-items`)
     return data
   },
+  getOrderInvoicingDetail: async (orderId: string) => {
+    const { data } = await client.get(`/orders/${orderId}/invoicing-detail`)
+    return data
+  },
   checkOrderBOM: async (orderId: string) => {
     const { data } = await client.get(`/orders/${orderId}/bom-check`)
     return data

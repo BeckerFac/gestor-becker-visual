@@ -171,6 +171,7 @@ export const Orders: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [summary, setSummary] = useState<any>({})
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
+  const [orderDetails, setOrderDetails] = useState<Record<string, any>>({})
 
   // Invoicing state per order
   const [invoicingStatus, setInvoicingStatus] = useState<Record<string, InvoicingStatusData>>({})
@@ -701,11 +702,17 @@ export const Orders: React.FC = () => {
     }
   }
 
-  const toggleExpand = (orderId: string) => {
+  const toggleExpand = async (orderId: string) => {
     const willExpand = expandedOrder !== orderId
     setExpandedOrder(prev => prev === orderId ? null : orderId)
     if (willExpand) {
       loadInvoicingStatus(orderId)
+      if (!orderDetails[orderId]) {
+        try {
+          const detail = await api.getOrderInvoicingDetail(orderId)
+          setOrderDetails(prev => ({ ...prev, [orderId]: detail }))
+        } catch { /* ignore */ }
+      }
     }
   }
 
@@ -1671,7 +1678,7 @@ export const Orders: React.FC = () => {
                     {/* Expanded detail row */}
                     {expandedOrder === order.id && (
                       <tr>
-                        <td colSpan={7} className="px-0 py-0 border-b-2 border-blue-300">
+                        <td colSpan={8} className="px-0 py-0 border-b-2 border-blue-300">
                           <div className="mx-3 my-3 bg-blue-50 dark:bg-gray-800 border border-blue-200 dark:border-gray-600 rounded-lg shadow-sm overflow-hidden animate-slideDown">
                             <div className="border-l-4 border-blue-500 px-4 py-4">
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1685,40 +1692,91 @@ export const Orders: React.FC = () => {
                                       <p className="text-sm text-gray-800 dark:text-gray-200 break-words whitespace-pre-wrap">{order.description}</p>
                                     </div>
                                   )}
-                                  {/* Items list from invoicing status */}
+                                  {/* Invoicing detail: Facturado / Sin facturar */}
                                   {(() => {
-                                    const status = invoicingStatus[order.id]
-                                    const items = status?.items || []
-                                    if (items.length > 0) {
-                                      return (
-                                        <div className="space-y-1.5">
-                                          <p className="text-xs text-gray-500 font-medium">Items ({items.length})</p>
-                                          {items.map((item: any, i: number) => (
-                                            <div key={item.id || i} className="bg-white border border-gray-200 rounded px-2 py-1.5 text-xs">
-                                              <div className="flex justify-between items-start">
-                                                <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
-                                                <span className="text-gray-600 dark:text-gray-400 whitespace-nowrap ml-2">
-                                                  {item.quantity} x {formatCurrency(parseFloat(item.unit_price || '0'))}
-                                                </span>
-                                              </div>
-                                              {item.description && (
-                                                <p className="text-gray-500 mt-0.5 break-words">{item.description}</p>
-                                              )}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )
+                                    const detail = orderDetails[order.id]
+                                    if (!detail) {
+                                      return <p className="text-xs text-gray-400 italic">Cargando detalle...</p>
                                     }
+                                    const items = detail.items || []
+                                    const invoiced = items.filter((it: any) => parseFloat(it.qty_invoiced) > 0)
+                                    const uninvoiced = items.filter((it: any) => parseFloat(it.qty_remaining) > 0)
+
                                     return (
-                                      <div className="grid grid-cols-2 gap-2">
-                                        <div>
-                                          <p className="text-xs text-gray-500">Precio Unitario</p>
-                                          <p className="text-sm font-medium">{formatCurrency(parseFloat(order.unit_price || '0'))}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-gray-500">Cantidad</p>
-                                          <p className="text-sm font-medium">{order.quantity}</p>
-                                        </div>
+                                      <div className="space-y-3">
+                                        {/* Seccion FACTURADO */}
+                                        {invoiced.length > 0 && (
+                                          <div>
+                                            <h5 className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Facturado</h5>
+                                            <table className="w-full text-xs">
+                                              <thead>
+                                                <tr className="text-[10px] text-gray-500">
+                                                  <th className="text-left pb-0.5">Producto</th>
+                                                  <th className="text-right pb-0.5">Cant. Facturada</th>
+                                                  <th className="text-left pb-0.5 pl-2">En Factura(s)</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {invoiced.map((it: any) => (
+                                                  <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
+                                                    <td className="py-1">{it.product_name}</td>
+                                                    <td className="py-1 text-right font-medium text-green-600">{parseFloat(it.qty_invoiced)}</td>
+                                                    <td className="py-1 pl-2">
+                                                      <div className="flex flex-wrap gap-0.5">
+                                                        {(it.invoices || []).map((inv: any, idx: number) => (
+                                                          <span key={idx} className="inline-block px-1 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono dark:bg-blue-900/40 dark:text-blue-300">
+                                                            {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud)
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        )}
+
+                                        {/* Seccion SIN FACTURAR */}
+                                        {uninvoiced.length > 0 && (
+                                          <div>
+                                            <h5 className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1">Sin Facturar</h5>
+                                            <table className="w-full text-xs">
+                                              <thead>
+                                                <tr className="text-[10px] text-gray-500">
+                                                  <th className="text-left pb-0.5">Producto</th>
+                                                  <th className="text-right pb-0.5">Cant. Pendiente</th>
+                                                  <th className="text-right pb-0.5">P. Unitario</th>
+                                                  <th className="text-right pb-0.5">Subtotal Pend.</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {uninvoiced.map((it: any) => {
+                                                  const remaining = parseFloat(it.qty_remaining)
+                                                  const price = parseFloat(it.unit_price)
+                                                  return (
+                                                    <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
+                                                      <td className="py-1">{it.product_name}</td>
+                                                      <td className="py-1 text-right font-medium text-amber-600">{remaining}</td>
+                                                      <td className="py-1 text-right">${price.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                      <td className="py-1 text-right font-medium">${(remaining * price).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                    </tr>
+                                                  )
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        )}
+
+                                        {/* Todo facturado */}
+                                        {invoiced.length > 0 && uninvoiced.length === 0 && (
+                                          <p className="text-xs text-green-600 font-medium">Pedido completamente facturado</p>
+                                        )}
+
+                                        {/* Sin items */}
+                                        {items.length === 0 && (
+                                          <p className="text-xs text-gray-400 italic">Sin items registrados</p>
+                                        )}
                                       </div>
                                     )
                                   })()}

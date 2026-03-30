@@ -788,6 +788,81 @@ export class OrdersService {
     }
   }
 
+  async getOrderInvoicingDetail(companyId: string, orderId: string) {
+    await this.ensureMigrations();
+    try {
+      await db.execute(sql`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS order_item_id UUID REFERENCES order_items(id)`).catch(() => {});
+
+      // Get order basic info
+      const orderResult = await db.execute(sql`
+        SELECT o.id, o.order_number, o.title,
+          COALESCE(e.name, (SELECT e2.name FROM enterprises e2 WHERE e2.id = c.enterprise_id)) as enterprise_name,
+          CAST(o.total_amount AS decimal) as total_amount, o.status
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN enterprises e ON o.enterprise_id = e.id
+        WHERE o.id = ${orderId} AND o.company_id = ${companyId}
+      `);
+      const orderRows = (orderResult as any).rows || [];
+      if (orderRows.length === 0) return null;
+
+      // Get items with invoicing detail
+      const itemsResult = await db.execute(sql`
+        SELECT
+          oi.id as order_item_id, oi.product_name, oi.description,
+          CAST(oi.quantity AS decimal) as quantity,
+          CAST(oi.unit_price AS decimal) as unit_price,
+          COALESCE(CAST(oi.vat_rate AS decimal), 21) as vat_rate,
+          CAST(oi.subtotal AS decimal) as subtotal,
+          COALESCE((
+            SELECT SUM(CAST(ii.quantity AS decimal))
+            FROM invoice_items ii
+            JOIN invoices i ON ii.invoice_id = i.id
+            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+          ), 0) as qty_invoiced,
+          CAST(oi.quantity AS decimal) - COALESCE((
+            SELECT SUM(CAST(ii.quantity AS decimal))
+            FROM invoice_items ii
+            JOIN invoices i ON ii.invoice_id = i.id
+            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+          ), 0) as qty_remaining,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'invoice_id', i.id,
+              'invoice_number', i.invoice_number,
+              'invoice_type', i.invoice_type,
+              'qty', CAST(ii.quantity AS decimal),
+              'invoice_date', i.invoice_date
+            ))
+            FROM invoice_items ii
+            JOIN invoices i ON ii.invoice_id = i.id
+            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+          ), '[]'::json) as invoices
+        FROM order_items oi
+        WHERE oi.order_id = ${orderId}
+        ORDER BY oi.created_at ASC
+      `);
+      const items = (itemsResult as any).rows || [];
+
+      return {
+        order: orderRows[0],
+        items: items.map((i: any) => ({
+          ...i,
+          quantity: parseFloat(i.quantity || '0'),
+          unit_price: parseFloat(i.unit_price || '0'),
+          vat_rate: parseFloat(i.vat_rate || '21'),
+          subtotal: parseFloat(i.subtotal || '0'),
+          qty_invoiced: parseFloat(i.qty_invoiced || '0'),
+          qty_remaining: Math.max(0, parseFloat(i.qty_remaining || '0')),
+        })),
+      };
+    } catch (error) {
+      console.error('Get order invoicing detail error:', error);
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to get order invoicing detail');
+    }
+  }
+
   async getUninvoicedItems(companyId: string, orderId: string) {
     await this.ensureMigrations();
     try {

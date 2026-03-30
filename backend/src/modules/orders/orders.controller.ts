@@ -67,6 +67,12 @@ export class OrdersController {
     res.json(data);
   }
 
+  async getOrderInvoicingDetail(req: AuthRequest, res: Response) {
+    const data = await ordersService.getOrderInvoicingDetail(req.user!.company_id, req.params.id);
+    if (!data) return res.status(404).json({ error: 'Pedido no encontrado' });
+    res.json(data);
+  }
+
   async checkBOMAvailability(req: AuthRequest, res: Response) {
     const data = await ordersService.checkBOMAvailability(req.user!.company_id, req.params.id);
     res.json(data);
