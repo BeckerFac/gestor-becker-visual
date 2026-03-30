@@ -350,6 +350,11 @@ export class InvoicesService {
       } else if (data.order_id) {
         // Legacy: single order_id provided directly
         await db.execute(sql`
+          INSERT INTO invoice_orders (id, invoice_id, order_id)
+          VALUES (gen_random_uuid(), ${invoiceId}, ${data.order_id})
+          ON CONFLICT (invoice_id, order_id) DO NOTHING
+        `);
+        await db.execute(sql`
           UPDATE orders SET has_invoice = true, updated_at = NOW()
           WHERE id = ${data.order_id} AND company_id = ${companyId}
         `);
@@ -568,6 +573,13 @@ export class InvoicesService {
         WHERE id = ${orderId} AND company_id = ${companyId}
       `);
 
+      // Sync invoice_orders N:N table
+      await db.execute(sql`
+        INSERT INTO invoice_orders (id, invoice_id, order_id)
+        VALUES (gen_random_uuid(), ${invoiceId}, ${orderId})
+        ON CONFLICT (invoice_id, order_id) DO NOTHING
+      `);
+
       return { invoice_id: invoiceId, order_id: orderId };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -585,6 +597,13 @@ export class InvoicesService {
       const rows = (invResult as any).rows || [];
       if (rows.length === 0) throw new ApiError(404, 'Factura no encontrada');
       const orderId = rows[0]?.order_id;
+
+      // Remove from invoice_orders N:N table
+      if (orderId) {
+        await db.execute(sql`
+          DELETE FROM invoice_orders WHERE invoice_id = ${invoiceId} AND order_id = ${orderId}
+        `);
+      }
 
       await db.execute(sql`
         UPDATE invoices SET order_id = NULL, updated_at = NOW()
@@ -718,6 +737,8 @@ export class InvoicesService {
 
       // Delete items first
       await db.delete(invoice_items).where(eq(invoice_items.invoice_id, invoiceId));
+      // Remove from invoice_orders N:N table
+      await db.execute(sql`DELETE FROM invoice_orders WHERE invoice_id = ${invoiceId}`);
       // Delete invoice
       await db.delete(invoices).where(eq(invoices.id, invoiceId));
 
