@@ -399,6 +399,9 @@ export const Invoices: React.FC = () => {
   const [linkDropdownInvoiceId, setLinkDropdownInvoiceId] = useState<string | null>(null)
   const [linkSelectedOrderId, setLinkSelectedOrderId] = useState('')
 
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; invoice: Invoice } | null>(null)
+
   // Invoice preview modal (PDF + authorize)
   const loadInvoicesRef = React.useRef<() => Promise<void>>(() => Promise.resolve())
   const invoicePreview = useInvoicePreview({
@@ -406,6 +409,26 @@ export const Invoices: React.FC = () => {
     onDataRefresh: async () => { await loadInvoicesRef.current() },
     loadInvoicingStatus: async () => {},
   })
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    document.addEventListener('click', close)
+    document.addEventListener('contextmenu', close)
+    return () => {
+      document.removeEventListener('click', close)
+      document.removeEventListener('contextmenu', close)
+    }
+  }, [contextMenu])
+
+  const handleContextMenu = (e: React.MouseEvent, invoice: Invoice) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const x = Math.min(e.clientX, window.innerWidth - 200)
+    const y = Math.min(e.clientY, window.innerHeight - 120)
+    setContextMenu({ x, y, invoice })
+  }
 
   // ---- Data Loading ----
 
@@ -1880,6 +1903,7 @@ export const Invoices: React.FC = () => {
                     <React.Fragment key={invoice.id}>
                     <tr
                       className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
+                      onContextMenu={(e) => handleContextMenu(e, invoice)}
                       onClick={async () => {
                         if (expandedInvoiceId === invoice.id) { setExpandedInvoiceId(null); return; }
                         setExpandedInvoiceId(invoice.id);
@@ -2254,6 +2278,55 @@ export const Invoices: React.FC = () => {
         />
       )}
       </>}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px]"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            onClick={() => {
+              const inv = contextMenu.invoice
+              const totalAmount = parseFloat(inv.total_amount || '0')
+              const totalCobrado = parseFloat(inv.total_cobrado || '0')
+              const remaining = Math.max(0, totalAmount - totalCobrado)
+              setContextMenu(null)
+              navigate(`/cobros?invoice_id=${inv.id}&amount=${remaining.toFixed(2)}`)
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+          >
+            <span className="text-green-600">$</span> Registrar Recibo
+          </button>
+          <button
+            onClick={() => {
+              const inv = contextMenu.invoice
+              setContextMenu(null)
+              setExpandedInvoiceId(prev => prev === inv.id ? null : inv.id)
+              if (!invoiceDetails[inv.id]) {
+                api.getInvoiceDetail(inv.id).then(detail => {
+                  setInvoiceDetails(prev => ({ ...prev, [inv.id]: detail }))
+                }).catch(() => {})
+              }
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+          >
+            <span className="text-blue-600">&#9660;</span> Ver Detalle
+          </button>
+          {(contextMenu.invoice.status === 'authorized' || contextMenu.invoice.status === 'emitido') && (
+            <button
+              onClick={() => {
+                const inv = contextMenu.invoice
+                setContextMenu(null)
+                handleDownloadPdf(inv)
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+            >
+              <span className="text-blue-600">&#8595;</span> Descargar PDF
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
