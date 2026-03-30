@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -154,6 +155,7 @@ const emptyFormItem = (): FormItem => ({
 const ORDER_DRAFT_KEY = 'bv_order_draft'
 
 export const Orders: React.FC = () => {
+  const navigate = useNavigate()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -810,6 +812,42 @@ export const Orders: React.FC = () => {
       setCreatingInvoice(prev => ({ ...prev, [orderId]: false }))
       setInvoiceProgress(prev => ({ ...prev, [orderId]: '' }))
     }
+  }
+
+  const handleGoToInvoice = (orderId: string) => {
+    const order = orders.find(o => o.id === orderId)
+    if (!order) return
+
+    const type = invoiceType[orderId] || 'B'
+    const status = invoicingStatus[orderId]
+    const items = status?.items || []
+    const qtys = invoiceQtys[orderId] || {}
+    const selectedItems = items
+      .filter((item: any) => {
+        const qty = qtys[item.id] ?? item.pending_qty
+        return qty > 0
+      })
+      .map((item: any) => ({
+        order_item_id: item.id,
+        product_name: item.product_name,
+        quantity: qtys[item.id] ?? item.pending_qty,
+        unit_price: parseFloat(item.unit_price || '0'),
+        vat_rate: parseFloat(item.vat_rate || '21'),
+      }))
+
+    if (selectedItems.length === 0) {
+      setError('Selecciona al menos un item para facturar')
+      return
+    }
+
+    sessionStorage.setItem('invoice_preload', JSON.stringify({
+      enterprise_id: order.enterprise?.id || null,
+      customer_id: order.customer?.id || null,
+      invoice_type: type,
+      items: selectedItems,
+    }))
+
+    navigate('/invoices?preload=1')
   }
 
   const getStatusBadge = (status: string) => {
@@ -2136,39 +2174,32 @@ export const Orders: React.FC = () => {
                                                 <p className="text-xs text-gray-400 italic">No hay items pendientes</p>
                                               )}
 
-                                              {/* Create invoice button */}
-                                              {creatingInvoice[order.id] ? (
-                                                <div className="w-full px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-center">
-                                                  <div className="flex items-center justify-center gap-2">
-                                                    <svg className="animate-spin h-4 w-4 text-indigo-600" viewBox="0 0 24 24">
-                                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-                                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-                                                    </svg>
-                                                    <span className="text-xs font-medium text-indigo-700">
+                                              {/* Navigate to invoices or create no fiscal */}
+                                              <div className="space-y-2">
+                                                <button
+                                                  onClick={() => handleGoToInvoice(order.id)}
+                                                  className="w-full px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
+                                                >
+                                                  Continuar en Facturas →
+                                                </button>
+                                                <p className="text-[10px] text-gray-400 text-center">Podras agregar mas items de otros pedidos</p>
+                                                {creatingInvoice[order.id] ? (
+                                                  <div className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-center">
+                                                    <span className="text-xs font-medium text-gray-600">
                                                       {invoiceProgress[order.id] || 'Procesando...'}
                                                     </span>
                                                   </div>
-                                                  <p className="text-[10px] text-indigo-500 mt-1">No cierres esta ventana</p>
-                                                </div>
-                                              ) : (
-                                                <div className="flex gap-2">
-                                                  <button
-                                                    onClick={() => handleCreateInvoice(order.id)}
-                                                    disabled={creatingInvoice[order.id]}
-                                                    className="flex-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                  >
-                                                    Crear Borrador de Factura
-                                                  </button>
+                                                ) : (
                                                   <button
                                                     onClick={() => handleCreateNoFiscalInvoice(order.id)}
                                                     disabled={creatingInvoice[order.id]}
-                                                    className="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-xs font-medium hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    className="w-full px-3 py-1.5 bg-gray-500 text-white rounded-lg text-xs font-medium hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                     title="Crear comprobante sin autorizacion AFIP"
                                                   >
                                                     No Fiscal
                                                   </button>
-                                                </div>
-                                              )}
+                                                )}
+                                              </div>
                                             </div>
                                           )}
                                         </div>

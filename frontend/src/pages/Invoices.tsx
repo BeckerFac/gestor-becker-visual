@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
@@ -309,6 +309,7 @@ const OrderItemsImporter: React.FC<{
 
 export const Invoices: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Data
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -484,6 +485,53 @@ export const Invoices: React.FC = () => {
   useEffect(() => {
     setCurrentPage(1)
   }, [filterEnterprise, filterType, filterStatus, search, dateFrom, dateTo, pageSize, vistaMode])
+
+  // ---- Preload from Orders ----
+  useEffect(() => {
+    if (searchParams.get('preload') !== '1') return
+    const raw = sessionStorage.getItem('invoice_preload')
+    if (!raw) return
+
+    const handlePreload = async () => {
+      try {
+        const data = JSON.parse(raw)
+        sessionStorage.removeItem('invoice_preload')
+
+        // Load form data (enterprises, customers, products) first
+        await loadFormData()
+
+        // Pre-fill Step 1
+        if (data.enterprise_id) setFormEnterpriseId(data.enterprise_id)
+        if (data.customer_id) setFormCustomerId(data.customer_id)
+        if (data.invoice_type) setFormInvoiceType(data.invoice_type as InvoiceType)
+
+        // Pre-fill Step 2 with items
+        if (data.items && data.items.length > 0) {
+          const preloadedItems: InvoiceItem[] = data.items.map((item: any) => ({
+            product_id: '',
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            vat_rate: item.vat_rate || 21,
+            subtotal: item.quantity * item.unit_price,
+            order_item_id: item.order_item_id,
+          }))
+          setFormItems(preloadedItems)
+        }
+
+        // Open form directly at Step 2
+        setShowForm(true)
+        setFormStep(2)
+
+        // Clean query param
+        setSearchParams({}, { replace: true })
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    handlePreload()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Form Handlers ----
 
