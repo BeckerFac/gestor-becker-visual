@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 
@@ -217,23 +217,35 @@ export class CuentaCorrienteService {
 
   async getDetalle(companyId: string, enterpriseId: string, filters?: { dateFrom?: string; dateTo?: string; businessUnitId?: string }) {
     try {
-      const entCheck = await db.execute(sql`
-        SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
-      `);
-      const entRows = (entCheck as any).rows || entCheck || [];
-      if (entRows.length === 0) throw new ApiError(404, 'Enterprise not found');
-      const enterprise = entRows[0];
+      // Validate enterprise exists
+      const entCheck = await pool.query(
+        'SELECT id, name, cuit FROM enterprises WHERE id = $1 AND company_id = $2',
+        [enterpriseId, companyId]
+      );
+      if (entCheck.rows.length === 0) throw new ApiError(404, 'Enterprise not found');
+      const enterprise = entCheck.rows[0];
 
-      const buFilterInvoices = filters?.businessUnitId ? sql` AND i.business_unit_id = ${filters.businessUnitId}` : sql``;
-      const buFilterCobros = filters?.businessUnitId ? sql` AND c.business_unit_id = ${filters.businessUnitId}` : sql``;
-      const buFilterPurchase = filters?.businessUnitId ? sql` AND pi.business_unit_id = ${filters.businessUnitId}` : sql``;
-      const buFilterPagos = filters?.businessUnitId ? sql` AND p.business_unit_id = ${filters.businessUnitId}` : sql``;
+      // Build dynamic filters with numbered params
+      // $1 = enterpriseId, $2 = companyId (used in ALL UNION subqueries)
+      const params: (string | undefined)[] = [enterpriseId, companyId];
+      let buFilter = '';
+      if (filters?.businessUnitId) {
+        params.push(filters.businessUnitId);
+        buFilter = ` AND business_unit_id = $${params.length}`;
+      }
 
-      const dateFromFilter = filters?.dateFrom ? sql` AND fecha >= ${filters.dateFrom}` : sql``;
-      const dateToFilter = filters?.dateTo ? sql` AND fecha <= ${filters.dateTo}` : sql``;
+      let dateFilter = '';
+      if (filters?.dateFrom) {
+        params.push(filters.dateFrom);
+        dateFilter += ` AND fecha >= $${params.length}`;
+      }
+      if (filters?.dateTo) {
+        params.push(filters.dateTo);
+        dateFilter += ` AND fecha <= $${params.length}`;
+      }
 
-      // Single UNION ALL query: 4 concepts + adjustments
-      const result = await db.execute(sql`
+      // Single UNION ALL query using pool.query with numbered params
+      const result = await pool.query(`
         SELECT * FROM (
           SELECT
             i.invoice_date as fecha,
@@ -244,73 +256,71 @@ export class CuentaCorrienteService {
             'Factura ' || COALESCE(i.invoice_type, '') || ' ' || i.invoice_number as descripcion,
             i.id as reference_id
           FROM invoices i
-          WHERE i.enterprise_id = ${enterpriseId} AND i.company_id = ${companyId} AND i.status != 'cancelled'
-            ${buFilterInvoices}
+          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
+            ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
 
           SELECT
-            COALESCE(c.payment_date, c.created_at) as fecha,
-            'recibo' as tipo,
-            CAST(c.receipt_number AS text) as nro_comprobante,
-            0::decimal as debe,
-            CAST(COALESCE(c.total_amount, c.amount) AS decimal) as haber,
-            'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
-            c.id as reference_id
+            COALESCE(c.payment_date, c.created_at),
+            'recibo',
+            CAST(c.receipt_number AS text),
+            0::decimal,
+            CAST(COALESCE(c.total_amount, c.amount) AS decimal),
+            'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text),
+            c.id
           FROM cobros c
-          WHERE c.enterprise_id = ${enterpriseId} AND c.company_id = ${companyId}
-            ${buFilterCobros}
+          WHERE c.enterprise_id = $1 AND c.company_id = $2
+            ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
 
           UNION ALL
 
           SELECT
-            pi.invoice_date as fecha,
-            'fact_compra' as tipo,
-            COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, '') as nro_comprobante,
-            CAST(pi.total_amount AS decimal) as debe,
-            0::decimal as haber,
-            'Fact. Compra ' || COALESCE(pi.invoice_type, '') || ' ' || COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, '') as descripcion,
-            pi.id as reference_id
+            pi.invoice_date,
+            'fact_compra',
+            COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, ''),
+            CAST(pi.total_amount AS decimal),
+            0::decimal,
+            'Fact. Compra ' || COALESCE(pi.invoice_type, '') || ' ' || COALESCE(pi.punto_venta, '') || '-' || COALESCE(pi.invoice_number, ''),
+            pi.id
           FROM purchase_invoices pi
-          WHERE pi.enterprise_id = ${enterpriseId} AND pi.company_id = ${companyId}
-            ${buFilterPurchase}
+          WHERE pi.enterprise_id = $1 AND pi.company_id = $2
+            ${buFilter.replace('business_unit_id', 'pi.business_unit_id')}
 
           UNION ALL
 
           SELECT
-            COALESCE(p.payment_date, p.created_at) as fecha,
-            'orden_pago' as tipo,
-            CAST(p.id AS text) as nro_comprobante,
-            0::decimal as debe,
-            CAST(COALESCE(p.total_amount, p.amount) AS decimal) as haber,
-            'Orden de Pago' as descripcion,
-            p.id as reference_id
+            COALESCE(p.payment_date, p.created_at),
+            'orden_pago',
+            CAST(p.id AS text),
+            0::decimal,
+            CAST(COALESCE(p.total_amount, p.amount) AS decimal),
+            'Orden de Pago',
+            p.id
           FROM pagos p
-          WHERE p.enterprise_id = ${enterpriseId} AND p.company_id = ${companyId}
-            ${buFilterPagos}
+          WHERE p.enterprise_id = $1 AND p.company_id = $2
+            ${buFilter.replace('business_unit_id', 'p.business_unit_id')}
 
           UNION ALL
 
           SELECT
-            aa.created_at as fecha,
-            'ajuste' as tipo,
-            CAST(aa.id AS text) as nro_comprobante,
-            CASE WHEN aa.adjustment_type = 'debit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END as debe,
-            CASE WHEN aa.adjustment_type = 'credit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END as haber,
-            'Ajuste' || COALESCE(' — ' || aa.reason, '') as descripcion,
-            aa.id as reference_id
+            aa.created_at,
+            'ajuste',
+            CAST(aa.id AS text),
+            CASE WHEN aa.adjustment_type = 'debit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END,
+            CASE WHEN aa.adjustment_type = 'credit' THEN CAST(ABS(COALESCE(aa.amount, 0)) AS decimal) ELSE 0::decimal END,
+            'Ajuste' || COALESCE(' — ' || aa.reason, ''),
+            aa.id
           FROM account_adjustments aa
-          WHERE aa.enterprise_id = ${enterpriseId} AND aa.company_id = ${companyId}
+          WHERE aa.enterprise_id = $1 AND aa.company_id = $2
         ) movimientos
-        WHERE true ${dateFromFilter} ${dateToFilter}
+        WHERE true ${dateFilter}
         ORDER BY fecha ASC, tipo ASC
-      `);
-
-      const rows = ((result as any).rows || []) as any[];
+      `, params);
 
       // Running balance (saldo corrido progresivo)
       let saldo = 0;
-      const movimientos = rows.map((r: any) => {
+      const movimientos = result.rows.map((r: any) => {
         const debe = parseFloat(r.debe) || 0;
         const haber = parseFloat(r.haber) || 0;
         saldo += debe - haber;
