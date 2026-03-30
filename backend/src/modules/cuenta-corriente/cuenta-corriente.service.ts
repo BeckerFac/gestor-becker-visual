@@ -336,7 +336,7 @@ export class CuentaCorrienteService {
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      console.error('Get cuenta corriente detalle error:', error);
+      console.error('CC getDetalle ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1]);
       throw new ApiError(500, 'Failed to get cuenta corriente detalle');
     }
   }

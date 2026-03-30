@@ -36,6 +36,7 @@ export class PdfService {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: 'new',
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -886,6 +887,7 @@ export class PdfService {
       return pdf
     } catch (error) {
       if (error instanceof ApiError) throw error
+      console.error('generateReceiptPdf ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1])
       throw new ApiError(500, 'Receipt PDF generation failed')
     }
   }
@@ -1227,6 +1229,7 @@ export class PdfService {
       return pdf
     } catch (error) {
       if (error instanceof ApiError) throw error
+      console.error('generatePaymentPdf ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1])
       throw new ApiError(500, 'Payment PDF generation failed')
     }
   }
