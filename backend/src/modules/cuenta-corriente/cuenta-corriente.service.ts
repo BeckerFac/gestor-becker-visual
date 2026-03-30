@@ -250,10 +250,10 @@ export class CuentaCorrienteService {
           SELECT
             i.invoice_date as fecha,
             'fact_venta' as tipo,
-            COALESCE(i.invoice_type, '') || ' ' || i.invoice_number as nro_comprobante,
+            COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as nro_comprobante,
             CAST(i.total_amount AS decimal) as debe,
             0::decimal as haber,
-            'Factura ' || COALESCE(i.invoice_type, '') || ' ' || i.invoice_number as descripcion,
+            'Factura ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as descripcion,
             i.id as reference_id
           FROM invoices i
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
@@ -371,7 +371,7 @@ export class CuentaCorrienteService {
       try {
         allInvoices = await db.execute(sql`
           SELECT i.id, 'factura' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
-            'Factura ' || COALESCE(i.invoice_type, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
+            'Factura ' || COALESCE(i.invoice_type::text, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0') as descripcion,
             CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
           FROM invoices i
           LEFT JOIN customers c ON i.customer_id = c.id

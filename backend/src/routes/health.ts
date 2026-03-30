@@ -45,7 +45,7 @@ router.get('/health/debug-cc', async (req: Request, res: Response) => {
     // Run the exact CC query
     const result = await pool.query(`
       SELECT * FROM (
-        SELECT i.invoice_date as fecha, 'fact_venta' as tipo, COALESCE(i.invoice_type,'') || ' ' || i.invoice_number as nro_comprobante, CAST(i.total_amount AS decimal) as debe, 0::decimal as haber, 'Factura' as descripcion, i.id as reference_id
+        SELECT i.invoice_date as fecha, 'fact_venta' as tipo, COALESCE(i.invoice_type::text,'') || ' ' || i.invoice_number as nro_comprobante, CAST(i.total_amount AS decimal) as debe, 0::decimal as haber, 'Factura' as descripcion, i.id as reference_id
         FROM invoices i WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
         UNION ALL
         SELECT COALESCE(c.payment_date, c.created_at), 'recibo', CAST(c.receipt_number AS text), 0::decimal, CAST(COALESCE(c.total_amount, c.amount) AS decimal), 'Recibo', c.id

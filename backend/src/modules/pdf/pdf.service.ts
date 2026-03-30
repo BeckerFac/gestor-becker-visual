@@ -854,7 +854,7 @@ export class PdfService {
 
       // 4. Query linked invoices
       const invResult = await db.execute(sql`
-        SELECT cia.amount_applied, i.invoice_number, i.invoice_type, i.total_amount,
+        SELECT cia.amount_applied, i.invoice_number, i.invoice_type::text, i.total_amount,
           CAST(i.total_amount AS decimal) - COALESCE(
             (SELECT SUM(CAST(cia2.amount_applied AS decimal))
              FROM cobro_invoice_applications cia2
@@ -1196,7 +1196,7 @@ export class PdfService {
 
       // 3. Query linked purchase invoices
       const invResult = await db.execute(sql`
-        SELECT pia.amount_applied, pi.invoice_number, pi.invoice_type, pi.total_amount,
+        SELECT pia.amount_applied, pi.invoice_number, pi.invoice_type::text, pi.total_amount,
           CAST(pi.total_amount AS decimal) - COALESCE(
             (SELECT SUM(CAST(pia2.amount_applied AS decimal))
              FROM pago_invoice_applications pia2
