@@ -888,7 +888,7 @@ export class PdfService {
     } catch (error) {
       if (error instanceof ApiError) throw error
       console.error('generateReceiptPdf ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1])
-      throw new ApiError(500, 'Receipt PDF generation failed')
+      throw new ApiError(500, `Receipt PDF generation failed: ${(error as Error).message}`)
     }
   }
 
@@ -1230,7 +1230,7 @@ export class PdfService {
     } catch (error) {
       if (error instanceof ApiError) throw error
       console.error('generatePaymentPdf ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1])
-      throw new ApiError(500, 'Payment PDF generation failed')
+      throw new ApiError(500, `Payment PDF generation failed: ${(error as Error).message}`)
     }
   }
 
