@@ -87,11 +87,12 @@ export class PdfService {
       }
 
       const page = await this.browser.newPage()
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
       })
 
       await page.close()
@@ -558,11 +559,12 @@ export class PdfService {
       }
 
       const page = await this.browser.newPage()
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
       })
 
       await page.close()
@@ -875,11 +877,12 @@ export class PdfService {
       }
 
       const page = await this.browser.newPage()
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
       })
 
       await page.close()
@@ -1217,11 +1220,12 @@ export class PdfService {
       }
 
       const page = await this.browser.newPage()
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
       })
 
       await page.close()
