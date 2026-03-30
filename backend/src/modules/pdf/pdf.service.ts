@@ -827,8 +827,7 @@ export class PdfService {
       const cobroResult = await db.execute(sql`
         SELECT c.*, e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address,
           e.tax_condition as enterprise_tax_condition,
-          comp.name as company_name, comp.cuit as company_cuit, comp.address as company_address,
-          comp.tax_condition as company_tax_condition
+          comp.name as company_name, comp.cuit as company_cuit, comp.address as company_address
         FROM cobros c
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
         LEFT JOIN companies comp ON c.company_id = comp.id
@@ -1035,7 +1034,7 @@ export class PdfService {
       </div>
       <div class="data-col">
         <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(cobro.company_address || '-')}</span></div>
-        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.company_tax_condition || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.company_tax_condition || 'Responsable Inscripto')}</span></div>
       </div>
     </div>
   </div>
@@ -1178,7 +1177,6 @@ export class PdfService {
         SELECT p.*, e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address,
           e.tax_condition as enterprise_tax_condition,
           comp.name as company_name, comp.cuit as company_cuit, comp.address as company_address,
-          comp.tax_condition as company_tax_condition,
           b.bank_name
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
@@ -1370,7 +1368,7 @@ export class PdfService {
       </div>
       <div class="data-col">
         <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(pago.company_address || '-')}</span></div>
-        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(pago.company_tax_condition || '-')}</span></div>
+        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(pago.company_tax_condition || 'Responsable Inscripto')}</span></div>
       </div>
     </div>
   </div>
