@@ -28,6 +28,61 @@ router.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+// TEMP: Debug CC detalle + PDF errors
+router.get('/health/debug-cc', async (req: Request, res: Response) => {
+  try {
+    const entId = req.query.enterprise_id as string || '';
+    const companyId = req.query.company_id as string || '';
+
+    if (!entId || !companyId) {
+      // Get first company + enterprise
+      const companies = await pool.query('SELECT id FROM companies LIMIT 1');
+      const cid = companies.rows[0]?.id;
+      const enterprises = await pool.query('SELECT id, name FROM enterprises WHERE company_id = $1 LIMIT 1', [cid]);
+      return res.json({ hint: 'Pass enterprise_id and company_id', first_company: cid, first_enterprise: enterprises.rows[0] });
+    }
+
+    // Run the exact CC query
+    const result = await pool.query(`
+      SELECT * FROM (
+        SELECT i.invoice_date as fecha, 'fact_venta' as tipo, COALESCE(i.invoice_type,'') || ' ' || i.invoice_number as nro_comprobante, CAST(i.total_amount AS decimal) as debe, 0::decimal as haber, 'Factura' as descripcion, i.id as reference_id
+        FROM invoices i WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
+        UNION ALL
+        SELECT COALESCE(c.payment_date, c.created_at), 'recibo', CAST(c.receipt_number AS text), 0::decimal, CAST(COALESCE(c.total_amount, c.amount) AS decimal), 'Recibo', c.id
+        FROM cobros c WHERE c.enterprise_id = $1 AND c.company_id = $2
+        UNION ALL
+        SELECT pi.invoice_date, 'fact_compra', COALESCE(pi.punto_venta,'') || '-' || COALESCE(pi.invoice_number,''), CAST(pi.total_amount AS decimal), 0::decimal, 'Fact Compra', pi.id
+        FROM purchase_invoices pi WHERE pi.enterprise_id = $1 AND pi.company_id = $2
+        UNION ALL
+        SELECT COALESCE(p.payment_date, p.created_at), 'orden_pago', CAST(p.id AS text), 0::decimal, CAST(COALESCE(p.total_amount, p.amount) AS decimal), 'Orden Pago', p.id
+        FROM pagos p WHERE p.enterprise_id = $1 AND p.company_id = $2
+      ) movimientos ORDER BY fecha ASC
+    `, [entId, companyId]);
+
+    res.json({ count: result.rows.length, first3: result.rows.slice(0, 3) });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message, detail: (err as Error).stack?.split('\n').slice(0, 3) });
+  }
+});
+
+// TEMP: Test Puppeteer availability
+router.get('/health/debug-puppeteer', async (_req: Request, res: Response) => {
+  try {
+    const puppeteer = require('puppeteer');
+    const execPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    const browser = await puppeteer.launch({
+      headless: true,
+      executablePath: execPath || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+    const version = await browser.version();
+    await browser.close();
+    res.json({ ok: true, version, executablePath: execPath || 'default' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message, executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || 'NOT SET', detail: (err as Error).stack?.split('\n').slice(0, 3) });
+  }
+});
+
 // Detailed health check - includes DB, memory, uptime
 // In production, limit information disclosed to prevent reconnaissance
 router.get('/health/detailed', async (_req: Request, res: Response) => {
