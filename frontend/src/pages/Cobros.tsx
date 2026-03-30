@@ -1222,11 +1222,14 @@ export const Cobros: React.FC = () => {
                       </div>
                       {(pm.method === 'transferencia') && (
                         <div className="col-span-3">
-                          <label className="text-xs text-gray-500">Banco</label>
-                          <select className="w-full rounded border p-2 text-sm dark:bg-gray-800" value={pm.bank_id} onChange={e => updatePaymentMethod(i, 'bank_id', e.target.value)}>
-                            <option value="">Seleccionar...</option>
-                            {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
-                          </select>
+                          <BankSelector
+                            banks={banks}
+                            value={pm.bank_id || ''}
+                            onChange={bankId => updatePaymentMethod(i, 'bank_id', bankId)}
+                            onBanksChange={setBanks}
+                            label="Banco"
+                            className="!py-1.5 text-sm"
+                          />
                         </div>
                       )}
                       <div className={pm.method === 'transferencia' ? 'col-span-3' : 'col-span-6'}>
