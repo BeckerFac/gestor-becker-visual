@@ -381,7 +381,8 @@ export const Cobros: React.FC = () => {
   // Expandable receipt row
   const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(null)
 
-  // Pending orders state
+  // Pending invoices state (facturas pendientes de cobro)
+  const [pendingInvoicesData, setPendingInvoicesData] = useState<InvoiceForReceipt[]>([])
   const [dismissedPendingCobros, setDismissedPendingCobros] = useState<string[]>(getDismissedPendingCobros())
   const [pendingCollapsed, setPendingCollapsed] = useState(true)
 
@@ -396,7 +397,7 @@ export const Cobros: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [cobrosRes, entRes, ordersRes, bankRes, agingRes] = await Promise.all([
+      const [cobrosRes, entRes, ordersRes, bankRes, agingRes, pendingInvRes] = await Promise.all([
         api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
           setError(`Error cargando cobros: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return []
@@ -405,6 +406,7 @@ export const Cobros: React.FC = () => {
         api.getOrders({ limit: 200 }).catch(() => ({ items: [] })),
         api.getBanks().catch(() => []),
         api.getAgingReport().catch(() => null),
+        api.getInvoices({ fiscal_type: 'all', limit: 200 }).catch(() => ({ items: [] })),
       ])
       // Use cobros as the unified source (receipts migrated to cobros)
       const unifiedReceipts = (cobrosRes || []).map((c: any) => ({
@@ -420,6 +422,12 @@ export const Cobros: React.FC = () => {
       setOrders((ordersRes.items || ordersRes || []))
       setBanks(bankRes || [])
       setAging(agingRes)
+      // Store pending invoices (authorized/emitido, not fully paid)
+      const pendingInvItems: InvoiceForReceipt[] = (pendingInvRes.items || []).filter((inv: any) =>
+        (inv.status === 'authorized' || inv.status === 'emitido') &&
+        (inv.payment_status !== 'pagado')
+      )
+      setPendingInvoicesData(pendingInvItems)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -504,25 +512,21 @@ export const Cobros: React.FC = () => {
     return map
   }, [cobros])
 
-  // Pending orders (pendiente or parcial payment_status, has invoice, not dismissed, not cancelled)
-  const pendingOrders = useMemo(() => {
-    const allOrders = Array.isArray(orders) ? orders : []
-    return allOrders
-      .filter((o: any) => (o as any).has_invoice === true)
-      .filter((o: any) => o.payment_status === 'pendiente' || o.payment_status === 'parcial')
-      .filter((o: any) => o.status !== 'cancelado')
-      .filter(o => !dismissedPendingCobros.includes(o.id))
-      .map(o => {
-        const total = parseFloat(o.total_amount || '0')
-        const paid = paidByOrder.get(o.id) || 0
-        const remaining = Math.max(0, total - paid)
-        const enterpriseName = (o as any).enterprise?.name || (o as any).customer?.name || 'Sin empresa'
-        const enterpriseId = (o as any).enterprise?.id || (o as any).enterprise_id || (o as any).customer?.enterprise_id || ''
-        return { ...o, paid, remaining, enterprise_name: enterpriseName, resolved_enterprise_id: enterpriseId }
+  // Pending invoices (authorized/emitido, not fully paid, not dismissed)
+  const pendingInvoices = useMemo(() => {
+    return pendingInvoicesData
+      .filter(inv => !dismissedPendingCobros.includes(inv.id))
+      .map(inv => {
+        const total = parseFloat(inv.total_amount || '0')
+        const cobrado = parseFloat(inv.total_cobrado || '0')
+        const saldo_pendiente = Math.max(0, total - cobrado)
+        const enterprise_name = inv.enterprise?.name || inv.customer?.name || 'Consumidor Final'
+        return { ...inv, total, cobrado, saldo_pendiente, enterprise_name }
       })
-  }, [orders, paidByOrder, dismissedPendingCobros])
+      .filter(inv => inv.saldo_pendiente > 0.01)
+  }, [pendingInvoicesData, dismissedPendingCobros])
 
-  const totalPendingCobros = pendingOrders.reduce((sum, o) => sum + o.remaining, 0)
+  const totalPendingCobros = pendingInvoices.reduce((sum, inv) => sum + inv.saldo_pendiente, 0)
   const hasDismissedPendingCobros = dismissedPendingCobros.length > 0
 
   const handleDismissPendingCobro = (orderId: string) => {
@@ -535,18 +539,25 @@ export const Cobros: React.FC = () => {
     setDismissedPendingCobros([])
   }
 
-  const handleCollectFromOrder = useCallback((order: typeof pendingOrders[0]) => {
+  const handleQuickCobro = useCallback(async (inv: typeof pendingInvoices[0]) => {
+    // Find enterprise_id from enterprises list
+    const matchEnt = enterprises.find(e => e.name === inv.enterprise_name)
+    const enterpriseId = matchEnt?.id || ''
+
+    // Load invoices for receipt if not already loaded
+    await loadInvoicesForReceipt()
+
     setForm({
-      enterprise_id: order.resolved_enterprise_id,
-      amount: order.remaining.toFixed(2),
+      enterprise_id: enterpriseId,
+      amount: '',
       payment_method: 'transferencia',
       bank_id: '',
       reference: '',
       payment_date: new Date().toISOString().split('T')[0],
-      notes: `Cobro pedido #${String(order.order_number).padStart(4, '0')}`,
+      notes: '',
     })
-    setInvoiceItems({})
-    setShowInvoiceSection(false)
+    setInvoiceItems({ [inv.id]: inv.saldo_pendiente.toFixed(2) })
+    setShowInvoiceSection(true)
     setShowForm(true)
     // Auto-scroll to the form so the user sees it
     setTimeout(() => {
@@ -557,7 +568,7 @@ export const Cobros: React.FC = () => {
         setTimeout(() => el.classList.remove('cobro-form-highlight'), 1500)
       }
     }, 300)
-  }, [])
+  }, [enterprises, loadInvoicesForReceipt])
 
   const handleOpenForm = async () => {
     setShowForm(true)
@@ -719,7 +730,7 @@ export const Cobros: React.FC = () => {
     setDeleting(true)
     try {
       await api.deleteCobro(deleteTarget.id)
-      toast.success('Recibo eliminado')
+      toast.success('Recibo anulado')
       setDeleteTarget(null)
       await loadData()
     } catch (e: any) {
@@ -841,17 +852,17 @@ export const Cobros: React.FC = () => {
         </Card>
       </div>
 
-      {/* Pedidos por Cobrar Section */}
-      {!loading && pendingOrders.length > 0 && (
+      {/* Facturas Pendientes de Cobro Section */}
+      {!loading && pendingInvoices.length > 0 && (
         <Card className="border border-orange-300 dark:border-orange-800 bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-950/30 dark:to-yellow-950/30">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-semibold text-orange-900 dark:text-orange-200">
-                  Pedidos por Cobrar
+                  Facturas Pendientes de Cobro
                 </h3>
                 <span className="text-xs font-medium bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full">
-                  {pendingOrders.length}
+                  {pendingInvoices.length}
                 </span>
               </div>
               <button
@@ -866,58 +877,64 @@ export const Cobros: React.FC = () => {
           {!pendingCollapsed && (
             <CardContent className="pt-0">
               <div className="space-y-2">
-                {pendingOrders.map(order => (
-                  <div
-                    key={order.id}
-                    className="bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <span className="font-mono font-bold text-orange-700 text-sm whitespace-nowrap">
-                        #{String(order.order_number).padStart(4, '0')}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                          {order.enterprise_name}
-                        </p>
-                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
-                          <span>Total: {fmt(order.total_amount)}</span>
-                          {order.paid > 0 && (
-                            <span className="text-green-600">Cobrado: {fmt(order.paid)}</span>
-                          )}
+                {pendingInvoices.map(inv => {
+                  const invLabel = inv.fiscal_type === 'interno'
+                    ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
+                    : inv.fiscal_type === 'no_fiscal'
+                      ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
+                      : `${inv.invoice_type || ''} ${String(inv.invoice_number).padStart(8, '0')}`
+                  return (
+                    <div
+                      key={inv.id}
+                      className="bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow"
+                    >
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 text-sm whitespace-nowrap">
+                          {invLabel}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                            {inv.enterprise_name}
+                          </p>
+                          <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                            <span>Total: {fmt(inv.total)}</span>
+                            {inv.cobrado > 0 && (
+                              <span className="text-green-600">Cobrado: {fmt(inv.cobrado)}</span>
+                            )}
+                          </div>
                         </div>
+                        <div className="text-right whitespace-nowrap">
+                          <p className="text-sm font-bold text-red-600 dark:text-red-400">{fmt(inv.saldo_pendiente)}</p>
+                          <p className="text-xs text-gray-400">restante</p>
+                        </div>
+                        <span className={`text-xs font-medium rounded-full px-2 py-0.5 whitespace-nowrap ${
+                          inv.payment_status === 'parcial'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {inv.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
+                        </span>
                       </div>
-                      <div className="text-right whitespace-nowrap">
-                        <p className="text-sm font-bold text-orange-700">{fmt(order.remaining)}</p>
-                        <p className="text-xs text-gray-400">restante</p>
-                      </div>
-                      <span className={`text-xs font-medium rounded-full px-2 py-0.5 whitespace-nowrap ${
-                        order.payment_status === 'parcial'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {order.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <PermissionGate module="cobros" action="create">
-                        <Button
-                          variant="success"
-                          size="sm"
-                          onClick={() => handleCollectFromOrder(order)}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <PermissionGate module="cobros" action="create">
+                          <button
+                            onClick={() => handleQuickCobro(inv)}
+                            className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors"
+                          >
+                            Cobrar
+                          </button>
+                        </PermissionGate>
+                        <button
+                          onClick={() => handleDismissPendingCobro(inv.id)}
+                          className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-400 transition-colors"
+                          title="Ocultar temporalmente"
                         >
-                          Cobrar
-                        </Button>
-                      </PermissionGate>
-                      <button
-                        onClick={() => handleDismissPendingCobro(order.id)}
-                        className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-400 transition-colors"
-                        title="Ocultar temporalmente"
-                      >
-                        x
-                      </button>
+                          x
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               {hasDismissedPendingCobros && (
                 <button
@@ -933,12 +950,12 @@ export const Cobros: React.FC = () => {
       )}
 
       {/* Restore dismissed when all are hidden */}
-      {!loading && pendingOrders.length === 0 && hasDismissedPendingCobros && (
+      {!loading && pendingInvoices.length === 0 && hasDismissedPendingCobros && (
         <button
           onClick={handleRestorePendingCobros}
           className="text-xs text-gray-400 hover:text-orange-600 transition-colors"
         >
-          Mostrar pedidos por cobrar ocultos ({dismissedPendingCobros.length})
+          Mostrar facturas pendientes ocultas ({dismissedPendingCobros.length})
         </button>
       )}
 
@@ -1575,7 +1592,7 @@ export const Cobros: React.FC = () => {
                             onClick={() => setDeleteTarget(receipt)}
                             className="text-red-500 hover:text-red-700 text-sm transition-colors"
                           >
-                            Eliminar
+                            Anular
                           </button>
                         </PermissionGate>
                       </div>
@@ -1690,6 +1707,14 @@ export const Cobros: React.FC = () => {
                             </div>
                           </div>
 
+                          {/* Observaciones */}
+                          {receipt.notes && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Observaciones</h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">{receipt.notes}</p>
+                            </div>
+                          )}
+
                           {/* Boton PDF */}
                           <div className="flex gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                             <button
@@ -1720,9 +1745,9 @@ export const Cobros: React.FC = () => {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Eliminar cobro"
-        message={`Eliminar el recibo #${deleteTarget ? String(deleteTarget.receipt_number).padStart(6, '0') : ''}? El cobro asociado tambien se eliminara. Esta accion no se puede deshacer.`}
-        confirmLabel="Eliminar"
+        title="Anular cobro"
+        message={`Anular el recibo #${deleteTarget ? String(deleteTarget.receipt_number).padStart(6, '0') : ''}? Los montos vinculados se desasignaran. Esta accion no se puede deshacer.`}
+        confirmLabel="Anular"
         variant="danger"
         loading={deleting}
         onConfirm={handleDelete}
