@@ -894,6 +894,65 @@ export class PdfService {
     }
   }
 
+  private numberToWords(amount: number): string {
+    const units = ['', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve']
+    const teens = ['diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciseis', 'diecisiete', 'dieciocho', 'diecinueve']
+    const tens = ['', 'diez', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa']
+    const hundreds = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos']
+
+    const convertGroup = (n: number): string => {
+      if (n === 0) return ''
+      if (n === 100) return 'cien'
+      if (n < 10) return units[n]
+      if (n < 20) return teens[n - 10]
+      if (n < 30) {
+        if (n === 20) return 'veinte'
+        return 'veinti' + units[n % 10]
+      }
+      if (n < 100) {
+        const t = Math.floor(n / 10)
+        const u = n % 10
+        return u === 0 ? tens[t] : tens[t] + ' y ' + units[u]
+      }
+      const h = Math.floor(n / 100)
+      const rest = n % 100
+      return rest === 0 && h === 1 ? 'cien' : hundreds[h] + (rest > 0 ? ' ' + convertGroup(rest) : '')
+    }
+
+    if (amount === 0) return 'cero pesos con 00/100'
+
+    const intPart = Math.floor(Math.abs(amount))
+    const decPart = Math.round((Math.abs(amount) - intPart) * 100)
+
+    const millions = Math.floor(intPart / 1000000)
+    const thousands = Math.floor((intPart % 1000000) / 1000)
+    const remainder = intPart % 1000
+
+    const parts: string[] = []
+
+    if (millions > 0) {
+      parts.push(millions === 1 ? 'un millon' : convertGroup(millions) + ' millones')
+    }
+    if (thousands > 0) {
+      parts.push(thousands === 1 ? 'mil' : convertGroup(thousands) + ' mil')
+    }
+    if (remainder > 0 || parts.length === 0) {
+      parts.push(convertGroup(remainder))
+    }
+
+    const intWords = parts.join(' ').replace(/\s+/g, ' ').trim()
+    const centStr = String(decPart).padStart(2, '0')
+
+    const capitalized = intWords.charAt(0).toUpperCase() + intWords.slice(1)
+    return `${capitalized} pesos con ${centStr}/100`
+  }
+
+  private formatMoneyAR(n: number): string {
+    const parts = Math.abs(n).toFixed(2).split('.')
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+    return `${n < 0 ? '-' : ''}${intPart},${parts[1]}`
+  }
+
   private generateReceiptHtml(data: {
     cobro: any
     paymentMethods: any[]
@@ -902,6 +961,7 @@ export class PdfService {
   }): string {
     const { cobro, paymentMethods, retenciones, linkedInvoices } = data
     const esc = this.escapeHtml.bind(this)
+    const fmtMoney = this.formatMoneyAR.bind(this)
 
     const receiptNumber = String(cobro.receipt_number || cobro.id?.slice(-8) || '0').padStart(8, '0')
     const receiptDate = new Date(cobro.payment_date || cobro.created_at).toLocaleDateString('es-AR')
@@ -917,17 +977,43 @@ export class PdfService {
       (sum: number, r: any) => sum + parseFloat(r.amount || '0'), 0
     )
     const totalRecibo = parseFloat(cobro.total_amount || '0')
+    const totalInLetters = this.numberToWords(totalRecibo)
 
-    // Payment method label mapping
-    const methodLabels: Record<string, string> = {
-      'cash': 'Efectivo',
-      'check': 'Cheque',
-      'transfer': 'Transferencia',
-      'credit_card': 'Tarjeta de Credito',
-      'debit_card': 'Tarjeta de Debito',
-      'echeq': 'E-Cheq',
-      'other': 'Otro',
+    // Payment method label + color mapping
+    const methodConfig: Record<string, { label: string; color: string; bg: string }> = {
+      'cash': { label: 'Efectivo', color: '#065f46', bg: '#d1fae5' },
+      'check': { label: 'Cheque', color: '#92400e', bg: '#fef3c7' },
+      'transfer': { label: 'Transferencia', color: '#1e40af', bg: '#dbeafe' },
+      'credit_card': { label: 'Tarjeta de Credito', color: '#7c3aed', bg: '#ede9fe' },
+      'debit_card': { label: 'Tarjeta de Debito', color: '#7c3aed', bg: '#ede9fe' },
+      'echeq': { label: 'E-Cheq', color: '#92400e', bg: '#fef3c7' },
+      'mercado_pago': { label: 'Mercado Pago', color: '#0e7490', bg: '#cffafe' },
+      'other': { label: 'Otro', color: '#374151', bg: '#f3f4f6' },
     }
+
+    // Status badge
+    const totalApplied = linkedInvoices.reduce(
+      (sum: number, inv: any) => sum + parseFloat(inv.amount_applied || '0'), 0
+    )
+    let statusLabel = 'Sin vincular'
+    let statusColor = '#6b7280'
+    let statusBg = '#f3f4f6'
+    if (linkedInvoices.length > 0) {
+      if (Math.abs(totalApplied - totalRecibo) < 0.01) {
+        statusLabel = 'Completo'
+        statusColor = '#065f46'
+        statusBg = '#d1fae5'
+      } else {
+        statusLabel = 'Parcial'
+        statusColor = '#92400e'
+        statusBg = '#fef3c7'
+      }
+    }
+
+    const verifyUrl = `gestia.ai/r/${receiptNumber}`
+    const now = new Date()
+    const generatedDate = now.toLocaleDateString('es-AR')
+    const generatedTime = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 
     return `<!DOCTYPE html>
 <html>
@@ -935,235 +1021,563 @@ export class PdfService {
   <meta charset="UTF-8">
   <title>Recibo X ${receiptNumber}</title>
   <style>
-    @page { size: A4; margin: 10mm; }
+    @page { size: A4; margin: 8mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #222; font-size: 11px; line-height: 1.4; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      color: #1f2937; font-size: 11px; line-height: 1.5;
+      background: #fff;
+    }
 
+    .receipt-container {
+      max-width: 100%;
+    }
+
+    /* --- HEADER --- */
     .header {
-      background: #1a1a2e; color: #fff; padding: 16px 20px;
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 0;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      padding: 24px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-radius: 0 0 8px 8px;
     }
-    .header-title { font-size: 22px; font-weight: bold; letter-spacing: 3px; }
-    .header-right { text-align: right; }
-    .header-letter {
-      display: inline-block; background: #fff; color: #1a1a2e;
-      font-size: 28px; font-weight: bold; width: 40px; height: 40px;
-      line-height: 40px; text-align: center; border-radius: 4px; margin-bottom: 4px;
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
     }
-    .header-number {
-      font-size: 16px; font-family: 'Courier New', monospace; font-weight: bold;
+    .logo-placeholder {
+      width: 48px; height: 48px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 700; color: #10b981;
+      letter-spacing: -1px;
     }
-    .header-date { font-size: 12px; margin-top: 4px; }
+    .company-info-header h2 {
+      font-size: 15px; font-weight: 700; margin-bottom: 2px;
+      letter-spacing: 0.3px;
+    }
+    .company-info-header p {
+      font-size: 10px; color: rgba(255,255,255,0.7);
+      margin: 0; line-height: 1.4;
+    }
+    .header-right {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+    .badge-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .receipt-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    .letter-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px; height: 32px;
+      background: #fff;
+      color: #1a1a2e;
+      font-size: 18px;
+      font-weight: 800;
+      border-radius: 5px;
+    }
+    .receipt-number {
+      font-size: 13px;
+      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+      letter-spacing: 1px;
+    }
+    .receipt-date {
+      font-size: 10px;
+      color: rgba(255,255,255,0.6);
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
 
-    .section { border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px; }
+    /* --- BODY --- */
+    .body-content {
+      padding: 20px 28px 16px;
+    }
+
+    /* Receptor card */
+    .receptor-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .receptor-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .receptor-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .receptor-details {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .receptor-detail {
+      font-size: 10px;
+      color: #64748b;
+    }
+    .receptor-detail strong {
+      color: #334155;
+    }
+
+    /* Amount hero */
+    .amount-hero {
+      background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      padding: 18px 24px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .amount-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #065f46;
+      margin-bottom: 4px;
+    }
+    .amount-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: #059669;
+      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+      letter-spacing: -0.5px;
+    }
+    .amount-words {
+      font-size: 10px;
+      color: #065f46;
+      font-style: italic;
+      max-width: 380px;
+      text-align: right;
+      line-height: 1.4;
+    }
+
+    /* Section headers */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      margin-top: 4px;
+    }
+    .section-header::before {
+      content: '';
+      display: block;
+      width: 3px;
+      height: 14px;
+      background: #1a1a2e;
+      border-radius: 2px;
+    }
     .section-title {
-      font-size: 10px; font-weight: bold; color: #1a1a2e;
-      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;
-      border-bottom: 1px solid #eee; padding-bottom: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #1a1a2e;
     }
-    .data-grid { display: flex; gap: 30px; }
-    .data-col { flex: 1; }
-    .data-row { display: flex; margin-bottom: 2px; }
-    .data-label { font-size: 10px; color: #666; min-width: 110px; }
-    .data-value { font-size: 11px; font-weight: 600; }
 
-    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
-    thead th {
-      background: #f0f0f0; border: 1px solid #ccc; padding: 6px 8px;
-      font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;
+    /* Tables */
+    .styled-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-bottom: 16px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
     }
-    thead th.left { text-align: left; }
-    thead th.right { text-align: right; }
-    tbody td { border: 1px solid #ddd; padding: 5px 8px; font-size: 11px; }
-    tbody td.center { text-align: center; }
-    tbody td.right { text-align: right; font-family: 'Courier New', monospace; }
+    .styled-table thead th {
+      background: #f1f5f9;
+      padding: 8px 12px;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #475569;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .styled-table thead th.right { text-align: right; }
+    .styled-table tbody tr { transition: background 0.15s; }
+    .styled-table tbody tr:nth-child(even) { background: #f8fafc; }
+    .styled-table tbody td {
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #334155;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .styled-table tbody td.right {
+      text-align: right;
+      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+      font-weight: 600;
+    }
+    .styled-table tbody td.center { text-align: center; }
 
-    .totals-box {
-      border: 2px solid #1a1a2e; margin-top: 12px; margin-bottom: 12px;
+    /* Method pill */
+    .method-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    /* Totals */
+    .totals-section {
+      margin-top: 8px;
+      margin-bottom: 16px;
     }
     .totals-row {
-      display: flex; justify-content: flex-end; padding: 5px 16px;
-      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 6px 16px;
     }
-    .totals-row:last-child { border-bottom: none; }
-    .totals-label { font-size: 11px; min-width: 200px; text-align: right; padding-right: 20px; }
+    .totals-label {
+      font-size: 11px;
+      color: #64748b;
+      min-width: 200px;
+      text-align: right;
+      padding-right: 20px;
+    }
     .totals-amount {
-      font-size: 11px; font-family: 'Courier New', monospace;
-      font-weight: bold; min-width: 120px; text-align: right;
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+      font-weight: 600;
+      min-width: 130px;
+      text-align: right;
+      color: #334155;
     }
-    .totals-row.grand {
-      background: #1a1a2e; color: #fff; padding: 10px 16px;
+    .totals-grand {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border-radius: 6px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-top: 4px;
     }
-    .totals-row.grand .totals-label,
-    .totals-row.grand .totals-amount { font-size: 14px; font-weight: bold; }
+    .totals-grand .totals-label {
+      color: rgba(255,255,255,0.8);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .totals-grand .totals-amount {
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+    }
 
-    .observations {
-      border: 1px solid #ccc; padding: 10px 16px; margin-bottom: 8px;
-      min-height: 40px;
+    /* Observations */
+    .observations-box {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
     }
-    .obs-title { font-size: 10px; font-weight: bold; color: #666; margin-bottom: 4px; }
+    .observations-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #92400e;
+      margin-bottom: 4px;
+    }
+    .observations-text {
+      font-size: 11px;
+      color: #78350f;
+      line-height: 1.5;
+    }
 
+    /* QR / Verification */
+    .verify-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      margin-bottom: 16px;
+    }
+    .qr-placeholder {
+      width: 52px; height: 52px;
+      background: #1a1a2e;
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .qr-inner {
+      width: 44px; height: 44px;
+      background: #fff;
+      border-radius: 2px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 7px; color: #94a3b8;
+    }
+    .verify-text {
+      font-size: 9px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .verify-text strong {
+      color: #1a1a2e;
+      font-size: 10px;
+    }
+
+    /* Footer */
     .footer {
-      text-align: center; font-size: 9px; color: #999; padding-top: 8px;
-      border-top: 1px solid #ddd; margin-top: 16px;
+      border-top: 1px solid #e2e8f0;
+      padding: 12px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer-left {
+      font-size: 9px;
+      color: #94a3b8;
+    }
+    .footer-right {
+      font-size: 9px;
+      color: #94a3b8;
+      text-align: right;
+    }
+    .footer a {
+      color: #059669;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    /* Divider */
+    .section-divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin: 16px 0;
     }
   </style>
 </head>
 <body>
+<div class="receipt-container">
 
   <!-- HEADER -->
   <div class="header">
-    <div>
-      <div class="header-title">RECIBO</div>
+    <div class="header-left">
+      <div class="logo-placeholder">G</div>
+      <div class="company-info-header">
+        <h2>${esc(cobro.company_name)}</h2>
+        <p>CUIT: ${esc(companyCuit)}${cobro.company_address ? ' | ' + esc(cobro.company_address) : ''}</p>
+        <p>${esc(cobro.company_tax_condition || 'Responsable Inscripto')}</p>
+      </div>
     </div>
     <div class="header-right">
-      <div class="header-letter">X</div>
-      <div class="header-number">N° ${receiptNumber}</div>
-      <div class="header-date">Fecha: ${receiptDate}</div>
+      <div class="badge-row">
+        <div class="receipt-badge">RECIBO</div>
+        <div class="letter-badge">X</div>
+      </div>
+      <div class="receipt-number">N${String.fromCharCode(176)} ${receiptNumber}</div>
+      <div class="receipt-date">Fecha: ${receiptDate}</div>
+      <div class="status-badge" style="color: ${statusColor}; background: ${statusBg};">${statusLabel}</div>
     </div>
   </div>
 
-  <!-- EMISOR -->
-  <div class="section">
-    <div class="section-title">Datos del Emisor</div>
-    <div class="data-grid">
-      <div class="data-col">
-        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(cobro.company_name)}</span></div>
-        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(companyCuit)}</span></div>
-      </div>
-      <div class="data-col">
-        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(cobro.company_address || '-')}</span></div>
-        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.company_tax_condition || 'Responsable Inscripto')}</span></div>
+  <div class="body-content">
+
+    <!-- RECEPTOR -->
+    <div class="receptor-card">
+      <div class="receptor-label">Recibimos de</div>
+      <div class="receptor-name">${esc(cobro.enterprise_name || '-')}</div>
+      <div class="receptor-details">
+        <div class="receptor-detail"><strong>CUIT:</strong> ${esc(enterpriseCuit || '-')}</div>
+        ${cobro.enterprise_address ? `<div class="receptor-detail"><strong>Domicilio:</strong> ${esc(cobro.enterprise_address)}</div>` : ''}
+        ${cobro.enterprise_tax_condition ? `<div class="receptor-detail"><strong>Cond. IVA:</strong> ${esc(cobro.enterprise_tax_condition)}</div>` : ''}
       </div>
     </div>
-  </div>
 
-  <!-- RECEPTOR -->
-  <div class="section">
-    <div class="section-title">Datos del Receptor</div>
-    <div class="data-grid">
-      <div class="data-col">
-        <div class="data-row"><span class="data-label">Razon Social:</span> <span class="data-value">${esc(cobro.enterprise_name || '-')}</span></div>
-        <div class="data-row"><span class="data-label">CUIT:</span> <span class="data-value">${esc(enterpriseCuit || '-')}</span></div>
+    <!-- AMOUNT HERO -->
+    <div class="amount-hero">
+      <div>
+        <div class="amount-label">La suma de</div>
+        <div class="amount-value">$ ${fmtMoney(totalRecibo)}</div>
       </div>
-      <div class="data-col">
-        <div class="data-row"><span class="data-label">Domicilio:</span> <span class="data-value">${esc(cobro.enterprise_address || '-')}</span></div>
-        <div class="data-row"><span class="data-label">Cond. IVA:</span> <span class="data-value">${esc(cobro.enterprise_tax_condition || '-')}</span></div>
-      </div>
+      <div class="amount-words">${esc(totalInLetters)}</div>
     </div>
-  </div>
 
-  <!-- FORMAS DE PAGO -->
-  ${paymentMethods.length > 0 ? `
-  <div class="section" style="padding: 0;">
-    <div class="section-title" style="padding: 10px 16px 4px;">Formas de Pago</div>
-    <table>
+    <!-- FORMAS DE PAGO -->
+    ${paymentMethods.length > 0 ? `
+    <div class="section-header"><span class="section-title">Formas de Pago</span></div>
+    <table class="styled-table">
       <thead>
         <tr>
-          <th class="left" style="width: 25%;">Metodo</th>
-          <th class="left" style="width: 25%;">Banco</th>
-          <th class="left" style="width: 30%;">Referencia</th>
-          <th class="right" style="width: 20%;">Monto</th>
+          <th style="width: 28%;">Metodo</th>
+          <th style="width: 22%;">Banco</th>
+          <th style="width: 28%;">Referencia</th>
+          <th class="right" style="width: 22%;">Monto</th>
         </tr>
       </thead>
       <tbody>
-        ${paymentMethods.map((pm: any) => `
+        ${paymentMethods.map((pm: any) => {
+          const cfg = methodConfig[pm.method] || methodConfig['other']
+          return `
         <tr>
-          <td>${esc(methodLabels[pm.method] || pm.method || '-')}</td>
+          <td><span class="method-pill" style="color: ${cfg.color}; background: ${cfg.bg};">${esc(cfg.label)}</span></td>
           <td>${esc(pm.bank_name || '-')}</td>
-          <td>${esc(pm.reference || pm.check_number || '-')}</td>
-          <td class="right">$ ${parseFloat(pm.amount || '0').toFixed(2)}</td>
-        </tr>`).join('')}
+          <td style="font-size: 10px; color: #64748b;">${esc(pm.reference || pm.check_number || '-')}</td>
+          <td class="right">$ ${fmtMoney(parseFloat(pm.amount || '0'))}</td>
+        </tr>`}).join('')}
       </tbody>
     </table>
-  </div>
-  ` : ''}
+    ` : ''}
 
-  <!-- RETENCIONES -->
-  ${retenciones.length > 0 ? `
-  <div class="section" style="padding: 0;">
-    <div class="section-title" style="padding: 10px 16px 4px;">Retenciones</div>
-    <table>
+    <!-- RETENCIONES -->
+    ${retenciones.length > 0 ? `
+    <div class="section-header"><span class="section-title">Retenciones</span></div>
+    <table class="styled-table">
       <thead>
         <tr>
-          <th class="left" style="width: 20%;">Tipo</th>
-          <th class="left" style="width: 20%;">Jurisdiccion</th>
-          <th class="left" style="width: 20%;">N° Cert.</th>
-          <th style="width: 20%;">Fecha</th>
-          <th class="right" style="width: 20%;">Importe</th>
+          <th style="width: 18%;">Tipo</th>
+          <th style="width: 20%;">Jurisdiccion</th>
+          <th style="width: 22%;">N${String.fromCharCode(176)} Certificado</th>
+          <th style="width: 18%;">Fecha</th>
+          <th class="right" style="width: 22%;">Importe</th>
         </tr>
       </thead>
       <tbody>
         ${retenciones.map((r: any) => `
         <tr>
-          <td>${esc(r.type || r.retention_type || '-')}</td>
+          <td><span class="method-pill" style="color: #7c3aed; background: #ede9fe;">${esc(r.type || r.retention_type || '-')}</span></td>
           <td>${esc(r.jurisdiction || '-')}</td>
-          <td>${esc(r.certificate_number || '-')}</td>
+          <td style="font-size: 10px; color: #64748b;">${esc(r.certificate_number || '-')}</td>
           <td class="center">${r.date ? new Date(r.date).toLocaleDateString('es-AR') : '-'}</td>
-          <td class="right">$ ${parseFloat(r.amount || '0').toFixed(2)}</td>
+          <td class="right">$ ${fmtMoney(parseFloat(r.amount || '0'))}</td>
         </tr>`).join('')}
       </tbody>
     </table>
-  </div>
-  ` : ''}
+    ` : ''}
 
-  <!-- COMPROBANTES CANCELADOS -->
-  ${linkedInvoices.length > 0 ? `
-  <div class="section" style="padding: 0;">
-    <div class="section-title" style="padding: 10px 16px 4px;">Comprobantes Cancelados</div>
-    <table>
+    <!-- FACTURAS CANCELADAS -->
+    ${linkedInvoices.length > 0 ? `
+    <div class="section-header"><span class="section-title">Facturas Canceladas</span></div>
+    <table class="styled-table">
       <thead>
         <tr>
-          <th class="left" style="width: 30%;">Factura</th>
-          <th class="right" style="width: 23%;">Total</th>
-          <th class="right" style="width: 23%;">Aplicado</th>
-          <th class="right" style="width: 24%;">Saldo</th>
+          <th style="width: 28%;">Factura</th>
+          <th class="right" style="width: 24%;">Total Factura</th>
+          <th class="right" style="width: 24%;">Aplicado</th>
+          <th class="right" style="width: 24%;">Saldo Pendiente</th>
         </tr>
       </thead>
       <tbody>
-        ${linkedInvoices.map((inv: any) => `
+        ${linkedInvoices.map((inv: any) => {
+          const saldo = parseFloat(inv.saldo_pendiente || '0')
+          const saldoColor = saldo <= 0.01 ? '#059669' : '#dc2626'
+          return `
         <tr>
-          <td>${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
-          <td class="right">$ ${parseFloat(inv.total_amount || '0').toFixed(2)}</td>
-          <td class="right">$ ${parseFloat(inv.amount_applied || '0').toFixed(2)}</td>
-          <td class="right">$ ${parseFloat(inv.saldo_pendiente || '0').toFixed(2)}</td>
-        </tr>`).join('')}
+          <td style="font-weight: 600;">${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
+          <td class="right">$ ${fmtMoney(parseFloat(inv.total_amount || '0'))}</td>
+          <td class="right" style="color: #059669;">$ ${fmtMoney(parseFloat(inv.amount_applied || '0'))}</td>
+          <td class="right" style="color: ${saldoColor};">$ ${fmtMoney(saldo)}</td>
+        </tr>`}).join('')}
       </tbody>
     </table>
-  </div>
-  ` : ''}
+    ` : ''}
 
-  <!-- TOTALES -->
-  <div class="totals-box">
-    ${paymentMethods.length > 0 ? `
-    <div class="totals-row">
-      <span class="totals-label">Total Formas de Pago:</span>
-      <span class="totals-amount">$ ${totalPaymentMethods.toFixed(2)}</span>
+    <!-- TOTALS -->
+    <div class="totals-section">
+      ${paymentMethods.length > 0 ? `
+      <div class="totals-row">
+        <span class="totals-label">Total Formas de Pago:</span>
+        <span class="totals-amount">$ ${fmtMoney(totalPaymentMethods)}</span>
+      </div>
+      ` : ''}
+      ${retenciones.length > 0 ? `
+      <div class="totals-row">
+        <span class="totals-label">Total Retenciones:</span>
+        <span class="totals-amount">$ ${fmtMoney(totalRetenciones)}</span>
+      </div>
+      ` : ''}
+      <div class="totals-grand">
+        <span class="totals-label">TOTAL RECIBO:</span>
+        <span class="totals-amount">$ ${fmtMoney(totalRecibo)}</span>
+      </div>
+    </div>
+
+    <!-- OBSERVATIONS -->
+    ${(cobro.notes || cobro.observations) ? `
+    <div class="observations-box">
+      <div class="observations-label">Observaciones</div>
+      <div class="observations-text">${esc(cobro.notes || cobro.observations || '')}</div>
     </div>
     ` : ''}
-    ${retenciones.length > 0 ? `
-    <div class="totals-row">
-      <span class="totals-label">Total Retenciones:</span>
-      <span class="totals-amount">$ ${totalRetenciones.toFixed(2)}</span>
+
+    <!-- QR VERIFICATION -->
+    <div class="verify-bar">
+      <div class="qr-placeholder">
+        <div class="qr-inner">QR</div>
+      </div>
+      <div class="verify-text">
+        Verificar autenticidad de este recibo en:<br>
+        <strong>${verifyUrl}</strong>
+      </div>
     </div>
-    ` : ''}
-    <div class="totals-row grand">
-      <span class="totals-label">TOTAL RECIBO:</span>
-      <span class="totals-amount">$ ${totalRecibo.toFixed(2)}</span>
-    </div>
+
   </div>
 
-  <!-- OBSERVACIONES -->
-  <div class="observations">
-    <div class="obs-title">Observaciones</div>
-    ${esc(cobro.notes || cobro.observations || '')}
-  </div>
-
+  <!-- FOOTER -->
   <div class="footer">
-    Recibo generado el ${new Date().toLocaleDateString('es-AR')} - Documento no fiscal
+    <div class="footer-left">
+      Documento no fiscal | Generado el ${generatedDate} a las ${generatedTime}
+    </div>
+    <div class="footer-right">
+      <a href="https://gestia.ai">gestia.ai</a> | soporte@gestia.ai
+    </div>
   </div>
 
+</div>
 </body>
 </html>`
   }
