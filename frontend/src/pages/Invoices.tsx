@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { SkeletonTable } from '@/components/ui/Skeleton'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { DateInput } from '@/components/ui/DateInput'
 import { EnterpriseCustomerSelector } from '@/components/shared/EnterpriseCustomerSelector'
@@ -60,7 +60,7 @@ interface Invoice {
 interface Enterprise { id: string; name: string; cuit?: string | null }
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
 interface Product { id: string; sku: string; name: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string }
-interface OrderWithoutInvoice { id: string; order_number: number; title: string; total_amount: string; customer_name: string; enterprise?: { id: string; name: string } | null }
+
 
 // ---- Constants ----
 
@@ -317,11 +317,11 @@ export const Invoices: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [ordersWithoutInvoice, setOrdersWithoutInvoice] = useState<OrderWithoutInvoice[]>([])
+
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [authorizing, setAuthorizing] = useState<string | null>(null)
-  const [linkingInvoice, setLinkingInvoice] = useState<string | null>(null)
+
   const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null)
 
   // UI
@@ -392,13 +392,8 @@ export const Invoices: React.FC = () => {
   })
   const [importItems, setImportItems] = useState<InvoiceItem[]>([EMPTY_FORM_ITEM()])
 
-  // Confirm dialog for unlink
-  const [unlinkTarget, setUnlinkTarget] = useState<string | null>(null)
-  const [unlinking, setUnlinking] = useState(false)
 
-  // Link/Unlink order per invoice row
-  const [linkDropdownInvoiceId, setLinkDropdownInvoiceId] = useState<string | null>(null)
-  const [linkSelectedOrderId, setLinkSelectedOrderId] = useState('')
+
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; invoice: Invoice } | null>(null)
@@ -463,16 +458,14 @@ export const Invoices: React.FC = () => {
 
   const loadFormData = async () => {
     try {
-      const [entRes, custRes, prodRes, ordersRes] = await Promise.all([
+      const [entRes, custRes, prodRes] = await Promise.all([
         api.getEnterprises().catch(() => []),
         api.getCustomers().catch(() => ({ items: [] })),
         api.getProducts().catch(() => ({ items: [] })),
-        api.getOrdersWithoutInvoice().catch(() => []),
       ])
       setEnterprises(entRes || [])
       setCustomers(custRes.items || custRes || [])
       setProducts(prodRes.items || prodRes || [])
-      setOrdersWithoutInvoice(Array.isArray(ordersRes) ? ordersRes : [])
     } catch (e: any) {
       setError(e.message)
     }
@@ -763,35 +756,8 @@ export const Invoices: React.FC = () => {
     }
   }
 
-  const handleLinkOrder = async (invoiceId: string) => {
-    if (!linkSelectedOrderId) return
-    setError(null)
-    try {
-      await api.linkOrderToInvoice(invoiceId, linkSelectedOrderId)
-      setLinkDropdownInvoiceId(null)
-      setLinkSelectedOrderId('')
-      await Promise.all([loadInvoices(), loadFormData()])
-    } catch (e: any) {
-      setError(e.message)
-    }
-  }
 
-  const handleUnlinkOrder = async () => {
-    if (!unlinkTarget) return
-    setUnlinking(true)
-    setError(null)
-    try {
-      await api.unlinkOrderFromInvoice(unlinkTarget)
-      toast.success('Pedido desvinculado correctamente')
-      await Promise.all([loadInvoices(), loadFormData()])
-    } catch (e: any) {
-      toast.error(e.message)
-      setError(e.message)
-    } finally {
-      setUnlinking(false)
-      setUnlinkTarget(null)
-    }
-  }
+
 
   // ---- Import Handlers ----
 
@@ -1945,7 +1911,8 @@ export const Invoices: React.FC = () => {
               <tbody>
                 {paginatedInvoices.map(invoice => {
                   const statusMeta = STATUS_MAP[invoice.status] || { label: invoice.status, color: 'bg-gray-100 text-gray-800 dark:text-gray-200' }
-                  const isLinkOpen = linkDropdownInvoiceId === invoice.id
+
+
 
                   return (
                     <React.Fragment key={invoice.id}>
@@ -2003,41 +1970,10 @@ export const Invoices: React.FC = () => {
                                   #{String(lo.order_number).padStart(4, '0')}
                                 </span>
                               ))}
-                              {orders.length === 1 && (
-                                <button onClick={(e) => { e.stopPropagation(); setUnlinkTarget(invoice.id) }} className="text-red-400 hover:text-red-600 text-[10px]">x</button>
-                              )}
                             </div>
                           );
                           return null;
                         })()}
-                        {vistaMode === 'venta_fiscal' && !(invoice.linked_orders && invoice.linked_orders.length > 0) && !invoice.order && (
-                          <div className="relative mt-0.5">
-                            <button
-                              onClick={() => {
-                                if (isLinkOpen) { setLinkDropdownInvoiceId(null); setLinkSelectedOrderId('') }
-                                else {
-                                  setLinkDropdownInvoiceId(invoice.id); setLinkSelectedOrderId('')
-                                  if (ordersWithoutInvoice.length === 0) {
-                                    api.getOrdersWithoutInvoice().catch(() => []).then(res => setOrdersWithoutInvoice(Array.isArray(res) ? res : []))
-                                  }
-                                }
-                              }}
-                              className="text-[10px] text-blue-600 hover:underline"
-                            >Vincular Pedido</button>
-                            {isLinkOpen && (
-                              <div className="absolute z-10 left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 w-64">
-                                <select className="w-full px-2 py-1 border rounded text-xs mb-1 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={linkSelectedOrderId} onChange={e => setLinkSelectedOrderId(e.target.value)}>
-                                  <option value="">Elegir pedido...</option>
-                                  {ordersWithoutInvoice.map(o => <option key={o.id} value={o.id}>#{String(o.order_number).padStart(4, '0')} - {o.title}</option>)}
-                                </select>
-                                <div className="flex gap-1">
-                                  <button onClick={() => handleLinkOrder(invoice.id)} disabled={!linkSelectedOrderId} className="flex-1 px-2 py-1 bg-blue-600 text-white text-[10px] rounded disabled:opacity-40">Vincular</button>
-                                  <button onClick={() => { setLinkDropdownInvoiceId(null); setLinkSelectedOrderId('') }} className="px-2 py-1 border text-[10px] rounded">x</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </td>
 
                       {/* Total */}
@@ -2282,17 +2218,6 @@ export const Invoices: React.FC = () => {
           />
         </Card>
       )}
-
-      <ConfirmDialog
-        open={!!unlinkTarget}
-        title="Desvincular pedido"
-        message="¿Desvincular el pedido de esta factura?"
-        confirmLabel="Desvincular"
-        variant="warning"
-        loading={unlinking}
-        onConfirm={handleUnlinkOrder}
-        onCancel={() => setUnlinkTarget(null)}
-      />
 
       {invoicePreview.previewInvoice && (
         <InvoicePreviewModal
