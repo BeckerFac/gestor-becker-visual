@@ -1006,7 +1006,7 @@ export const Invoices: React.FC = () => {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Empresa</label>
               <select
@@ -1078,7 +1078,7 @@ export const Invoices: React.FC = () => {
                 </button>
               </div>
             </div>
-            <div className="flex flex-col gap-1 lg:col-span-2">
+            <div className="flex flex-col gap-1">
               <DateRangeFilter
                 dateFrom={dateFrom}
                 dateTo={dateTo}
@@ -1951,7 +1951,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Empresa + Cliente + Pedido combined */}
-                      <td className="px-2 py-2 text-xs" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-2 py-2 text-xs">
                         <div className="flex items-center gap-1">
                           <span className="font-medium text-gray-800 dark:text-gray-200">{invoice.enterprise?.name || <span className="text-gray-400 italic">Sin empresa</span>}</span>
                           <TagBadges tags={invoice.enterprise_tags || []} size="sm" />
@@ -1987,7 +1987,7 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Estado Pago */}
-                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3 text-center">
                         {(() => {
                           const ps = invoice.payment_status || 'pendiente'
                           const meta = PAYMENT_STATUS_MAP[ps]
@@ -2002,7 +2002,7 @@ export const Invoices: React.FC = () => {
                             </span>
                           ) : (
                             <button
-                              onClick={() => navigate(`/cobros?invoice_id=${invoice.id}&amount=${remaining.toFixed(2)}`)}
+                              onClick={(e) => { e.stopPropagation(); navigate(`/cobros?invoice_id=${invoice.id}&amount=${remaining.toFixed(2)}`) }}
                               title="Click para registrar cobro"
                               className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 hover:scale-105 ${meta.color}`}
                             >
@@ -2018,12 +2018,12 @@ export const Invoices: React.FC = () => {
                       </td>
 
                       {/* Acciones */}
-                      <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-2 py-2">
                         <div className="flex items-center justify-center gap-2">
                           {vistaMode === 'venta_fiscal' && invoice.status === 'draft' && (
                             <PermissionGate module="invoices" action="authorize_afip">
                               <button
-                                onClick={() => handleAuthorize(invoice)}
+                                onClick={(e) => { e.stopPropagation(); handleAuthorize(invoice) }}
                                 disabled={authorizing === invoice.id}
                                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded transition-all ${
                                   authorizing === invoice.id
@@ -2045,7 +2045,7 @@ export const Invoices: React.FC = () => {
                           )}
                           {(invoice.status === 'authorized' || invoice.status === 'emitido') && (
                             <button
-                              onClick={() => handleDownloadPdf(invoice)}
+                              onClick={(e) => { e.stopPropagation(); handleDownloadPdf(invoice) }}
                               disabled={downloadingPdfId === invoice.id}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                             >
@@ -2069,9 +2069,21 @@ export const Invoices: React.FC = () => {
                               )}
                             </button>
                           )}
+                          {(invoice.status === 'authorized' || invoice.status === 'emitido') && invoice.payment_status !== 'pagado' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                window.location.href = `/cobros?invoice_id=${invoice.id}&amount=${invoice.total_amount}&enterprise_id=${invoice.enterprise?.id || ''}`
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded hover:bg-amber-700 transition-colors"
+                              title="Registrar recibo para esta factura"
+                            >
+                              Recibo
+                            </button>
+                          )}
                           {invoice.status === 'authorized' && (
                             <button
-                              onClick={() => handleGeneratePaymentLink(invoice.id)}
+                              onClick={(e) => { e.stopPropagation(); handleGeneratePaymentLink(invoice.id) }}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
                               title="Generar link de pago (MercadoPago)"
                             >
