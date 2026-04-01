@@ -16,13 +16,14 @@ interface Enterprise {
 
 // Default stages (fallback if API doesn't have stages yet)
 const DEFAULT_STAGES: CrmStage[] = [
-  { id: 'default-1', name: 'Contacto', color: '#3B82F6', order: 1, trigger_event: null, is_loss_stage: false },
-  { id: 'default-2', name: 'Cotizacion', color: '#8B5CF6', order: 2, trigger_event: 'quote_created', is_loss_stage: false },
+  { id: 'default-1', name: 'Contacto', color: '#6B7280', order: 1, trigger_event: null, is_loss_stage: false },
+  { id: 'default-2', name: 'Cotizacion', color: '#3B82F6', order: 2, trigger_event: 'quote_created', is_loss_stage: false },
   { id: 'default-3', name: 'Negociacion', color: '#EAB308', order: 3, trigger_event: 'quote_accepted', is_loss_stage: false },
-  { id: 'default-4', name: 'Pedido', color: '#F97316', order: 4, trigger_event: 'order_created', is_loss_stage: false },
-  { id: 'default-5', name: 'Entregado', color: '#06B6D4', order: 5, trigger_event: 'order_delivered', is_loss_stage: false },
-  { id: 'default-6', name: 'Cobrado', color: '#22C55E', order: 6, trigger_event: 'payment_received', is_loss_stage: false },
-  { id: 'default-7', name: 'Perdido', color: '#EF4444', order: 7, trigger_event: null, is_loss_stage: true },
+  { id: 'default-4', name: 'Pedido', color: '#8B5CF6', order: 4, trigger_event: 'order_created', is_loss_stage: false },
+  { id: 'default-5', name: 'Entregado', color: '#F59E0B', order: 5, trigger_event: 'order_delivered', is_loss_stage: false },
+  { id: 'default-6', name: 'Facturado', color: '#06B6D4', order: 6, trigger_event: 'invoice_authorized', is_loss_stage: false },
+  { id: 'default-7', name: 'Cobrado', color: '#22C55E', order: 7, trigger_event: 'payment_received', is_loss_stage: false },
+  { id: 'default-8', name: 'Perdido', color: '#EF4444', order: 8, trigger_event: null, is_loss_stage: true },
 ]
 
 class KanbanErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
@@ -57,7 +58,9 @@ export const Oportunidades: React.FC = () => {
   const [filterStage, setFilterStage] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
 
-  const loadData = useCallback(async () => {
+  const [bootstrapped, setBootstrapped] = useState(false)
+
+  const loadData = useCallback(async (skipBootstrap = false) => {
     try {
       setLoading(true)
       const [entRes, stagesRes, summaryRes] = await Promise.all([
@@ -73,18 +76,34 @@ export const Oportunidades: React.FC = () => {
       const loadedStages = Array.isArray(stagesRes) && stagesRes.length > 0 ? stagesRes : DEFAULT_STAGES
       setStages(loadedStages)
 
+      const activeDeals = summaryRes?.totals?.active_deals || 0
+
       if (summaryRes?.totals) {
         setSummary({
-          active_deals: summaryRes.totals.active_deals || 0,
+          active_deals: activeDeals,
           pipeline_value: summaryRes.totals.pipeline_value || 0,
         })
+      }
+
+      // Auto-bootstrap: if pipeline is empty and we haven't tried yet, sync from existing data
+      if (!skipBootstrap && !bootstrapped && activeDeals === 0) {
+        setBootstrapped(true)
+        try {
+          const result = await api.bootstrapCrmDeals()
+          if (result.created > 0 || result.updated > 0) {
+            toast.success(`Pipeline sincronizado: ${result.created} deals creados, ${result.updated} actualizados`)
+            // Reload data after bootstrap
+            await loadData(true)
+            return
+          }
+        } catch { /* non-critical */ }
       }
     } catch (err: any) {
       toast.error(err.message || 'Error al cargar datos')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [bootstrapped])
 
   useEffect(() => {
     loadData()
@@ -132,9 +151,9 @@ export const Oportunidades: React.FC = () => {
               try {
                 const result = await api.bootstrapCrmDeals()
                 if (result.created > 0 || result.updated > 0) {
-                  toast.success(`${result.created} deals creados, ${result.updated} actualizados desde pedidos existentes`)
+                  toast.success(`${result.created} deals creados, ${result.updated} actualizados`)
                 } else {
-                  toast.info('Todos los pedidos ya tienen deals asociados')
+                  toast.info('Pipeline ya sincronizado con todos los datos')
                 }
                 loadData()
               } catch (e: any) { toast.error(e.message) }
@@ -143,7 +162,7 @@ export const Oportunidades: React.FC = () => {
             <svg className="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            Sincronizar pedidos
+            Sincronizar datos
           </Button>
           <Button
             size="sm"

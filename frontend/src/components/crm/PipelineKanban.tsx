@@ -31,6 +31,7 @@ function getStageGradient(hex: string): { headerBg: string; headerText: string }
     '#8B5CF6': { headerBg: 'bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-950/40 dark:to-purple-900/30', headerText: 'text-purple-800 dark:text-purple-300' },
     '#EAB308': { headerBg: 'bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-950/40 dark:to-amber-900/30', headerText: 'text-amber-800 dark:text-amber-300' },
     '#F97316': { headerBg: 'bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-950/40 dark:to-orange-900/30', headerText: 'text-orange-800 dark:text-orange-300' },
+    '#F59E0B': { headerBg: 'bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-950/40 dark:to-amber-900/30', headerText: 'text-amber-800 dark:text-amber-300' },
     '#06B6D4': { headerBg: 'bg-gradient-to-r from-cyan-50 to-cyan-100 dark:from-cyan-950/40 dark:to-cyan-900/30', headerText: 'text-cyan-800 dark:text-cyan-300' },
     '#22C55E': { headerBg: 'bg-gradient-to-r from-green-50 to-green-100 dark:from-green-950/40 dark:to-green-900/30', headerText: 'text-green-800 dark:text-green-300' },
     '#EF4444': { headerBg: 'bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950/40 dark:to-red-900/30', headerText: 'text-red-800 dark:text-red-300' },
@@ -47,6 +48,7 @@ function getStageBorderColor(hex: string): string {
     '#8B5CF6': 'border-l-purple-500',
     '#EAB308': 'border-l-amber-500',
     '#F97316': 'border-l-orange-500',
+    '#F59E0B': 'border-l-amber-500',
     '#06B6D4': 'border-l-cyan-500',
     '#22C55E': 'border-l-green-500',
     '#EF4444': 'border-l-red-500',
@@ -103,14 +105,13 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
 
   const handleMoveForward = async (deal: Deal) => {
     const currentStageIndex = activeStages.findIndex(s =>
-      s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase()
+      s.id === deal.stage_id || s.id === deal.stage || s.name.toLowerCase() === deal.stage?.toLowerCase()
     )
     if (currentStageIndex < 0 || currentStageIndex >= activeStages.length - 1) return
     const nextStage = activeStages[currentStageIndex + 1]
 
     try {
-      // Try with stage_id first, fall back to name
-      await api.moveCrmDealStage(deal.id, nextStage.id || nextStage.name.toLowerCase())
+      await api.moveCrmDealStage(deal.id, nextStage.id)
       toast.success(`Movido a ${nextStage.name}`)
       await loadData()
     } catch (err: any) {
@@ -120,13 +121,13 @@ export const PipelineKanban: React.FC<PipelineKanbanProps> = ({ enterprises, sta
 
   const handleMoveBackward = async (deal: Deal) => {
     const currentStageIndex = activeStages.findIndex(s =>
-      s.id === deal.stage || s.name.toLowerCase() === deal.stage.toLowerCase()
+      s.id === deal.stage_id || s.id === deal.stage || s.name.toLowerCase() === deal.stage?.toLowerCase()
     )
     if (currentStageIndex <= 0) return
     const prevStage = activeStages[currentStageIndex - 1]
 
     try {
-      await api.moveCrmDealStage(deal.id, prevStage.id || prevStage.name.toLowerCase())
+      await api.moveCrmDealStage(deal.id, prevStage.id)
       toast.success(`Movido a ${prevStage.name}`)
       await loadData()
     } catch (err: any) {
