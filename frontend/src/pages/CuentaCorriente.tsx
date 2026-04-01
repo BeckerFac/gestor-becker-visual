@@ -457,34 +457,7 @@ export const CuentaCorriente: React.FC = () => {
       </div>
 
       {/* Alert banners for unlinked payments */}
-      {totalAdelantosRecibidos > 0 && (
-        <div className="flex items-start gap-3 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <svg className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-sm text-blue-700 dark:text-blue-300">
-            Hay recibos por <span className="font-semibold">{fmt(totalAdelantosRecibidos)}</span> sin factura asociada.
-            Estos recibos ya figuran en el balance pero no estan vinculados a ninguna factura de venta.{' '}
-            <Link to="/cobros" className="font-semibold underline hover:text-blue-900 dark:hover:text-blue-100">
-              Ir a Recibos para vincularlos
-            </Link>
-          </p>
-        </div>
-      )}
-      {totalAdelantosEntregados > 0 && (
-        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-          <svg className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-sm text-amber-700 dark:text-amber-300">
-            Hay ordenes de pago por <span className="font-semibold">{fmt(totalAdelantosEntregados)}</span> sin factura asociada.
-            Estas ordenes de pago ya figuran en el balance pero no estan vinculadas a ninguna factura de compra.{' '}
-            <Link to="/pagos" className="font-semibold underline hover:text-amber-900 dark:hover:text-amber-100">
-              Ir a Ordenes de Pago para vincularlas
-            </Link>
-          </p>
-        </div>
-      )}
+      {/* Banners de adelantos removidos por pedido del usuario */}
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
