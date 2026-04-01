@@ -969,612 +969,163 @@ export class PdfService {
     const companyCuit = this.formatCuit(cobro.company_cuit || '')
     const enterpriseCuit = this.formatCuit(cobro.enterprise_cuit || '')
 
-    // Totals
-    const totalPaymentMethods = paymentMethods.reduce(
-      (sum: number, pm: any) => sum + parseFloat(pm.amount || '0'), 0
-    )
-    const totalRetenciones = retenciones.reduce(
-      (sum: number, r: any) => sum + parseFloat(r.amount || '0'), 0
-    )
     const totalRecibo = parseFloat(cobro.total_amount || '0')
     const totalInLetters = this.numberToWords(totalRecibo)
 
-    // Payment method label + color mapping
-    const methodConfig: Record<string, { label: string; color: string; bg: string }> = {
-      'cash': { label: 'Efectivo', color: '#065f46', bg: '#d1fae5' },
-      'check': { label: 'Cheque', color: '#92400e', bg: '#fef3c7' },
-      'transfer': { label: 'Transferencia', color: '#1e40af', bg: '#dbeafe' },
-      'credit_card': { label: 'Tarjeta de Credito', color: '#7c3aed', bg: '#ede9fe' },
-      'debit_card': { label: 'Tarjeta de Debito', color: '#7c3aed', bg: '#ede9fe' },
-      'echeq': { label: 'E-Cheq', color: '#92400e', bg: '#fef3c7' },
-      'mercado_pago': { label: 'Mercado Pago', color: '#0e7490', bg: '#cffafe' },
-      'other': { label: 'Otro', color: '#374151', bg: '#f3f4f6' },
+    // Payment method labels
+    const methodLabels: Record<string, string> = {
+      'cash': 'Efectivo',
+      'check': 'Cheque',
+      'transfer': 'Transferencia',
+      'credit_card': 'Tarjeta de Credito',
+      'debit_card': 'Tarjeta de Debito',
+      'echeq': 'E-Cheq',
+      'mercado_pago': 'Mercado Pago',
+      'other': 'Otro',
     }
 
-    // Status badge
-    const totalApplied = linkedInvoices.reduce(
-      (sum: number, inv: any) => sum + parseFloat(inv.amount_applied || '0'), 0
-    )
-    let statusLabel = 'Sin vincular'
-    let statusColor = '#6b7280'
-    let statusBg = '#f3f4f6'
-    if (linkedInvoices.length > 0) {
-      if (Math.abs(totalApplied - totalRecibo) < 0.01) {
-        statusLabel = 'Completo'
-        statusColor = '#065f46'
-        statusBg = '#d1fae5'
-      } else {
-        statusLabel = 'Parcial'
-        statusColor = '#92400e'
-        statusBg = '#fef3c7'
-      }
-    }
-
-    const verifyUrl = `gestia.ai/r/${receiptNumber}`
     const now = new Date()
     const generatedDate = now.toLocaleDateString('es-AR')
-    const generatedTime = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+
+    // Build payment methods lines
+    const pmLines = paymentMethods.map((pm: any) => {
+      const label = methodLabels[pm.method] || 'Otro'
+      const bankPart = pm.bank_name ? ` — ${esc(pm.bank_name)}` : ''
+      const refValue = pm.reference || pm.check_number || ''
+      const refPart = refValue ? ` — Ref: ${esc(refValue)}` : ''
+      const desc = `${esc(label)}${bankPart}${refPart}`
+      const amount = `$ ${fmtMoney(parseFloat(pm.amount || '0'))}`
+      return `      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #111;">${desc}</td>
+        <td style="padding: 6px 0; font-size: 13px; color: #111; text-align: right; font-weight: 600; white-space: nowrap;">${amount}</td>
+      </tr>`
+    }).join('\n')
+
+    // Build retenciones lines
+    const retLines = retenciones.map((r: any) => {
+      const tipo = esc(r.type || r.retention_type || '-')
+      const jurisdiccion = r.jurisdiction ? ` ${esc(r.jurisdiction)}` : ''
+      const cert = r.certificate_number ? ` — Cert: ${esc(r.certificate_number)}` : ''
+      const desc = `${tipo}${jurisdiccion}${cert}`
+      const amount = `$ ${fmtMoney(parseFloat(r.amount || '0'))}`
+      return `      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #111;">${desc}</td>
+        <td style="padding: 6px 0; font-size: 13px; color: #111; text-align: right; font-weight: 600; white-space: nowrap;">${amount}</td>
+      </tr>`
+    }).join('\n')
+
+    // Build linked invoices rows
+    const invRows = linkedInvoices.map((inv: any) => {
+      const saldo = parseFloat(inv.saldo_pendiente || '0')
+      return `      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #111; font-weight: 600;">${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
+        <td style="padding: 6px 0; font-size: 13px; color: #333; text-align: right; white-space: nowrap;">$${fmtMoney(parseFloat(inv.total_amount || '0'))}</td>
+        <td style="padding: 6px 0; font-size: 13px; color: #333; text-align: right; white-space: nowrap;">$${fmtMoney(parseFloat(inv.amount_applied || '0'))}</td>
+        <td style="padding: 6px 0; font-size: 13px; color: #333; text-align: right; white-space: nowrap;">$${fmtMoney(saldo)}</td>
+      </tr>`
+    }).join('\n')
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Recibo X ${receiptNumber}</title>
-  <style>
-    @page { size: A4; margin: 8mm; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-      color: #1f2937; font-size: 11px; line-height: 1.5;
-      background: #fff;
-    }
-
-    .receipt-container {
-      max-width: 100%;
-    }
-
-    /* --- HEADER --- */
-    .header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      color: #fff;
-      padding: 24px 28px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      border-radius: 0 0 8px 8px;
-    }
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-    .logo-placeholder {
-      width: 48px; height: 48px;
-      background: rgba(255,255,255,0.15);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20px; font-weight: 700; color: #10b981;
-      letter-spacing: -1px;
-    }
-    .company-info-header h2 {
-      font-size: 15px; font-weight: 700; margin-bottom: 2px;
-      letter-spacing: 0.3px;
-    }
-    .company-info-header p {
-      font-size: 10px; color: rgba(255,255,255,0.7);
-      margin: 0; line-height: 1.4;
-    }
-    .header-right {
-      text-align: right;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
-    }
-    .badge-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .receipt-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.25);
-      border-radius: 6px;
-      padding: 6px 14px;
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-    }
-    .letter-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px; height: 32px;
-      background: #fff;
-      color: #1a1a2e;
-      font-size: 18px;
-      font-weight: 800;
-      border-radius: 5px;
-    }
-    .receipt-number {
-      font-size: 13px;
-      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      font-weight: 600;
-      color: rgba(255,255,255,0.9);
-      letter-spacing: 1px;
-    }
-    .receipt-date {
-      font-size: 10px;
-      color: rgba(255,255,255,0.6);
-    }
-    .status-badge {
-      display: inline-block;
-      padding: 2px 10px;
-      border-radius: 20px;
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    /* --- BODY --- */
-    .body-content {
-      padding: 20px 28px 16px;
-    }
-
-    /* Receptor card */
-    .receptor-card {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 16px;
-    }
-    .receptor-label {
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: #94a3b8;
-      margin-bottom: 8px;
-    }
-    .receptor-name {
-      font-size: 16px;
-      font-weight: 700;
-      color: #0f172a;
-      margin-bottom: 4px;
-    }
-    .receptor-details {
-      display: flex;
-      gap: 24px;
-      flex-wrap: wrap;
-    }
-    .receptor-detail {
-      font-size: 10px;
-      color: #64748b;
-    }
-    .receptor-detail strong {
-      color: #334155;
-    }
-
-    /* Amount hero */
-    .amount-hero {
-      background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
-      border: 1px solid #bbf7d0;
-      border-radius: 8px;
-      padding: 18px 24px;
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .amount-label {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #065f46;
-      margin-bottom: 4px;
-    }
-    .amount-value {
-      font-size: 28px;
-      font-weight: 800;
-      color: #059669;
-      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      letter-spacing: -0.5px;
-    }
-    .amount-words {
-      font-size: 10px;
-      color: #065f46;
-      font-style: italic;
-      max-width: 380px;
-      text-align: right;
-      line-height: 1.4;
-    }
-
-    /* Section headers */
-    .section-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-      margin-top: 4px;
-    }
-    .section-header::before {
-      content: '';
-      display: block;
-      width: 3px;
-      height: 14px;
-      background: #1a1a2e;
-      border-radius: 2px;
-    }
-    .section-title {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: #1a1a2e;
-    }
-
-    /* Tables */
-    .styled-table {
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin-bottom: 16px;
-      border-radius: 6px;
-      overflow: hidden;
-      border: 1px solid #e2e8f0;
-    }
-    .styled-table thead th {
-      background: #f1f5f9;
-      padding: 8px 12px;
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #475569;
-      text-align: left;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .styled-table thead th.right { text-align: right; }
-    .styled-table tbody tr { transition: background 0.15s; }
-    .styled-table tbody tr:nth-child(even) { background: #f8fafc; }
-    .styled-table tbody td {
-      padding: 8px 12px;
-      font-size: 11px;
-      color: #334155;
-      border-bottom: 1px solid #f1f5f9;
-    }
-    .styled-table tbody td.right {
-      text-align: right;
-      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      font-weight: 600;
-    }
-    .styled-table tbody td.center { text-align: center; }
-
-    /* Method pill */
-    .method-pill {
-      display: inline-block;
-      padding: 2px 10px;
-      border-radius: 20px;
-      font-size: 10px;
-      font-weight: 600;
-    }
-
-    /* Totals */
-    .totals-section {
-      margin-top: 8px;
-      margin-bottom: 16px;
-    }
-    .totals-row {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      padding: 6px 16px;
-    }
-    .totals-label {
-      font-size: 11px;
-      color: #64748b;
-      min-width: 200px;
-      text-align: right;
-      padding-right: 20px;
-    }
-    .totals-amount {
-      font-size: 11px;
-      font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-      font-weight: 600;
-      min-width: 130px;
-      text-align: right;
-      color: #334155;
-    }
-    .totals-grand {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      border-radius: 6px;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      margin-top: 4px;
-    }
-    .totals-grand .totals-label {
-      color: rgba(255,255,255,0.8);
-      font-size: 12px;
-      font-weight: 600;
-    }
-    .totals-grand .totals-amount {
-      color: #fff;
-      font-size: 16px;
-      font-weight: 700;
-    }
-
-    /* Observations */
-    .observations-box {
-      background: #fffbeb;
-      border: 1px solid #fde68a;
-      border-radius: 6px;
-      padding: 12px 16px;
-      margin-bottom: 16px;
-    }
-    .observations-label {
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #92400e;
-      margin-bottom: 4px;
-    }
-    .observations-text {
-      font-size: 11px;
-      color: #78350f;
-      line-height: 1.5;
-    }
-
-    /* QR / Verification */
-    .verify-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      padding: 10px 16px;
-      margin-bottom: 16px;
-    }
-    .qr-placeholder {
-      width: 52px; height: 52px;
-      background: #1a1a2e;
-      border-radius: 4px;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-    }
-    .qr-inner {
-      width: 44px; height: 44px;
-      background: #fff;
-      border-radius: 2px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 7px; color: #94a3b8;
-    }
-    .verify-text {
-      font-size: 9px;
-      color: #64748b;
-      line-height: 1.5;
-    }
-    .verify-text strong {
-      color: #1a1a2e;
-      font-size: 10px;
-    }
-
-    /* Footer */
-    .footer {
-      border-top: 1px solid #e2e8f0;
-      padding: 12px 28px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .footer-left {
-      font-size: 9px;
-      color: #94a3b8;
-    }
-    .footer-right {
-      font-size: 9px;
-      color: #94a3b8;
-      text-align: right;
-    }
-    .footer a {
-      color: #059669;
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    /* Divider */
-    .section-divider {
-      height: 1px;
-      background: #e2e8f0;
-      margin: 16px 0;
-    }
-  </style>
 </head>
-<body>
-<div class="receipt-container">
+<body style="margin: 0; padding: 0; background: #fff; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.6; color: #111;">
+<div style="max-width: 700px; margin: 0 auto; padding: 32px 28px;">
 
   <!-- HEADER -->
-  <div class="header">
-    <div class="header-left">
-      <div class="logo-placeholder">G</div>
-      <div class="company-info-header">
-        <h2>${esc(cobro.company_name)}</h2>
-        <p>CUIT: ${esc(companyCuit)}${cobro.company_address ? ' | ' + esc(cobro.company_address) : ''}</p>
-        <p>${esc(cobro.company_tax_condition || 'Responsable Inscripto')}</p>
-      </div>
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+    <div>
+      <div style="font-size: 16px; font-weight: 700; color: #111;">${esc(cobro.company_name)}</div>
+      <div style="font-size: 12px; color: #333; margin-top: 2px;">CUIT: ${esc(companyCuit)}${cobro.company_address ? ' | ' + esc(cobro.company_address) : ''}</div>
+      <div style="font-size: 12px; color: #555;">${esc(cobro.company_tax_condition || 'Responsable Inscripto')}</div>
     </div>
-    <div class="header-right">
-      <div class="badge-row">
-        <div class="receipt-badge">RECIBO</div>
-        <div class="letter-badge">X</div>
-      </div>
-      <div class="receipt-number">N${String.fromCharCode(176)} ${receiptNumber}</div>
-      <div class="receipt-date">Fecha: ${receiptDate}</div>
-      <div class="status-badge" style="color: ${statusColor}; background: ${statusBg};">${statusLabel}</div>
+    <div style="text-align: right;">
+      <div style="font-size: 22px; font-weight: 800; color: #111; letter-spacing: 1px;">RECIBO X</div>
+      <div style="font-size: 15px; font-weight: 600; color: #111; margin-top: 2px;">N${String.fromCharCode(176)} ${receiptNumber}</div>
+      <div style="font-size: 12px; color: #333; margin-top: 2px;">Fecha: ${receiptDate}</div>
     </div>
   </div>
 
-  <div class="body-content">
+  <!-- SEPARATOR -->
+  <div style="border-bottom: 2px solid #333; margin: 16px 0;"></div>
 
-    <!-- RECEPTOR -->
-    <div class="receptor-card">
-      <div class="receptor-label">Recibimos de</div>
-      <div class="receptor-name">${esc(cobro.enterprise_name || '-')}</div>
-      <div class="receptor-details">
-        <div class="receptor-detail"><strong>CUIT:</strong> ${esc(enterpriseCuit || '-')}</div>
-        ${cobro.enterprise_address ? `<div class="receptor-detail"><strong>Domicilio:</strong> ${esc(cobro.enterprise_address)}</div>` : ''}
-        ${cobro.enterprise_tax_condition ? `<div class="receptor-detail"><strong>Cond. IVA:</strong> ${esc(cobro.enterprise_tax_condition)}</div>` : ''}
-      </div>
-    </div>
-
-    <!-- AMOUNT HERO -->
-    <div class="amount-hero">
-      <div>
-        <div class="amount-label">La suma de</div>
-        <div class="amount-value">$ ${fmtMoney(totalRecibo)}</div>
-      </div>
-      <div class="amount-words">${esc(totalInLetters)}</div>
-    </div>
-
-    <!-- FORMAS DE PAGO -->
-    ${paymentMethods.length > 0 ? `
-    <div class="section-header"><span class="section-title">Formas de Pago</span></div>
-    <table class="styled-table">
-      <thead>
-        <tr>
-          <th style="width: 28%;">Metodo</th>
-          <th style="width: 22%;">Banco</th>
-          <th style="width: 28%;">Referencia</th>
-          <th class="right" style="width: 22%;">Monto</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${paymentMethods.map((pm: any) => {
-          const cfg = methodConfig[pm.method] || methodConfig['other']
-          return `
-        <tr>
-          <td><span class="method-pill" style="color: ${cfg.color}; background: ${cfg.bg};">${esc(cfg.label)}</span></td>
-          <td>${esc(pm.bank_name || '-')}</td>
-          <td style="font-size: 10px; color: #64748b;">${esc(pm.reference || pm.check_number || '-')}</td>
-          <td class="right">$ ${fmtMoney(parseFloat(pm.amount || '0'))}</td>
-        </tr>`}).join('')}
-      </tbody>
-    </table>
-    ` : ''}
-
-    <!-- RETENCIONES -->
-    ${retenciones.length > 0 ? `
-    <div class="section-header"><span class="section-title">Retenciones</span></div>
-    <table class="styled-table">
-      <thead>
-        <tr>
-          <th style="width: 18%;">Tipo</th>
-          <th style="width: 20%;">Jurisdiccion</th>
-          <th style="width: 22%;">N${String.fromCharCode(176)} Certificado</th>
-          <th style="width: 18%;">Fecha</th>
-          <th class="right" style="width: 22%;">Importe</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${retenciones.map((r: any) => `
-        <tr>
-          <td><span class="method-pill" style="color: #7c3aed; background: #ede9fe;">${esc(r.type || r.retention_type || '-')}</span></td>
-          <td>${esc(r.jurisdiction || '-')}</td>
-          <td style="font-size: 10px; color: #64748b;">${esc(r.certificate_number || '-')}</td>
-          <td class="center">${r.date ? new Date(r.date).toLocaleDateString('es-AR') : '-'}</td>
-          <td class="right">$ ${fmtMoney(parseFloat(r.amount || '0'))}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-    ` : ''}
-
-    <!-- FACTURAS CANCELADAS -->
-    ${linkedInvoices.length > 0 ? `
-    <div class="section-header"><span class="section-title">Facturas Canceladas</span></div>
-    <table class="styled-table">
-      <thead>
-        <tr>
-          <th style="width: 28%;">Factura</th>
-          <th class="right" style="width: 24%;">Total Factura</th>
-          <th class="right" style="width: 24%;">Aplicado</th>
-          <th class="right" style="width: 24%;">Saldo Pendiente</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${linkedInvoices.map((inv: any) => {
-          const saldo = parseFloat(inv.saldo_pendiente || '0')
-          const saldoColor = saldo <= 0.01 ? '#059669' : '#dc2626'
-          return `
-        <tr>
-          <td style="font-weight: 600;">${esc(inv.invoice_type || '')} ${esc(String(inv.invoice_number || ''))}</td>
-          <td class="right">$ ${fmtMoney(parseFloat(inv.total_amount || '0'))}</td>
-          <td class="right" style="color: #059669;">$ ${fmtMoney(parseFloat(inv.amount_applied || '0'))}</td>
-          <td class="right" style="color: ${saldoColor};">$ ${fmtMoney(saldo)}</td>
-        </tr>`}).join('')}
-      </tbody>
-    </table>
-    ` : ''}
-
-    <!-- TOTALS -->
-    <div class="totals-section">
-      ${paymentMethods.length > 0 ? `
-      <div class="totals-row">
-        <span class="totals-label">Total Formas de Pago:</span>
-        <span class="totals-amount">$ ${fmtMoney(totalPaymentMethods)}</span>
-      </div>
-      ` : ''}
-      ${retenciones.length > 0 ? `
-      <div class="totals-row">
-        <span class="totals-label">Total Retenciones:</span>
-        <span class="totals-amount">$ ${fmtMoney(totalRetenciones)}</span>
-      </div>
-      ` : ''}
-      <div class="totals-grand">
-        <span class="totals-label">TOTAL RECIBO:</span>
-        <span class="totals-amount">$ ${fmtMoney(totalRecibo)}</span>
-      </div>
-    </div>
-
-    <!-- OBSERVATIONS -->
-    ${(cobro.notes || cobro.observations) ? `
-    <div class="observations-box">
-      <div class="observations-label">Observaciones</div>
-      <div class="observations-text">${esc(cobro.notes || cobro.observations || '')}</div>
-    </div>
-    ` : ''}
-
-    <!-- QR VERIFICATION -->
-    <div class="verify-bar">
-      <div class="qr-placeholder">
-        <div class="qr-inner">QR</div>
-      </div>
-      <div class="verify-text">
-        Verificar autenticidad de este recibo en:<br>
-        <strong>${verifyUrl}</strong>
-      </div>
-    </div>
-
+  <!-- RECEPTOR -->
+  <div style="margin-bottom: 4px;">
+    <div style="font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Recibimos de:</div>
+    <div style="font-size: 18px; font-weight: 700; color: #111;">${esc(cobro.enterprise_name || '-')}</div>
+    <div style="font-size: 12px; color: #333; margin-top: 4px;">CUIT: ${esc(enterpriseCuit || '-')}${cobro.enterprise_address ? ' | ' + esc(cobro.enterprise_address) : ''}${cobro.enterprise_tax_condition ? ' | ' + esc(cobro.enterprise_tax_condition) : ''}</div>
   </div>
+
+  <!-- AMOUNT -->
+  <div style="margin: 20px 0;">
+    <div style="font-size: 12px; color: #555; margin-bottom: 4px;">La suma de pesos: ${esc(totalInLetters)}</div>
+    <div style="text-align: right; font-size: 28px; font-weight: 800; color: #047857;">$ ${fmtMoney(totalRecibo)}</div>
+  </div>
+
+  <!-- SEPARATOR -->
+  <div style="border-bottom: 2px solid #333; margin: 16px 0;"></div>
+
+  <!-- FORMAS DE PAGO -->
+  ${paymentMethods.length > 0 ? `
+  <div style="margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Formas de pago:</div>
+    <table style="width: 100%; border-collapse: collapse;">
+${pmLines}
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- RETENCIONES -->
+  ${retenciones.length > 0 ? `
+  <div style="margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Retenciones sufridas:</div>
+    <table style="width: 100%; border-collapse: collapse;">
+${retLines}
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- FACTURAS CANCELADAS -->
+  ${linkedInvoices.length > 0 ? `
+  <div style="margin-bottom: 20px;">
+    <div style="font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Comprobantes cancelados:</div>
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid #e5e5e5;">
+          <th style="padding: 6px 0; font-size: 11px; color: #555; text-align: left; font-weight: 600;">Comprobante</th>
+          <th style="padding: 6px 0; font-size: 11px; color: #555; text-align: right; font-weight: 600;">Total</th>
+          <th style="padding: 6px 0; font-size: 11px; color: #555; text-align: right; font-weight: 600;">Aplicado</th>
+          <th style="padding: 6px 0; font-size: 11px; color: #555; text-align: right; font-weight: 600;">Pendiente</th>
+        </tr>
+      </thead>
+      <tbody>
+${invRows}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <!-- SEPARATOR -->
+  <div style="border-bottom: 2px solid #333; margin: 16px 0;"></div>
+
+  <!-- TOTAL -->
+  <div style="text-align: right; margin-bottom: 24px;">
+    <span style="font-size: 14px; font-weight: 700; color: #111; margin-right: 16px;">TOTAL RECIBO:</span>
+    <span style="font-size: 22px; font-weight: 800; color: #047857;">$ ${fmtMoney(totalRecibo)}</span>
+  </div>
+
+  ${(cobro.notes || cobro.observations) ? `
+  <!-- OBSERVATIONS -->
+  <div style="margin-bottom: 20px; font-size: 12px; color: #333;">
+    <span style="font-weight: 600;">Obs:</span> ${esc(cobro.notes || cobro.observations || '')}
+  </div>
+  ` : ''}
 
   <!-- FOOTER -->
-  <div class="footer">
-    <div class="footer-left">
-      Documento no fiscal | Generado el ${generatedDate} a las ${generatedTime}
-    </div>
-    <div class="footer-right">
-      <a href="https://gestia.ai">gestia.ai</a> | soporte@gestia.ai
-    </div>
+  <div style="border-top: 1px solid #e5e5e5; padding-top: 12px; font-size: 11px; color: #555; text-align: center;">
+    Documento no fiscal | Generado el ${generatedDate}
   </div>
 
 </div>
