@@ -534,6 +534,9 @@ export const Invoices: React.FC = () => {
 
   useEffect(() => {
     if (!pendingExpandId || invoices.length === 0) return
+    const targetId = pendingExpandId
+    setPendingExpandId(null)
+    setSearchParams({}, { replace: true })
 
     // Clear all filters so the target invoice is visible
     setFilterEnterprise('')
@@ -544,17 +547,23 @@ export const Invoices: React.FC = () => {
     setDateTo('')
 
     // Find the page where this invoice lives (in unfiltered list)
-    const idx = invoices.findIndex((inv: any) => inv.id === pendingExpandId)
+    const idx = invoices.findIndex((inv: any) => inv.id === targetId)
     if (idx >= 0) {
       const targetPage = Math.floor(idx / pageSize) + 1
       setCurrentPage(targetPage)
     }
-    setExpandedInvoiceId(pendingExpandId)
-    setSearchParams({}, { replace: true })
-    setPendingExpandId(null)
+    setExpandedInvoiceId(targetId)
+
+    // Load invoice details (same as onClick handler)
+    if (!invoiceDetails[targetId]) {
+      api.getInvoiceDetail(targetId)
+        .then(detail => setInvoiceDetails(prev => ({ ...prev, [targetId]: detail })))
+        .catch(() => { /* ignore */ })
+    }
+
     // Scroll after page change renders
     setTimeout(() => {
-      const el = document.getElementById(`invoice-row-${pendingExpandId}`)
+      const el = document.getElementById(`invoice-row-${targetId}`)
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 400)
   }, [pendingExpandId, invoices.length]) // eslint-disable-line react-hooks/exhaustive-deps

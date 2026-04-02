@@ -145,12 +145,34 @@ export class CollectionsService {
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
 
+      // Only update payment_method, payment_status is auto-calculated
       await db.execute(sql`
-        UPDATE orders SET payment_status = 'pagado', payment_method = ${data.payment_method || 'efectivo'}, updated_at = NOW()
+        UPDATE orders SET payment_method = ${data.payment_method || 'efectivo'}, updated_at = NOW()
         WHERE id = ${orderId}
       `);
 
-      return { id: orderId, payment_status: 'pagado', payment_method: data.payment_method };
+      // Recalculate payment_status from actual cobro_invoice_applications data
+      const calcResult = await db.execute(sql`
+        SELECT
+          CAST(o.total_amount AS decimal) as order_total,
+          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
+        FROM orders o
+        LEFT JOIN invoices i ON (i.order_id = o.id OR i.id IN (SELECT io.invoice_id FROM invoice_orders io WHERE io.order_id = o.id)) AND i.status != 'cancelled'
+        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        WHERE o.id = ${orderId}
+        GROUP BY o.id, o.total_amount
+      `);
+      const calcRow = ((calcResult as any).rows || [])[0];
+      let status = 'pendiente';
+      if (calcRow) {
+        const orderTotal = parseFloat(calcRow.order_total);
+        const totalPaid = parseFloat(calcRow.total_paid);
+        if (totalPaid >= orderTotal && orderTotal > 0) status = 'pagado';
+        else if (totalPaid > 0) status = 'parcial';
+      }
+      await db.execute(sql`UPDATE orders SET payment_status = ${status} WHERE id = ${orderId}`);
+
+      return { id: orderId, payment_status: status, payment_method: data.payment_method };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to mark order as paid');
