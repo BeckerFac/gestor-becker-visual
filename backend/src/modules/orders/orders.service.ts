@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -814,7 +814,6 @@ export class OrdersService {
       if (invoiceIds.length > 0) {
         // Build parameterized IN clause
         const placeholders = invoiceIds.map((_: any, i: number) => `$${i + 2}`).join(',');
-        const pool = (await import('../../config/db')).pool;
         const receiptsResult = await pool.query(
           `SELECT DISTINCT c.id, c.receipt_number, c.total_amount, c.payment_date, c.payment_method,
             c.notes, c.status as cobro_status,
