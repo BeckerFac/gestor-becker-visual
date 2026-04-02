@@ -2264,7 +2264,7 @@ export const Invoices: React.FC = () => {
                                           <tr key={c.cobro_id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors">
                                             <td className="py-1">
                                               <button
-                                                onClick={() => navigate(`/recibos?expand=${c.cobro_id}`)}
+                                                onClick={() => navigate(`/cobros?expand=${c.cobro_id}`)}
                                                 className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
                                               >
                                                 #{String(c.receipt_number || 0).padStart(4, '0')}
@@ -2275,7 +2275,7 @@ export const Invoices: React.FC = () => {
                                             <td className="py-1 text-right text-green-600 font-medium">${parseFloat(c.amount_applied || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                                             <td className="py-1 text-right">
                                               <button
-                                                onClick={() => navigate(`/recibos?expand=${c.cobro_id}`)}
+                                                onClick={() => navigate(`/cobros?expand=${c.cobro_id}`)}
                                                 className="text-xs text-blue-500 hover:text-blue-700"
                                               >
                                                 Ver
@@ -2422,7 +2422,7 @@ export const Invoices: React.FC = () => {
               cobros.map((c: any) => (
                 <button
                   key={c.cobro_id}
-                  onClick={() => { setContextMenu(null); navigate(`/recibos?expand=${c.cobro_id}`) }}
+                  onClick={() => { setContextMenu(null); navigate(`/cobros?expand=${c.cobro_id}`) }}
                   className="w-full text-left px-4 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between"
                 >
                   <span>#{String(c.receipt_number || 0).padStart(4, '0')} - {c.payment_method}</span>

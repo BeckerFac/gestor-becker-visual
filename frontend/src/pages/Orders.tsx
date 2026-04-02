@@ -2436,7 +2436,7 @@ export const Orders: React.FC = () => {
             items.push({
               id: `rec-${rec.id}`,
               label: `  #${String(rec.receipt_number || 0).padStart(4, '0')}  ${formatCurrency(parseFloat(rec.total_amount || '0'))}  ${rec.payment_method || ''}`,
-              onClick: () => navigate(`/recibos?expand=${rec.id}`),
+              onClick: () => navigate(`/cobros?expand=${rec.id}`),
             })
           }
         } else if (!ctx) {

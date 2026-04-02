@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -239,6 +239,7 @@ function restorePendingCobros() {
 }
 
 export const Cobros: React.FC = () => {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const invoiceParamProcessed = useRef(false)
 
@@ -1656,8 +1657,15 @@ export const Cobros: React.FC = () => {
                                     const total = parseFloat(inv.invoice_total || '0')
                                     const applied = parseFloat(inv.amount || '0')
                                     return (
-                                      <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700">
-                                        <td className="py-1">{inv.invoice_type || ''} {inv.invoice_number}</td>
+                                      <tr key={inv.id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/30">
+                                        <td className="py-1">
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.invoice_id}`) }}
+                                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                          >
+                                            {inv.invoice_type || ''} {inv.invoice_number}
+                                          </button>
+                                        </td>
                                         <td className="py-1 text-right">${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                                         <td className="py-1 text-right text-green-600">${applied.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                                         <td className="py-1 text-right text-amber-600">${(total - applied > 0.01 ? (total - applied) : 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
