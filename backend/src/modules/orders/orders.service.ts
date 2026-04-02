@@ -794,70 +794,53 @@ export class OrdersService {
    */
   async getOrderContextData(companyId: string, orderId: string) {
     try {
-      // Get all invoices linked to this order
-      const invoicesResult = await db.execute(sql`
-        SELECT DISTINCT i.id, i.invoice_number, i.invoice_type, i.status, i.total_amount,
+      // Ensure invoice_orders table exists
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS invoice_orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+        order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        UNIQUE(invoice_id, order_id)
+      )`).catch(() => {});
+
+      // Get all invoices linked to this order (N:N + legacy)
+      const invoicesResult = await pool.query(
+        `SELECT DISTINCT i.id, i.invoice_number, i.invoice_type, i.status,
+          CAST(i.total_amount AS text) as total_amount,
           i.fiscal_type, i.payment_status,
-          (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta
+          CASE WHEN i.afip_response IS NOT NULL
+            THEN (i.afip_response->'FeCabResp'->>'PtoVta')::int
+            ELSE NULL
+          END as punto_venta
         FROM invoices i
         LEFT JOIN invoice_orders io ON io.invoice_id = i.id
-        WHERE i.company_id = ${companyId}
-          AND (i.order_id = ${orderId} OR io.order_id = ${orderId})
+        WHERE i.company_id = $1
+          AND (i.order_id = $2 OR io.order_id = $2)
           AND i.status != 'cancelled'
-        ORDER BY i.created_at ASC
-      `);
-      const invoices = (invoicesResult as any).rows || [];
+        ORDER BY i.created_at ASC`,
+        [companyId, orderId]
+      );
+      const invoices = invoicesResult.rows || [];
 
       // Get all receipts (cobros) applied to those invoices
       const invoiceIds = invoices.map((inv: any) => inv.id);
       let receipts: any[] = [];
       if (invoiceIds.length > 0) {
-        // Build parameterized IN clause
         const placeholders = invoiceIds.map((_: any, i: number) => `$${i + 2}`).join(',');
         const receiptsResult = await pool.query(
-          `SELECT DISTINCT c.id, c.receipt_number, c.total_amount, c.payment_date, c.payment_method,
-            c.notes, c.status as cobro_status,
-            cia.invoice_id, cia.amount_applied,
-            i.invoice_number, i.invoice_type
+          `SELECT DISTINCT ON (c.id) c.id, c.receipt_number,
+            CAST(c.total_amount AS text) as total_amount,
+            c.payment_date, c.payment_method, c.status as cobro_status
           FROM cobro_invoice_applications cia
           JOIN cobros c ON c.id = cia.cobro_id
-          JOIN invoices i ON i.id = cia.invoice_id
           WHERE c.company_id = $1
             AND cia.invoice_id IN (${placeholders})
-          ORDER BY c.payment_date DESC`,
+          ORDER BY c.id, c.payment_date DESC`,
           [companyId, ...invoiceIds]
         );
         receipts = receiptsResult.rows || [];
       }
 
-      // Deduplicate receipts (same cobro can appear for multiple invoices)
-      const uniqueReceipts = new Map<string, any>();
-      for (const r of receipts) {
-        if (!uniqueReceipts.has(r.id)) {
-          uniqueReceipts.set(r.id, {
-            id: r.id,
-            receipt_number: r.receipt_number,
-            total_amount: r.total_amount,
-            payment_date: r.payment_date,
-            payment_method: r.payment_method,
-            cobro_status: r.cobro_status,
-          });
-        }
-      }
-
-      return {
-        invoices: invoices.map((inv: any) => ({
-          id: inv.id,
-          invoice_number: inv.invoice_number,
-          invoice_type: inv.invoice_type,
-          status: inv.status,
-          total_amount: inv.total_amount,
-          fiscal_type: inv.fiscal_type,
-          payment_status: inv.payment_status,
-          punto_venta: inv.punto_venta,
-        })),
-        receipts: Array.from(uniqueReceipts.values()),
-      };
+      return { invoices, receipts };
     } catch (error) {
       console.error('Get order context data error:', error);
       return { invoices: [], receipts: [] };
