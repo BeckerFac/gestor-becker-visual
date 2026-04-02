@@ -424,6 +424,12 @@ export const Invoices: React.FC = () => {
     const x = Math.min(e.clientX, window.innerWidth - 200)
     const y = Math.min(e.clientY, window.innerHeight - 120)
     setContextMenu({ x, y, invoice })
+    // Eagerly load invoice details for context menu (cobros, saldo)
+    if (!invoiceDetails[invoice.id]) {
+      api.getInvoiceDetail(invoice.id)
+        .then(detail => setInvoiceDetails(prev => ({ ...prev, [invoice.id]: detail })))
+        .catch(() => {})
+    }
   }
 
   // ---- Data Loading ----
@@ -2211,32 +2217,80 @@ export const Invoices: React.FC = () => {
                                   })()}
                                 </div>
 
+                                {/* Totales: Neto + IVA + Total */}
+                                {(() => {
+                                  const detail = invoiceDetails[invoice.id]
+                                  const allItems = detail?.items || []
+                                  const neto = allItems.reduce((s: number, it: any) => s + parseFloat(it.quantity || 0) * parseFloat(it.unit_price || 0), 0)
+                                  const iva = allItems.reduce((s: number, it: any) => {
+                                    const rate = parseFloat(it.vat_rate || '21')
+                                    return s + parseFloat(it.quantity || 0) * parseFloat(it.unit_price || 0) * rate / 100
+                                  }, 0)
+                                  const total = neto + iva
+                                  return (
+                                    <div className="flex justify-end">
+                                      <div className="w-64 space-y-0.5 text-sm">
+                                        <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                                          <span>Neto</span>
+                                          <span>${neto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                                          <span>IVA</span>
+                                          <span>${iva.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                        <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200 border-t pt-0.5">
+                                          <span>Total</span>
+                                          <span>${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                })()}
+
                                 {/* Recibos vinculados */}
-                                {invoiceDetails[invoice.id].cobros_aplicados?.length > 0 && (
-                                  <div>
-                                    <h4 className="text-sm font-semibold mb-2">Recibos Vinculados</h4>
+                                <div>
+                                  <h4 className="text-sm font-semibold mb-2">Recibos Vinculados</h4>
+                                  {(invoiceDetails[invoice.id].cobros_aplicados?.length || 0) > 0 ? (
                                     <table className="w-full text-sm">
                                       <thead><tr className="text-xs text-gray-500">
                                         <th className="text-left pb-1">Recibo</th>
                                         <th className="text-left pb-1">Fecha</th>
                                         <th className="text-left pb-1">Metodo</th>
                                         <th className="text-right pb-1">Aplicado</th>
+                                        <th className="text-right pb-1"></th>
                                       </tr></thead>
                                       <tbody>
                                         {invoiceDetails[invoice.id].cobros_aplicados.map((c: any) => (
-                                          <tr key={c.cobro_id} className="border-t border-gray-100 dark:border-gray-700">
-                                            <td className="py-1">#{c.receipt_number}</td>
+                                          <tr key={c.cobro_id} className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors">
+                                            <td className="py-1">
+                                              <button
+                                                onClick={() => navigate(`/recibos?expand=${c.cobro_id}`)}
+                                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                              >
+                                                #{String(c.receipt_number || 0).padStart(4, '0')}
+                                              </button>
+                                            </td>
                                             <td className="py-1">{c.payment_date ? new Date(c.payment_date).toLocaleDateString('es-AR') : '-'}</td>
                                             <td className="py-1 capitalize">{c.payment_method}</td>
                                             <td className="py-1 text-right text-green-600 font-medium">${parseFloat(c.amount_applied || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                            <td className="py-1 text-right">
+                                              <button
+                                                onClick={() => navigate(`/recibos?expand=${c.cobro_id}`)}
+                                                className="text-xs text-blue-500 hover:text-blue-700"
+                                              >
+                                                Ver
+                                              </button>
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
                                     </table>
-                                  </div>
-                                )}
+                                  ) : (
+                                    <p className="text-xs text-gray-400 italic">Sin recibos vinculados a esta factura</p>
+                                  )}
+                                </div>
 
-                                {/* Saldo pendiente */}
+                                {/* Empresa + Saldo pendiente */}
                                 <div className="flex justify-between items-center pt-2 border-t">
                                   <div className="text-sm">
                                     <span className="font-medium">{invoiceDetails[invoice.id].enterprise?.name}</span>
@@ -2308,53 +2362,91 @@ export const Invoices: React.FC = () => {
       </>}
 
       {/* Context menu */}
-      {contextMenu && (
-        <div
-          className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px]"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <button
-            onClick={() => {
-              const inv = contextMenu.invoice
-              const totalAmount = parseFloat(inv.total_amount || '0')
-              const totalCobrado = parseFloat(inv.total_cobrado || '0')
-              const remaining = Math.max(0, totalAmount - totalCobrado)
-              setContextMenu(null)
-              navigate(`/cobros?invoice_id=${inv.id}&amount=${remaining.toFixed(2)}`)
-            }}
-            className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+      {contextMenu && (() => {
+        const inv = contextMenu.invoice
+        const detail = invoiceDetails[inv.id]
+        const cobros = detail?.cobros_aplicados || []
+        const saldo = detail?.saldo_pendiente ?? parseFloat(inv.total_amount || '0')
+
+        return (
+          <div
+            className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[220px]"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-            <span className="text-green-600">$</span> Registrar Recibo
-          </button>
-          <button
-            onClick={() => {
-              const inv = contextMenu.invoice
-              setContextMenu(null)
-              setExpandedInvoiceId(prev => prev === inv.id ? null : inv.id)
-              if (!invoiceDetails[inv.id]) {
-                api.getInvoiceDetail(inv.id).then(detail => {
-                  setInvoiceDetails(prev => ({ ...prev, [inv.id]: detail }))
-                }).catch(() => {})
-              }
-            }}
-            className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-          >
-            <span className="text-blue-600">&#9660;</span> Ver Detalle
-          </button>
-          {(contextMenu.invoice.status === 'authorized' || contextMenu.invoice.status === 'emitido') && (
+            {/* Registrar Recibo */}
             <button
               onClick={() => {
-                const inv = contextMenu.invoice
                 setContextMenu(null)
-                handleDownloadPdf(inv)
+                navigate(`/cobros?invoice_id=${inv.id}&amount=${saldo.toFixed(2)}`)
               }}
               className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
             >
-              <span className="text-blue-600">&#8595;</span> Descargar PDF
+              <span className="text-green-600">$</span> Registrar Recibo
             </button>
-          )}
-        </div>
-      )}
+
+            {/* Ver Detalle */}
+            <button
+              onClick={() => {
+                setContextMenu(null)
+                setExpandedInvoiceId(prev => prev === inv.id ? null : inv.id)
+                if (!invoiceDetails[inv.id]) {
+                  api.getInvoiceDetail(inv.id).then(d => {
+                    setInvoiceDetails(prev => ({ ...prev, [inv.id]: d }))
+                  }).catch(() => {})
+                }
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+            >
+              <span className="text-blue-600">&#9660;</span> Ver Detalle
+            </button>
+
+            {/* Descargar PDF */}
+            {(inv.status === 'authorized' || inv.status === 'emitido') && (
+              <button
+                onClick={() => { setContextMenu(null); handleDownloadPdf(inv) }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-blue-600">&#8595;</span> Descargar PDF
+              </button>
+            )}
+
+            {/* Separator */}
+            <div className="border-t dark:border-gray-700 my-1" />
+
+            {/* Recibos header */}
+            <div className="px-4 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+              Recibos vinculados
+            </div>
+
+            {cobros.length > 0 ? (
+              cobros.map((c: any) => (
+                <button
+                  key={c.cobro_id}
+                  onClick={() => { setContextMenu(null); navigate(`/recibos?expand=${c.cobro_id}`) }}
+                  className="w-full text-left px-4 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between"
+                >
+                  <span>#{String(c.receipt_number || 0).padStart(4, '0')} - {c.payment_method}</span>
+                  <span className="text-green-600 font-medium text-xs">${parseFloat(c.amount_applied || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                </button>
+              ))
+            ) : detail ? (
+              <div className="px-4 py-1.5 text-xs text-gray-400 italic">Sin recibos</div>
+            ) : (
+              <div className="px-4 py-1.5 text-xs text-gray-400 italic">Cargando...</div>
+            )}
+
+            {/* Saldo pendiente */}
+            {detail && (
+              <div className="px-4 py-1.5 border-t dark:border-gray-700 flex justify-between text-xs">
+                <span className="text-gray-500">Saldo pendiente</span>
+                <span className={saldo > 0.01 ? 'font-bold text-amber-600' : 'font-bold text-green-600'}>
+                  ${saldo.toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                </span>
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
