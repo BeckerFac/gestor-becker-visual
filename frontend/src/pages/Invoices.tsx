@@ -526,6 +526,39 @@ export const Invoices: React.FC = () => {
     handlePreload()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- Expand from Orders (navigate to specific invoice) ----
+  const [pendingExpandId, setPendingExpandId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('expand')
+  })
+
+  useEffect(() => {
+    if (!pendingExpandId || invoices.length === 0) return
+
+    // Clear all filters so the target invoice is visible
+    setFilterEnterprise('')
+    setFilterType('')
+    setFilterStatus('')
+    setSearch('')
+    setDateFrom('')
+    setDateTo('')
+
+    // Find the page where this invoice lives (in unfiltered list)
+    const idx = invoices.findIndex((inv: any) => inv.id === pendingExpandId)
+    if (idx >= 0) {
+      const targetPage = Math.floor(idx / pageSize) + 1
+      setCurrentPage(targetPage)
+    }
+    setExpandedInvoiceId(pendingExpandId)
+    setSearchParams({}, { replace: true })
+    setPendingExpandId(null)
+    // Scroll after page change renders
+    setTimeout(() => {
+      const el = document.getElementById(`invoice-row-${pendingExpandId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 400)
+  }, [pendingExpandId, invoices.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- Form Handlers ----
 
   const openForm = async () => {
@@ -1917,6 +1950,7 @@ export const Invoices: React.FC = () => {
                   return (
                     <React.Fragment key={invoice.id}>
                     <tr
+                      id={`invoice-row-${invoice.id}`}
                       className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
                       onContextMenu={(e) => handleContextMenu(e, invoice)}
                       onClick={async () => {

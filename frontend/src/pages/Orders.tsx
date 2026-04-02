@@ -21,6 +21,8 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { ContextMenuBase, type ContextMenuItem } from '@/components/ui/ContextMenuBase'
+import { useContextMenu } from '@/hooks/useContextMenu'
 
 interface Order {
   id: string
@@ -174,6 +176,9 @@ export const Orders: React.FC = () => {
   const [summary, setSummary] = useState<any>({})
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
   const [orderDetails, setOrderDetails] = useState<Record<string, any>>({})
+
+  // Context menu
+  const contextMenu = useContextMenu<Order>()
 
   // Invoicing state per order
   const [invoicingStatus, setInvoicingStatus] = useState<Record<string, InvoicingStatusData>>({})
@@ -1588,6 +1593,11 @@ export const Orders: React.FC = () => {
                     <tr
                       className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${expandedOrder === order.id ? 'bg-blue-50 dark:bg-blue-900/20 border-b-0' : 'border-b dark:border-gray-700'}`}
                       onClick={() => toggleExpand(order.id)}
+                      onContextMenu={(e) => {
+                        contextMenu.openMenu(e, order)
+                        // Eagerly load invoicing status for context menu items
+                        if (!invoicingStatus[order.id]) loadInvoicingStatus(order.id)
+                      }}
                     >
                       <td className="px-4 py-3">
                         <span className="font-mono font-bold text-blue-700 dark:text-blue-400">#{String(order.order_number || 0).padStart(4, '0')}</span>
@@ -1750,26 +1760,39 @@ export const Orders: React.FC = () => {
                                               <thead>
                                                 <tr className="text-[10px] text-gray-500">
                                                   <th className="text-left pb-0.5">Producto</th>
-                                                  <th className="text-right pb-0.5">Cant. Facturada</th>
+                                                  <th className="text-right pb-0.5">Cant.</th>
+                                                  <th className="text-right pb-0.5">P. Unitario</th>
+                                                  <th className="text-right pb-0.5">Subtotal</th>
                                                   <th className="text-left pb-0.5 pl-2">En Factura(s)</th>
                                                 </tr>
                                               </thead>
                                               <tbody>
-                                                {invoiced.map((it: any) => (
-                                                  <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
-                                                    <td className="py-1">{it.product_name}</td>
-                                                    <td className="py-1 text-right font-medium text-green-600">{parseFloat(it.qty_invoiced)}</td>
-                                                    <td className="py-1 pl-2">
-                                                      <div className="flex flex-wrap gap-0.5">
-                                                        {(it.invoices || []).map((inv: any, idx: number) => (
-                                                          <span key={idx} className="inline-block px-1 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono dark:bg-blue-900/40 dark:text-blue-300">
-                                                            {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud)
-                                                          </span>
-                                                        ))}
-                                                      </div>
-                                                    </td>
-                                                  </tr>
-                                                ))}
+                                                {invoiced.map((it: any) => {
+                                                  const qtyInv = parseFloat(it.qty_invoiced)
+                                                  const price = parseFloat(it.unit_price || '0')
+                                                  return (
+                                                    <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
+                                                      <td className="py-1">{it.product_name}</td>
+                                                      <td className="py-1 text-right font-medium text-green-600">{qtyInv}</td>
+                                                      <td className="py-1 text-right">${price.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                      <td className="py-1 text-right font-medium">${(qtyInv * price).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                                      <td className="py-1 pl-2">
+                                                        <div className="flex flex-wrap gap-0.5">
+                                                          {(it.invoices || []).map((inv: any, idx: number) => (
+                                                            <button
+                                                              key={idx}
+                                                              onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.invoice_id}`) }}
+                                                              className="inline-block px-1 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800/50 cursor-pointer transition-colors"
+                                                              title="Ir a factura"
+                                                            >
+                                                              {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud)
+                                                            </button>
+                                                          ))}
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  )
+                                                })}
                                               </tbody>
                                             </table>
                                           </div>
@@ -1815,6 +1838,39 @@ export const Orders: React.FC = () => {
                                         {items.length === 0 && (
                                           <p className="text-xs text-gray-400 italic">Sin items registrados</p>
                                         )}
+
+                                        {/* Totales: Neto + IVA + Total */}
+                                        {items.length > 0 && (() => {
+                                          const allItems = items as any[]
+                                          const neto = allItems.reduce((sum: number, it: any) => {
+                                            const qty = parseFloat(it.quantity || '0')
+                                            const price = parseFloat(it.unit_price || '0')
+                                            return sum + qty * price
+                                          }, 0)
+                                          const iva = allItems.reduce((sum: number, it: any) => {
+                                            const qty = parseFloat(it.quantity || '0')
+                                            const price = parseFloat(it.unit_price || '0')
+                                            const rate = parseFloat(it.vat_rate || '21')
+                                            return sum + qty * price * rate / 100
+                                          }, 0)
+                                          const total = neto + iva
+                                          return (
+                                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600 space-y-0.5">
+                                              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                                                <span>Neto (sin IVA)</span>
+                                                <span>${neto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                              </div>
+                                              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                                                <span>IVA</span>
+                                                <span>${iva.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                              </div>
+                                              <div className="flex justify-between text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                                <span>Total</span>
+                                                <span>${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</span>
+                                              </div>
+                                            </div>
+                                          )
+                                        })()}
                                       </div>
                                     )
                                   })()}
@@ -1956,20 +2012,17 @@ export const Orders: React.FC = () => {
                                     </div>
                                   )}
 
-                                  {/* Payment status - editable */}
+                                  {/* Payment status - auto-calculated from cobros */}
                                   <div>
                                     <p className="text-xs text-gray-500">Estado de Pago</p>
-                                    <PermissionGate module="orders" action="edit">
-                                      <select
-                                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 mt-0.5 bg-white dark:bg-gray-700 dark:text-gray-100"
-                                        value={order.payment_status || 'pendiente'}
-                                        onChange={e => handlePaymentStatusChange(order.id, e.target.value)}
-                                      >
-                                        <option value="pendiente">No pagado</option>
-                                        <option value="parcial">Parcial</option>
-                                        <option value="pagado">Pagado</option>
-                                      </select>
-                                    </PermissionGate>
+                                    <span className={`inline-block mt-0.5 px-2 py-1 rounded text-xs font-medium ${
+                                      order.payment_status === 'pagado' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
+                                      order.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300' :
+                                      'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+                                    }`}>
+                                      {order.payment_status === 'pagado' ? 'Pagado' :
+                                       order.payment_status === 'parcial' ? 'Parcial' : 'No pagado'}
+                                    </span>
                                   </div>
 
                                   {/* Invoicing section */}
@@ -2044,14 +2097,18 @@ export const Orders: React.FC = () => {
                                             <div className="space-y-1">
                                               {status.invoices.map(inv => (
                                                 <div key={inv.id} className="flex items-center gap-2 bg-white border border-indigo-200 rounded px-2 py-1.5">
-                                                  <span className="font-mono text-xs font-semibold text-indigo-800">
+                                                  <button
+                                                    onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.id}`) }}
+                                                    className="font-mono text-xs font-semibold text-indigo-800 hover:text-indigo-600 hover:underline cursor-pointer"
+                                                    title="Ir a factura"
+                                                  >
                                                     {inv.fiscal_type === 'no_fiscal'
                                                       ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
                                                       : inv.fiscal_type === 'interno'
                                                         ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
                                                         : `${inv.invoice_type || ''} ${inv.punto_venta ? `${String(inv.punto_venta).padStart(5, '0')}-` : ''}${String(inv.invoice_number).padStart(8, '0')}`
                                                     }
-                                                  </span>
+                                                  </button>
                                                   <span className="text-xs text-gray-500">{formatCurrency(parseFloat(inv.total_amount || '0'))}</span>
                                                   {inv.status === 'draft' ? (
                                                     <>
@@ -2272,6 +2329,92 @@ export const Orders: React.FC = () => {
         onCancel={() => setDeleteTarget(null)}
         loading={deletingOrder}
       />
+
+      {/* Context menu for orders */}
+      {contextMenu.menu && (() => {
+        const order = contextMenu.menu.item
+        const status = invoicingStatus[order.id]
+        const invoiceStatus = order.invoice_status || status?.invoicing_status || 'sin_facturar'
+        const hasInvoices = (status?.invoices || []).length > 0
+
+        const items: ContextMenuItem[] = []
+
+        // Invoice navigation items
+        if (hasInvoices) {
+          // Show each invoice as a submenu item
+          const invoiceItems: ContextMenuItem[] = (status?.invoices || []).map((inv: any) => ({
+            id: `go-inv-${inv.id}`,
+            label: `${inv.fiscal_type === 'no_fiscal' ? 'NF' : inv.fiscal_type === 'interno' ? 'CI' : (inv.invoice_type || '')} ${inv.invoice_number} - ${formatCurrency(parseFloat(inv.total_amount || '0'))}`,
+            onClick: () => navigate(`/invoices?expand=${inv.id}`),
+          }))
+          items.push({
+            id: 'invoices',
+            label: `Ver Factura${(status?.invoices || []).length > 1 ? 's' : ''}`,
+            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
+            submenu: invoiceItems.length > 1 ? invoiceItems : undefined,
+            onClick: invoiceItems.length === 1 ? invoiceItems[0].onClick : undefined,
+          })
+        }
+
+        // Create invoice option (if not fully invoiced)
+        if (invoiceStatus !== 'facturado') {
+          items.push({
+            id: 'create-invoice',
+            label: hasInvoices ? 'Facturar Items Pendientes' : 'Crear Factura',
+            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>,
+            onClick: () => {
+              // Open expandable first so the form is visible
+              if (expandedOrder !== order.id) toggleExpand(order.id)
+              // Show invoice form (with small delay to let expand render)
+              setTimeout(() => handleShowInvoiceForm(order.id), 100)
+            },
+          })
+        }
+
+        // Navigate to recibos (if has invoices with payments)
+        if (hasInvoices) {
+          items.push({
+            id: 'receipts',
+            label: 'Ver Recibos',
+            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+            onClick: () => navigate('/recibos'),
+          })
+        }
+
+        if (items.length > 0) {
+          items.push({ id: 'sep-1', label: '', separator: true })
+        }
+
+        // Edit
+        items.push({
+          id: 'edit',
+          label: 'Editar Pedido',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
+          onClick: () => handleEditOrder(order),
+        })
+
+        // Delete
+        items.push({
+          id: 'delete',
+          label: 'Eliminar Pedido',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+          danger: true,
+          onClick: () => setDeleteTarget(order.id),
+        })
+
+        return (
+          <ContextMenuBase
+            x={contextMenu.menu.x}
+            y={contextMenu.menu.y}
+            header={{
+              title: `#${String(order.order_number || 0).padStart(4, '0')} - ${order.title}`,
+              subtitle: order.enterprise?.name || order.customer?.name || undefined,
+            }}
+            items={items}
+            onClose={contextMenu.closeMenu}
+          />
+        )
+      })()}
     </div>
   )
 }

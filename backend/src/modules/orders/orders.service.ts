@@ -621,7 +621,6 @@ export class OrdersService {
           has_invoice = CASE WHEN ${data.has_invoice !== undefined} THEN ${data.has_invoice ?? null} ELSE has_invoice END,
           estimated_delivery = CASE WHEN ${data.estimated_delivery !== undefined} THEN ${v(data.estimated_delivery)} ELSE estimated_delivery END,
           payment_method = CASE WHEN ${data.payment_method !== undefined} THEN ${v(data.payment_method)} ELSE payment_method END,
-          payment_status = CASE WHEN ${data.payment_status !== undefined} THEN ${v(data.payment_status)} ELSE payment_status END,
           notes = CASE WHEN ${data.notes !== undefined} THEN ${v(data.notes)} ELSE notes END,
           production_started_at = CASE WHEN ${data.production_started_at !== undefined} THEN ${v(data.production_started_at)} ELSE production_started_at END,
           updated_at = NOW()
