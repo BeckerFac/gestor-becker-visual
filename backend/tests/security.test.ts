@@ -74,18 +74,15 @@ describe('Security Tests', () => {
   })
 
   describe('CUIT format validation', () => {
-    it('enterprise creation with CUIT containing special chars does not break query', async () => {
+    it('enterprise creation with CUIT containing special chars is rejected by format validation', async () => {
       const svc = new EnterprisesService()
       mockDbExecute.mockResolvedValue({ rows: [] })
 
-      // CUIT with unusual characters - should be safe due to parameterization
-      await svc.createEnterprise('company-1', {
+      // CUIT with SQL injection attempt - rejected by format validation before reaching DB
+      await expect(svc.createEnterprise('company-1', {
         name: 'Test Corp',
         cuit: "20-1234'; DROP TABLE--",
-      })
-
-      // Parameterized query handles this safely
-      expect(mockDbExecute).toHaveBeenCalled()
+      })).rejects.toThrow('CUIT invalido')
     })
   })
 

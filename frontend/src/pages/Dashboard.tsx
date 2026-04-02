@@ -672,7 +672,15 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-center py-6 text-gray-400">No hay pedidos aun</p>
+              <div className="text-center py-8">
+                <p className="text-gray-400 mb-3">Todavia no tenes pedidos</p>
+                <button
+                  onClick={() => navigate('/orders')}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Crear primer pedido
+                </button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -711,7 +719,15 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-center py-6 text-gray-400">No hay facturas aun</p>
+              <div className="text-center py-8">
+                <p className="text-gray-400 mb-3">Todavia no tenes facturas</p>
+                <button
+                  onClick={() => navigate('/invoices')}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                >
+                  Emitir primera factura
+                </button>
+              </div>
             )}
           </CardContent>
         </Card>

@@ -90,6 +90,11 @@ export class EnterprisesService {
     await this.ensureTables();
     try {
       if (data.cuit) {
+        // Validate CUIT format: 11 digits (with or without dashes)
+        const cleanCuit = data.cuit.replace(/-/g, '');
+        if (!/^\d{11}$/.test(cleanCuit)) {
+          throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos (XX-XXXXXXXX-X)');
+        }
         const existing = await db.execute(sql`
           SELECT id FROM enterprises WHERE company_id = ${companyId} AND cuit = ${data.cuit}
         `);
@@ -121,6 +126,14 @@ export class EnterprisesService {
       `);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
+
+      // Validate CUIT format if updating
+      if (data.cuit) {
+        const cleanCuit = data.cuit.replace(/-/g, '');
+        if (!/^\d{11}$/.test(cleanCuit)) {
+          throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos (XX-XXXXXXXX-X)');
+        }
+      }
 
       // Handle access_code update separately (can be set to null to revoke)
       if (data.access_code !== undefined) {

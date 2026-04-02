@@ -182,6 +182,13 @@ app.use(auditLogger);
 import { activityLoggerMiddleware } from './middlewares/activityLogger';
 app.use(activityLoggerMiddleware);
 
+// security.txt (RFC 9116)
+app.get('/.well-known/security.txt', (_req, res) => {
+  res.type('text/plain').send(
+    `Contact: mailto:security@gestia.com.ar\nPreferred-Languages: es, en\nCanonical: https://gestia.com.ar/.well-known/security.txt\nExpires: 2027-04-01T00:00:00.000Z\n`
+  );
+});
+
 // Health check endpoints (no auth required for /health and /health/detailed)
 // Admin health at /api/admin/health requires auth
 app.use(healthRouter);
