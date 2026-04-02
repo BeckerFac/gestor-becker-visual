@@ -787,6 +787,84 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Returns invoices + receipts (cobros) linked to this order for context menu.
+   * Invoices: via invoice_orders N:N + legacy invoices.order_id
+   * Receipts: via cobro_invoice_applications on those invoices
+   */
+  async getOrderContextData(companyId: string, orderId: string) {
+    try {
+      // Get all invoices linked to this order
+      const invoicesResult = await db.execute(sql`
+        SELECT DISTINCT i.id, i.invoice_number, i.invoice_type, i.status, i.total_amount,
+          i.fiscal_type, i.payment_status,
+          (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta
+        FROM invoices i
+        LEFT JOIN invoice_orders io ON io.invoice_id = i.id
+        WHERE i.company_id = ${companyId}
+          AND (i.order_id = ${orderId} OR io.order_id = ${orderId})
+          AND i.status != 'cancelled'
+        ORDER BY i.created_at ASC
+      `);
+      const invoices = (invoicesResult as any).rows || [];
+
+      // Get all receipts (cobros) applied to those invoices
+      const invoiceIds = invoices.map((inv: any) => inv.id);
+      let receipts: any[] = [];
+      if (invoiceIds.length > 0) {
+        // Build parameterized IN clause
+        const placeholders = invoiceIds.map((_: any, i: number) => `$${i + 2}`).join(',');
+        const pool = (await import('../../config/db')).pool;
+        const receiptsResult = await pool.query(
+          `SELECT DISTINCT c.id, c.receipt_number, c.total_amount, c.payment_date, c.payment_method,
+            c.notes, c.status as cobro_status,
+            cia.invoice_id, cia.amount_applied,
+            i.invoice_number, i.invoice_type
+          FROM cobro_invoice_applications cia
+          JOIN cobros c ON c.id = cia.cobro_id
+          JOIN invoices i ON i.id = cia.invoice_id
+          WHERE c.company_id = $1
+            AND cia.invoice_id IN (${placeholders})
+          ORDER BY c.payment_date DESC`,
+          [companyId, ...invoiceIds]
+        );
+        receipts = receiptsResult.rows || [];
+      }
+
+      // Deduplicate receipts (same cobro can appear for multiple invoices)
+      const uniqueReceipts = new Map<string, any>();
+      for (const r of receipts) {
+        if (!uniqueReceipts.has(r.id)) {
+          uniqueReceipts.set(r.id, {
+            id: r.id,
+            receipt_number: r.receipt_number,
+            total_amount: r.total_amount,
+            payment_date: r.payment_date,
+            payment_method: r.payment_method,
+            cobro_status: r.cobro_status,
+          });
+        }
+      }
+
+      return {
+        invoices: invoices.map((inv: any) => ({
+          id: inv.id,
+          invoice_number: inv.invoice_number,
+          invoice_type: inv.invoice_type,
+          status: inv.status,
+          total_amount: inv.total_amount,
+          fiscal_type: inv.fiscal_type,
+          payment_status: inv.payment_status,
+          punto_venta: inv.punto_venta,
+        })),
+        receipts: Array.from(uniqueReceipts.values()),
+      };
+    } catch (error) {
+      console.error('Get order context data error:', error);
+      return { invoices: [], receipts: [] };
+    }
+  }
+
   async getOrderInvoicingDetail(companyId: string, orderId: string) {
     await this.ensureMigrations();
     try {

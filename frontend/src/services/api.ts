@@ -1183,6 +1183,10 @@ export const api = {
     const { data } = await client.get(`/orders/${orderId}/invoicing-detail`)
     return data
   },
+  getOrderContextData: async (orderId: string) => {
+    const { data } = await client.get(`/orders/${orderId}/context-data`)
+    return data as { invoices: any[]; receipts: any[] }
+  },
   checkOrderBOM: async (orderId: string) => {
     const { data } = await client.get(`/orders/${orderId}/bom-check`)
     return data

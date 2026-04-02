@@ -179,6 +179,7 @@ export const Orders: React.FC = () => {
 
   // Context menu
   const contextMenu = useContextMenu<Order>()
+  const [contextData, setContextData] = useState<Record<string, { invoices: any[]; receipts: any[] }>>({})
 
   // Invoicing state per order
   const [invoicingStatus, setInvoicingStatus] = useState<Record<string, InvoicingStatusData>>({})
@@ -817,6 +818,46 @@ export const Orders: React.FC = () => {
       setCreatingInvoice(prev => ({ ...prev, [orderId]: false }))
       setInvoiceProgress(prev => ({ ...prev, [orderId]: '' }))
     }
+  }
+
+  // Navigate to invoices page with ALL pending items preloaded
+  const handleCreateInvoiceFromContextMenu = async (orderId: string) => {
+    const order = orders.find(o => o.id === orderId)
+    if (!order) return
+
+    // Load invoicing status if not loaded
+    let status = invoicingStatus[orderId]
+    if (!status) {
+      try {
+        status = await api.getOrderInvoicingStatus(orderId)
+        setInvoicingStatus(prev => ({ ...prev, [orderId]: status }))
+      } catch { return }
+    }
+
+    const items = status?.items || []
+    const selectedItems = items
+      .filter((item: any) => item.pending_qty > 0)
+      .map((item: any) => ({
+        order_item_id: item.id,
+        product_name: item.product_name,
+        quantity: item.pending_qty,
+        unit_price: parseFloat(item.unit_price || '0'),
+        vat_rate: parseFloat(item.vat_rate || '21'),
+      }))
+
+    if (selectedItems.length === 0) {
+      toast.info('No hay items pendientes de facturar')
+      return
+    }
+
+    sessionStorage.setItem('invoice_preload', JSON.stringify({
+      enterprise_id: order.enterprise?.id || null,
+      customer_id: order.customer?.id || null,
+      invoice_type: 'B',
+      items: selectedItems,
+    }))
+
+    navigate('/invoices?preload=1')
   }
 
   const handleGoToInvoice = (orderId: string) => {
@@ -1595,8 +1636,12 @@ export const Orders: React.FC = () => {
                       onClick={() => toggleExpand(order.id)}
                       onContextMenu={(e) => {
                         contextMenu.openMenu(e, order)
-                        // Eagerly load invoicing status for context menu items
-                        if (!invoicingStatus[order.id]) loadInvoicingStatus(order.id)
+                        // Load context data (invoices + receipts) for context menu
+                        if (!contextData[order.id]) {
+                          api.getOrderContextData(order.id)
+                            .then(data => setContextData(prev => ({ ...prev, [order.id]: data })))
+                            .catch(() => {})
+                        }
                       }}
                     >
                       <td className="px-4 py-3">
@@ -2333,59 +2378,76 @@ export const Orders: React.FC = () => {
       {/* Context menu for orders */}
       {contextMenu.menu && (() => {
         const order = contextMenu.menu.item
-        const status = invoicingStatus[order.id]
-        const invoiceStatus = order.invoice_status || status?.invoicing_status || 'sin_facturar'
-        const hasInvoices = (status?.invoices || []).length > 0
+        const ctx = contextData[order.id]
+        const invoiceStatus = order.invoice_status || 'sin_facturar'
+        const invoices = ctx?.invoices || []
+        const receipts = ctx?.receipts || []
 
         const items: ContextMenuItem[] = []
 
-        // Invoice navigation items
-        if (hasInvoices) {
-          // Show each invoice as a submenu item
-          const invoiceItems: ContextMenuItem[] = (status?.invoices || []).map((inv: any) => ({
-            id: `go-inv-${inv.id}`,
-            label: `${inv.fiscal_type === 'no_fiscal' ? 'NF' : inv.fiscal_type === 'interno' ? 'CI' : (inv.invoice_type || '')} ${inv.invoice_number} - ${formatCurrency(parseFloat(inv.total_amount || '0'))}`,
-            onClick: () => navigate(`/invoices?expand=${inv.id}`),
-          }))
-          items.push({
-            id: 'invoices',
-            label: `Ver Factura${(status?.invoices || []).length > 1 ? 's' : ''}`,
-            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
-            submenu: invoiceItems.length > 1 ? invoiceItems : undefined,
-            onClick: invoiceItems.length === 1 ? invoiceItems[0].onClick : undefined,
-          })
+        // --- FACTURAS section ---
+        items.push({
+          id: 'invoices-header',
+          label: 'Facturas',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
+          disabled: true,
+        })
+
+        if (invoices.length > 0) {
+          for (const inv of invoices) {
+            const label = inv.fiscal_type === 'no_fiscal'
+              ? `NF-${String(inv.invoice_number).padStart(6, '0')}`
+              : inv.fiscal_type === 'interno'
+                ? `CI-${String(inv.invoice_number).padStart(6, '0')}`
+                : `${inv.invoice_type || ''} ${inv.punto_venta ? String(inv.punto_venta).padStart(5, '0') + '-' : ''}${String(inv.invoice_number).padStart(8, '0')}`
+            items.push({
+              id: `inv-${inv.id}`,
+              label: `  ${label}  ${formatCurrency(parseFloat(inv.total_amount || '0'))}`,
+              onClick: () => navigate(`/invoices?expand=${inv.id}`),
+            })
+          }
+        } else if (!ctx) {
+          items.push({ id: 'inv-loading', label: '  Cargando...', disabled: true })
+        } else {
+          items.push({ id: 'inv-none', label: '  Sin facturas', disabled: true })
         }
 
-        // Create invoice option (if not fully invoiced)
+        // Create invoice (if not fully invoiced)
         if (invoiceStatus !== 'facturado') {
           items.push({
             id: 'create-invoice',
-            label: hasInvoices ? 'Facturar Items Pendientes' : 'Crear Factura',
-            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>,
-            onClick: () => {
-              // Open expandable first so the form is visible
-              if (expandedOrder !== order.id) toggleExpand(order.id)
-              // Show invoice form (with small delay to let expand render)
-              setTimeout(() => handleShowInvoiceForm(order.id), 100)
-            },
+            label: invoices.length > 0 ? '  + Facturar items pendientes' : '  + Crear Factura',
+            onClick: () => handleCreateInvoiceFromContextMenu(order.id),
           })
         }
 
-        // Navigate to recibos (if has invoices with payments)
-        if (hasInvoices) {
-          items.push({
-            id: 'receipts',
-            label: 'Ver Recibos',
-            icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
-            onClick: () => navigate('/recibos'),
-          })
+        items.push({ id: 'sep-inv', label: '', separator: true })
+
+        // --- RECIBOS section ---
+        items.push({
+          id: 'receipts-header',
+          label: 'Recibos',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+          disabled: true,
+        })
+
+        if (receipts.length > 0) {
+          for (const rec of receipts) {
+            items.push({
+              id: `rec-${rec.id}`,
+              label: `  #${String(rec.receipt_number || 0).padStart(4, '0')}  ${formatCurrency(parseFloat(rec.total_amount || '0'))}  ${rec.payment_method || ''}`,
+              onClick: () => navigate(`/recibos?expand=${rec.id}`),
+            })
+          }
+        } else if (!ctx) {
+          items.push({ id: 'rec-loading', label: '  Cargando...', disabled: true })
+        } else {
+          items.push({ id: 'rec-none', label: '  Sin recibos asociados', disabled: true })
         }
 
-        if (items.length > 0) {
-          items.push({ id: 'sep-1', label: '', separator: true })
-        }
+        items.push({ id: 'sep-actions', label: '', separator: true })
 
-        // Edit
+        // --- ACTIONS ---
         items.push({
           id: 'edit',
           label: 'Editar Pedido',
@@ -2393,7 +2455,6 @@ export const Orders: React.FC = () => {
           onClick: () => handleEditOrder(order),
         })
 
-        // Delete
         items.push({
           id: 'delete',
           label: 'Eliminar Pedido',

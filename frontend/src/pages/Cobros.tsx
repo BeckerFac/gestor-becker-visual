@@ -500,6 +500,22 @@ export const Cobros: React.FC = () => {
     prefillFromInvoice()
   }, [searchParams, loading, enterprises, setSearchParams])
 
+  // Expand from Orders context menu (?expand=COBRO_ID)
+  useEffect(() => {
+    const expandId = searchParams.get('expand')
+    if (!expandId || cobros.length === 0) return
+    setExpandedReceiptId(expandId)
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev)
+      p.delete('expand')
+      return p
+    }, { replace: true })
+    setTimeout(() => {
+      const el = document.getElementById(`receipt-row-${expandId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+  }, [cobros.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Calculate paid amounts per order from cobros data
   const paidByOrder = useMemo(() => {
     const map = new Map<string, number>()
@@ -1523,6 +1539,7 @@ export const Cobros: React.FC = () => {
                 {paginatedReceipts.map(receipt => (
                   <React.Fragment key={receipt.id}>
                   <tr
+                    id={`receipt-row-${receipt.id}`}
                     onClick={() => setExpandedReceiptId(prev => prev === receipt.id ? null : receipt.id)}
                     className="border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                   >
