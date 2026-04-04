@@ -48,6 +48,7 @@ export const DateInput: React.FC<DateInputProps> = ({
   const [isFocused, setIsFocused] = useState(false)
   const [validationError, setValidationError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const pickerRef = useRef<HTMLInputElement>(null)
 
   // Sync display value when ISO value changes externally
   const lastValueRef = useRef(value)
@@ -150,6 +151,16 @@ export const DateInput: React.FC<DateInputProps> = ({
     }
   }, [])
 
+  const handlePickerChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const iso = e.target.value
+    if (iso) {
+      onChange(iso)
+      lastValueRef.current = iso
+      setDisplayValue(isoToDdMmYyyy(iso))
+      setValidationError('')
+    }
+  }, [onChange])
+
   const displayError = error || validationError
 
   return (
@@ -159,26 +170,47 @@ export const DateInput: React.FC<DateInputProps> = ({
           {label}
         </label>
       )}
-      <input
-        ref={inputRef}
-        id={id}
-        type="text"
-        inputMode="numeric"
-        placeholder="DD/MM/AAAA"
-        value={displayValue}
-        onChange={handleChange}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        onKeyDown={handleKeyDown}
-        required={required}
-        disabled={disabled}
-        maxLength={10}
-        className={cn(
-          'px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent',
-          displayError && 'border-red-500 focus:ring-red-500',
-          className
-        )}
-      />
+      <div className="relative">
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          inputMode="numeric"
+          placeholder="DD/MM/AAAA"
+          value={displayValue}
+          onChange={handleChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          required={required}
+          disabled={disabled}
+          maxLength={10}
+          className={cn(
+            'w-full px-3 py-2 pr-9 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent',
+            displayError && 'border-red-500 focus:ring-red-500',
+            className
+          )}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={disabled}
+          onClick={() => pickerRef.current?.showPicker?.()}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </button>
+        <input
+          ref={pickerRef}
+          type="date"
+          tabIndex={-1}
+          className="sr-only absolute top-0 left-0"
+          value={value || ''}
+          onChange={handlePickerChange}
+        />
+      </div>
       {displayError && <span className="text-sm text-red-500">{displayError}</span>}
     </div>
   )
