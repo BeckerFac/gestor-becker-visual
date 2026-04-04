@@ -36,6 +36,14 @@ export const PriceListsManager: React.FC<PriceListsManagerProps> = ({ priceLists
   })
   const [ruleSaving, setRuleSaving] = useState(false)
 
+  // Inline name editing
+  const [editingName, setEditingName] = useState<{ id: string; name: string } | null>(null)
+
+  // Global percentage adjustment per list
+  const [adjustingList, setAdjustingList] = useState<string | null>(null)
+  const [globalPercent, setGlobalPercent] = useState('')
+  const [savingPercent, setSavingPercent] = useState(false)
+
   // Bulk form
   const [bulkType, setBulkType] = useState<'increase_percent' | 'copy_from_list'>('increase_percent')
   const [bulkPercent, setBulkPercent] = useState('')
@@ -53,6 +61,48 @@ export const PriceListsManager: React.FC<PriceListsManagerProps> = ({ priceLists
       toast.success('Lista de precios creada')
     } catch (e: any) { toast.error(e.message) }
     finally { setPlSaving(false) }
+  }
+
+  const handleRenamePriceList = async (listId: string, newName: string) => {
+    if (!newName.trim()) { setEditingName(null); return }
+    try {
+      await api.updatePriceList(listId, { name: newName.trim() })
+      await onReload()
+      toast.success('Nombre actualizado')
+    } catch (e: any) { toast.error(e.message) }
+    setEditingName(null)
+  }
+
+  const handleApplyGlobalPercent = async (listId: string) => {
+    const pct = parseFloat(globalPercent)
+    if (isNaN(pct)) { toast.error('Ingrese un porcentaje valido'); return }
+    setSavingPercent(true)
+    try {
+      // Find existing global percentage rule (no product_id, no category_id)
+      const existingGlobalRule = rules.find(r =>
+        r.rule_type === 'percentage' && !r.product_id && !r.category_id && (r.min_quantity || 1) <= 1
+      )
+      if (existingGlobalRule) {
+        // Delete old and create new (no update endpoint)
+        await api.deletePriceListRule(listId, existingGlobalRule.id)
+      }
+      if (pct !== 0) {
+        await api.addPriceListRule(listId, {
+          rule_type: 'percentage',
+          value: pct,
+          product_id: null,
+          category_id: null,
+          min_quantity: 1,
+          priority: 0,
+        })
+      }
+      await loadListDetails(listId)
+      setResolvedPrices([])
+      await onReload()
+      toast.success(pct === 0 ? 'Ajuste % eliminado' : `Ajuste ${pct > 0 ? '+' : ''}${pct}% aplicado a todos los productos`)
+      setAdjustingList(null)
+    } catch (e: any) { toast.error(e.message) }
+    finally { setSavingPercent(false) }
   }
 
   const handleDeletePriceList = async (listId: string) => {
@@ -198,20 +248,59 @@ export const PriceListsManager: React.FC<PriceListsManagerProps> = ({ priceLists
                 <div className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => handleExpandPriceList(pl.id)}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs">{expandedListId === pl.id ? '▼' : '▶'}</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200">{pl.name}</span>
+                    {editingName && editingName.id === pl.id ? (
+                      <input
+                        autoFocus
+                        value={editingName.name}
+                        onChange={e => setEditingName({ id: pl.id, name: e.target.value })}
+                        onBlur={() => handleRenamePriceList(pl.id, editingName.name)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleRenamePriceList(pl.id, editingName.name); if (e.key === 'Escape') setEditingName(null) }}
+                        onClick={e => e.stopPropagation()}
+                        className={`${inputClass} font-medium w-48`}
+                      />
+                    ) : (
+                      <span
+                        className="font-medium text-gray-800 dark:text-gray-200 hover:text-blue-600 cursor-text"
+                        onClick={e => { e.stopPropagation(); setEditingName({ id: pl.id, name: pl.name }) }}
+                        title="Click para renombrar"
+                      >
+                        {pl.name}
+                      </span>
+                    )}
                     <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">{pl.type}</span>
                     {Number(pl.rule_count) > 0 && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">{pl.rule_count} regla{Number(pl.rule_count) !== 1 ? 's' : ''}</span>
-                    )}
-                    {Number(pl.item_count) > 0 && (
-                      <span className="text-gray-400 text-xs">{pl.item_count} precio{Number(pl.item_count) !== 1 ? 's' : ''} fijo{Number(pl.item_count) !== 1 ? 's' : ''}</span>
                     )}
                     {Number(pl.enterprise_count) > 0 && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300">{pl.enterprise_count} empresa{Number(pl.enterprise_count) !== 1 ? 's' : ''}</span>
                     )}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); handleDeletePriceList(pl.id) }} className="text-red-500 dark:text-red-400 text-xs hover:underline">Eliminar</button>
+                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => { setAdjustingList(adjustingList === pl.id ? null : pl.id); setGlobalPercent('') }} className="text-blue-500 dark:text-blue-400 text-xs hover:underline">% Global</button>
+                    <button onClick={() => handleDeletePriceList(pl.id)} className="text-red-500 dark:text-red-400 text-xs hover:underline">Eliminar</button>
+                  </div>
                 </div>
+
+                {/* Global percentage adjustment inline */}
+                {adjustingList === pl.id && (
+                  <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border-t border-blue-200 dark:border-blue-800 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Ajuste % sobre precio base para todos los productos:</span>
+                    <input
+                      type="number" step="0.1" placeholder="Ej: 15 para +15%"
+                      value={globalPercent} onChange={e => setGlobalPercent(e.target.value)}
+                      className={`${inputClass} w-36`} autoFocus
+                    />
+                    {globalPercent && (
+                      <span className="text-xs text-gray-500">
+                        Ej: $100 -&gt; ${(100 * (1 + (parseFloat(globalPercent) || 0) / 100)).toFixed(2)}
+                      </span>
+                    )}
+                    <Button size="sm" variant="primary" onClick={() => handleApplyGlobalPercent(pl.id)} loading={savingPercent} disabled={!globalPercent}>
+                      Aplicar
+                    </Button>
+                    <button onClick={() => setAdjustingList(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancelar</button>
+                  </div>
+                )}
 
                 {expandedListId === pl.id && (
                   <div className="border-t border-gray-200 dark:border-gray-700">
