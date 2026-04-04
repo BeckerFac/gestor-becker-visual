@@ -79,6 +79,7 @@ export const Products: React.FC = () => {
   const [quickCategoryName, setQuickCategoryName] = useState('')
   const [creatingCategory, setCreatingCategory] = useState(false)
   const quickCategoryRef = useRef<HTMLInputElement>(null)
+  const formRef = useRef<HTMLDivElement>(null)
 
   // Bulk category assignment
   const [showBulkCategory, setShowBulkCategory] = useState(false)
@@ -196,6 +197,7 @@ export const Products: React.FC = () => {
     setEditingId(product.id)
     setShowForm(true)
     setSelectedProduct(null)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
   // Delete handler
@@ -341,6 +343,7 @@ export const Products: React.FC = () => {
 
       {/* Product form (create/edit) */}
       {showForm && (
+        <div ref={formRef}>
         <ProductForm
           editingId={editingId}
           initialForm={preselectedCategoryId && !editingId
@@ -363,6 +366,7 @@ export const Products: React.FC = () => {
             setPreselectedCategoryId(undefined)
           }}
         />
+        </div>
       )}
 
       {/* Tabs */}
