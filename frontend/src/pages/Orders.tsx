@@ -53,6 +53,7 @@ interface Order {
   cobro?: { id: string; amount: string; payment_method: string } | null
   invoiced_amount?: string
   invoice_status?: string
+  discount_percent?: string
   created_at: string
 }
 
@@ -213,6 +214,7 @@ export const Orders: React.FC = () => {
     description: '', customer_id: '',
     estimated_delivery: '',
     priority: 'normal', notes: '', payment_method: '', bank_id: '',
+    discount_percent: 0,
   })
   const [formItems, setFormItems] = useState<FormItem[]>([emptyFormItem()])
   const [hasDraft, setHasDraft] = useState(false)
@@ -260,7 +262,7 @@ export const Orders: React.FC = () => {
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
-    setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
+    setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
     setFormTitle('')
@@ -474,18 +476,22 @@ export const Orders: React.FC = () => {
   const getFormItemSubtotal = (item: FormItem) => item.quantity * item.unit_price
 
   const getFormTotals = () => {
-    const subtotal = formItems.reduce((sum, item) => sum + getFormItemSubtotal(item), 0)
-    // Calculate VAT per item, grouped by rate
+    const subtotalBruto = formItems.reduce((sum, item) => sum + getFormItemSubtotal(item), 0)
+    const disc = Math.min(Math.max(form.discount_percent || 0, 0), 100)
+    const discountAmount = subtotalBruto * disc / 100
+    const subtotal = subtotalBruto - discountAmount
+    // Calculate VAT per item, grouped by rate (after discount)
+    const discountMultiplier = 1 - disc / 100
     const vatByRate: Record<number, number> = {}
     let totalVat = 0
     for (const item of formItems) {
-      const itemNet = item.quantity * item.unit_price
+      const itemNet = item.quantity * item.unit_price * discountMultiplier
       const rate = item.vat_rate ?? 21
       const itemVat = itemNet * rate / 100
       totalVat += itemVat
       vatByRate[rate] = (vatByRate[rate] || 0) + itemVat
     }
-    return { subtotal, vat: totalVat, total: subtotal + totalVat, vatByRate }
+    return { subtotalBruto, discountAmount, discountPercent: disc, subtotal, vat: totalVat, total: subtotal + totalVat, vatByRate }
   }
 
   // --- Order creation ---
@@ -516,6 +522,7 @@ export const Orders: React.FC = () => {
         estimated_delivery: form.estimated_delivery || null,
         priority: form.priority,
         payment_method: form.payment_method || null,
+        discount_percent: form.discount_percent || 0,
         notes: form.notes || null,
         items: formItems.map(item => ({
           product_id: item.product_id && item.product_id !== 'custom' ? item.product_id : null,
@@ -542,7 +549,7 @@ export const Orders: React.FC = () => {
       setHasDraft(false)
       setFormEnterpriseId('')
       setFormTitle('')
-      setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', })
+      setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
       setFormItems([emptyFormItem()])
       await loadData()
     } catch (e: any) {
@@ -578,6 +585,7 @@ export const Orders: React.FC = () => {
       notes: order.notes || '',
       payment_method: order.payment_method || '',
       bank_id: order.bank?.id || '',
+      discount_percent: parseFloat(order.discount_percent || '0') || 0,
     })
     setFormEnterpriseId(order.enterprise?.id || '')
     setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
@@ -1510,8 +1518,14 @@ export const Orders: React.FC = () => {
                   <div className="w-80 space-y-1">
                     <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                       <span>Subtotal Neto:</span>
-                      <span className="font-medium">{formatCurrency(formTotals.subtotal)}</span>
+                      <span className="font-medium">{formatCurrency(formTotals.subtotalBruto)}</span>
                     </div>
+                    {formTotals.discountPercent > 0 && (
+                      <div className="flex justify-between text-sm text-red-600 dark:text-red-400">
+                        <span>Descuento ({formTotals.discountPercent}%):</span>
+                        <span className="font-medium">-{formatCurrency(formTotals.discountAmount)}</span>
+                      </div>
+                    )}
                     {Object.entries(formTotals.vatByRate)
                       .sort(([a], [b]) => Number(a) - Number(b))
                       .map(([rate, amount]) => (
@@ -1529,57 +1543,18 @@ export const Orders: React.FC = () => {
                 </div>
               </div>
 
-              {/* Payment + delivery + priority */}
+              {/* Discount + delivery + priority */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Forma de Pago<HelpTip text="Como va a pagar el cliente. Podes cambiarlo despues." /></label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
-                    {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                  </select>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Descuento %<HelpTip text="Descuento global sobre el neto del pedido. Se aplica antes del IVA." /></label>
+                  <input
+                    type="number" min="0" max="100" step="0.5"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100"
+                    value={form.discount_percent || ''}
+                    placeholder="0"
+                    onChange={e => setForm({ ...form, discount_percent: parseFloat(e.target.value) || 0 })}
+                  />
                 </div>
-                {showBankSelector && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Banco</label>
-                    <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.bank_id} onChange={e => {
-                      if (e.target.value === '__new__') {
-                        setShowNewBankInput(true)
-                      } else {
-                        setForm({ ...form, bank_id: e.target.value })
-                        setShowNewBankInput(false)
-                      }
-                    }}>
-                      <option value="">Seleccionar banco...</option>
-                      {banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
-                      <option value="__new__">+ Crear nuevo banco...</option>
-                    </select>
-                    {showNewBankInput && (
-                      <div className="flex gap-2 mt-1">
-                        <input
-                          className="flex-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
-                          placeholder="Nombre del banco"
-                          value={newBankName}
-                          onChange={e => setNewBankName(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateInlineBank() } }}
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={handleCreateInlineBank}
-                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                        >
-                          Crear
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setShowNewBankInput(false); setNewBankName('') }}
-                          className="px-2 py-1 text-gray-500 text-sm hover:text-gray-700 dark:text-gray-300"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
                 <DateInput label="Fecha Estimada de Entrega" value={form.estimated_delivery} onChange={val => setForm({ ...form, estimated_delivery: val })} />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Prioridad<HelpTip text="Urgente sube el pedido en la cola de produccion." /></label>

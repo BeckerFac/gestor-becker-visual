@@ -39,6 +39,7 @@ export class OrdersService {
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS production_started_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
       await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cobro_id UUID`).catch(() => {});
+      await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_percent DECIMAL(5,2) DEFAULT 0`).catch(() => {});
       // Ensure quotes table has quote_number column (may not exist if quotes module hasn't run)
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_number INTEGER`).catch(() => {});
       this.migrationsRun = true;
@@ -273,8 +274,13 @@ export class OrdersService {
         totalVat = subtotal * Number(data.vat_rate || 21) / 100;
       }
 
-      const totalWithVat = subtotal + totalVat;
-      const estimatedProfit = subtotal - totalCost;
+      // Apply order-level discount
+      const discountPercent = Math.min(Math.max(Number(data.discount_percent || 0), 0), 100);
+      const discountMultiplier = 1 - discountPercent / 100;
+      const discountedSubtotal = subtotal * discountMultiplier;
+      const discountedVat = totalVat * discountMultiplier;
+      const totalWithVat = discountedSubtotal + discountedVat;
+      const estimatedProfit = discountedSubtotal - totalCost;
       // Weighted average VAT rate for order-level display
       const vatRate = subtotal > 0 ? (totalVat / subtotal) * 100 : 21;
 
@@ -289,8 +295,8 @@ export class OrdersService {
       await db.execute(sql`BEGIN`);
 
       await db.execute(sql`
-        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, notes, created_by)
-        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${data.notes || null}, ${userId})
+        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by)
+        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${discountPercent.toString()}, ${data.notes || null}, ${userId})
       `);
 
       // Insert items
@@ -621,6 +627,7 @@ export class OrdersService {
           has_invoice = CASE WHEN ${data.has_invoice !== undefined} THEN ${data.has_invoice ?? null} ELSE has_invoice END,
           estimated_delivery = CASE WHEN ${data.estimated_delivery !== undefined} THEN ${v(data.estimated_delivery)} ELSE estimated_delivery END,
           payment_method = CASE WHEN ${data.payment_method !== undefined} THEN ${v(data.payment_method)} ELSE payment_method END,
+          discount_percent = CASE WHEN ${data.discount_percent !== undefined} THEN ${v(data.discount_percent)} ELSE discount_percent END,
           notes = CASE WHEN ${data.notes !== undefined} THEN ${v(data.notes)} ELSE notes END,
           production_started_at = CASE WHEN ${data.production_started_at !== undefined} THEN ${v(data.production_started_at)} ELSE production_started_at END,
           updated_at = NOW()
