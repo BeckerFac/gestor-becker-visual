@@ -59,7 +59,7 @@ interface Order {
 
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
 interface Product { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string; category_id?: string | null; product_type?: string | null }
-interface Enterprise { id: string; name: string; cuit?: string | null; price_list_id?: string | null }
+interface Enterprise { id: string; name: string; cuit?: string | null; price_list_id?: string | null; default_discount?: number | string | null }
 interface Bank { id: string; bank_name: string }
 interface Category { id: string; name: string; parent_id: string | null; color?: string | null; product_count?: number; child_product_count?: number }
 
@@ -1166,7 +1166,16 @@ export const Orders: React.FC = () => {
                 customers={customers}
                 selectedEnterpriseId={formEnterpriseId}
                 selectedCustomerId={form.customer_id}
-                onEnterpriseChange={id => setFormEnterpriseId(id)}
+                onEnterpriseChange={id => {
+                  setFormEnterpriseId(id)
+                  // Pre-load enterprise defaults (discount)
+                  if (id) {
+                    const ent = enterprises.find(e => e.id === id)
+                    if (ent?.default_discount) {
+                      setForm(f => ({ ...f, discount_percent: parseFloat(String(ent.default_discount)) || 0 }))
+                    }
+                  }
+                }}
                 onCustomerChange={id => setForm(f => ({ ...f, customer_id: id }))}
                 enterpriseLabel="Empresa"
                 customerLabel="Cliente / Contacto"

@@ -37,6 +37,7 @@ export class EnterprisesService {
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS fiscal_city VARCHAR(100)`).catch(() => {});
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS fiscal_province VARCHAR(100)`).catch(() => {});
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS fiscal_postal_code VARCHAR(10)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_discount DECIMAL(5,2) DEFAULT 0`).catch(() => {});
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure enterprises tables error:', error);
@@ -104,8 +105,8 @@ export class EnterprisesService {
 
       const enterpriseId = uuid();
       await db.execute(sql`
-        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes)
-        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${data.cuit || null}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null})
+        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount)
+        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${data.cuit || null}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0})
       `);
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
@@ -162,6 +163,7 @@ export class EnterprisesService {
             email = ${data.email || null},
             tax_condition = ${data.tax_condition || null},
             notes = ${data.notes || null},
+            default_discount = ${data.default_discount ?? 0},
             updated_at = NOW()
           WHERE id = ${enterpriseId} AND company_id = ${companyId}
         `);

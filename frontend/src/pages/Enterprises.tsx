@@ -58,6 +58,7 @@ const emptyEnterpriseForm = {
   same_fiscal_address: true,
   phone: '', email: '', tax_condition: 'Responsable Inscripto', notes: '',
   price_list_id: '',
+  default_discount: '',
 }
 
 const emptyContactForm = {
@@ -158,9 +159,10 @@ export const Enterprises: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      const { same_fiscal_address, price_list_id, ...formData } = enterpriseForm
+      const { same_fiscal_address, price_list_id, default_discount, ...formData } = enterpriseForm
       const payload = {
         ...formData,
+        default_discount: parseFloat(default_discount) || 0,
         fiscal_address: same_fiscal_address ? null : formData.fiscal_address,
         fiscal_city: same_fiscal_address ? null : formData.fiscal_city,
         fiscal_province: same_fiscal_address ? null : formData.fiscal_province,
@@ -204,6 +206,7 @@ export const Enterprises: React.FC = () => {
       phone: ent.phone || '', email: ent.email || '',
       tax_condition: ent.tax_condition || 'Responsable Inscripto', notes: ent.notes || '',
       price_list_id: (ent as any).price_list_id || '',
+      default_discount: (ent as any).default_discount || '',
     })
     setEditingEnterpriseId(ent.id)
     setOriginalPriceListId((ent as any).price_list_id || '')
@@ -432,6 +435,16 @@ export const Enterprises: React.FC = () => {
                     <option value="">Sin lista de precios</option>
                     {priceLists.map((pl: any) => <option key={pl.id} value={pl.id}>{pl.name} ({pl.type})</option>)}
                   </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Descuento Predeterminado %</label>
+                  <input
+                    type="number" min="0" max="100" step="0.5"
+                    placeholder="0"
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={enterpriseForm.default_discount}
+                    onChange={e => setEnterpriseForm({ ...enterpriseForm, default_discount: e.target.value })}
+                  />
                 </div>
               </div>
 
