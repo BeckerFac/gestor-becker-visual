@@ -1,4 +1,5 @@
 import React from 'react'
+import { useNavigate } from 'react-router-dom'
 import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Enterprise { id: string; name: string; cuit?: string | null }
@@ -33,11 +34,17 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
   enterpriseHelpText,
   className = '',
 }) => {
+  const navigate = useNavigate()
+
   const filteredCustomers = selectedEnterpriseId
     ? customers.filter(c => c.enterprise_id === selectedEnterpriseId)
     : customers
 
   const handleEnterpriseChange = (id: string) => {
+    if (id === '__new__') {
+      navigate('/empresas?new=1')
+      return
+    }
     onEnterpriseChange(id)
     if (id && selectedCustomerId) {
       const customer = customers.find(c => c.id === selectedCustomerId)
@@ -64,6 +71,7 @@ export const EnterpriseCustomerSelector: React.FC<EnterpriseCustomerSelectorProp
           {enterprises.map(e => (
             <option key={e.id} value={e.id}>{e.name}{e.cuit ? ` (${e.cuit})` : ''}</option>
           ))}
+          <option value="__new__">+ Nueva Empresa</option>
         </select>
       </div>
       <div className="flex flex-col gap-1">

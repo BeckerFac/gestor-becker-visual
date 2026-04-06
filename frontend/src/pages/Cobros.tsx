@@ -1166,9 +1166,13 @@ export const Cobros: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value })}>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => {
+                    if (e.target.value === '__new__') { navigate('/empresas?new=1'); return }
+                    setForm({ ...form, enterprise_id: e.target.value })
+                  }}>
                     <option value="">Seleccionar...</option>
                     {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
+                    <option value="__new__">+ Nueva Empresa</option>
                   </select>
                 </div>
                 <DateInput label="Fecha" value={form.payment_date} onChange={val => setForm({ ...form, payment_date: val })} />

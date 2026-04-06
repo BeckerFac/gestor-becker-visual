@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -111,6 +112,7 @@ function restorePending() {
 }
 
 export const Pagos: React.FC = () => {
+  const navigate = useNavigate()
   const [pagos, setPagos] = useState<Pago[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [purchases, setPurchases] = useState<Purchase[]>([])
@@ -655,9 +657,13 @@ export const Pagos: React.FC = () => {
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
-                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value, purchase_id: '' })}>
+                <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => {
+                  if (e.target.value === '__new__') { navigate('/empresas?new=1'); return }
+                  setForm({ ...form, enterprise_id: e.target.value, purchase_id: '' })
+                }}>
                   <option value="">Seleccionar...</option>
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
+                  <option value="__new__">+ Nueva Empresa</option>
                 </select>
               </div>
               <Input label={hasPiItems ? `Monto (auto: ${fmt(piTotal)})` : 'Monto *'} type="number" step="0.01" min="0.01" placeholder="0.00" value={hasPiItems ? piTotal.toFixed(2) : form.amount} onChange={e => { if (!hasPiItems) setForm({ ...form, amount: e.target.value }) }} required={!hasPiItems} readOnly={hasPiItems} />

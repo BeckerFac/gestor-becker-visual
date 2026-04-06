@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -74,7 +74,15 @@ export const Enterprises: React.FC = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [expandedContacts, setExpandedContacts] = useState<Contact[]>([])
 
-  const [showEnterpriseForm, setShowEnterpriseForm] = useState(false)
+  // Auto-open form if navigated with ?new=1
+  const [showEnterpriseForm, setShowEnterpriseForm] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('new') === '1') {
+      window.history.replaceState({}, '', window.location.pathname)
+      return true
+    }
+    return false
+  })
   const [originalPriceListId, setOriginalPriceListId] = useState('')
   const [editingEnterpriseId, setEditingEnterpriseId] = useState<string | null>(null)
   const [enterpriseForm, setEnterpriseForm] = useState(emptyEnterpriseForm)
