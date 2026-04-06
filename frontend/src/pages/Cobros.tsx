@@ -1584,8 +1584,13 @@ export const Cobros: React.FC = () => {
                               isPartial ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' :
                               'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300'
                             }`}>
-                              {isFullyAssigned ? 'Completo' : isPartial ? `Parcial (${fmt(assigned)}/${fmt(totalAmt)})` : 'Sin vincular'}
+                              {isFullyAssigned ? 'Completo' : isPartial ? `Parcial` : 'Sin vincular'}
                             </span>
+                            {isPartial && (
+                              <p className="text-[10px] text-gray-500 mt-0.5">
+                                {fmt(assigned)} asignado | <span className="text-amber-600 font-medium">{fmt(totalAmt - assigned)} sin asignar</span>
+                              </p>
+                            )}
                             {invoices.length > 0 && (
                               <div className="flex flex-wrap gap-0.5 mt-1">
                                 {invoices.map((item: any, idx: number) => (
