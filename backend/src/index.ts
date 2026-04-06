@@ -53,6 +53,14 @@ async function start() {
     // Start SecretarIA morning brief scheduler
     secretariaScheduler.start();
 
+    // Keep Neon DB warm (prevent scale-to-zero cold starts)
+    setInterval(async () => {
+      try {
+        const { pool } = await import('./config/db');
+        await pool.query('SELECT 1');
+      } catch { /* non-critical */ }
+    }, 4 * 60 * 1000); // Every 4 minutes
+
     logger.info('All systems initialized successfully');
   } catch (error) {
     logger.fatal({ error }, 'Failed to start server');
