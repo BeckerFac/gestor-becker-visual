@@ -383,10 +383,14 @@ export const Orders: React.FC = () => {
           const product = products.find(p => p.id === productId)
           if (product) {
             item.product_name = product.name
-            item.unit_price = parseFloat(product.pricing?.final_price || '0') || 0
+            // Use net price (without IVA) as unit_price - IVA is added separately in order totals
+            const finalPrice = parseFloat(product.pricing?.final_price || '0') || 0
+            const productVat = parseFloat(product.pricing?.vat_rate || '21') || 21
+            const netPrice = finalPrice / (1 + productVat / 100)
+            item.unit_price = Math.round(netPrice * 100) / 100
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).category_name || (product as any).product_type || 'otro'
-            item.vat_rate = parseFloat(product.pricing?.vat_rate || '21') || 21
+            item.vat_rate = productVat
             setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
 
             // If a price criteria is selected, try to use criteria price
@@ -1232,7 +1236,9 @@ export const Orders: React.FC = () => {
                               if (!item.product_id || item.product_id === 'custom' || manualPriceOverride[idx]) return item
                               const product = products.find(p => p.id === item.product_id)
                               if (product) {
-                                return { ...item, unit_price: parseFloat(product.pricing?.final_price || '0') || 0 }
+                                const fp = parseFloat(product.pricing?.final_price || '0') || 0
+                                const vr = parseFloat(product.pricing?.vat_rate || '21') || 21
+                                return { ...item, unit_price: Math.round((fp / (1 + vr / 100)) * 100) / 100 }
                               }
                               return item
                             })
@@ -1382,7 +1388,7 @@ export const Orders: React.FC = () => {
                                 : products
                               return filtered.map(p => (
                                 <option key={p.id} value={p.id}>
-                                  {p.name}{p.pricing?.final_price ? ` (${formatCurrency(parseFloat(p.pricing.final_price))})` : ''}
+                                  {p.name}{p.pricing?.final_price ? ` (${formatCurrency(parseFloat(p.pricing.final_price) / (1 + (parseFloat(p.pricing.vat_rate || '21') || 21) / 100))})` : ''}
                                 </option>
                               ))
                             })()}

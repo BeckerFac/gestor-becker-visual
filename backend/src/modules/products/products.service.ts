@@ -234,11 +234,12 @@ export class ProductsService {
         await pool.query('UPDATE products SET low_stock_threshold = $1 WHERE id = $2', [Number(data.low_stock_threshold) || 0, productId]);
       }
 
-      // Update or create pricing
-      if (data.cost !== undefined) {
-        const vat_rate = data.vat_rate || 21;
-        const margin = data.margin_percent || 30;
-        const final_price = Number(data.cost) * (1 + Number(margin) / 100) * (1 + Number(vat_rate) / 100);
+      // Update or create pricing (handle 0 values correctly)
+      if (data.cost !== undefined || data.vat_rate !== undefined || data.margin_percent !== undefined) {
+        const vat_rate = data.vat_rate != null ? Number(data.vat_rate) : 21;
+        const margin = data.margin_percent != null ? Number(data.margin_percent) : 30;
+        const cost = data.cost != null ? Number(data.cost) : 0;
+        const final_price = cost * (1 + margin / 100) * (1 + vat_rate / 100);
 
         const existingPricing = await db.select().from(product_pricing)
           .where(eq(product_pricing.product_id, productId));
@@ -249,7 +250,7 @@ export class ProductsService {
           const oldMargin = parseFloat(existingPricing[0].margin_percent?.toString() || '0');
           const oldVat = parseFloat(existingPricing[0].vat_rate?.toString() || '0');
           const oldFinal = parseFloat(existingPricing[0].final_price?.toString() || '0');
-          const newCost = Number(data.cost);
+          const newCost = cost;
           const newFinal = final_price;
 
           if (Math.abs(oldCost - newCost) > 0.001) {
@@ -267,7 +268,7 @@ export class ProductsService {
 
           await db.update(product_pricing)
             .set({
-              cost: data.cost.toString(),
+              cost: cost.toString(),
               margin_percent: margin.toString(),
               vat_rate: vat_rate.toString(),
               final_price: final_price.toString(),
@@ -278,7 +279,7 @@ export class ProductsService {
           await db.insert(product_pricing).values({
             id: uuid(),
             product_id: productId,
-            cost: data.cost.toString(),
+            cost: cost.toString(),
             margin_percent: margin.toString(),
             vat_rate: vat_rate.toString(),
             final_price: final_price.toString(),
