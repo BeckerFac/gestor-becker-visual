@@ -65,16 +65,16 @@ export const StepCustomer: React.FC<StepCustomerProps> = ({ data, onChange }) =>
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Agrega tu primer cliente
+          Agrega tu primera empresa cliente
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Con un cliente y un producto, ya podes facturar
+          Con una empresa y un producto, ya podes facturar
         </p>
       </div>
 
       {/* CUIT with lookup */}
       <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CUIT / CUIL del cliente *</label>
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CUIT de la empresa *</label>
         <div className="flex gap-2">
           <input
             type="text"

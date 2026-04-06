@@ -145,20 +145,33 @@ export class OnboardingService {
     const email = customer.email as string | undefined;
     const phone = customer.phone as string | undefined;
 
-    const result = await pool.query(
-      `INSERT INTO customers (company_id, name, cuit, tax_condition, contact_name, email, phone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (company_id, cuit) DO UPDATE SET name = EXCLUDED.name
+    // Create enterprise (empresa) instead of just a customer contact
+    const entResult = await pool.query(
+      `INSERT INTO enterprises (company_id, name, cuit, tax_condition, email, phone)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT DO NOTHING
        RETURNING id`,
-      [companyId, name, cuit, condicionIva || null, contactName || null, email || null, phone || null]
+      [companyId, name, cuit, condicionIva || null, email || null, phone || null]
     );
+
+    const enterpriseId = entResult.rows[0]?.id;
+
+    // If there's a contact name, also create a customer linked to the enterprise
+    if (contactName && enterpriseId) {
+      await pool.query(
+        `INSERT INTO customers (company_id, name, cuit, tax_condition, email, phone, enterprise_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT DO NOTHING`,
+        [companyId, contactName, cuit, condicionIva || null, email || null, phone || null, enterpriseId]
+      ).catch(() => {});
+    }
 
     await pool.query(
       `UPDATE companies SET onboarding_current_step = GREATEST(onboarding_current_step, 4) WHERE id = $1`,
       [companyId]
     );
 
-    return { success: true, step: 4, customer: { id: result.rows[0].id, name } };
+    return { success: true, step: 4, enterprise: { id: enterpriseId, name } };
   }
 
   async completeOnboarding(companyId: string) {

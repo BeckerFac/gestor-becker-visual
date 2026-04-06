@@ -14,7 +14,7 @@ const STEPS = [
   { id: 1, label: 'Tu empresa', required: true },
   { id: 2, label: 'Modulos', required: true },
   { id: 3, label: 'Producto', required: false },
-  { id: 4, label: 'Cliente', required: false },
+  { id: 4, label: 'Empresa cliente', required: false },
   { id: 5, label: 'Listo!', required: false },
 ]
 
