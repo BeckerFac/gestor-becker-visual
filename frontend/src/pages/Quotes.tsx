@@ -247,11 +247,8 @@ export const Quotes: React.FC = () => {
       if (prod) {
         updated[idx].product_name = prod.name
         if (prod.pricing?.final_price) {
-          const fp = parseFloat(prod.pricing.final_price)
-          const vr = parseFloat(prod.pricing?.vat_rate || '21') || 21
-          updated[idx].unit_price = String(Math.round((fp / (1 + vr / 100)) * 100) / 100)
+          updated[idx].unit_price = prod.pricing.final_price
         }
-        if (prod.pricing?.vat_rate) updated[idx].vat_rate = prod.pricing.vat_rate
 
         // If a price criteria is selected, use criteria price
         if (selectedPriceCriteria) {
@@ -590,9 +587,7 @@ export const Quotes: React.FC = () => {
                             if (!item.product_id) return item
                             const prod = products.find(p => p.id === item.product_id)
                             if (prod?.pricing?.final_price) {
-                              const fp = parseFloat(prod.pricing.final_price)
-                              const vr = parseFloat(prod.pricing?.vat_rate || '21') || 21
-                              return { ...item, unit_price: String(Math.round((fp / (1 + vr / 100)) * 100) / 100) }
+                              return { ...item, unit_price: prod.pricing.final_price }
                             }
                             return item
                           })

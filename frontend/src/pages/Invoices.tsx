@@ -1603,10 +1603,13 @@ export const Invoices: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Expected withholdings section */}
+                {/* Expected withholdings section - collapsible */}
                 {vistaMode === 'venta_fiscal' && formTotals.total > 0 && (
-                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-4 mt-3">
-                    <h4 className="font-medium text-sm mb-1 text-amber-900 dark:text-amber-200">Retenciones esperadas del cliente (estimado)</h4>
+                  <details className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg mt-3">
+                    <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-lg select-none">
+                      Retenciones esperadas del cliente (estimado)
+                    </summary>
+                    <div className="px-4 pb-4">
                     <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">Marca las retenciones que esperas que el cliente aplique. Se pre-llenaran al registrar el cobro.</p>
                     <div className="space-y-2">
                       {retencionesEsperadas.map((ret, idx) => {
@@ -1652,7 +1655,8 @@ export const Invoices: React.FC = () => {
                         <span>{formatCurrency(retencionesEsperadas.filter(r => r.enabled).reduce((sum, r) => sum + formTotals.total * (r.rate / 100), 0), formCurrency)}</span>
                       </div>
                     )}
-                  </div>
+                    </div>
+                  </details>
                 )}
 
                 <div className="flex justify-between pt-2">

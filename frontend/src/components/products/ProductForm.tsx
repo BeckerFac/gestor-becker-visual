@@ -95,28 +95,25 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const recalcFrom = useCallback((field: string, value: string, currentForm: ProductFormType) => {
     const cost = field === 'cost' ? (parseFloat(value) || 0) : (parseFloat(currentForm.cost) || 0)
     const margin = field === 'margin_percent' ? (parseFloat(value) || 0) : (parseFloat(currentForm.margin_percent) || 0)
-    const vat = field === 'vat_rate' ? (parseFloat(value) || 0) : (parseFloat(currentForm.vat_rate) || 0)
     const finalPrice = field === 'final_price' ? (parseFloat(value) || 0) : (parseFloat(currentForm.final_price) || 0)
 
     const updated = { ...currentForm, [field]: value }
 
     if (field === 'final_price') {
-      if (cost > 0 && vat >= 0) {
-        const priceWithoutVat = finalPrice / (1 + vat / 100)
-        const newMargin = ((priceWithoutVat / cost) - 1) * 100
+      // Derive margin from final price (precio neto, sin IVA)
+      if (cost > 0) {
+        const newMargin = ((finalPrice / cost) - 1) * 100
         updated.margin_percent = isFinite(newMargin) && newMargin >= 0 ? newMargin.toFixed(2) : '0'
       }
     } else if (field === 'margin_percent') {
-      const newFinal = cost * (1 + margin / 100) * (1 + vat / 100)
+      const newFinal = cost * (1 + margin / 100)
       updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
     } else if (field === 'cost') {
       const newCost = parseFloat(value) || 0
-      const newFinal = newCost * (1 + margin / 100) * (1 + vat / 100)
+      const newFinal = newCost * (1 + margin / 100)
       updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
     } else if (field === 'vat_rate') {
-      const newVat = parseFloat(value) || 0
-      const newFinal = cost * (1 + margin / 100) * (1 + newVat / 100)
-      updated.final_price = isFinite(newFinal) ? newFinal.toFixed(2) : '0'
+      // No-op: IVA removed from product pricing
     }
 
     return updated
@@ -176,8 +173,8 @@ export const ProductForm: React.FC<ProductFormProps> = ({
     try {
       const cost = parseFloat(form.cost) || 0
       const margin = parseFloat(form.margin_percent) || 0
-      const vat = parseFloat(form.vat_rate) || 0
-      const finalPrice = parseFloat(form.final_price) || cost * (1 + margin / 100) * (1 + vat / 100)
+      // IVA se define por item en pedidos/facturas, producto guarda precio neto
+      const finalPrice = parseFloat(form.final_price) || cost * (1 + margin / 100)
 
       const payload = {
         sku: form.sku,
@@ -188,7 +185,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         category_id: categoryId || null,
         cost: cost,
         margin_percent: margin,
-        vat_rate: vat,
+        vat_rate: 0,
         final_price: Math.round(finalPrice * 100) / 100,
         controls_stock: form.controls_stock,
         low_stock_threshold: form.controls_stock ? parseFloat(form.low_stock_threshold) || 0 : 0,
@@ -387,18 +384,9 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                   onChange={e => handlePriceField('margin_percent', e.target.value)}
                 />
               </div>
+              {/* IVA hidden - se define por item en pedidos/facturas, no en el producto */}
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">IVA %</label>
-                <select
-                  className={`px-3 py-2 border rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 ${lastEdited === 'vat_rate' ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100' : 'border-gray-300 dark:border-gray-600'}`}
-                  value={form.vat_rate}
-                  onChange={e => handlePriceField('vat_rate', e.target.value)}
-                >
-                  {VAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Precio Final (ARS)</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Precio Neto (ARS)</label>
                 <input
                   type="number" step="0.01" placeholder="0.00"
                   className={`px-3 py-2 border rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500 ${lastEdited === 'final_price' ? 'border-green-400 bg-green-50 text-green-800 dark:border-green-600 dark:bg-green-900/30 dark:text-green-100' : 'border-green-300 bg-green-50 text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-100'}`}
