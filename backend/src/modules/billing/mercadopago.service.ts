@@ -17,7 +17,7 @@ import { getPlan } from './plans.config';
 // Environment variables needed:
 //   MERCADOPAGO_ACCESS_TOKEN - Production access token
 //   MERCADOPAGO_WEBHOOK_SECRET - Webhook signature secret
-//   APP_URL - Public URL for webhooks (e.g., https://gestor.beckervisual.com)
+//   APP_URL - Public URL for webhooks (e.g., https://gobecker.com.ar)
 
 interface MercadoPagoConfig {
   accessToken: string;
@@ -102,7 +102,7 @@ class MercadoPagoService {
       // Create preapproval (recurring subscription)
       // Docs: https://www.mercadopago.com.ar/developers/es/reference/subscriptions/_preapproval/post
       const response = await client.post('/preapproval', {
-        reason: `Gestor BeckerVisual - Plan ${plan.displayName} (${isAnnual ? 'Anual' : 'Mensual'})`,
+        reason: `GoBecker - Plan ${plan.displayName} (${isAnnual ? 'Anual' : 'Mensual'})`,
         auto_recurring: {
           frequency,
           frequency_type: frequencyType,

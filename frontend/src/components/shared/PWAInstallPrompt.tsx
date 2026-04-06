@@ -68,7 +68,7 @@ export function PWAInstallPrompt() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-200">
-            Instala GESTIA en tu dispositivo
+            Instala GoBecker en tu dispositivo
           </p>
           <p className="mt-0.5 text-xs text-gray-500">
             Acceso rapido desde tu pantalla de inicio

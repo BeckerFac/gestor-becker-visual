@@ -10,7 +10,7 @@ interface WelcomeEmailData {
 
 export function welcomeEmailHtml(data: WelcomeEmailData): string {
   const body = `
-    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#1f2937;">Bienvenido a Gestor BeckerVisual</h2>
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#1f2937;">Bienvenido a GoBecker</h2>
     <p style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;">
       Hola <strong>${escapeHtml(data.name)}</strong>,
     </p>
@@ -66,7 +66,7 @@ export function welcomeEmailHtml(data: WelcomeEmailData): string {
   `
 
   return baseLayout({
-    preheader: `Bienvenido a Gestor BeckerVisual, ${escapeHtml(data.name)}`,
+    preheader: `Bienvenido a GoBecker, ${escapeHtml(data.name)}`,
     body,
   })
 }

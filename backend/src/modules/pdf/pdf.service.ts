@@ -811,7 +811,7 @@ export class PdfService {
 
   <!-- Footer -->
   <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999;">
-    <p style="margin: 0 0 4px 0;">Generado por GESTIA - ${todayStr} ${timeStr}</p>
+    <p style="margin: 0 0 4px 0;">Generado por GoBecker - ${todayStr} ${timeStr}</p>
     <p style="margin: 0;">Este documento es un resumen del periodo seleccionado. El balance final refleja el total historico.</p>
   </div>
 </div>

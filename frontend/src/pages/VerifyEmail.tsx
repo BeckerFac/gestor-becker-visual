@@ -39,7 +39,7 @@ export const VerifyEmail: React.FC = () => {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 mb-4 shadow-lg shadow-blue-500/20">
             <span className="text-2xl font-bold text-white">G</span>
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">GESTIA</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">GoBecker</h1>
           <p className="text-gray-500 mt-1">Verificacion de Email</p>
         </div>
         {/* Glass card */}

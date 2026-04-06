@@ -26,7 +26,7 @@ export function passwordResetEmailHtml(data: PasswordResetEmailData): string {
   `
 
   return baseLayout({
-    preheader: 'Restablecer tu contrasena de Gestor BeckerVisual',
+    preheader: 'Restablecer tu contrasena de GoBecker',
     body,
   })
 }

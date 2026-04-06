@@ -60,7 +60,7 @@ export class EmailService {
 
   constructor() {
     this.mode = resolveTransportMode()
-    this.fromAddress = env.RESEND_FROM || env.SMTP_FROM || 'Gestor BeckerVisual <noreply@gestorbecker.com>'
+    this.fromAddress = env.RESEND_FROM || env.SMTP_FROM || 'GoBecker <noreply@gobecker.com.ar>'
 
     if (this.mode === 'resend') {
       this.resend = new Resend(env.RESEND_API_KEY)
@@ -153,7 +153,7 @@ export class EmailService {
 
       return await this.send({
         to: email,
-        subject: 'Verifica tu email - Gestor BeckerVisual',
+        subject: 'Verifica tu email - GoBecker',
         html,
       })
     } catch (error) {
@@ -169,7 +169,7 @@ export class EmailService {
 
       return await this.send({
         to: email,
-        subject: 'Restablecer contrasena - Gestor BeckerVisual',
+        subject: 'Restablecer contrasena - GoBecker',
         html,
       })
     } catch (error) {
@@ -191,7 +191,7 @@ export class EmailService {
 
       return await this.send({
         to: email,
-        subject: `Te invitaron a ${companyName} - Gestor BeckerVisual`,
+        subject: `Te invitaron a ${companyName} - GoBecker`,
         html,
       })
     } catch (error) {
@@ -207,7 +207,7 @@ export class EmailService {
 
       return await this.send({
         to: email,
-        subject: `Bienvenido a Gestor BeckerVisual! - ${companyName}`,
+        subject: `Bienvenido a GoBecker! - ${companyName}`,
         html,
       })
     } catch (error) {

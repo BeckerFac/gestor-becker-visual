@@ -368,7 +368,7 @@ ${JSON.stringify(analysisData, null, 2)}`,
         type: 'opportunity',
         severity: 'info',
         title: 'Creá tu primer pedido',
-        description: 'Empezá cargando tu primer pedido para activar los insights inteligentes de GESTIA.',
+        description: 'Empezá cargando tu primer pedido para activar los insights inteligentes de GoBecker.',
         action_label: 'Nuevo pedido',
         action_link: '/orders',
       });

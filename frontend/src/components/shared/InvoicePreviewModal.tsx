@@ -932,7 +932,7 @@ export function InvoicePreviewModal({
               <div className="flex-1 bg-gray-50 p-5 overflow-y-auto flex items-start justify-center">
                 <div className="w-full max-w-sm">
                   <InvoiceTemplate
-                    companyName={invoice.enterprise?.name || 'BeckerVisual'}
+                    companyName={invoice.enterprise?.name || 'GoBecker'}
                     companyCuit={invoice.enterprise?.cuit || '27-23091318-3'}
                     companyAddress={invoice.enterprise?.address}
                     customerName={localCustomerName || 'Consumidor Final'}

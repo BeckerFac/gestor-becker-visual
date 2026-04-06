@@ -180,8 +180,8 @@ export const Sidebar: React.FC = () => {
     )}>
       {/* Logo */}
       <div className="px-6 py-4 border-b border-gray-700 dark:border-gray-800">
-        <h1 className="text-xl font-bold">BeckerVisual</h1>
-        <p className="text-xs text-gray-400">Gestor Comercial</p>
+        <h1 className="text-xl font-bold">GoBecker</h1>
+        <p className="text-xs text-gray-400">Gestion Comercial Inteligente</p>
       </div>
 
       {/* Business Unit Selector */}

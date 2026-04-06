@@ -14,7 +14,7 @@ export function verificationEmailHtml(data: VerificationEmailData): string {
       Hola <strong>${escapeHtml(data.name)}</strong>,
     </p>
     <p style="margin:0 0 8px;font-size:15px;color:#374151;line-height:1.6;">
-      Gracias por registrarte en Gestor BeckerVisual. Para completar tu registro, verifica tu email haciendo clic en el boton:
+      Gracias por registrarte en GoBecker. Para completar tu registro, verifica tu email haciendo clic en el boton:
     </p>
     ${ctaButton('Verificar Email', data.verifyUrl)}
     <p style="margin:0 0 6px;font-size:13px;color:#6b7280;line-height:1.5;">

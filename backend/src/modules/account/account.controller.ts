@@ -75,7 +75,7 @@ export class AccountController {
         },
       };
 
-      res.setHeader('Content-Disposition', `attachment; filename="gestia-data-export-${new Date().toISOString().slice(0, 10)}.json"`);
+      res.setHeader('Content-Disposition', `attachment; filename="gobecker-data-export-${new Date().toISOString().slice(0, 10)}.json"`);
       res.setHeader('Content-Type', 'application/json');
       res.json(exportData);
     } catch (error: any) {

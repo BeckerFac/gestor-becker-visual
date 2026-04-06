@@ -284,7 +284,7 @@ export class SecretariaMediaService {
       const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
 
       if (!mediaId) {
-        return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+        return { success: false, error: 'No pude subir el archivo. Intenta desde GoBecker.' };
       }
 
       // Send as document
@@ -299,7 +299,7 @@ export class SecretariaMediaService {
       return { success: true, mediaId };
     } catch (error) {
       logger.error({ error, invoiceId }, '[SecretarIA Media] sendInvoicePdf failed');
-      return { success: false, error: 'No pude generar el PDF de la factura. Intenta desde GESTIA.' };
+      return { success: false, error: 'No pude generar el PDF de la factura. Intenta desde GoBecker.' };
     }
   }
 
@@ -341,7 +341,7 @@ export class SecretariaMediaService {
       const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
 
       if (!mediaId) {
-        return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+        return { success: false, error: 'No pude subir el archivo. Intenta desde GoBecker.' };
       }
 
       // Send as document
@@ -356,7 +356,7 @@ export class SecretariaMediaService {
       return { success: true, mediaId };
     } catch (error) {
       logger.error({ error, quoteId }, '[SecretarIA Media] sendQuotePdf failed');
-      return { success: false, error: 'No pude generar el PDF de la cotizacion. Intenta desde GESTIA.' };
+      return { success: false, error: 'No pude generar el PDF de la cotizacion. Intenta desde GoBecker.' };
     }
   }
 
@@ -397,7 +397,7 @@ export class SecretariaMediaService {
       const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
 
       if (!mediaId) {
-        return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+        return { success: false, error: 'No pude subir el archivo. Intenta desde GoBecker.' };
       }
 
       // Send as document
@@ -412,7 +412,7 @@ export class SecretariaMediaService {
       return { success: true, mediaId };
     } catch (error) {
       logger.error({ error, remitoId }, '[SecretarIA Media] sendRemitoPdf failed');
-      return { success: false, error: 'No pude generar el PDF del remito. Intenta desde GESTIA.' };
+      return { success: false, error: 'No pude generar el PDF del remito. Intenta desde GoBecker.' };
     }
   }
 
@@ -597,7 +597,7 @@ export class SecretariaMediaService {
       );
 
       if (!mediaId) {
-        return { success: false, error: 'No pude subir el archivo Excel. Intenta desde GESTIA.' };
+        return { success: false, error: 'No pude subir el archivo Excel. Intenta desde GoBecker.' };
       }
 
       const caption = `Reporte de ${reportType} (${effectiveDateFrom} a ${effectiveDateTo}) - ${rows.length} registros`;
@@ -611,7 +611,7 @@ export class SecretariaMediaService {
       return { success: true, mediaId };
     } catch (error) {
       logger.error({ error, reportType }, '[SecretarIA Media] sendExcelReport failed');
-      return { success: false, error: 'No pude generar el reporte Excel. Intenta desde GESTIA.' };
+      return { success: false, error: 'No pude generar el reporte Excel. Intenta desde GoBecker.' };
     }
   }
 
@@ -716,7 +716,7 @@ export class SecretariaMediaService {
         const filename = `${documentType}_${documentNumber}.pdf`;
         const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
         if (!mediaId) {
-          return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+          return { success: false, error: 'No pude subir el archivo. Intenta desde GoBecker.' };
         }
         const sent = await this.sendDocumentByMediaId(phoneNumber, mediaId, filename, `${documentType} #${documentNumber}`);
         return sent
@@ -767,7 +767,7 @@ export class SecretariaMediaService {
         const mediaId = await this.uploadMedia(pdfBuffer, 'application/pdf', filename);
 
         if (!mediaId) {
-          return { success: false, error: 'No pude subir el archivo. Intenta desde GESTIA.' };
+          return { success: false, error: 'No pude subir el archivo. Intenta desde GoBecker.' };
         }
 
         const sent = await this.sendDocumentByMediaId(phoneNumber, mediaId, filename, `${docTypeLabel} #${documentNumber}`);
@@ -780,7 +780,7 @@ export class SecretariaMediaService {
       const mediaId = await this.uploadMedia(screenshotBuffer, 'image/png', `preview_${documentType}_${documentNumber}.png`);
 
       if (!mediaId) {
-        return { success: false, error: 'No pude subir la preview. Intenta desde GESTIA.' };
+        return { success: false, error: 'No pude subir la preview. Intenta desde GoBecker.' };
       }
 
       const docTypeLabel = documentType === 'factura' ? 'Factura' : documentType === 'cotizacion' ? 'Cotizacion' : 'Remito';
@@ -795,7 +795,7 @@ export class SecretariaMediaService {
       return { success: true, mediaId };
     } catch (error) {
       logger.error({ error, documentType, documentId }, '[SecretarIA Media] sendPreviewImage failed');
-      return { success: false, error: 'No pude generar la preview del documento. Intenta desde GESTIA.' };
+      return { success: false, error: 'No pude generar la preview del documento. Intenta desde GoBecker.' };
     }
   }
 }

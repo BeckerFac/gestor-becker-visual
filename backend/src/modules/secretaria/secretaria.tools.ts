@@ -800,7 +800,7 @@ export async function sendDocument(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error({ error: message }, 'SecretarIA sendDocument failed');
-    return { toolName: 'sendDocument', data: null, formatted: 'Error al procesar el envio del documento. Intenta desde GESTIA.' };
+    return { toolName: 'sendDocument', data: null, formatted: 'Error al procesar el envio del documento. Intenta desde GoBecker.' };
   }
 }
 

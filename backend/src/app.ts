@@ -185,7 +185,7 @@ app.use(activityLoggerMiddleware);
 // security.txt (RFC 9116)
 app.get('/.well-known/security.txt', (_req, res) => {
   res.type('text/plain').send(
-    `Contact: mailto:security@gestia.com.ar\nPreferred-Languages: es, en\nCanonical: https://gestia.com.ar/.well-known/security.txt\nExpires: 2027-04-01T00:00:00.000Z\n`
+    `Contact: mailto:security@gobecker.com.ar\nPreferred-Languages: es, en\nCanonical: https://gobecker.com.ar/.well-known/security.txt\nExpires: 2027-04-01T00:00:00.000Z\n`
   );
 });
 

@@ -2,8 +2,8 @@
 // Brand colors and responsive structure.
 
 const BRAND_COLOR = '#0066cc'
-const BRAND_NAME = 'Gestor BeckerVisual'
-const FOOTER_TEXT = 'Gestion Comercial Profesional'
+const BRAND_NAME = 'GoBecker'
+const FOOTER_TEXT = 'Gestion Comercial Inteligente'
 
 function escapeHtml(str: string): string {
   return String(str || '')

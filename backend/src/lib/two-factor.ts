@@ -6,7 +6,7 @@ import { ApiError } from '../middlewares/errorHandler';
 import { auditService } from '../modules/audit/audit.service';
 
 // Application name shown in authenticator apps
-const ISSUER = 'GestorBeckerVisual';
+const ISSUER = 'GoBecker';
 
 export interface TwoFactorSetupResult {
   secret: string; // Base32 encoded secret (for manual entry)

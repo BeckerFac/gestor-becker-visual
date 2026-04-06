@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icons/*.png', 'icons/*.svg'],
       manifest: {
-        name: 'GESTIA - Gestion Empresarial',
-        short_name: 'GESTIA',
+        name: 'GoBecker - Gestion Comercial Inteligente',
+        short_name: 'GoBecker',
         description: 'Sistema de gestion integral para PyMEs argentinas',
         theme_color: '#0A0A0F',
         background_color: '#0A0A0F',

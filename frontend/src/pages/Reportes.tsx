@@ -313,7 +313,7 @@ export const Reportes: React.FC = () => {
     const filename = buildExcelFilename(activeTab, dateFrom, dateTo)
     const dateRangeStr = `${formatDate(dateFrom)} - ${formatDate(dateTo)}`
     const tabLabel = ALL_TABS.find(t => t.key === activeTab)?.label || 'Reporte'
-    const headerText = `BeckerVisual - ${tabLabel} - ${dateRangeStr}`
+    const headerText = `GoBecker - ${tabLabel} - ${dateRangeStr}`
 
     // Business tabs: provide empty data (business tabs export differently via their own components)
     if (!isAccountingTab(activeTab)) {

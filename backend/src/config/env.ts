@@ -8,7 +8,7 @@ export const env = {
   PORT: parseInt(process.env.PORT || '3000', 10),
 
   // Database
-  DATABASE_URL: process.env.DATABASE_URL || 'postgresql://gestor_user:gestor_password_dev@localhost:5432/gestor_becker',
+  DATABASE_URL: process.env.DATABASE_URL || 'postgresql://gestor_user:gestor_password_dev@localhost:5432/gobecker',
 
   // JWT - secure defaults (15m access, 7d refresh)
   JWT_SECRET: process.env.JWT_SECRET || '',
@@ -29,7 +29,7 @@ export const env = {
   SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
   SMTP_USER: process.env.SMTP_USER || '',
   SMTP_PASS: process.env.SMTP_PASS || '',
-  SMTP_FROM: process.env.SMTP_FROM || 'noreply@gestorbecker.com',
+  SMTP_FROM: process.env.SMTP_FROM || 'noreply@gobecker.com.ar',
 
   // App URL (for email links)
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',

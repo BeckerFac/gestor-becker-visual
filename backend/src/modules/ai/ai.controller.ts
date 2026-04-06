@@ -50,7 +50,7 @@ class AiController {
     });
   }
 
-  // POST /api/ai/chat - Chat with GESTIA
+  // POST /api/ai/chat - Chat with GoBecker
   async chat(req: AuthRequest, res: Response) {
     const companyId = req.user!.company_id;
     await requireAiAccess(companyId);

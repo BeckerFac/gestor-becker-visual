@@ -61,7 +61,7 @@ export class EmailController {
       const success = await emailService.sendWelcomeEmail(
         recipientEmail,
         req.user.email,
-        'Gestor BeckerVisual'
+        'GoBecker'
       )
 
       if (!success) {

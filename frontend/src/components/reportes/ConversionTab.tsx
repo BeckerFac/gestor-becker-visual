@@ -119,7 +119,7 @@ export const ConversionTab: React.FC<Props> = ({ data }) => {
         excelData={excelData}
         excelColumns={excelColumns}
         excelFilename="Conversion_Reporte"
-        headerText="BeckerVisual - Reporte de Conversion"
+        headerText="GoBecker - Reporte de Conversion"
       />
 
       {/* Summary cards */}

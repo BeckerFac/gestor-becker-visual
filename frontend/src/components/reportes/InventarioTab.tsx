@@ -166,7 +166,7 @@ export const InventarioTab: React.FC<Props> = ({ data }) => {
         excelData={excelData}
         excelColumns={excelColumns}
         excelFilename="Inventario_Reporte"
-        headerText="BeckerVisual - Reporte de Inventario"
+        headerText="GoBecker - Reporte de Inventario"
       />
 
       {/* Summary cards */}

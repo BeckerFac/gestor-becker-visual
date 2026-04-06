@@ -165,7 +165,7 @@ class SecretariaService {
       await whatsappClient.sendTextMessage(
         phoneNumber,
         'No tengo tu numero vinculado a ninguna empresa. ' +
-        'Para conectarte, ingresa a GESTIA > SecretarIA y genera un codigo de vinculacion.',
+        'Para conectarte, ingresa a GoBecker > SecretarIA y genera un codigo de vinculacion.',
       );
       return;
     }
@@ -177,7 +177,7 @@ class SecretariaService {
     if (!config.enabled) {
       await whatsappClient.sendTextMessage(
         phoneNumber,
-        'SecretarIA esta desactivada para tu empresa. Pedi al administrador que la active desde GESTIA.',
+        'SecretarIA esta desactivada para tu empresa. Pedi al administrador que la active desde GoBecker.',
       );
       return;
     }

@@ -5,7 +5,7 @@ import { AiFeatures } from '../billing/plans.config';
 
 // ── Role-based tool access ──
 
-// Intent types allowed per GESTIA role
+// Intent types allowed per GoBecker role
 const ROLE_TOOL_MAP: Record<string, readonly SecretariaIntent[]> = {
   owner: [
     'query_clients', 'query_products', 'query_invoices', 'query_balances',

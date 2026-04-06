@@ -126,7 +126,7 @@ export const AIChatPanel: React.FC = () => {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center group"
-        title="Preguntale a GESTIA"
+        title="Preguntale a GoBecker"
         aria-label="Abrir chat de IA"
       >
         {isOpen ? (
@@ -155,7 +155,7 @@ export const AIChatPanel: React.FC = () => {
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-sm">Preguntale a GESTIA</h3>
+              <h3 className="font-semibold text-sm">Preguntale a GoBecker</h3>
               <p className="text-xs text-white/70">Asistente de inteligencia artificial</p>
             </div>
             <div className="text-xs text-white/60 text-right">

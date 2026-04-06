@@ -279,7 +279,7 @@ export const Settings: React.FC = () => {
 
             {/* Step 2 - Generar CSR */}
             {wizardStep === 2 && (() => {
-              const csrCommand = `openssl req -new -key clave.key -subj "/C=AR/O=${form.name.replace(/"/g, '')}/CN=BeckerVisual/serialNumber=CUIT ${form.cuit}" -out solicitud.csr`
+              const csrCommand = `openssl req -new -key clave.key -subj "/C=AR/O=${form.name.replace(/"/g, '')}/CN=GoBecker/serialNumber=CUIT ${form.cuit}" -out solicitud.csr`
               return (
                 <div className="space-y-4">
                   <p className="text-sm text-gray-600 dark:text-gray-400">Genera la clave privada y el CSR (Certificate Signing Request) en tu computadora.</p>
@@ -326,7 +326,7 @@ export const Settings: React.FC = () => {
                 <ol className="text-sm text-gray-700 dark:text-gray-300 space-y-2 list-decimal list-inside">
                   <li>Ingresa a <a href="https://auth.afip.gob.ar/contribuyente_/login.xhtml" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">AFIP - Login con CUIT</a></li>
                   <li>Busca el servicio <strong>"Administracion de Certificados Digitales"</strong></li>
-                  <li>Crea un nuevo <strong>"Computador Fiscal"</strong> (nombre: BeckerVisual o el que prefieras)</li>
+                  <li>Crea un nuevo <strong>"Computador Fiscal"</strong> (nombre: GoBecker o el que prefieras)</li>
                   <li>Subi el archivo <code className="bg-gray-100 px-1 rounded">solicitud.csr</code></li>
                   <li>Descarga el certificado firmado (.crt o .pem)</li>
                   <li>En <strong>"Administrador de Relaciones de Clave Fiscal"</strong>: adherir el servicio <strong>"WSFE - Facturacion Electronica"</strong> al computador fiscal creado</li>

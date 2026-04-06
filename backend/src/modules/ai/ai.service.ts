@@ -1,4 +1,4 @@
-// AI Service - Core chat functionality ("Preguntale a GESTIA")
+// AI Service - Core chat functionality ("Preguntale a GoBecker")
 // Converts natural language questions to data queries and returns natural language answers
 
 import Anthropic from '@anthropic-ai/sdk';

@@ -203,7 +203,7 @@ class SecretariaSafetyService {
             { companyId },
             'SecretarIA safety: credential sharing suggestion detected — blocking',
           );
-          sanitized = 'No puedo pedir ni procesar credenciales por este canal. Gestionalo directamente desde la app de GESTIA.';
+          sanitized = 'No puedo pedir ni procesar credenciales por este canal. Gestionalo directamente desde la app de GoBecker.';
           wasSanitized = true;
           break;
         }

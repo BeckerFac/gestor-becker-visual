@@ -34,7 +34,7 @@ async function start() {
       process.exit(1);
     }
 
-    logger.info({ environment: env.NODE_ENV }, 'Starting Gestor BeckerVisual API...');
+    logger.info({ environment: env.NODE_ENV }, 'Starting GoBecker API...');
 
     // Connect to database
     await initDb();

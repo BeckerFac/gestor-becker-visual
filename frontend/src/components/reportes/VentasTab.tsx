@@ -92,7 +92,7 @@ export const VentasTab: React.FC<Props> = ({ data }) => {
         excelData={excelData}
         excelColumns={excelColumns}
         excelFilename="Ventas_Reporte"
-        headerText="BeckerVisual - Reporte de Ventas"
+        headerText="GoBecker - Reporte de Ventas"
       />
 
       {/* Summary cards */}

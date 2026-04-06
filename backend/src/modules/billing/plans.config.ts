@@ -1,4 +1,4 @@
-// Plan definitions for Gestor BeckerVisual SaaS
+// Plan definitions for GoBecker SaaS
 // Prices in ARS (Argentine Pesos)
 // Restructured: 2026-03-19
 
