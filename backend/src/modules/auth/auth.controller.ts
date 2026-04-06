@@ -46,6 +46,7 @@ export class AuthController {
       if (error instanceof ApiError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
+      console.error('Registration error:', error);
       res.status(500).json({ error: 'Registration failed' });
     }
   }
