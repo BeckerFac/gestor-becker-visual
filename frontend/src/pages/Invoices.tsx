@@ -201,7 +201,8 @@ const PurchaseInvoicesTab: React.FC = () => (
 const OrderItemsImporter: React.FC<{
   enterpriseId?: string;
   onImport: (items: any[]) => void;
-}> = ({ enterpriseId, onImport }) => {
+  existingOrderItemIds?: string[];
+}> = ({ enterpriseId, onImport, existingOrderItemIds = [] }) => {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [orderItems, setOrderItems] = useState<any[]>([])
@@ -233,17 +234,19 @@ const OrderItemsImporter: React.FC<{
     setSelectedQty({})
   }
 
-  // Group by order
+  // Group by order, excluding items already in the form
   const grouped = useMemo(() => {
+    const excludeSet = new Set(existingOrderItemIds)
+    const filtered = orderItems.filter(oi => !excludeSet.has(oi.order_item_id))
     const map = new Map<string, { order_id: string; order_number: number; order_title: string; enterprise_name: string; items: any[] }>()
-    for (const oi of orderItems) {
+    for (const oi of filtered) {
       if (!map.has(oi.order_id)) {
         map.set(oi.order_id, { order_id: oi.order_id, order_number: oi.order_number, order_title: oi.order_title, enterprise_name: oi.enterprise_name, items: [] })
       }
       map.get(oi.order_id)!.items.push(oi)
     }
     return Array.from(map.values())
-  }, [orderItems])
+  }, [orderItems, existingOrderItemIds])
 
   if (!open) {
     return (
@@ -1447,6 +1450,7 @@ export const Invoices: React.FC = () => {
                 {/* Import from orders button */}
                 <OrderItemsImporter
                   enterpriseId={formEnterpriseId}
+                  existingOrderItemIds={formItems.filter(i => i.order_item_id).map(i => i.order_item_id!)}
                   onImport={(importedItems) => {
                     const newItems = importedItems.map((oi: any) => {
                       const qty = parseFloat(oi.qty_to_invoice || oi.qty_remaining)
