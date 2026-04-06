@@ -1186,171 +1186,16 @@ export const Cobros: React.FC = () => {
                 />
               </div>
 
-              {/* Formas de Pago (multiple) */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">Formas de Pago</label>
-                {paymentMethods.map((pm, i) => (
-                  <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-3">
-                        <label className="text-xs text-gray-500">Metodo</label>
-                        <select className="w-full rounded border p-2 text-sm dark:bg-gray-800" value={pm.method} onChange={e => updatePaymentMethod(i, 'method', e.target.value)}>
-                          <option value="efectivo">Efectivo</option>
-                          <option value="transferencia">Transferencia</option>
-                          <option value="cheque">Cheque</option>
-                          <option value="tarjeta">Tarjeta</option>
-                          <option value="mercado_pago">Mercado Pago</option>
-                        </select>
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-xs text-gray-500">Monto *</label>
-                        <input type="number" className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="0.00" value={pm.amount} onChange={e => updatePaymentMethod(i, 'amount', e.target.value)} />
-                      </div>
-                      {(pm.method === 'transferencia') && (
-                        <div className="col-span-3">
-                          <BankSelector
-                            banks={banks}
-                            value={pm.bank_id || ''}
-                            onChange={bankId => updatePaymentMethod(i, 'bank_id', bankId)}
-                            onBanksChange={setBanks}
-                            label="Banco"
-                            className="!py-1.5 text-sm"
-                          />
-                        </div>
-                      )}
-                      <div className={pm.method === 'transferencia' ? 'col-span-3' : 'col-span-6'}>
-                        <label className="text-xs text-gray-500">Referencia</label>
-                        <input className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="N comprobante" value={pm.reference} onChange={e => updatePaymentMethod(i, 'reference', e.target.value)} />
-                      </div>
-                      {paymentMethods.length > 1 && (
-                        <div className="col-span-1 flex items-end">
-                          <button type="button" onClick={() => removePaymentMethod(i)} className="p-2 text-red-500 hover:text-red-700">X</button>
-                        </div>
-                      )}
-                    </div>
-                    {/* Cheque inline fields */}
-                    {pm.method === 'cheque' && pm.cheque_data && (
-                      <div className="grid grid-cols-4 gap-2 mt-2 pl-4 border-l-2 border-amber-300">
-                        <input placeholder="N Cheque" value={pm.cheque_data.number} onChange={e => updateChequeData(i, 'number', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input placeholder="Banco emisor" value={pm.cheque_data.bank} onChange={e => updateChequeData(i, 'bank', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input placeholder="Librador" value={pm.cheque_data.drawer} onChange={e => updateChequeData(i, 'drawer', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input placeholder="CUIT librador" value={pm.cheque_data.drawer_cuit} onChange={e => updateChequeData(i, 'drawer_cuit', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <select value={pm.cheque_data.cheque_type} onChange={e => updateChequeData(i, 'cheque_type', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800">
-                          <option value="comun">Comun</option>
-                          <option value="diferido">Diferido</option>
-                          <option value="cruzado">Cruzado</option>
-                        </select>
-                        <input type="date" placeholder="Emision" value={pm.cheque_data.issue_date} onChange={e => updateChequeData(i, 'issue_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input type="date" placeholder="Vencimiento" value={pm.cheque_data.due_date} onChange={e => updateChequeData(i, 'due_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-                <button type="button" onClick={addPaymentMethod} className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">+ Agregar forma de pago</button>
-                <div className="text-right text-sm font-medium">
-                  Total: ${paymentMethodsTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}
-                </div>
-              </div>
-
-              {/* Retenciones sufridas */}
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 mt-4">
-                <h4 className="font-medium mb-1 text-gray-900 dark:text-gray-100">Retenciones sufridas por el cliente</h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Montos que el cliente retuvo al pagarte</p>
-                <div className="space-y-2">
-                  {retencionesSufridas.map((ret, idx) => (
-                    <div key={ret.type}>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={ret.enabled}
-                          onChange={() => setRetencionesSufridas(prev => prev.map((r, i) =>
-                            i === idx ? { ...r, enabled: !r.enabled, amount: !r.enabled ? r.amount : 0 } : r
-                          ))}
-                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type] || ret.type}</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="Monto"
-                          value={ret.amount || ''}
-                          disabled={!ret.enabled}
-                          className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                          onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                            i === idx ? { ...r, amount: parseFloat(e.target.value) || 0 } : r
-                          ))}
-                        />
-                        {ret.enabled && (
-                          <label className="text-xs text-blue-600 cursor-pointer hover:underline">
-                            <input type="file" accept=".pdf" className="hidden" onChange={e => handleCertUpload(idx, e)} />
-                            {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
-                          </label>
-                        )}
-                      </div>
-                      {ret.enabled && (
-                        <div className="grid grid-cols-4 gap-2 mt-1 ml-7">
-                          <div>
-                            <label className="text-xs text-gray-500">N° Certificado</label>
-                            <input type="text" maxLength={14} placeholder="14 digitos"
-                              value={ret.certificate_number || ''}
-                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                                i === idx ? { ...r, certificate_number: e.target.value } : r
-                              ))}
-                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
-                          </div>
-                          <div>
-                            <label className="text-xs text-gray-500">Fecha retencion</label>
-                            <input type="date" value={ret.retention_date || ''}
-                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                                i === idx ? { ...r, retention_date: e.target.value } : r
-                              ))}
-                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
-                          </div>
-                          {ret.type === 'iibb' && (
-                            <div>
-                              <label className="text-xs text-gray-500">Jurisdiccion</label>
-                              <select value={ret.jurisdiction || ''} onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                                i === idx ? { ...r, jurisdiction: e.target.value } : r
-                              ))}
-                                className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100">
-                                <option value="">Seleccionar...</option>
-                                <option value="caba">CABA</option>
-                                <option value="pba">Provincia de Buenos Aires</option>
-                                <option value="otra">Otra jurisdiccion</option>
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {totalRetSufridas > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm text-gray-700 dark:text-gray-300">
-                    <span>Recibido: <b>$ {paymentMethodsTotal.toFixed(2)}</b></span>
-                    <span>Retenciones: <b>$ {totalRetSufridas.toFixed(2)}</b></span>
-                    <span>Total que cancela factura: <b>$ {(paymentMethodsTotal + totalRetSufridas).toFixed(2)}</b></span>
-                  </div>
-                )}
-              </div>
-
+              {/* Invoice linking - at the top for visibility */}
               <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
-                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-              </div>
-
-              {/* Optional invoice linking */}
-              <div className="border-t border-gray-200 pt-3">
                 <button
                   type="button"
                   onClick={handleToggleInvoices}
                   className="text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
                 >
-                  {showInvoiceSection ? 'Ocultar facturas' : 'Vincular a facturas (opcional)'}<HelpTip text="Opcional. Vincular el cobro a facturas emitidas o en borrador permite llevar control parcial de pagos." />
+                  {showInvoiceSection ? 'Ocultar facturas' : 'Vincular a facturas (opcional)'}<HelpTip text="Vincular el cobro a facturas permite llevar control de pagos parciales y actualizar el estado de la factura." />
                 </button>
               </div>
-
               {showInvoiceSection && (
                 <div>
                   {/* Tabs: Facturas Emitidas / Facturas Borrador */}
@@ -1467,6 +1312,166 @@ export const Cobros: React.FC = () => {
                   )}
                 </div>
               )}
+
+              {/* Formas de Pago (multiple) */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">Formas de Pago</label>
+                {paymentMethods.map((pm, i) => (
+                  <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-3">
+                        <label className="text-xs text-gray-500">Metodo</label>
+                        <select className="w-full rounded border p-2 text-sm dark:bg-gray-800" value={pm.method} onChange={e => updatePaymentMethod(i, 'method', e.target.value)}>
+                          <option value="efectivo">Efectivo</option>
+                          <option value="transferencia">Transferencia</option>
+                          <option value="cheque">Cheque</option>
+                          <option value="tarjeta">Tarjeta</option>
+                          <option value="mercado_pago">Mercado Pago</option>
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs text-gray-500">Monto *</label>
+                        <input type="number" className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="0.00" value={pm.amount} onChange={e => updatePaymentMethod(i, 'amount', e.target.value)} />
+                      </div>
+                      {(pm.method === 'transferencia') && (
+                        <div className="col-span-3">
+                          <BankSelector
+                            banks={banks}
+                            value={pm.bank_id || ''}
+                            onChange={bankId => updatePaymentMethod(i, 'bank_id', bankId)}
+                            onBanksChange={setBanks}
+                            label="Banco"
+                            className="!py-1.5 text-sm"
+                          />
+                        </div>
+                      )}
+                      <div className={pm.method === 'transferencia' ? 'col-span-3' : 'col-span-6'}>
+                        <label className="text-xs text-gray-500">Referencia</label>
+                        <input className="w-full rounded border p-2 text-sm dark:bg-gray-800" placeholder="N comprobante" value={pm.reference} onChange={e => updatePaymentMethod(i, 'reference', e.target.value)} />
+                      </div>
+                      {paymentMethods.length > 1 && (
+                        <div className="col-span-1 flex items-end">
+                          <button type="button" onClick={() => removePaymentMethod(i)} className="p-2 text-red-500 hover:text-red-700">X</button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Cheque inline fields */}
+                    {pm.method === 'cheque' && pm.cheque_data && (
+                      <div className="grid grid-cols-4 gap-2 mt-2 pl-4 border-l-2 border-amber-300">
+                        <input placeholder="N Cheque" value={pm.cheque_data.number} onChange={e => updateChequeData(i, 'number', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="Banco emisor" value={pm.cheque_data.bank} onChange={e => updateChequeData(i, 'bank', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="Librador" value={pm.cheque_data.drawer} onChange={e => updateChequeData(i, 'drawer', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input placeholder="CUIT librador" value={pm.cheque_data.drawer_cuit} onChange={e => updateChequeData(i, 'drawer_cuit', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <select value={pm.cheque_data.cheque_type} onChange={e => updateChequeData(i, 'cheque_type', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800">
+                          <option value="comun">Comun</option>
+                          <option value="diferido">Diferido</option>
+                          <option value="cruzado">Cruzado</option>
+                        </select>
+                        <input type="date" placeholder="Emision" value={pm.cheque_data.issue_date} onChange={e => updateChequeData(i, 'issue_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <input type="date" placeholder="Vencimiento" value={pm.cheque_data.due_date} onChange={e => updateChequeData(i, 'due_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button type="button" onClick={addPaymentMethod} className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">+ Agregar forma de pago</button>
+                <div className="text-right text-sm font-medium">
+                  Total: ${paymentMethodsTotal.toLocaleString('es-AR', {minimumFractionDigits: 2})}
+                </div>
+              </div>
+
+              {/* Retenciones sufridas - collapsible */}
+              <details className="border border-gray-200 dark:border-gray-700 rounded-lg mt-4">
+                <summary className="px-4 py-3 cursor-pointer font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg select-none">
+                  Retenciones sufridas por el cliente
+                  {totalRetSufridas > 0 && <span className="ml-2 text-sm text-blue-600 font-normal">(${totalRetSufridas.toFixed(2)})</span>}
+                </summary>
+                <div className="px-4 pb-4">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Montos que el cliente retuvo al pagarte</p>
+                <div className="space-y-2">
+                  {retencionesSufridas.map((ret, idx) => (
+                    <div key={ret.type}>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={ret.enabled}
+                          onChange={() => setRetencionesSufridas(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, enabled: !r.enabled, amount: !r.enabled ? r.amount : 0 } : r
+                          ))}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">{RETENCION_LABELS[ret.type] || ret.type}</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Monto"
+                          value={ret.amount || ''}
+                          disabled={!ret.enabled}
+                          className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-right text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, amount: parseFloat(e.target.value) || 0 } : r
+                          ))}
+                        />
+                        {ret.enabled && (
+                          <label className="text-xs text-blue-600 cursor-pointer hover:underline">
+                            <input type="file" accept=".pdf" className="hidden" onChange={e => handleCertUpload(idx, e)} />
+                            {ret.certificate_file ? 'Certificado cargado' : 'Subir certificado'}
+                          </label>
+                        )}
+                      </div>
+                      {ret.enabled && (
+                        <div className="grid grid-cols-4 gap-2 mt-1 ml-7">
+                          <div>
+                            <label className="text-xs text-gray-500">N° Certificado</label>
+                            <input type="text" maxLength={14} placeholder="14 digitos"
+                              value={ret.certificate_number || ''}
+                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, certificate_number: e.target.value } : r
+                              ))}
+                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">Fecha retencion</label>
+                            <input type="date" value={ret.retention_date || ''}
+                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, retention_date: e.target.value } : r
+                              ))}
+                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
+                          </div>
+                          {ret.type === 'iibb' && (
+                            <div>
+                              <label className="text-xs text-gray-500">Jurisdiccion</label>
+                              <select value={ret.jurisdiction || ''} onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, jurisdiction: e.target.value } : r
+                              ))}
+                                className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100">
+                                <option value="">Seleccionar...</option>
+                                <option value="caba">CABA</option>
+                                <option value="pba">Provincia de Buenos Aires</option>
+                                <option value="otra">Otra jurisdiccion</option>
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {totalRetSufridas > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm text-gray-700 dark:text-gray-300">
+                    <span>Recibido: <b>$ {paymentMethodsTotal.toFixed(2)}</b></span>
+                    <span>Retenciones: <b>$ {totalRetSufridas.toFixed(2)}</b></span>
+                    <span>Total que cancela factura: <b>$ {(paymentMethodsTotal + totalRetSufridas).toFixed(2)}</b></span>
+                  </div>
+                )}
+                </div>
+              </details>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>
+                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" rows={2} placeholder="Observaciones..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+              </div>
+
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <div className="text-sm text-gray-600 dark:text-gray-400">

@@ -704,9 +704,10 @@ export const Invoices: React.FC = () => {
   // Totals
 
   const formTotals = useMemo(() => {
-    const total = formItems.reduce((sum, item) => sum + item.subtotal, 0)
-    const neto = formItems.reduce((sum, item) => sum + item.subtotal / (1 + item.vat_rate / 100), 0)
-    const iva = total - neto
+    // unit_price is NET (without IVA), so subtotal = qty * unit_price = neto
+    const neto = formItems.reduce((sum, item) => sum + item.subtotal, 0)
+    const iva = formItems.reduce((sum, item) => sum + item.subtotal * (item.vat_rate / 100), 0)
+    const total = neto + iva
     return { neto, iva, total }
   }, [formItems])
 

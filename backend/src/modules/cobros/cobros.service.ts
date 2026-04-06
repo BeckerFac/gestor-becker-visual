@@ -179,12 +179,9 @@ export class CobrosService {
           cheque_data: data.cheque_data,
         }];
 
-    // B.1.3: Validate SUM == total
+    // B.1.3: Total = sum of payment methods (payment methods define the amount received)
     const pmTotal = paymentMethods.reduce((s, pm) => s + pm.amount, 0);
-    const cobroAmount = parseFloat(data.amount?.toString() || '0');
-    if (Math.abs(pmTotal - cobroAmount) > 0.01) {
-      throw new ApiError(400, `Suma de formas de pago ($${pmTotal.toFixed(2)}) no coincide con total ($${cobroAmount.toFixed(2)})`);
-    }
+    const cobroAmount = pmTotal; // The cobro amount IS the sum of payment methods
 
     // B.1.4: summaryMethod for the cobro header
     const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
@@ -208,13 +205,14 @@ export class CobrosService {
       const cobroCurrency = data.currency || 'ARS';
       const cobroExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
 
-      // Calculate total_amount = amount + retenciones sufridas
+      // Calculate total_amount = payment methods sum + retenciones sufridas
       const totalRetenciones = data.retenciones_sufridas?.reduce((s: number, r: any) => s + parseFloat(r.amount), 0) || 0;
-      const totalAmount = parseFloat(data.amount) + totalRetenciones;
+      const receiptAmount = pmTotal; // Use payment methods sum, not data.amount
+      const totalAmount = receiptAmount + totalRetenciones;
 
       await db.execute(sql`
         INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${data.amount}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${receiptAmount.toString()}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
       `);
 
       // B.1.4: Insert receipt_payment_methods for each payment method
