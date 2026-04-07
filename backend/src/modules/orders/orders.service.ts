@@ -817,7 +817,8 @@ export class OrdersService {
           CASE WHEN i.afip_response IS NOT NULL
             THEN (i.afip_response->'FeCabResp'->>'PtoVta')::int
             ELSE NULL
-          END as punto_venta
+          END as punto_venta,
+          i.created_at
         FROM invoices i
         LEFT JOIN invoice_orders io ON io.invoice_id = i.id
         WHERE i.company_id = $1
