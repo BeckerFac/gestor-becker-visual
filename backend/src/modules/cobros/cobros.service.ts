@@ -66,6 +66,10 @@ export class CobrosService {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
       `);
+      // Ensure retenciones has all columns referenced by getCobros query
+      await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0`).catch(() => {});
+      await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0`).catch(() => {});
+      await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`).catch(() => {});
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure cobros tables error:', error);
