@@ -425,16 +425,21 @@ class SecretariaService {
         responseText += `\n\n_${consistency.warning}_`;
       }
 
-      // Step 10: Send response via WhatsApp
-      await whatsappClient.sendTextMessage(phoneNumber, responseText);
+      // Step 10: Send response via WhatsApp (split into multiple messages if --- separator)
+      const messageParts = responseText.split('---').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+      for (const part of messageParts) {
+        await whatsappClient.sendTextMessage(phoneNumber, part);
+        // Small delay between messages to feel natural
+        if (messageParts.length > 1) await new Promise(r => setTimeout(r, 800));
+      }
 
-      // Step 11: Save outgoing message
+      // Step 11: Save outgoing message (full response)
       await this.saveConversationMessage(companyId, phoneNumber, 'assistant', responseText);
 
       // Step 12: Update usage tracking
       await secretariaMemory.trackUsage(companyId, {
         messages_received: 1,
-        messages_sent: 1,
+        messages_sent: messageParts.length,
       });
 
       // Step 13: Detect and save memory updates if new info detected
