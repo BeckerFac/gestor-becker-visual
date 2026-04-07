@@ -67,7 +67,14 @@ Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - create_remito: crear remito de entrega: "generame un remito del pedido 1"
 - create_enterprise: crear empresa: "agrega la empresa Metalurgica Sur"
 - update_order_status: cambiar estado de pedido: "pasa el pedido 1 a produccion", "marca entregado el 3"
-- authorize_invoice: SOLO cuando dice "autoriza/autorizar" explicitamente. "autoriza la factura B 1". NO usar si dice "dame la factura" (eso es query_invoices) o "haceme una factura" (eso es create_invoice)
+- authorize_invoice: SOLO cuando dice "autoriza/autorizar/autoriza con AFIP" explicitamente. NO usar para ninguna otra cosa.
+
+REGLAS DE DESAMBIGUACION CRITICAS:
+- "dame la factura X" / "mostrame la factura" / "ver factura" = query_invoices (CONSULTAR)
+- "haceme/creame/genera una factura" / "facturame" / "factura para X" = create_invoice (CREAR)
+- "autoriza la factura" / "mandala a AFIP" = authorize_invoice (AUTORIZAR)
+- "dame el CUIT" / "busca a X" / "datos de X" / "cuantas empresas" = query_clients (CONSULTAR CLIENTES)
+- "como estamos" / "que onda el negocio" = query_general (no greeting)
 - help: pedido de ayuda o lista de funciones
 - greeting: saludo simple (hola, buen dia, etc.)
 - unknown: no se puede clasificar
