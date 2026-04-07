@@ -63,7 +63,7 @@ async function llmChat(systemPrompt: string, userMessage: string, maxTokens: num
       anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       logger.info('SecretarIA: Anthropic client initialized successfully');
     }
-    const model = useSmartModel ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20250315';
+    const model = useSmartModel ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20251001';
     logger.info({ model, maxTokens, promptLength: systemPrompt.length }, 'SecretarIA: calling Anthropic');
     const response = await anthropicClient.messages.create({
       model,
