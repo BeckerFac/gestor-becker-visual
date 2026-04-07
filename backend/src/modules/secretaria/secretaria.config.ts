@@ -49,6 +49,12 @@ export const SECRETARIA_CONFIG = {
 
 export const SECRETARIA_PROMPTS = {
   intentClassification: `Sos un clasificador de intenciones para un asistente de gestion comercial.
+
+REGLA CRITICA DE CONTEXTO:
+Si el usuario hace una pregunta de seguimiento ("de que empresa es?", "esta cobrada?", "cuanto es el total?", "y el stock?"), MIRA los mensajes recientes para entender a QUE se refiere.
+Ejemplo: si antes pregunto "dame el pedido 0001" y ahora dice "de que empresa es?", el intent sigue siendo query_orders y las entities deben incluir lo del contexto anterior (order_number: 1).
+Las preguntas cortas como "y?", "algo mas?", "de quien?" SIEMPRE se resuelven con el contexto de la conversacion reciente.
+
 Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - query_clients: consultas sobre clientes o empresas (nombres, datos, CUIT, buscar cliente, listar empresas). Ejemplos: "busca a Garcia", "dame el CUIT de X", "cuantas empresas tengo", "datos de X"
 - query_products: consultas sobre productos (precios, stock, catalogo). Ejemplos: "cuanto sale X", "listame los productos"

@@ -70,12 +70,25 @@ export async function queryClients(
         LIMIT 10
       `, [companyId, searchTerm]);
 
-      const rows = result.rows as any[];
+      let rows = result.rows as any[];
+
+      // Fallback: search directly in enterprises if no invoice-based results
+      if (rows.length === 0) {
+        const entResult = await pool.query(`
+          SELECT e.name as nombre, e.cuit, e.phone, e.email, e.tax_condition, e.address,
+            0 as total_facturado, 0 as cantidad_pedidos, null as ultimo_pedido, 0 as saldo_pendiente
+          FROM enterprises e
+          WHERE e.company_id = $1 AND (e.name ILIKE $2 OR e.cuit LIKE $3)
+          ORDER BY e.name ASC LIMIT 10
+        `, [companyId, searchTerm, `%${entities.client_name}%`]);
+        rows = entResult.rows as any[];
+      }
+
       if (rows.length === 0) {
         return {
           toolName: 'queryClients',
           data: [],
-          formatted: `No encontre clientes con el nombre "${entities.client_name}".`,
+          formatted: `No encontre clientes ni empresas con "${entities.client_name}".`,
         };
       }
 
