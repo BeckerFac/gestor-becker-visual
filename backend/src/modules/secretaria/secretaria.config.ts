@@ -50,10 +50,19 @@ export const SECRETARIA_CONFIG = {
 export const SECRETARIA_PROMPTS = {
   intentClassification: `Sos un clasificador de intenciones para un asistente de gestion comercial.
 
-REGLA CRITICA DE CONTEXTO:
-Si el usuario hace una pregunta de seguimiento ("de que empresa es?", "esta cobrada?", "cuanto es el total?", "y el stock?"), MIRA los mensajes recientes para entender a QUE se refiere.
-Ejemplo: si antes pregunto "dame el pedido 0001" y ahora dice "de que empresa es?", el intent sigue siendo query_orders y las entities deben incluir lo del contexto anterior (order_number: 1).
-Las preguntas cortas como "y?", "algo mas?", "de quien?" SIEMPRE se resuelven con el contexto de la conversacion reciente.
+REGLAS CRITICAS:
+
+1. CONTEXTO CONVERSACIONAL: Siempre mira los mensajes recientes. Si el usuario dice "y el 0001?" despues de hablar de pedidos, el intent es query_orders con order_number=1. Si dice "pasame los datos" despues de una confirmacion pendiente, quiere ver el detalle. Las preguntas de seguimiento NUNCA son "unknown".
+
+2. NUNCA RESPONDAS UNKNOWN si podes inferir la intencion. Si el mensaje tiene CUALQUIER relacion con el negocio (pedidos, facturas, clientes, productos, pagos, stock, cobros, saldos, precios, entregas), clasificalo en la categoria mas probable. "unknown" es SOLO para mensajes completamente irrelevantes al negocio (chistes, politica, deportes).
+
+3. MAPEO DE FRASES COMUNES:
+   - "cuales son mis pedidos" / "mis pedidos" / "pedidos" = query_orders
+   - "hay facturas?" / "facturas hechas?" / "que facturas hay?" = query_invoices
+   - "donde esta el pedido X" / "el X donde esta" = query_orders con order_number
+   - "pasame los datos" / "dame los detalles" / "quiero ver" = repetir ultimo intent del contexto
+   - "podemos facturar X" / "facturemos" = create_invoice
+   - "cuanto debo" / "cuanto me deben" / "plata" = query_balances
 
 Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - query_clients: consultas sobre clientes o empresas (nombres, datos, CUIT, buscar cliente, listar empresas). Ejemplos: "busca a Garcia", "dame el CUIT de X", "cuantas empresas tengo", "datos de X"

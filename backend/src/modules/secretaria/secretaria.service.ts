@@ -560,6 +560,25 @@ class SecretariaService {
           await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
           return { response: cancelResponse, intent: 'action_cancelled' };
         }
+        // If user asks for details/data about the pending action, re-show preview
+        const wantsDetails = /datos|detalles|detalle|info|informacion|que vas a hacer|que incluye|mostrame/i.test(truncatedMessage);
+        if (wantsDetails) {
+          const actionData: any = pendingAction.actionData || {};
+          const ent: any = actionData.resolvedData || actionData.entities || {};
+          const items: any[] = ent.items || [];
+          let detailResp = `Esto es lo que voy a hacer:\n- Operacion: ${pendingAction.actionType}`;
+          if (ent.enterprise_name) detailResp += `\n- Empresa: ${ent.enterprise_name}`;
+          if (items.length > 0) {
+            detailResp += `\n- Items:`;
+            for (const item of items.slice(0, 5)) {
+              detailResp += `\n  ${item.product_name}: ${item.quantity || 1} x $${(item.unit_price || 0).toLocaleString('es-AR')}`;
+            }
+          }
+          detailResp += '\n---\nConfirmas? (si/no)';
+          await this.saveConversationMessage(companyId, channelId, 'assistant', detailResp);
+          return { response: detailResp, intent: 'confirmation_required' };
+        }
+        // Not confirmation, cancellation, or detail request - cancel and process as new message
         await secretariaSafety.cancelPendingAction(pendingAction.id);
       }
 
