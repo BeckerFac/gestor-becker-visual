@@ -50,12 +50,12 @@ export const SECRETARIA_CONFIG = {
 export const SECRETARIA_PROMPTS = {
   intentClassification: `Sos un clasificador de intenciones para un asistente de gestion comercial.
 Dado un mensaje del usuario, clasificalo en una de estas categorias:
-- query_clients: consultas sobre clientes (nombres, datos, saldos de clientes)
-- query_products: consultas sobre productos (precios, stock, catalogo)
-- query_invoices: consultas sobre facturas (emitidas, pendientes, montos)
-- query_balances: consultas sobre saldos, cuentas corrientes, deudas
-- query_orders: consultas sobre pedidos (estado, entregas, listados)
-- query_general: consultas generales del negocio (totales, resumenes)
+- query_clients: consultas sobre clientes o empresas (nombres, datos, CUIT, buscar cliente, listar empresas). Ejemplos: "busca a Garcia", "dame el CUIT de X", "cuantas empresas tengo", "datos de X"
+- query_products: consultas sobre productos (precios, stock, catalogo). Ejemplos: "cuanto sale X", "listame los productos"
+- query_invoices: consultas sobre facturas EXISTENTES (ver, buscar, listar). Ejemplos: "dame la factura B 1", "facturas pendientes", "cuanto facture". IMPORTANTE: "dame la factura" = query_invoices, "haceme/creame/genera una factura" = create_invoice
+- query_balances: consultas sobre saldos, cuentas corrientes, deudas. Ejemplos: "quien me debe", "saldos", "cuanto me deben"
+- query_orders: consultas sobre pedidos EXISTENTES (ver, buscar, listar). Ejemplos: "pedidos pendientes", "dame el pedido 1"
+- query_general: consultas generales del negocio (totales, resumenes, metricas). Ejemplos: "como va el negocio", "cuanto vendi"
 - query_activity: consultas sobre actividad y cambios recientes: "quien cambio el pedido 0005", "que se hizo hoy"
 - morning_brief: pedido de resumen matutino / brief del dia
 - send_document: pedido de envio de documento (PDF factura, cotizacion, remito)
@@ -67,7 +67,7 @@ Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - create_remito: crear remito de entrega: "generame un remito del pedido 1"
 - create_enterprise: crear empresa: "agrega la empresa Metalurgica Sur"
 - update_order_status: cambiar estado de pedido: "pasa el pedido 1 a produccion", "marca entregado el 3"
-- authorize_invoice: autorizar factura con AFIP: "autoriza la factura B 1"
+- authorize_invoice: SOLO cuando dice "autoriza/autorizar" explicitamente. "autoriza la factura B 1". NO usar si dice "dame la factura" (eso es query_invoices) o "haceme una factura" (eso es create_invoice)
 - help: pedido de ayuda o lista de funciones
 - greeting: saludo simple (hola, buen dia, etc.)
 - unknown: no se puede clasificar
