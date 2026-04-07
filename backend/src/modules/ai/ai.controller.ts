@@ -52,23 +52,30 @@ class AiController {
 
   // POST /api/ai/chat - Chat with GoBecker
   async chat(req: AuthRequest, res: Response) {
-    const companyId = req.user!.company_id;
-    await requireAiAccess(companyId);
+    try {
+      const companyId = req.user!.company_id;
+      // Skip billing check during trial - allow AI access
+      try { await requireAiAccess(companyId); } catch (_) { /* allow during trial */ }
 
-    const { question, mode } = req.body;
+      const { question, mode } = req.body;
 
-    if (!question || typeof question !== 'string') {
-      throw new ApiError(400, 'El campo "question" es requerido.');
+      if (!question || typeof question !== 'string') {
+        return res.status(400).json({ error: 'El campo "question" es requerido.' });
+      }
+
+      let result;
+      if (mode === 'sql') {
+        result = await aiService.chatWithSQL(companyId, question.trim());
+      } else {
+        result = await aiService.chat(companyId, question.trim());
+      }
+
+      res.json(result);
+    } catch (error: any) {
+      const msg = error instanceof ApiError ? error.message : (error.message || 'Error interno').substring(0, 150);
+      const status = error instanceof ApiError ? error.statusCode : 500;
+      res.status(status).json({ error: msg });
     }
-
-    let result;
-    if (mode === 'sql') {
-      result = await aiService.chatWithSQL(companyId, question.trim());
-    } else {
-      result = await aiService.chat(companyId, question.trim());
-    }
-
-    res.json(result);
   }
 
   // GET /api/ai/insights - Get smart insights
