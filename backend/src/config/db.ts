@@ -1427,6 +1427,8 @@ async function runAutoMigrations() {
       'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0',
       'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT',
       'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS regime VARCHAR(100)',
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS enterprise_id UUID',
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS company_id UUID',
       // Cobros
       'ALTER TABLE cobros ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT \'ARS\'',
       'ALTER TABLE cobros ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)',
