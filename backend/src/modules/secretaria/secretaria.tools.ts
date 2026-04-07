@@ -441,10 +441,9 @@ export async function queryOrders(
       conditions.push(`o.status = $${paramIdx}`);
       params.push(entities.status);
       paramIdx++;
-    } else {
-      // Default: show pending + in_production orders
-      conditions.push(`o.status IN ('pendiente', 'en_produccion', 'in_production', 'listo')`);
     }
+    // No default status filter - show ALL orders when user asks generically
+    // Only filter by status when explicitly requested (e.g., "pedidos pendientes")
 
     if (entities.date_from) {
       conditions.push(`o.created_at >= $${paramIdx}::date`);
