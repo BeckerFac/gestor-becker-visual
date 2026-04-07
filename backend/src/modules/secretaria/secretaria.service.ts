@@ -627,28 +627,56 @@ class SecretariaService {
 
         if (safetyCheck.requiresConfirmation) {
           // Validate and generate preview before asking confirmation
-          let previewText = safetyCheck.reason || `Voy a ejecutar "${intentResult.intent}". Confirmas?`;
+          const intentLabels: Record<string, string> = {
+            create_order: 'crear un pedido',
+            create_invoice: 'crear una factura',
+            create_invoice_partial: 'crear una factura parcial',
+            create_cobro: 'registrar un cobro',
+            create_quote: 'crear una cotizacion',
+            create_remito: 'crear un remito',
+            create_enterprise: 'agregar una empresa',
+            update_order_status: 'cambiar el estado de un pedido',
+            authorize_invoice: 'autorizar una factura con AFIP',
+          };
+          const actionLabel = intentLabels[intentResult.intent] || intentResult.intent;
+          let previewText = `Voy a ${actionLabel}. Confirmas? (si/no)`;
           let resolvedData = intentResult.entities;
+
           try {
             const { validateAction } = await import('./secretaria.validators');
             const validation = await validateAction(companyId, userId, intentResult.intent, intentResult.entities);
             if (!validation.valid) {
-              // Validation failed - explain why + suggest alternatives
               const errorMsg = validation.errors.join('\n') + (validation.suggestions.length ? '\n---\n' + validation.suggestions.join('\n') : '');
               await this.saveConversationMessage(companyId, channelId, 'assistant', errorMsg);
               return { response: errorMsg, intent: intentResult.intent };
             }
-            // Generate human-readable preview with calculated totals
             resolvedData = validation.resolvedData || intentResult.entities;
-            const preview = validation.preview || {};
-            if (preview.total) {
-              previewText = `Voy a crear:\n- Empresa: ${preview.enterprise_name || resolvedData.enterprise_name || 'Sin especificar'}\n- ${preview.items_count || 0} item(s)\n- Neto: $${(preview.neto || 0).toLocaleString('es-AR')}\n- IVA: $${(preview.iva || 0).toLocaleString('es-AR')}\n- Total: $${(preview.total || 0).toLocaleString('es-AR')}\n---\nConfirmas? (si/no)`;
-            } else if (preview.amount) {
-              previewText = `Voy a registrar un cobro:\n- Empresa: ${preview.enterprise_name || 'Sin especificar'}\n- Monto: $${(preview.amount || 0).toLocaleString('es-AR')}\n---\nConfirmas? (si/no)`;
+            const p = validation.preview || {};
+
+            // Build descriptive preview based on intent
+            if (p.total && p.total > 0) {
+              previewText = `Voy a ${actionLabel}:`;
+              if (p.enterprise_name) previewText += `\n- Empresa: ${p.enterprise_name}`;
+              if (p.items_count) previewText += `\n- ${p.items_count} item(s)`;
+              previewText += `\n- Neto: $${Math.round(p.neto).toLocaleString('es-AR')}`;
+              if (p.discount_percent > 0) previewText += `\n- Descuento: ${p.discount_percent}% (-$${Math.round(p.discount_amount).toLocaleString('es-AR')})`;
+              previewText += `\n- IVA: $${Math.round(p.iva).toLocaleString('es-AR')}`;
+              previewText += `\n- *Total: $${Math.round(p.total).toLocaleString('es-AR')}*`;
+              previewText += '\n---\nConfirmas? (si/no)';
+            } else if (p.amount) {
+              previewText = `Voy a ${actionLabel}:`;
+              if (p.enterprise_name) previewText += `\n- Empresa: ${p.enterprise_name}`;
+              previewText += `\n- Monto: $${Math.round(p.amount).toLocaleString('es-AR')}`;
+              previewText += '\n---\nConfirmas? (si/no)';
+            } else if (resolvedData.name || resolvedData.enterprise_name) {
+              // For create_enterprise and similar simple creates
+              const name = resolvedData.name || resolvedData.enterprise_name;
+              previewText = `Voy a ${actionLabel}: *${name}*`;
+              if (resolvedData.cuit || resolvedData.enterprise_cuit) previewText += ` (CUIT: ${resolvedData.cuit || resolvedData.enterprise_cuit})`;
+              previewText += '\n---\nConfirmas? (si/no)';
             }
           } catch (valErr: any) {
-            // Validation failed - still allow with generic preview
-            previewText = `Voy a ejecutar "${intentResult.intent}". Confirmas? (si/no)`;
+            logger.warn({ err: valErr.message }, 'SecretarIA: validation warning');
           }
 
           await secretariaSafety.createPendingAction({
