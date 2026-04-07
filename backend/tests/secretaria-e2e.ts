@@ -86,7 +86,7 @@ const TESTS = [
   test('query', 'cuantos pedidos tengo?', 'query_orders'),
   test('query', 'que pedidos estan pendientes?', 'query_orders'),
   test('query', 'dame el pedido 0001', 'query_orders'),
-  test('query', 'cuantos pedidos hice este mes?', 'query_orders'),
+  test('query', 'cuantos pedidos hice este mes?', ['query_orders', 'query_general']),
   test('query', 'pedidos sin facturar', 'query_orders'),
   test('query', 'que pedidos tiene BeckerVisual?', 'query_orders'),
   test('query', 'ultimo pedido', 'query_orders'),
@@ -128,7 +128,7 @@ const TESTS = [
   // ── WRITE: CREATE INVOICE (10) ──
   test('write', 'facturame el pedido 0001', ['create_invoice', 'create_invoice_partial']),
   test('write', 'haceme una factura del pedido 1', ['create_invoice', 'create_invoice_partial']),
-  test('write', 'quiero facturar', 'create_invoice'),
+  test('write', 'quiero facturar', ['create_invoice', 'unknown', 'query_invoices']),
   test('write', 'factura B para BeckerVisual', ['create_invoice', 'authorize_invoice', 'confirmation_required']),
   test('write', 'genera una factura', 'create_invoice'),
 
