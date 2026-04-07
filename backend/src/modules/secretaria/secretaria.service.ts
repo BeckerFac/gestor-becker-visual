@@ -541,13 +541,22 @@ class SecretariaService {
       if (pendingAction) {
         if (secretariaSafety.isConfirmation(truncatedMessage)) {
           await secretariaSafety.confirmPendingAction(pendingAction.id);
-          const confirmResponse = `Listo! La operacion "${pendingAction.actionType}" fue confirmada y ejecutada.`;
+          // EXECUTE the confirmed action
+          let confirmResponse = 'Listo!';
+          try {
+            const { executeWriteAction } = await import('./secretaria.executor');
+            const actionData = pendingAction.actionData || {};
+            const execResult = await executeWriteAction(companyId, userId, pendingAction.actionType, actionData.resolvedData || actionData.entities || {});
+            confirmResponse = execResult.success ? execResult.formatted : `No pude completar: ${execResult.error || execResult.formatted}`;
+          } catch (execErr: any) {
+            confirmResponse = `Error al ejecutar: ${execErr.message?.substring(0, 100) || 'error desconocido'}`;
+          }
           await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResponse);
           return { response: confirmResponse, intent: 'action_confirmed' };
         }
         if (secretariaSafety.isCancellation(truncatedMessage)) {
           await secretariaSafety.cancelPendingAction(pendingAction.id);
-          const cancelResponse = 'Operacion cancelada. Si necesitas otra cosa, escribime.';
+          const cancelResponse = 'Dale, cancelado. Decime si necesitas otra cosa.';
           await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
           return { response: cancelResponse, intent: 'action_cancelled' };
         }
@@ -617,17 +626,41 @@ class SecretariaService {
         }
 
         if (safetyCheck.requiresConfirmation) {
+          // Validate and generate preview before asking confirmation
+          let previewText = safetyCheck.reason || `Voy a ejecutar "${intentResult.intent}". Confirmas?`;
+          let resolvedData = intentResult.entities;
+          try {
+            const { validateAction } = await import('./secretaria.validators');
+            const validation = await validateAction(companyId, userId, intentResult.intent, intentResult.entities);
+            if (!validation.valid) {
+              // Validation failed - explain why + suggest alternatives
+              const errorMsg = validation.errors.join('\n') + (validation.suggestions.length ? '\n---\n' + validation.suggestions.join('\n') : '');
+              await this.saveConversationMessage(companyId, channelId, 'assistant', errorMsg);
+              return { response: errorMsg, intent: intentResult.intent };
+            }
+            // Generate human-readable preview with calculated totals
+            resolvedData = validation.resolvedData || intentResult.entities;
+            const preview = validation.preview || {};
+            if (preview.total) {
+              previewText = `Voy a crear:\n- Empresa: ${preview.enterprise_name || resolvedData.enterprise_name || 'Sin especificar'}\n- ${preview.items_count || 0} item(s)\n- Neto: $${(preview.neto || 0).toLocaleString('es-AR')}\n- IVA: $${(preview.iva || 0).toLocaleString('es-AR')}\n- Total: $${(preview.total || 0).toLocaleString('es-AR')}\n---\nConfirmas? (si/no)`;
+            } else if (preview.amount) {
+              previewText = `Voy a registrar un cobro:\n- Empresa: ${preview.enterprise_name || 'Sin especificar'}\n- Monto: $${(preview.amount || 0).toLocaleString('es-AR')}\n---\nConfirmas? (si/no)`;
+            }
+          } catch (valErr: any) {
+            // Validation failed - still allow with generic preview
+            previewText = `Voy a ejecutar "${intentResult.intent}". Confirmas? (si/no)`;
+          }
+
           await secretariaSafety.createPendingAction({
             companyId,
             userId,
             channel: 'web',
             channelId,
             actionType: intentResult.intent,
-            actionData: { entities: intentResult.entities, originalText: truncatedMessage },
+            actionData: { entities: intentResult.entities, resolvedData, originalText: truncatedMessage },
           });
-          const confirmResp = `${safetyCheck.reason}\n\nConfirmas? (si/no)`;
-          await this.saveConversationMessage(companyId, channelId, 'assistant', confirmResp);
-          return { response: confirmResp, intent: 'confirmation_required' };
+          await this.saveConversationMessage(companyId, channelId, 'assistant', previewText);
+          return { response: previewText, intent: 'confirmation_required' };
         }
 
         const blockResp = safetyCheck.reason || 'No puedo procesar esa consulta por razones de seguridad.';

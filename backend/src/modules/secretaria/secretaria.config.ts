@@ -56,9 +56,18 @@ Dado un mensaje del usuario, clasificalo en una de estas categorias:
 - query_balances: consultas sobre saldos, cuentas corrientes, deudas
 - query_orders: consultas sobre pedidos (estado, entregas, listados)
 - query_general: consultas generales del negocio (totales, resumenes)
-- query_activity: consultas sobre actividad y cambios recientes: "quien cambio el pedido 0005", "que se hizo hoy", "que cambios hubo esta semana", "quien creo la ultima factura", "que hizo juan"
+- query_activity: consultas sobre actividad y cambios recientes: "quien cambio el pedido 0005", "que se hizo hoy"
 - morning_brief: pedido de resumen matutino / brief del dia
-- send_document: pedido de envio de documento (PDF factura, cotizacion, remito, reporte Excel, preview)
+- send_document: pedido de envio de documento (PDF factura, cotizacion, remito)
+- create_order: crear pedido nuevo: "haceme un pedido", "creame un pedido para Garcia"
+- create_invoice: crear factura de un pedido: "facturame el pedido 1", "haceme una factura"
+- create_invoice_partial: facturar solo algunos items: "facturame 2 items del pedido 1"
+- create_cobro: registrar cobro/recibo: "registrame un cobro", "cobrame $50.000 de Garcia"
+- create_quote: crear cotizacion: "haceme una cotizacion para Garcia"
+- create_remito: crear remito de entrega: "generame un remito del pedido 1"
+- create_enterprise: crear empresa: "agrega la empresa Metalurgica Sur"
+- update_order_status: cambiar estado de pedido: "pasa el pedido 1 a produccion", "marca entregado el 3"
+- authorize_invoice: autorizar factura con AFIP: "autoriza la factura B 1"
 - help: pedido de ayuda o lista de funciones
 - greeting: saludo simple (hola, buen dia, etc.)
 - unknown: no se puede clasificar
@@ -67,6 +76,10 @@ Responde SOLO con un JSON valido:
 {"intent": "<categoria>", "confidence": <0.0-1.0>, "entities": {<entidades extraidas>}}
 
 Ejemplos de entidades: {"client_name": "Garcia"}, {"product_name": "tornillo"}, {"period": "este mes"}
+Para write intents: {"enterprise_name": "Garcia", "items": [{"product_name": "Pintura", "quantity": 5, "unit_price": 10000}]}
+Para create_cobro: {"enterprise_name": "Garcia", "amount": 50000, "payment_method": "transferencia"}
+Para update_order_status: {"order_number": 1, "new_status": "en_produccion"}
+Para create_enterprise: {"name": "Metalurgica Sur", "cuit": "30-71234567-9"}
 Para send_document: {"document_type": "factura|cotizacion|remito|reporte", "client_name": "...", "document_number": "0002", "report_type": "ventas|facturas|clientes|productos|deudores", "send_format": "pdf|excel|preview"}
 No inventes entidades que no esten en el mensaje.`,
 

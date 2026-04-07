@@ -206,18 +206,15 @@ Genera una respuesta natural para WhatsApp basada en estos datos.`;
 // ── Helpers ──
 
 const VALID_INTENTS: ReadonlyArray<SecretariaIntent> = [
-  'query_clients',
-  'query_products',
-  'query_invoices',
-  'query_balances',
-  'query_orders',
-  'query_general',
-  'query_activity',
-  'morning_brief',
-  'send_document',
-  'help',
-  'greeting',
-  'unknown',
+  // Read intents
+  'query_clients', 'query_products', 'query_invoices', 'query_balances',
+  'query_orders', 'query_general', 'query_activity', 'morning_brief', 'send_document',
+  // Write intents
+  'create_order', 'create_invoice', 'create_invoice_partial', 'create_cobro',
+  'create_quote', 'create_remito', 'create_enterprise', 'update_order_status',
+  'authorize_invoice',
+  // System intents
+  'help', 'greeting', 'unknown',
 ];
 
 function validateIntent(raw: string | undefined): SecretariaIntent {

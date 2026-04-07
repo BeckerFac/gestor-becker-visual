@@ -35,6 +35,7 @@ export interface WhatsAppWebhookPayload {
 // ── Intent Classification ──
 
 export type SecretariaIntent =
+  // Read intents
   | 'query_clients'
   | 'query_products'
   | 'query_invoices'
@@ -44,6 +45,17 @@ export type SecretariaIntent =
   | 'query_activity'
   | 'morning_brief'
   | 'send_document'
+  // Write intents
+  | 'create_order'
+  | 'create_invoice'
+  | 'create_invoice_partial'
+  | 'create_cobro'
+  | 'create_quote'
+  | 'create_remito'
+  | 'create_enterprise'
+  | 'update_order_status'
+  | 'authorize_invoice'
+  // System intents
   | 'help'
   | 'greeting'
   | 'unknown';
