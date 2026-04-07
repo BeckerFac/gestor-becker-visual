@@ -1436,16 +1436,55 @@ async function runAutoMigrations() {
       'ALTER TABLE remitos ADD COLUMN IF NOT EXISTS receiver_name VARCHAR(255)',
       'ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS description TEXT',
       'ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS unit VARCHAR(50) DEFAULT \'unidades\'',
-      // Purchases
+      // Purchases (ALL columns referenced by getPurchases query)
       'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_number INTEGER',
       'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_id UUID',
       'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255)',
       'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS subtotal DECIMAL(12,2) DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS vat_amount DECIMAL(12,2) DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS date TIMESTAMP WITH TIME ZONE DEFAULT NOW()',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS bank_id UUID',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS enterprise_id UUID',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT \'pendiente\'',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS stock_added BOOLEAN DEFAULT false',
       // Purchase invoices
       'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS company_id UUID',
       'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS purchase_id UUID',
       'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) DEFAULT 0',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS enterprise_id UUID',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT \'pendiente\'',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT \'pendiente\'',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMP WITH TIME ZONE DEFAULT NOW()',
+      // Account adjustments (CC)
+      'ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS enterprise_id UUID',
+      'ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS description TEXT',
+      'ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS date TIMESTAMP WITH TIME ZONE DEFAULT NOW()',
+      'ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS business_unit_id UUID',
+      // Product materials (RLS log error)
+      'ALTER TABLE product_materials ADD COLUMN IF NOT EXISTS company_id UUID',
+      // Tables referenced by RLS that may not exist yet
+      `CREATE TABLE IF NOT EXISTS bank_statements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), company_id UUID NOT NULL,
+        bank_id UUID, date DATE, description TEXT, amount DECIMAL(12,2),
+        type VARCHAR(20), matched BOOLEAN DEFAULT false,
+        matched_entity_type VARCHAR(30), matched_entity_id UUID,
+        imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+      `CREATE TABLE IF NOT EXISTS chart_of_accounts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), company_id UUID NOT NULL,
+        code VARCHAR(20), name VARCHAR(255), type VARCHAR(50),
+        parent_id UUID, level INTEGER DEFAULT 1, active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
+      `CREATE TABLE IF NOT EXISTS journal_entries (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), company_id UUID NOT NULL,
+        entry_number INTEGER, date DATE, description TEXT,
+        reference_type VARCHAR(50), reference_id UUID,
+        debit DECIMAL(12,2) DEFAULT 0, credit DECIMAL(12,2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'posted', created_by UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`,
       // Invoices
       'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total_cobrado DECIMAL(12,2) DEFAULT 0',
       // Orders
