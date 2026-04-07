@@ -1413,6 +1413,53 @@ async function runAutoMigrations() {
       `);
     } catch (_) {}
 
+    // ===== COMPREHENSIVE COLUMN MIGRATIONS (Neon DB completeness) =====
+    const colMigrations = [
+      // Pagos
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS purchase_id UUID',
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS cheque_id UUID',
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS receipt_image TEXT',
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT \'ARS\'',
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)',
+      'ALTER TABLE pagos ADD COLUMN IF NOT EXISTS pending_status VARCHAR(30)',
+      // Retenciones
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0',
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0',
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT',
+      'ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS regime VARCHAR(100)',
+      // Cobros
+      'ALTER TABLE cobros ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT \'ARS\'',
+      'ALTER TABLE cobros ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)',
+      'ALTER TABLE cobros ADD COLUMN IF NOT EXISTS pending_status VARCHAR(30)',
+      // Remitos
+      'ALTER TABLE remitos ADD COLUMN IF NOT EXISTS delivery_address TEXT',
+      'ALTER TABLE remitos ADD COLUMN IF NOT EXISTS receiver_name VARCHAR(255)',
+      'ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS description TEXT',
+      'ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS unit VARCHAR(50) DEFAULT \'unidades\'',
+      // Purchases
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_number INTEGER',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_id UUID',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255)',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS subtotal DECIMAL(12,2) DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN IF NOT EXISTS vat_amount DECIMAL(12,2) DEFAULT 0',
+      // Purchase invoices
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS company_id UUID',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS purchase_id UUID',
+      'ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2) DEFAULT 0',
+      // Invoices
+      'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total_cobrado DECIMAL(12,2) DEFAULT 0',
+      // Orders
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_percent DECIMAL(5,2) DEFAULT 0',
+      // Enterprises
+      'ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_discount DECIMAL(5,2) DEFAULT 0',
+      'ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS price_list_id UUID',
+      // Activity log
+      'ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS metadata JSONB',
+    ];
+    for (const m of colMigrations) {
+      try { await pool.query(m); } catch (_) {}
+    }
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
