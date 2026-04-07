@@ -30,7 +30,12 @@ function getProvider(): LLMProvider {
   return provider;
 }
 
-async function llmChat(systemPrompt: string, userMessage: string, maxTokens: number = 512): Promise<string> {
+// Model routing: Haiku for reads (fast/cheap), Sonnet for writes (precise)
+async function llmChatSmart(systemPrompt: string, userMessage: string, maxTokens: number = 512, useSmartModel: boolean = false): Promise<string> {
+  return llmChat(systemPrompt, userMessage, maxTokens, useSmartModel);
+}
+
+async function llmChat(systemPrompt: string, userMessage: string, maxTokens: number = 512, useSmartModel: boolean = false): Promise<string> {
   const p = getProvider();
 
   if (p === 'openai') {
@@ -58,9 +63,10 @@ async function llmChat(systemPrompt: string, userMessage: string, maxTokens: num
       anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       logger.info('SecretarIA: Anthropic client initialized successfully');
     }
-    logger.info({ model: 'claude-haiku-4-5-20250315', maxTokens, promptLength: systemPrompt.length }, 'SecretarIA: calling Anthropic');
+    const model = useSmartModel ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20250315';
+    logger.info({ model, maxTokens, promptLength: systemPrompt.length }, 'SecretarIA: calling Anthropic');
     const response = await anthropicClient.messages.create({
-      model: 'claude-3-haiku-20240307',
+      model,
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [
@@ -111,10 +117,13 @@ export async function classifyIntent(
 ${buildSecurityBlock(companyName, companyId)}`;
 
   try {
+    // Use Sonnet for intent classification when message looks like a write operation
+    const looksLikeWrite = /crea|hace|genera|registr|agrega|nueva?o?\s+(?:pedido|factura|cobro|empresa|cotizacion|remito)|factura(?:me|le)|pasa(?:me|lo)|marca|autoriza/i.test(text);
     const raw = await llmChat(
       systemPrompt,
       `${contextBlock}\n\nMensaje actual: ${text}`,
       SECRETARIA_CONFIG.maxTokens.intent,
+      looksLikeWrite, // Use Sonnet for write-looking messages
     );
 
     // Parse the JSON response - strip markdown fences if present

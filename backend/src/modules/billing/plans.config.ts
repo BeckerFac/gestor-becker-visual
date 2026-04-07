@@ -79,8 +79,8 @@ const PREMIUM_ANNUAL_MONTHLY = Math.round(PREMIUM_ANNUAL_PRICE / 12);
 
 const TRIAL_AI: AiFeatures = {
   enabled: true,
-  chatMessagesPerDay: 10,
-  chatMessagesPerMonth: 300,
+  chatMessagesPerDay: 200,
+  chatMessagesPerMonth: 5000,
   whatsappEnabled: false,
   morningBriefEnabled: false,
   voiceEnabled: false,
