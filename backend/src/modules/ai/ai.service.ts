@@ -144,7 +144,7 @@ ${topProducts.map((p, i) => `${i + 1}. ${p.name}: $${p.revenue.toLocaleString('e
         remaining_queries: rateCheck.remaining - 1,
       };
     } catch (error: any) {
-      logger.error({ error: error.message }, 'AI chat error');
+      logger.error({ error: error.message, stack: error.stack?.substring(0, 300) }, 'AI chat error');
 
       if (error instanceof ApiError) throw error;
 
@@ -152,7 +152,9 @@ ${topProducts.map((p, i) => `${i + 1}. ${p.name}: $${p.revenue.toLocaleString('e
         throw new ApiError(429, 'El servicio de IA esta temporalmente sobrecargado. Intenta en unos minutos.');
       }
 
-      throw new ApiError(500, 'Error al procesar tu consulta. Intenta de nuevo.');
+      // Return error detail in dev/staging for debugging
+      const detail = error.message?.substring(0, 100) || 'unknown';
+      throw new ApiError(500, `Error IA: ${detail}`);
     }
   }
 
