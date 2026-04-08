@@ -108,10 +108,16 @@ export async function classifyIntent(
   // using displayName as fallback for the security block context
   const companyName = displayName;
 
-  const recentContext = context.recentMessages.slice(-3);
+  const recentContext = context.recentMessages.slice(-4);
   const contextBlock = recentContext.length > 0
-    ? `\nMensajes recientes:\n${recentContext.map(m => `${m.role}: ${m.content}`).join('\n')}`
+    ? `\nCONVERSACION RECIENTE (IMPORTANTE - usa esto para entender preguntas de seguimiento):\n${recentContext.map(m => `${m.role === 'user' ? 'USUARIO' : 'ASISTENTE'}: ${m.content.substring(0, 200)}`).join('\n')}\n`
     : '';
+
+  // Pre-classify obvious single-word or short messages to avoid LLM overhead
+  const shortcutIntent = classifyShortcut(text);
+  if (shortcutIntent) {
+    return { intent: shortcutIntent, confidence: 0.95, entities: {}, original_text: text };
+  }
 
   const systemPrompt = `${SECRETARIA_PROMPTS.intentClassification}
 ${buildSecurityBlock(companyName, companyId)}`;
@@ -119,11 +125,13 @@ ${buildSecurityBlock(companyName, companyId)}`;
   try {
     // Use Sonnet for intent classification when message looks like a write operation
     const looksLikeWrite = /crea|hace|genera|registr|agrega|nueva?o?\s+(?:pedido|factura|cobro|empresa|cotizacion|remito)|factura(?:me|le)|pasa(?:me|lo)|marca|autoriza/i.test(text);
+    // Also use Sonnet for follow-up questions (short messages with context)
+    const isFollowUp = text.length < 40 && recentContext.length > 0;
     const raw = await llmChat(
       systemPrompt,
-      `${contextBlock}\n\nMensaje actual: ${text}`,
+      `${contextBlock}\nMensaje actual del usuario: ${text}`,
       SECRETARIA_CONFIG.maxTokens.intent,
-      looksLikeWrite, // Use Sonnet for write-looking messages
+      looksLikeWrite || isFollowUp, // Use Sonnet for writes and follow-up questions
     );
 
     // Parse the JSON response - strip markdown fences if present
@@ -210,6 +218,36 @@ Genera una respuesta natural para WhatsApp basada en estos datos.`;
     logger.error({ error: message }, 'SecretarIA response generation failed');
     return 'Disculpa, hubo un error al procesar tu consulta. Intenta de nuevo en unos segundos.';
   }
+}
+
+// ── Shortcut classifier for obvious single-word/short messages ──
+function classifyShortcut(text: string): SecretariaIntent | null {
+  const t = text.trim().toLowerCase();
+  // Single-word shortcuts
+  const shortcuts: Record<string, SecretariaIntent> = {
+    'pedidos': 'query_orders',
+    'facturas': 'query_invoices',
+    'clientes': 'query_clients',
+    'empresas': 'query_clients',
+    'productos': 'query_products',
+    'stock': 'query_products',
+    'saldos': 'query_balances',
+    'plata': 'query_balances',
+    'guita': 'query_balances',
+    'deudores': 'query_balances',
+    'cobros': 'query_balances',
+    'recibos': 'query_balances',
+    'ayuda': 'help',
+    'help': 'help',
+  };
+  if (shortcuts[t]) return shortcuts[t];
+  // Short phrase shortcuts
+  if (/^(algo|hay algo) pendiente/i.test(t)) return 'query_general';
+  if (/^mis pedidos/i.test(t)) return 'query_orders';
+  if (/^mis facturas/i.test(t)) return 'query_invoices';
+  if (/^mis clientes/i.test(t)) return 'query_clients';
+  if (/^(que onda|como (va|anda|estamos)|resumen)/i.test(t)) return 'query_general';
+  return null;
 }
 
 // ── Helpers ──
