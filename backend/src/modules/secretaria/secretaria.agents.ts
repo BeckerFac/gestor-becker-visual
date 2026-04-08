@@ -254,6 +254,9 @@ function classifyShortcut(text: string): SecretariaIntent | null {
   if (/^(dame|mostrame|ver) (el |la |los |las )?(factura|comprobante)/i.test(t)) return 'query_invoices';
   if (/^(dame|mostrame|ver) (el |la |los |las )?(recibo|cobro)/i.test(t)) return 'query_balances';
   if (/^(dame|mostrame|ver) (el |la |los |las )?(producto|catalogo|precio)/i.test(t)) return 'query_products';
+  if (/pedidos? sin (pagar|cobrar|facturar)/i.test(t)) return 'query_orders';
+  if (/facturas? sin (cobrar|pagar)/i.test(t)) return 'query_invoices';
+  if (/hay (pedidos|facturas|cobros|deuda)/i.test(t)) return t.includes('factura') ? 'query_invoices' : t.includes('cobro') ? 'query_balances' : 'query_orders';
   return null;
 }
 
