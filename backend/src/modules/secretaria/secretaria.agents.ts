@@ -148,12 +148,12 @@ ${buildSecurityBlock(companyName, companyId)}`;
       : 0;
     const entities = sanitizeEntities(parsed.entities);
 
-    // Low confidence fallback
-    if (confidence < 0.5) {
+    // Low confidence: still use the intent if it's not unknown (better than giving up)
+    if (confidence < 0.3 && intent === 'unknown') {
       return {
         intent: 'unknown',
         confidence,
-        entities,
+        entities: { ...entities, _original_text: text },
         original_text: text,
       };
     }
@@ -243,10 +243,17 @@ function classifyShortcut(text: string): SecretariaIntent | null {
   if (shortcuts[t]) return shortcuts[t];
   // Short phrase shortcuts
   if (/^(algo|hay algo) pendiente/i.test(t)) return 'query_general';
-  if (/^mis pedidos/i.test(t)) return 'query_orders';
-  if (/^mis facturas/i.test(t)) return 'query_invoices';
-  if (/^mis clientes/i.test(t)) return 'query_clients';
-  if (/^(que onda|como (va|anda|estamos)|resumen)/i.test(t)) return 'query_general';
+  if (/^mis pedidos|^cuales.*pedidos|^los pedidos/i.test(t)) return 'query_orders';
+  if (/^mis facturas|^las facturas|^hay facturas|^facturas\??$/i.test(t)) return 'query_invoices';
+  if (/^mis clientes|^los clientes/i.test(t)) return 'query_clients';
+  if (/^(que onda|como (va|anda|estamos)|resumen|como estamos)/i.test(t)) return 'query_general';
+  if (/^(quien|quie?n) me debe/i.test(t)) return 'query_balances';
+  if (/^cuanto (facture|cobre|vendi|debo)/i.test(t)) return 'query_general';
+  if (/^(datos|info|informacion) de /i.test(t)) return 'query_clients';
+  if (/^(dame|mostrame|ver) (el |la |los |las )?(pedido|orden)/i.test(t)) return 'query_orders';
+  if (/^(dame|mostrame|ver) (el |la |los |las )?(factura|comprobante)/i.test(t)) return 'query_invoices';
+  if (/^(dame|mostrame|ver) (el |la |los |las )?(recibo|cobro)/i.test(t)) return 'query_balances';
+  if (/^(dame|mostrame|ver) (el |la |los |las )?(producto|catalogo|precio)/i.test(t)) return 'query_products';
   return null;
 }
 

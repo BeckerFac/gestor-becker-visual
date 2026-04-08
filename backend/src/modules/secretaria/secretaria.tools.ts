@@ -1070,10 +1070,11 @@ export async function executeTool(
       };
     case 'unknown':
     default:
+      // Instead of generic "no entendi", try to help by explaining what we CAN do
       return {
         toolName: 'unknown',
-        data: null,
-        formatted: 'No entendi tu consulta. Escribi "ayuda" para ver lo que puedo hacer.',
+        data: { original_message: entities._original_text || '' },
+        formatted: `No pude procesar tu consulta. Puedo ayudarte con:\n- *Pedidos*: ver, crear, cambiar estado\n- *Facturas*: ver, crear, autorizar AFIP\n- *Cobros*: registrar pagos, ver saldos\n- *Clientes*: buscar datos, ver deudas\n- *Productos*: precios, stock\n- *Reportes*: resumen del negocio\n\nDecime que necesitas y te ayudo.`,
       };
   }
 }

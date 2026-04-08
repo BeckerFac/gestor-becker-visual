@@ -54,7 +54,10 @@ REGLAS CRITICAS:
 
 1. CONTEXTO CONVERSACIONAL: Siempre mira los mensajes recientes. Si el usuario dice "y el 0001?" despues de hablar de pedidos, el intent es query_orders con order_number=1. Si dice "pasame los datos" despues de una confirmacion pendiente, quiere ver el detalle. Las preguntas de seguimiento NUNCA son "unknown".
 
-2. NUNCA RESPONDAS UNKNOWN si podes inferir la intencion. Si el mensaje tiene CUALQUIER relacion con el negocio (pedidos, facturas, clientes, productos, pagos, stock, cobros, saldos, precios, entregas), clasificalo en la categoria mas probable. "unknown" es SOLO para mensajes completamente irrelevantes al negocio (chistes, politica, deportes).
+2. PROHIBIDO CLASIFICAR COMO "unknown" SI EL MENSAJE TIENE CUALQUIER RELACION CON EL NEGOCIO.
+   Si el mensaje menciona: pedidos, facturas, clientes, productos, pagos, stock, cobros, saldos, precios, entregas, empresa, plata, guita, deuda, facturar, cobrar, vender, comprar, o CUALQUIER termino comercial → NUNCA unknown.
+   "unknown" es SOLO para: chistes, politica, deportes, temas completamente ajenos al negocio.
+   Si tenes 60% de duda entre 2 categorias, elegir la MAS PROBABLE. Nunca unknown por duda.
 
 3. MAPEO DE FRASES COMUNES:
    - "cuales son mis pedidos" / "mis pedidos" / "pedidos" = query_orders

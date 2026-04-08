@@ -426,7 +426,7 @@ describe('SecretarIA Tools', () => {
     const result = await executeTool('unknown', {}, 'company-1')
 
     expect(result.toolName).toBe('unknown')
-    expect(result.formatted).toContain('No entendi')
+    expect(result.formatted).toContain('Puedo ayudarte')
   })
 })
 
