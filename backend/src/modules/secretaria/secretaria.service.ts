@@ -1,7 +1,7 @@
 // SecretarIA — Main orchestrator service
 // Handles incoming WhatsApp messages, phone linking, config, and usage tracking
 
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import logger from '../../config/logger';
@@ -909,12 +909,12 @@ class SecretariaService {
     content: string,
   ): Promise<void> {
     try {
-      await db.execute(sql`
-        INSERT INTO secretaria_conversations (company_id, phone_number, role, content)
-        VALUES (${companyId}, ${phoneNumber}, ${role}, ${content})
-      `);
+      await pool.query(
+        'INSERT INTO secretaria_conversations (company_id, phone_number, role, content) VALUES ($1, $2, $3, $4)',
+        [companyId, phoneNumber, role, content]
+      );
     } catch (err) {
-      logger.error({ err }, 'SecretarIA: failed to save conversation message (table may not exist)');
+      logger.error({ err }, 'SecretarIA: failed to save conversation message');
     }
   }
 
@@ -924,16 +924,11 @@ class SecretariaService {
     limit: number,
   ): Promise<ConversationMessage[]> {
     try {
-      const result = await db.execute(sql`
-        SELECT role, content, created_at
-        FROM secretaria_conversations
-        WHERE company_id = ${companyId} AND phone_number = ${phoneNumber}
-        ORDER BY created_at DESC
-        LIMIT ${limit}
-      `);
-
-      const rows = (result as any).rows || result || [];
-      return rows.reverse().map((row: any) => ({
+      const result = await pool.query(
+        'SELECT role, content, created_at FROM secretaria_conversations WHERE company_id = $1 AND phone_number = $2 ORDER BY created_at DESC LIMIT $3',
+        [companyId, phoneNumber, limit]
+      );
+      return (result.rows || []).reverse().map((row: any) => ({
         role: row.role as 'user' | 'assistant',
         content: row.content as string,
         created_at: new Date(row.created_at),
