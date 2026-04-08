@@ -525,13 +525,12 @@ class SecretariaService {
     // Step 3: Truncate very long messages
     const truncatedMessage = message.slice(0, 2000);
 
-    // Step 4: Save user message
-    await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
-
-    // Step 4.1-4.3: Safety checks (wrapped defensively - tables may not exist yet)
+    // Step 4: Safety checks (wrapped defensively - tables may not exist yet)
+    // NOTE: User message is saved AFTER v3 processing to avoid duplication (Plan 7)
     try {
       if (secretariaSafety.isEscalationRequest(truncatedMessage)) {
         await secretariaSafety.escalateToHuman(companyId, userId, 'user_requested', truncatedMessage, 'web', channelId);
+        await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
         const escResponse = 'Entiendo, voy a derivar tu consulta a un humano. Te van a contactar pronto.';
         await this.saveConversationMessage(companyId, channelId, 'assistant', escResponse);
         return { response: escResponse, intent: 'human_escalation' };
@@ -540,6 +539,7 @@ class SecretariaService {
       const pendingAction = await secretariaSafety.getPendingAction(companyId, channelId);
       if (pendingAction) {
         if (secretariaSafety.isConfirmation(truncatedMessage)) {
+          await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
           await secretariaSafety.confirmPendingAction(pendingAction.id);
           // EXECUTE the confirmed action
           let confirmResponse = 'Listo!';
@@ -555,14 +555,16 @@ class SecretariaService {
           return { response: confirmResponse, intent: 'action_confirmed' };
         }
         if (secretariaSafety.isCancellation(truncatedMessage)) {
+          await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
           await secretariaSafety.cancelPendingAction(pendingAction.id);
           const cancelResponse = 'Dale, cancelado. Decime si necesitas otra cosa.';
           await this.saveConversationMessage(companyId, channelId, 'assistant', cancelResponse);
           return { response: cancelResponse, intent: 'action_cancelled' };
         }
         // If user asks for details/data about the pending action, re-show preview
-        const wantsDetails = /datos|detalles|detalle|info|informacion|que vas a hacer|que incluye|mostrame/i.test(truncatedMessage);
+        const wantsDetails = /^(datos|detalles|detalle|info|informacion|que vas a hacer|que incluye|mostrame)\b/i.test(truncatedMessage.trim());
         if (wantsDetails) {
+          await this.saveConversationMessage(companyId, channelId, 'user', truncatedMessage);
           const actionData: any = pendingAction.actionData || {};
           const ent: any = actionData.resolvedData || actionData.entities || {};
           const items: any[] = ent.items || [];
@@ -600,15 +602,24 @@ class SecretariaService {
     }
 
     // ═══ SecretarIA v3: Single LLM call with native tool_use ═══
-    const recentMessages = await this.loadRecentMessages(companyId, channelId, 20);
+    const recentMessages = await this.loadRecentMessages(companyId, channelId, 50);
     const companyName = await this.getCompanyName(companyId);
 
     try {
       const { handleConversation } = await import('./secretaria.v3');
-      const history = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-      const result = await handleConversation(companyId, userId, truncatedMessage, history, companyName, displayName);
+      const result = await handleConversation(companyId, userId, truncatedMessage, recentMessages, companyName, displayName);
 
-      await this.saveConversationMessage(companyId, channelId, 'assistant', result.response);
+      // Save all conversation messages (user + intermediate tool_use/tool_result + final response)
+      for (const msg of result.allMessages) {
+        const textContent = typeof msg.content === 'string'
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? msg.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || '[tool interaction]'
+            : '';
+        const blocks = Array.isArray(msg.content) ? msg.content : undefined;
+        await this.saveConversationMessage(companyId, channelId, msg.role, textContent, blocks);
+      }
+
       await secretariaMemory.trackUsage(companyId, { messages_received: 1, messages_sent: 1 });
 
       return {
@@ -907,11 +918,12 @@ class SecretariaService {
     phoneNumber: string,
     role: 'user' | 'assistant',
     content: string,
+    contentBlocks?: any[],
   ): Promise<void> {
     try {
       await pool.query(
-        'INSERT INTO secretaria_conversations (company_id, phone_number, role, content) VALUES ($1, $2, $3, $4)',
-        [companyId, phoneNumber, role, content]
+        'INSERT INTO secretaria_conversations (company_id, phone_number, role, content, content_blocks) VALUES ($1, $2, $3, $4, $5)',
+        [companyId, phoneNumber, role, content, contentBlocks ? JSON.stringify(contentBlocks) : null]
       );
     } catch (err) {
       logger.error({ err }, 'SecretarIA: failed to save conversation message');
@@ -925,12 +937,13 @@ class SecretariaService {
   ): Promise<ConversationMessage[]> {
     try {
       const result = await pool.query(
-        'SELECT role, content, created_at FROM secretaria_conversations WHERE company_id = $1 AND phone_number = $2 ORDER BY created_at DESC LIMIT $3',
+        'SELECT role, content, content_blocks, created_at FROM secretaria_conversations WHERE company_id = $1 AND phone_number = $2 ORDER BY created_at DESC LIMIT $3',
         [companyId, phoneNumber, limit]
       );
       return (result.rows || []).reverse().map((row: any) => ({
         role: row.role as 'user' | 'assistant',
         content: row.content as string,
+        content_blocks: row.content_blocks || undefined,
         created_at: new Date(row.created_at),
       }));
     } catch (err) {

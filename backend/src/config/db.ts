@@ -730,6 +730,7 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_company ON secretaria_conversations(company_id, created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_phone ON secretaria_conversations(phone_number, created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_secretaria_conv_wa_id ON secretaria_conversations(whatsapp_message_id)`);
+    await pool.query(`ALTER TABLE secretaria_conversations ADD COLUMN IF NOT EXISTS content_blocks JSONB`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS secretaria_memory (

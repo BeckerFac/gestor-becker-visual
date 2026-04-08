@@ -72,6 +72,7 @@ export interface IntentClassification {
 export interface ConversationMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  content_blocks?: any[]; // Anthropic API content blocks (tool_use, tool_result, text)
   created_at: Date;
 }
 
