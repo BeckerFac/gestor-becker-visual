@@ -554,24 +554,43 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
         const entRes = await resolveEnterprise(companyId, input.empresa);
         if (!entRes.resolved) return `No encontre la empresa "${input.empresa}". ${entRes.ambiguous ? `Puede ser: ${entRes.ambiguous.map((e: any) => e.name).join(', ')}. Cual?` : entRes.error || ''}`;
 
-        const items = (input.items || []).map((i: any) => ({
-          product_name: i.producto,
-          quantity: i.cantidad || 1,
-          unit_price: i.precio_unitario || 0,
-        }));
+        // Resolve product IDs and get correct prices/vat from catalog
+        const items: any[] = [];
+        for (const i of (input.items || [])) {
+          const productName = i.producto;
+          const qty = i.cantidad || 1;
+          const unitPrice = i.precio_unitario || 0;
+
+          // Try to find product in catalog for product_id and vat_rate
+          const pRes = await pool.query(
+            `SELECT p.id, p.name, pp.vat_rate, pp.final_price, pp.cost
+             FROM products p LEFT JOIN product_pricing pp ON pp.product_id = p.id
+             WHERE p.company_id = $1 AND p.name ILIKE $2 LIMIT 1`,
+            [companyId, `%${productName}%`]
+          );
+          const product = pRes.rows[0];
+          items.push({
+            product_id: product?.id || null,
+            product_name: product?.name || productName,
+            quantity: qty,
+            unit_price: unitPrice || (product ? parseFloat(product.final_price || '0') : 0),
+            cost: product ? parseFloat(product.cost || '0') : 0,
+            vat_rate: product ? parseFloat(product.vat_rate || '21') : 21,
+          });
+        }
+
         const discount = input.descuento || 0;
-        const subtotalNeto = items.reduce((s: number, i: any) => s + i.quantity * i.unit_price, 0);
+        const subtotalNeto = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
         const descuentoMonto = subtotalNeto * (discount / 100);
         const netoConDescuento = subtotalNeto - descuentoMonto;
-        const iva = netoConDescuento * 0.21;
-        const total = netoConDescuento + iva;
+        const totalIva = items.reduce((s, i) => {
+          const itemNeto = i.quantity * i.unit_price * (1 - discount / 100);
+          return s + itemNeto * (i.vat_rate / 100);
+        }, 0);
+        const total = netoConDescuento + totalIva;
 
-        // Save as pending action with all resolved data
         const previewId = await secretariaSafety.createPendingAction({
-          companyId,
-          userId: null,
-          channel: 'web',
-          channelId: `web-${userId}`,
+          companyId, userId: null, channel: 'web', channelId: `web-${userId}`,
           actionType: 'create_order',
           actionData: {
             enterprise_id: entRes.entity!.id,
@@ -579,39 +598,51 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
             items,
             discount_percent: discount,
             priority: input.prioridad || 'normal',
-            neto: netoConDescuento,
-            iva: Math.round(iva),
-            total: Math.round(total),
+            neto: netoConDescuento, iva: Math.round(totalIva), total: Math.round(total),
           },
         });
 
         let preview = `PREVIEW (preview_id: ${previewId})\n`;
-        preview += `Pedido para *${entRes.entity!.name}*:\n`;
-        preview += items.map((i: any) => `- ${i.quantity}x ${i.product_name} a $${i.unit_price.toLocaleString('es-AR')}`).join('\n');
-        if (discount > 0) preview += `\nDescuento: ${discount}%`;
-        preview += `\nNeto: $${netoConDescuento.toLocaleString('es-AR')} + IVA: $${Math.round(iva).toLocaleString('es-AR')} = *Total: $${Math.round(total).toLocaleString('es-AR')}*`;
+        preview += `*Pedido para ${entRes.entity!.name}* (${entRes.entity!.extra?.cuit || 'sin CUIT'})\n`;
+        preview += `Estado inicial: pendiente | Prioridad: ${input.prioridad || 'normal'}\n`;
+        for (const i of items) {
+          preview += `- ${i.quantity}x ${i.product_name} a $${i.unit_price.toLocaleString('es-AR')} (IVA ${i.vat_rate}%)`;
+          if (i.product_id) preview += ' [catalogo]';
+          preview += '\n';
+        }
+        if (discount > 0) preview += `Descuento: ${discount}%\n`;
+        preview += `Neto: $${netoConDescuento.toLocaleString('es-AR')} + IVA: $${Math.round(totalIva).toLocaleString('es-AR')} = *Total: $${Math.round(total).toLocaleString('es-AR')}*`;
         return preview;
       }
 
       case 'ejecutar_pedido': {
         const action = await getAndValidatePendingAction(input.preview_id);
-        if (typeof action === 'string') return action; // Error message
+        if (typeof action === 'string') return action;
         const { executeWriteAction } = await import('./secretaria.executor');
-        const result = await executeWriteAction(companyId, '', 'create_order', action.actionData);
+        const result = await executeWriteAction(companyId, userId, 'create_order', action.actionData);
         await secretariaSafety.confirmPendingAction(action.id);
-        return result.formatted;
+        return result.success ? result.formatted : `Error: ${result.error || result.formatted}`;
       }
 
       case 'preview_factura': {
-        // Find the order and its items
         const orderNum = input.pedido_numero;
+        // Load order with items INCLUDING order_item_id and invoiced quantities
         const r = await pool.query(`
           SELECT o.id, o.order_number, o.status, o.total_amount, o.discount_percent,
             e.id as enterprise_id, e.name as empresa, e.cuit, e.tax_condition,
             COALESCE((SELECT json_agg(json_build_object(
-              'product_name', oi.product_name, 'quantity', oi.quantity,
-              'unit_price', CAST(oi.unit_price AS text), 'vat_rate', oi.vat_rate
-            )) FROM order_items oi WHERE oi.order_id = o.id), '[]'::json) as items
+              'order_item_id', oi.id,
+              'product_id', oi.product_id,
+              'product_name', oi.product_name,
+              'quantity', oi.quantity,
+              'unit_price', CAST(oi.unit_price AS text),
+              'vat_rate', COALESCE(oi.vat_rate, 21),
+              'invoiced_qty', COALESCE((
+                SELECT SUM(ii.quantity) FROM invoice_items ii
+                JOIN invoices inv ON inv.id = ii.invoice_id
+                WHERE ii.order_item_id = oi.id AND inv.status != 'cancelled'
+              ), 0)
+            ) ORDER BY oi.created_at) FROM order_items oi WHERE oi.order_id = o.id), '[]'::json) as items
           FROM orders o
           LEFT JOIN enterprises e ON o.enterprise_id = e.id
           WHERE o.company_id = $1 AND o.order_number = $2
@@ -619,20 +650,47 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
 
         if (r.rows.length === 0) return `No encontre el pedido #${String(orderNum).padStart(4, '0')}.`;
         const order = r.rows[0];
-        const allItems = order.items || [];
-        const itemsToInvoice = input.cantidad_items
-          ? allItems.slice(0, input.cantidad_items)
-          : allItems;
+        const allItems = (order.items || []).map((i: any) => ({
+          ...i,
+          unit_price: parseFloat(i.unit_price || '0'),
+          remaining_qty: i.quantity - (parseFloat(i.invoiced_qty) || 0),
+        }));
 
-        const neto = itemsToInvoice.reduce((s: number, i: any) => s + (i.quantity || 1) * parseFloat(i.unit_price || '0'), 0);
-        const iva = neto * 0.21;
-        const total = neto + iva;
+        // Filter to items with remaining qty
+        const availableItems = allItems.filter((i: any) => i.remaining_qty > 0);
+        if (availableItems.length === 0) return `El pedido #${String(orderNum).padStart(4, '0')} ya esta 100% facturado.`;
+
+        // Apply cantidad_items: take N units from available items
+        let itemsToInvoice: any[];
+        const requestedQty = input.cantidad_items;
+        if (requestedQty && requestedQty < availableItems.reduce((s: number, i: any) => s + i.remaining_qty, 0)) {
+          // Partial: take requestedQty units, distributing across items
+          itemsToInvoice = [];
+          let remaining = requestedQty;
+          for (const item of availableItems) {
+            if (remaining <= 0) break;
+            const take = Math.min(remaining, item.remaining_qty);
+            itemsToInvoice.push({ ...item, quantity: take });
+            remaining -= take;
+          }
+        } else {
+          // Full: take all remaining
+          itemsToInvoice = availableItems.map((i: any) => ({ ...i, quantity: i.remaining_qty }));
+        }
+
+        let neto = 0, totalIva = 0;
+        for (const i of itemsToInvoice) {
+          const itemNeto = i.quantity * i.unit_price;
+          neto += itemNeto;
+          totalIva += itemNeto * ((i.vat_rate || 21) / 100);
+        }
+        const total = neto + totalIva;
+        const totalOriginalQty = allItems.reduce((s: number, i: any) => s + i.quantity, 0);
+        const invoicingQty = itemsToInvoice.reduce((s: number, i: any) => s + i.quantity, 0);
+        const isPartial = invoicingQty < totalOriginalQty;
 
         const previewId = await secretariaSafety.createPendingAction({
-          companyId,
-          userId: null,
-          channel: 'web',
-          channelId: `web-${userId}`,
+          companyId, userId: null, channel: 'web', channelId: `web-${userId}`,
           actionType: 'create_invoice',
           actionData: {
             order_id: order.id,
@@ -642,19 +700,31 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
             cuit: order.cuit,
             tax_condition: order.tax_condition,
             invoice_type: input.tipo_factura || 'B',
-            items: itemsToInvoice,
-            neto, iva: Math.round(iva), total: Math.round(total),
-            is_partial: input.cantidad_items ? true : false,
+            fiscal_type: 'no_fiscal',
+            items: itemsToInvoice.map((i: any) => ({
+              product_name: i.product_name,
+              product_id: i.product_id,
+              quantity: i.quantity,
+              unit_price: i.unit_price,
+              vat_rate: i.vat_rate || 21,
+              order_item_id: i.order_item_id,
+            })),
+            neto, iva: Math.round(totalIva), total: Math.round(total),
+            is_partial: isPartial,
           },
         });
 
         let preview = `PREVIEW (preview_id: ${previewId})\n`;
-        preview += `Factura ${input.tipo_factura || 'B'} del pedido #${String(orderNum).padStart(4, '0')} - *${order.empresa}*:\n`;
-        preview += itemsToInvoice.map((i: any) => `- ${i.quantity}x ${i.product_name} a $${parseFloat(i.unit_price || '0').toLocaleString('es-AR')}`).join('\n');
-        if (input.cantidad_items && input.cantidad_items < allItems.length) {
-          preview += `\n(${input.cantidad_items} de ${allItems.length} items - factura parcial)`;
+        preview += `*Factura ${input.tipo_factura || 'B'}* del pedido #${String(orderNum).padStart(4, '0')} - *${order.empresa}*\n`;
+        preview += `CUIT: ${order.cuit || 'sin CUIT'} | Cond. IVA: ${order.tax_condition || 'N/A'}\n`;
+        for (const i of itemsToInvoice) {
+          preview += `- ${i.quantity}x ${i.product_name} a $${i.unit_price.toLocaleString('es-AR')} (IVA ${i.vat_rate}%)\n`;
         }
-        preview += `\nNeto: $${neto.toLocaleString('es-AR')} + IVA: $${Math.round(iva).toLocaleString('es-AR')} = *Total: $${Math.round(total).toLocaleString('es-AR')}*`;
+        if (isPartial) {
+          preview += `_(Factura parcial: ${invoicingQty} de ${totalOriginalQty} unidades)_\n`;
+        }
+        preview += `Neto: $${neto.toLocaleString('es-AR')} + IVA: $${Math.round(totalIva).toLocaleString('es-AR')} = *Total: $${Math.round(total).toLocaleString('es-AR')}*\n`;
+        preview += `Estado: borrador (no fiscal). Vinculada al pedido por items.`;
         return preview;
       }
 
@@ -662,9 +732,9 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
         const action = await getAndValidatePendingAction(input.preview_id);
         if (typeof action === 'string') return action;
         const { executeWriteAction } = await import('./secretaria.executor');
-        const result = await executeWriteAction(companyId, '', 'create_invoice', action.actionData);
+        const result = await executeWriteAction(companyId, userId, 'create_invoice', action.actionData);
         await secretariaSafety.confirmPendingAction(action.id);
-        return result.formatted;
+        return result.success ? result.formatted : `Error: ${result.error || result.formatted}`;
       }
 
       case 'preview_cobro': {
@@ -672,24 +742,61 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
         const entRes = await resolveEnterprise(companyId, input.empresa);
         if (!entRes.resolved) return `No encontre la empresa "${input.empresa}". ${entRes.ambiguous ? `Puede ser: ${entRes.ambiguous.map((e: any) => e.name).join(', ')}. Cual?` : entRes.error || ''}`;
 
-        const metodos = input.metodos_pago || [{ metodo: 'efectivo', monto: input.monto }];
+        // Find pending invoices for this enterprise to auto-link
+        const pendingInvoices = await pool.query(`
+          SELECT i.id, i.invoice_type, i.invoice_number, CAST(i.total_amount AS text) as total,
+            COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as cobrado
+          FROM invoices i
+          LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+          WHERE i.company_id = $1 AND i.enterprise_id = $2 AND i.status != 'cancelled'
+          GROUP BY i.id, i.invoice_type, i.invoice_number, i.total_amount
+          HAVING CAST(i.total_amount AS decimal) > COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0)
+          ORDER BY i.created_at ASC
+        `, [companyId, entRes.entity!.id]);
+
+        const metodos = (input.metodos_pago || [{ metodo: 'efectivo', monto: input.monto }]).map((m: any) => ({
+          method: m.metodo, amount: m.monto,
+        }));
+        const totalCobro = metodos.reduce((s: number, m: any) => s + m.amount, 0);
+
+        // Auto-distribute cobro across pending invoices (oldest first)
+        const invoiceApplications: Array<{ invoice_id: string; amount: number; display: string }> = [];
+        let remaining = totalCobro;
+        for (const inv of pendingInvoices.rows) {
+          if (remaining <= 0) break;
+          const pending = parseFloat(inv.total) - parseFloat(inv.cobrado || '0');
+          const apply = Math.min(remaining, pending);
+          invoiceApplications.push({
+            invoice_id: inv.id,
+            amount: apply,
+            display: `Factura ${inv.invoice_type}-${String(inv.invoice_number).padStart(8, '0')}: $${apply.toLocaleString('es-AR')} de $${pending.toLocaleString('es-AR')} pendientes`,
+          });
+          remaining -= apply;
+        }
+
         const previewId = await secretariaSafety.createPendingAction({
-          companyId,
-          userId: null,
-          channel: 'web',
-          channelId: `web-${userId}`,
+          companyId, userId: null, channel: 'web', channelId: `web-${userId}`,
           actionType: 'create_cobro',
           actionData: {
             enterprise_id: entRes.entity!.id,
             enterprise_name: entRes.entity!.name,
-            monto: input.monto,
-            metodos_pago: metodos,
+            amount: totalCobro,
+            payment_methods: metodos,
+            invoice_items: invoiceApplications.map(a => ({ invoice_id: a.invoice_id, amount: a.amount })),
           },
         });
 
         let preview = `PREVIEW (preview_id: ${previewId})\n`;
-        preview += `Cobro de *$${input.monto.toLocaleString('es-AR')}* de *${entRes.entity!.name}*:\n`;
-        preview += metodos.map((m: any) => `- ${m.metodo}: $${(m.monto || 0).toLocaleString('es-AR')}`).join('\n');
+        preview += `*Cobro de $${totalCobro.toLocaleString('es-AR')}* de *${entRes.entity!.name}*\n`;
+        preview += `Medios de pago:\n`;
+        preview += metodos.map((m: any) => `- ${m.method}: $${m.amount.toLocaleString('es-AR')}`).join('\n') + '\n';
+        if (invoiceApplications.length > 0) {
+          preview += `\nAplicado a facturas:\n`;
+          preview += invoiceApplications.map(a => `- ${a.display}`).join('\n') + '\n';
+        }
+        if (remaining > 0) {
+          preview += `\n$${remaining.toLocaleString('es-AR')} queda como saldo a favor (sin factura pendiente)`;
+        }
         return preview;
       }
 
@@ -697,9 +804,9 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
         const action = await getAndValidatePendingAction(input.preview_id);
         if (typeof action === 'string') return action;
         const { executeWriteAction } = await import('./secretaria.executor');
-        const result = await executeWriteAction(companyId, '', 'create_cobro', action.actionData);
+        const result = await executeWriteAction(companyId, userId, 'create_cobro', action.actionData);
         await secretariaSafety.confirmPendingAction(action.id);
-        return result.formatted;
+        return result.success ? result.formatted : `Error: ${result.error || result.formatted}`;
       }
 
       default:
