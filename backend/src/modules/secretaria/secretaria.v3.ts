@@ -228,9 +228,40 @@ async function executeTool(companyId: string, toolName: string, input: any): Pro
         if (input.empresa) { where += ` AND e.name ILIKE $${idx}`; params.push(`%${input.empresa}%`); idx++; }
         if (input.estado) { where += ` AND o.status = $${idx}`; params.push(input.estado); idx++; }
         else { where += ` AND o.status NOT IN ('cancelado')`; }
-        const r = await pool.query(`SELECT o.order_number, o.title, o.status, CAST(o.total_amount AS text) as total, o.payment_status, e.name as empresa, o.created_at FROM orders o LEFT JOIN enterprises e ON o.enterprise_id = e.id WHERE ${where} ORDER BY o.created_at DESC LIMIT 10`, params);
+        const r = await pool.query(`
+          SELECT o.order_number, o.title, o.description, o.status, o.priority,
+            CAST(o.total_amount AS text) as total_amount,
+            CAST(o.unit_price AS text) as unit_price,
+            o.vat_rate, o.payment_status, o.payment_method,
+            o.discount_percent, o.estimated_delivery, o.actual_delivery,
+            o.production_started_at, o.notes, o.created_at,
+            e.name as empresa, e.cuit as empresa_cuit,
+            c.name as cliente, c.cuit as cliente_cuit,
+            COALESCE((SELECT json_agg(json_build_object(
+              'producto', oi.product_name, 'cantidad', oi.quantity,
+              'precio_unitario', CAST(oi.unit_price AS text),
+              'subtotal', CAST(oi.subtotal AS text),
+              'iva', oi.vat_rate, 'tipo', oi.product_type
+            )) FROM order_items oi WHERE oi.order_id = o.id), '[]'::json) as items
+          FROM orders o
+          LEFT JOIN enterprises e ON o.enterprise_id = e.id
+          LEFT JOIN customers c ON o.customer_id = c.id
+          WHERE ${where} ORDER BY o.created_at DESC LIMIT 10`, params);
         if (r.rows.length === 0) return 'No hay pedidos con esos criterios.';
-        return r.rows.map((o: any) => `#${String(o.order_number).padStart(4, '0')} ${o.empresa || 'Sin empresa'} - $${parseFloat(o.total || '0').toLocaleString('es-AR')} - ${o.status} - pago: ${o.payment_status || 'pendiente'}`).join('\n');
+        return JSON.stringify(r.rows.map((o: any) => ({
+          numero: `#${String(o.order_number).padStart(4, '0')}`,
+          titulo: o.title, descripcion: o.description,
+          empresa: o.empresa, cuit_empresa: o.empresa_cuit,
+          cliente: o.cliente, cuit_cliente: o.cliente_cuit,
+          total: `$${parseFloat(o.total_amount || '0').toLocaleString('es-AR')}`,
+          iva: `${o.vat_rate}%`, descuento: o.discount_percent > 0 ? `${o.discount_percent}%` : null,
+          estado: o.status, pago: o.payment_status, prioridad: o.priority,
+          metodo_pago: o.payment_method,
+          entrega_estimada: o.estimated_delivery, entrega_real: o.actual_delivery,
+          inicio_produccion: o.production_started_at,
+          notas: o.notes, fecha: o.created_at,
+          items: o.items,
+        })));
       }
 
       case 'buscar_facturas': {
@@ -239,50 +270,156 @@ async function executeTool(companyId: string, toolName: string, input: any): Pro
         let idx = 2;
         if (input.empresa) { where += ` AND (e.name ILIKE $${idx} OR c.name ILIKE $${idx})`; params.push(`%${input.empresa}%`); idx++; }
         if (input.estado) { where += ` AND i.status = $${idx}`; params.push(input.estado); idx++; }
-        const r = await pool.query(`SELECT i.invoice_type, i.invoice_number, CAST(i.total_amount AS text) as total, i.status, i.payment_status, e.name as empresa, c.name as cliente, i.created_at FROM invoices i LEFT JOIN enterprises e ON i.enterprise_id = e.id LEFT JOIN customers c ON i.customer_id = c.id WHERE ${where} ORDER BY i.created_at DESC LIMIT 10`, params);
+        const r = await pool.query(`
+          SELECT i.invoice_type, i.invoice_number, i.fiscal_type,
+            CAST(i.total_amount AS text) as total_amount,
+            CAST(i.subtotal AS text) as subtotal,
+            CAST(i.vat_amount AS text) as vat_amount,
+            i.status, i.payment_status, i.cae, i.cae_vto,
+            i.currency, i.invoice_date, i.created_at,
+            i.notes, i.concepto,
+            e.name as empresa, e.cuit as empresa_cuit,
+            c.name as cliente, c.cuit as cliente_cuit,
+            COALESCE((SELECT json_agg(json_build_object(
+              'producto', ii.product_name, 'cantidad', ii.quantity,
+              'precio_unitario', CAST(ii.unit_price AS text),
+              'iva', ii.vat_rate, 'subtotal', CAST(ii.quantity * ii.unit_price AS text)
+            )) FROM invoice_items ii WHERE ii.invoice_id = i.id), '[]'::json) as items,
+            COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0) as total_cobrado
+          FROM invoices i
+          LEFT JOIN enterprises e ON i.enterprise_id = e.id
+          LEFT JOIN customers c ON i.customer_id = c.id
+          WHERE ${where} ORDER BY i.created_at DESC LIMIT 10`, params);
         if (r.rows.length === 0) return 'No hay facturas con esos criterios.';
-        return r.rows.map((f: any) => `${f.invoice_type || 'B'} ${String(f.invoice_number).padStart(8, '0')} - ${f.empresa || f.cliente || 'Sin nombre'} - $${parseFloat(f.total || '0').toLocaleString('es-AR')} - ${f.status} - pago: ${f.payment_status || 'pendiente'}`).join('\n');
+        return JSON.stringify(r.rows.map((f: any) => ({
+          tipo: f.invoice_type, numero: f.invoice_number, fiscal: f.fiscal_type,
+          empresa: f.empresa, cuit_empresa: f.empresa_cuit,
+          cliente: f.cliente, cuit_cliente: f.cliente_cuit,
+          subtotal_neto: `$${parseFloat(f.subtotal || '0').toLocaleString('es-AR')}`,
+          iva: `$${parseFloat(f.vat_amount || '0').toLocaleString('es-AR')}`,
+          total: `$${parseFloat(f.total_amount || '0').toLocaleString('es-AR')}`,
+          cobrado: `$${parseFloat(f.total_cobrado || '0').toLocaleString('es-AR')}`,
+          pendiente_cobro: `$${Math.max(parseFloat(f.total_amount || '0') - parseFloat(f.total_cobrado || '0'), 0).toLocaleString('es-AR')}`,
+          estado: f.status, pago: f.payment_status,
+          cae: f.cae, vto_cae: f.cae_vto, moneda: f.currency,
+          fecha_emision: f.invoice_date, fecha_creacion: f.created_at,
+          notas: f.notes, items: f.items,
+        })));
       }
 
       case 'buscar_clientes': {
-        if (input.nombre) {
-          const r = await pool.query(`SELECT e.name, e.cuit, e.phone, e.email, e.tax_condition FROM enterprises e WHERE e.company_id = $1 AND (e.name ILIKE $2 OR e.cuit LIKE $2) ORDER BY e.name LIMIT 10`, [companyId, `%${input.nombre}%`]);
-          if (r.rows.length === 0) return `No encontre ninguna empresa con "${input.nombre}".`;
-          return r.rows.map((c: any) => `${c.name}${c.cuit ? ` (CUIT: ${c.cuit})` : ''}${c.tax_condition ? ` - ${c.tax_condition}` : ''}${c.phone ? ` - Tel: ${c.phone}` : ''}`).join('\n');
-        }
-        const r = await pool.query('SELECT e.name, e.cuit FROM enterprises e WHERE e.company_id = $1 ORDER BY e.name LIMIT 20', [companyId]);
-        if (r.rows.length === 0) return 'No tenes empresas cargadas. Podes agregar una desde Directorio > Empresas.';
-        return `${r.rows.length} empresa(s):\n` + r.rows.map((c: any) => `- ${c.name}${c.cuit ? ` (${c.cuit})` : ''}`).join('\n');
+        const search = input.nombre ? `%${input.nombre}%` : '%';
+        const r = await pool.query(`
+          SELECT e.name, e.razon_social, e.cuit, e.tax_condition,
+            e.address, e.city, e.province, e.postal_code,
+            e.fiscal_address, e.fiscal_city, e.fiscal_province,
+            e.phone, e.email, e.notes, e.default_discount,
+            e.created_at,
+            COALESCE((SELECT COUNT(*) FROM orders o WHERE o.enterprise_id = e.id), 0) as total_pedidos,
+            COALESCE((SELECT SUM(CAST(o.total_amount AS decimal)) FROM orders o WHERE o.enterprise_id = e.id), 0) as total_vendido,
+            COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.enterprise_id = e.id AND i.status = 'authorized'), 0) as total_facturas,
+            COALESCE((SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.enterprise_id = e.id AND i.status = 'authorized'), 0) as total_facturado
+          FROM enterprises e
+          WHERE e.company_id = $1 AND (e.name ILIKE $2 OR e.cuit LIKE $2 OR $2 = '%')
+          ORDER BY e.name LIMIT 20`, [companyId, search]);
+        if (r.rows.length === 0) return input.nombre ? `No encontre ninguna empresa con "${input.nombre}".` : 'No tenes empresas cargadas.';
+        return JSON.stringify(r.rows.map((c: any) => ({
+          nombre: c.name, razon_social: c.razon_social, cuit: c.cuit,
+          condicion_iva: c.tax_condition,
+          direccion: c.address, ciudad: c.city, provincia: c.province, cp: c.postal_code,
+          dir_fiscal: c.fiscal_address, ciudad_fiscal: c.fiscal_city,
+          telefono: c.phone, email: c.email, notas: c.notes,
+          descuento_default: c.default_discount > 0 ? `${c.default_discount}%` : null,
+          total_pedidos: c.total_pedidos, total_vendido: `$${parseFloat(c.total_vendido || '0').toLocaleString('es-AR')}`,
+          total_facturas: c.total_facturas, total_facturado: `$${parseFloat(c.total_facturado || '0').toLocaleString('es-AR')}`,
+          cliente_desde: c.created_at,
+        })));
       }
 
       case 'buscar_productos': {
-        let where = 'p.company_id = $1';
-        const params: any[] = [companyId];
-        let idx = 2;
-        if (input.nombre) { where += ` AND (p.name ILIKE $${idx} OR p.sku ILIKE $${idx})`; params.push(`%${input.nombre}%`); idx++; }
-        const r = await pool.query(`SELECT p.name, p.sku, pp.final_price, pp.cost, pp.margin_percent FROM products p LEFT JOIN product_pricing pp ON pp.product_id = p.id WHERE ${where} ORDER BY p.name LIMIT 10`, params);
-        if (r.rows.length === 0) return input.nombre ? `No encontre productos con "${input.nombre}".` : 'No tenes productos cargados. Cargalos desde Abastecimiento > Productos.';
-        return r.rows.map((p: any) => `${p.name} (${p.sku || 'sin SKU'}) - Precio: $${parseFloat(p.final_price || '0').toLocaleString('es-AR')} - Costo: $${parseFloat(p.cost || '0').toLocaleString('es-AR')} - Margen: ${p.margin_percent || 0}%`).join('\n');
+        const search = input.nombre ? `%${input.nombre}%` : '%';
+        const r = await pool.query(`
+          SELECT p.name, p.sku, p.description, p.barcode, p.product_type,
+            p.controls_stock, p.low_stock_threshold,
+            pp.cost, pp.margin_percent, pp.vat_rate, pp.final_price,
+            COALESCE((SELECT SUM(CAST(s.quantity AS decimal)) FROM stock s WHERE s.product_id = p.id), 0) as stock_actual
+          FROM products p
+          LEFT JOIN product_pricing pp ON pp.product_id = p.id
+          WHERE p.company_id = $1 AND (p.name ILIKE $2 OR p.sku ILIKE $2 OR $2 = '%')
+          ORDER BY p.name LIMIT 20`, [companyId, search]);
+        if (r.rows.length === 0) return input.nombre ? `No encontre productos con "${input.nombre}".` : 'No tenes productos cargados.';
+        return JSON.stringify(r.rows.map((p: any) => ({
+          nombre: p.name, sku: p.sku, descripcion: p.description,
+          codigo_barras: p.barcode, tipo: p.product_type,
+          costo: `$${parseFloat(p.cost || '0').toLocaleString('es-AR')}`,
+          margen: `${p.margin_percent || 0}%`,
+          precio_neto: `$${parseFloat(p.final_price || '0').toLocaleString('es-AR')}`,
+          iva: `${p.vat_rate || 0}%`,
+          stock: parseFloat(p.stock_actual || '0'),
+          controla_stock: p.controls_stock, stock_minimo: p.low_stock_threshold,
+        })));
       }
 
       case 'ver_saldos': {
-        const r = await pool.query(`SELECT
-          COALESCE(SUM(CASE WHEN i.status = 'authorized' THEN CAST(i.total_amount AS decimal) ELSE 0 END), 0) as facturado,
-          COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia JOIN invoices inv ON cia.invoice_id = inv.id WHERE inv.company_id = $1), 0) as cobrado
-        FROM invoices i WHERE i.company_id = $1`, [companyId]);
-        const facturado = parseFloat(r.rows[0]?.facturado || '0');
-        const cobrado = parseFloat(r.rows[0]?.cobrado || '0');
-        const pendiente = Math.max(facturado - cobrado, 0);
-        return `Facturado: $${facturado.toLocaleString('es-AR')}\nCobrado: $${cobrado.toLocaleString('es-AR')}\nPendiente de cobro: $${pendiente.toLocaleString('es-AR')}`;
+        if (input.empresa) {
+          const r = await pool.query(`
+            SELECT e.name, e.cuit,
+              COALESCE((SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.enterprise_id = e.id AND i.company_id = $1 AND i.status = 'authorized'), 0) as facturado,
+              COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia JOIN invoices i ON cia.invoice_id = i.id WHERE i.enterprise_id = e.id AND i.company_id = $1), 0) as cobrado,
+              COALESCE((SELECT COUNT(*) FROM invoices i WHERE i.enterprise_id = e.id AND i.company_id = $1 AND i.status = 'authorized'), 0) as cant_facturas,
+              COALESCE((SELECT COUNT(*) FROM cobros c WHERE c.enterprise_id = e.id AND c.company_id = $1), 0) as cant_cobros
+            FROM enterprises e WHERE e.company_id = $1 AND e.name ILIKE $2 LIMIT 5
+          `, [companyId, `%${input.empresa}%`]);
+          if (r.rows.length === 0) return `No encontre empresa "${input.empresa}".`;
+          return JSON.stringify(r.rows.map((e: any) => ({
+            empresa: e.name, cuit: e.cuit,
+            total_facturado: `$${parseFloat(e.facturado || '0').toLocaleString('es-AR')}`,
+            total_cobrado: `$${parseFloat(e.cobrado || '0').toLocaleString('es-AR')}`,
+            pendiente: `$${Math.max(parseFloat(e.facturado || '0') - parseFloat(e.cobrado || '0'), 0).toLocaleString('es-AR')}`,
+            facturas: e.cant_facturas, cobros: e.cant_cobros,
+          })));
+        }
+        // Resumen general
+        const r = await pool.query(`
+          SELECT
+            COALESCE(SUM(CASE WHEN i.status = 'authorized' THEN CAST(i.total_amount AS decimal) ELSE 0 END), 0) as facturado,
+            COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia JOIN invoices inv ON cia.invoice_id = inv.id WHERE inv.company_id = $1), 0) as cobrado,
+            COALESCE((SELECT COUNT(*) FROM orders o WHERE o.company_id = $1 AND o.payment_status = 'pendiente'), 0) as pedidos_sin_pagar,
+            COALESCE((SELECT SUM(CAST(o.total_amount AS decimal)) FROM orders o WHERE o.company_id = $1 AND o.payment_status = 'pendiente'), 0) as monto_sin_pagar
+          FROM invoices i WHERE i.company_id = $1`, [companyId]);
+        const d = r.rows[0] || {};
+        return JSON.stringify({
+          total_facturado: `$${parseFloat(d.facturado || '0').toLocaleString('es-AR')}`,
+          total_cobrado: `$${parseFloat(d.cobrado || '0').toLocaleString('es-AR')}`,
+          pendiente_cobro: `$${Math.max(parseFloat(d.facturado || '0') - parseFloat(d.cobrado || '0'), 0).toLocaleString('es-AR')}`,
+          pedidos_sin_pagar: d.pedidos_sin_pagar,
+          monto_pedidos_sin_pagar: `$${parseFloat(d.monto_sin_pagar || '0').toLocaleString('es-AR')}`,
+        });
       }
 
       case 'resumen_negocio': {
-        const [orders, invoices, products] = await Promise.all([
-          pool.query('SELECT COUNT(*)::int as total, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as revenue FROM orders WHERE company_id = $1', [companyId]),
-          pool.query("SELECT COUNT(*)::int as total, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as invoiced FROM invoices WHERE company_id = $1 AND status = 'authorized'", [companyId]),
+        const [orders, invoices, products, cobros] = await Promise.all([
+          pool.query(`SELECT COUNT(*)::int as total, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as revenue,
+            COUNT(CASE WHEN status = 'pendiente' THEN 1 END)::int as pendientes,
+            COUNT(CASE WHEN status = 'en_produccion' THEN 1 END)::int as en_produccion,
+            COUNT(CASE WHEN status = 'terminado' THEN 1 END)::int as terminados,
+            COUNT(CASE WHEN payment_status = 'pendiente' THEN 1 END)::int as sin_pagar
+          FROM orders WHERE company_id = $1`, [companyId]),
+          pool.query(`SELECT COUNT(*)::int as total, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as invoiced,
+            COUNT(CASE WHEN status = 'draft' THEN 1 END)::int as borradores,
+            COUNT(CASE WHEN status = 'authorized' THEN 1 END)::int as autorizadas
+          FROM invoices WHERE company_id = $1`, [companyId]),
           pool.query('SELECT COUNT(*)::int as total FROM products WHERE company_id = $1', [companyId]),
+          pool.query(`SELECT COUNT(*)::int as total, COALESCE(SUM(CAST(COALESCE(total_amount, amount) AS decimal)), 0) as cobrado
+          FROM cobros WHERE company_id = $1`, [companyId]),
         ]);
-        return `Pedidos: ${orders.rows[0].total} por $${parseFloat(orders.rows[0].revenue || '0').toLocaleString('es-AR')}\nFacturado: ${invoices.rows[0].total} facturas por $${parseFloat(invoices.rows[0].invoiced || '0').toLocaleString('es-AR')}\nProductos: ${products.rows[0].total}`;
+        const o = orders.rows[0]; const i = invoices.rows[0]; const c = cobros.rows[0];
+        return JSON.stringify({
+          pedidos: { total: o.total, revenue: `$${parseFloat(o.revenue || '0').toLocaleString('es-AR')}`, pendientes: o.pendientes, en_produccion: o.en_produccion, terminados: o.terminados, sin_pagar: o.sin_pagar },
+          facturas: { total: i.total, facturado: `$${parseFloat(i.invoiced || '0').toLocaleString('es-AR')}`, borradores: i.borradores, autorizadas: i.autorizadas },
+          cobros: { total: c.total, cobrado: `$${parseFloat(c.cobrado || '0').toLocaleString('es-AR')}` },
+          productos: products.rows[0].total,
+        });
       }
 
       case 'crear_pedido': {
