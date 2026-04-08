@@ -599,184 +599,24 @@ class SecretariaService {
       logger.error({ err: safetyErr }, 'SecretarIA: safety check failed (non-blocking)');
     }
 
-    // Step 5: Load context
-    const recentMessages = await this.loadRecentMessages(
-      companyId,
-      channelId,
-      SECRETARIA_CONFIG.context.recentMessagesCount,
-    );
+    // ═══ SecretarIA v3: Single LLM call with native tool_use ═══
+    const recentMessages = await this.loadRecentMessages(companyId, channelId, 20);
     const companyName = await this.getCompanyName(companyId);
-    const memoryContext = await secretariaMemory.getMemoryContext(companyId, userId);
-    const memory: Record<string, string> = memoryContext ? { context: memoryContext } : {};
-
-    const context: SecretariaContext = {
-      companyId,
-      userId,
-      phoneNumber: channelId,
-      displayName,
-      recentMessages,
-      memory,
-    };
 
     try {
-      // Step 6: Classify intent
-      const intentResult = await classifyIntent(truncatedMessage, context);
+      const { handleConversation } = await import('./secretaria.v3');
+      const history = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      const result = await handleConversation(companyId, userId, truncatedMessage, history, companyName, displayName);
 
-      // Step 6.1: Safety — track low confidence
-      const safetyKey = `${companyId}:${channelId}`;
-      try { secretariaSafety.trackLowConfidence(safetyKey, intentResult.confidence); } catch {}
-
-      // Step 6.2: Safety — pre-execution check
-      const safetyCheck = await secretariaSafety.checkSafety({
-        companyId,
-        userId,
-        intent: intentResult.intent,
-        entities: intentResult.entities,
-      });
-
-      if (!safetyCheck.safe) {
-        if (safetyCheck.escalateToHuman) {
-          await secretariaSafety.escalateToHuman(
-            companyId, userId, safetyCheck.reason || 'safety_check', truncatedMessage, 'web', channelId,
-          );
-          const escResp = safetyCheck.reason || 'Voy a derivar tu consulta a un humano. Te van a contactar pronto.';
-          await this.saveConversationMessage(companyId, channelId, 'assistant', escResp);
-          return { response: escResp, intent: 'human_escalation' };
-        }
-
-        if (safetyCheck.requiresConfirmation) {
-          // Validate and generate preview before asking confirmation
-          const intentLabels: Record<string, string> = {
-            create_order: 'crear un pedido',
-            create_invoice: 'crear una factura',
-            create_invoice_partial: 'crear una factura parcial',
-            create_cobro: 'registrar un cobro',
-            create_quote: 'crear una cotizacion',
-            create_remito: 'crear un remito',
-            create_enterprise: 'agregar una empresa',
-            update_order_status: 'cambiar el estado de un pedido',
-            authorize_invoice: 'autorizar una factura con AFIP',
-          };
-          const actionLabel = intentLabels[intentResult.intent] || intentResult.intent;
-          let previewText = `Voy a ${actionLabel}. Confirmas? (si/no)`;
-          let resolvedData = intentResult.entities;
-
-          try {
-            const { validateAction } = await import('./secretaria.validators');
-            const validation = await validateAction(companyId, userId, intentResult.intent, intentResult.entities);
-            if (!validation.valid) {
-              const errorMsg = validation.errors.join('\n') + (validation.suggestions.length ? '\n---\n' + validation.suggestions.join('\n') : '');
-              await this.saveConversationMessage(companyId, channelId, 'assistant', errorMsg);
-              return { response: errorMsg, intent: intentResult.intent };
-            }
-            resolvedData = validation.resolvedData || intentResult.entities;
-            const p = validation.preview || {};
-
-            // Build descriptive preview based on intent
-            if (p.total && p.total > 0) {
-              previewText = `Voy a ${actionLabel}:`;
-              if (p.enterprise_name) previewText += `\n- Empresa: ${p.enterprise_name}`;
-              if (p.items_count) previewText += `\n- ${p.items_count} item(s)`;
-              previewText += `\n- Neto: $${Math.round(p.neto).toLocaleString('es-AR')}`;
-              if (p.discount_percent > 0) previewText += `\n- Descuento: ${p.discount_percent}% (-$${Math.round(p.discount_amount).toLocaleString('es-AR')})`;
-              previewText += `\n- IVA: $${Math.round(p.iva).toLocaleString('es-AR')}`;
-              previewText += `\n- *Total: $${Math.round(p.total).toLocaleString('es-AR')}*`;
-              previewText += '\n---\nConfirmas? (si/no)';
-            } else if (p.amount) {
-              previewText = `Voy a ${actionLabel}:`;
-              if (p.enterprise_name) previewText += `\n- Empresa: ${p.enterprise_name}`;
-              previewText += `\n- Monto: $${Math.round(p.amount).toLocaleString('es-AR')}`;
-              previewText += '\n---\nConfirmas? (si/no)';
-            } else if (resolvedData.name || resolvedData.enterprise_name) {
-              // For create_enterprise and similar simple creates
-              const name = resolvedData.name || resolvedData.enterprise_name;
-              previewText = `Voy a ${actionLabel}: *${name}*`;
-              if (resolvedData.cuit || resolvedData.enterprise_cuit) previewText += ` (CUIT: ${resolvedData.cuit || resolvedData.enterprise_cuit})`;
-              previewText += '\n---\nConfirmas? (si/no)';
-            }
-          } catch (valErr: any) {
-            logger.warn({ err: valErr.message }, 'SecretarIA: validation warning');
-          }
-
-          await secretariaSafety.createPendingAction({
-            companyId,
-            userId,
-            channel: 'web',
-            channelId,
-            actionType: intentResult.intent,
-            actionData: { entities: intentResult.entities, resolvedData, originalText: truncatedMessage },
-          });
-          await this.saveConversationMessage(companyId, channelId, 'assistant', previewText);
-          return { response: previewText, intent: 'confirmation_required' };
-        }
-
-        const blockResp = safetyCheck.reason || 'No puedo procesar esa consulta por razones de seguridad.';
-        await this.saveConversationMessage(companyId, channelId, 'assistant', blockResp);
-        return { response: blockResp, intent: 'safety_blocked' };
-      }
-
-      // Step 6.5: Role-based intent filtering
-      const effectiveRole = userRole || 'viewer';
-      if (!isIntentAllowedForRole(effectiveRole, intentResult.intent)) {
-        const blockedResponse = 'No tenes permiso para acceder a esa informacion. Contacta a tu administrador.';
-        await this.saveConversationMessage(companyId, channelId, 'assistant', blockedResponse);
-        return {
-          response: blockedResponse,
-          intent: 'permission_denied',
-        };
-      }
-
-      // Step 7: Execute tool
-      const toolResult = await executeTool(intentResult.intent, intentResult.entities, companyId);
-
-      // Step 7.5: Log SecretarIA activity (fire-and-forget)
-      activityService.log({
-        companyId,
-        userId: SECRETARIA_SYSTEM_USER_ID,
-        action: intentResult.intent || 'query',
-        module: 'secretaria',
-        entityType: 'ai_interaction',
-        entityId: undefined,
-        description: `SecretarIA: ${intentResult.intent} — ${(toolResult?.formatted || '').substring(0, 200)}`,
-        metadata: {
-          ai_intent: intentResult.intent,
-          ai_confidence: intentResult.confidence,
-          channel: 'web',
-          triggered_by: displayName || 'unknown',
-        },
-      }).catch(() => {}); // fire-and-forget
-
-      // Step 8: Generate response
-      let responseText = await generateResponse(toolResult, context, companyName);
-
-      // Step 8.1: Safety — post-execution response validation
-      const responseValidation = await secretariaSafety.validateResponse(responseText, companyId);
-      if (!responseValidation.safe && responseValidation.sanitizedResponse) {
-        responseText = responseValidation.sanitizedResponse;
-      }
-
-      // Step 8.2: Safety — validate tool result consistency (hallucination detection)
-      const consistency = secretariaSafety.validateToolResultConsistency(toolResult, responseText);
-      if (!consistency.consistent && consistency.warning) {
-        responseText += `\n\n_${consistency.warning}_`;
-      }
-
-      // Step 9: Save assistant message
-      await this.saveConversationMessage(companyId, channelId, 'assistant', responseText);
-
-      // Step 10: Track usage
-      await secretariaMemory.trackUsage(companyId, {
-        messages_received: 1,
-        messages_sent: 1,
-      });
-
-      // Step 11: Detect and save memory
-      await secretariaMemory.detectAndSaveMemory(companyId, userId, truncatedMessage, responseText);
+      await this.saveConversationMessage(companyId, channelId, 'assistant', result.response);
+      await secretariaMemory.trackUsage(companyId, { messages_received: 1, messages_sent: 1 });
 
       return {
-        response: responseText,
-        intent: intentResult.intent,
+        response: result.response,
+        intent: result.toolsCalled.length > 0 ? result.toolsCalled[0] : 'conversation',
       };
+
+      // OLD PIPELINE BELOW — v2 classifier+generator (replaced by v3 tool_use)
     } catch (error: any) {
       logger.error({ err: error, message: error?.message, stack: error?.stack, companyId, userId }, 'SecretarIA: error in web chat pipeline');
 
