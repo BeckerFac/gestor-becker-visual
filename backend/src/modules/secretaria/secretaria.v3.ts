@@ -342,7 +342,7 @@ async function getAndValidatePendingAction(previewId: string): Promise<any | str
   }
 }
 
-async function executeTool(companyId: string, toolName: string, input: any): Promise<string> {
+async function executeTool(companyId: string, userId: string, toolName: string, input: any): Promise<string> {
   try {
     switch (toolName) {
       case 'buscar_pedidos': {
@@ -571,7 +571,7 @@ async function executeTool(companyId: string, toolName: string, input: any): Pro
           companyId,
           userId: null,
           channel: 'web',
-          channelId: `web-${companyId}`,
+          channelId: `web-${userId}`,
           actionType: 'create_order',
           actionData: {
             enterprise_id: entRes.entity!.id,
@@ -632,7 +632,7 @@ async function executeTool(companyId: string, toolName: string, input: any): Pro
           companyId,
           userId: null,
           channel: 'web',
-          channelId: `web-${companyId}`,
+          channelId: `web-${userId}`,
           actionType: 'create_invoice',
           actionData: {
             order_id: order.id,
@@ -677,7 +677,7 @@ async function executeTool(companyId: string, toolName: string, input: any): Pro
           companyId,
           userId: null,
           channel: 'web',
-          channelId: `web-${companyId}`,
+          channelId: `web-${userId}`,
           actionType: 'create_cobro',
           actionData: {
             enterprise_id: entRes.entity!.id,
@@ -866,7 +866,7 @@ export async function handleConversation(
 
     for (const toolUse of toolUseBlocks) {
       toolsCalled.push(toolUse.name);
-      const result = await executeTool(companyId, toolUse.name, toolUse.input);
+      const result = await executeTool(companyId, userId, toolUse.name, toolUse.input);
       toolResults.push({
         type: 'tool_result',
         tool_use_id: toolUse.id,
