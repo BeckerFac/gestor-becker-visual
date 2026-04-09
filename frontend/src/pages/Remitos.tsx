@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -18,6 +19,9 @@ import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { RemitoPreviewModal } from '@/components/shared/RemitoPreviewModal'
+import { useContextMenu } from '@/hooks/useContextMenu'
+import { ContextMenuBase } from '@/components/ui/ContextMenuBase'
+import type { ContextMenuItem } from '@/components/ui/ContextMenuBase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +94,10 @@ const EMPTY_FORM = {
   tipo: 'entrega' as 'entrega' | 'recepcion',
 }
 
-const EMPTY_ITEM: RemitoItem = { product_name: '', description: '', quantity: 1, unit: 'unidades' }
+const EMPTY_ITEM: RemitoItem = {
+  product_name: '', description: '', quantity: 1, unit: 'unidades',
+  source: 'manual', source_ref: 'Manual', localId: crypto.randomUUID(),
+}
 
 const CSV_COLUMNS = [
   { key: 'remito_number', label: 'N° Remito' },
@@ -134,6 +141,9 @@ function hasActiveFilters(filters: {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export const Remitos: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+
   // Data
   const [remitos, setRemitos]       = useState<Remito[]>([])
   const [total, setTotal]           = useState(0)
@@ -155,6 +165,16 @@ export const Remitos: React.FC = () => {
 
   // Preview modal
   const [previewRemitoId, setPreviewRemitoId] = useState<string | null>(null)
+
+  // Item importers
+  const [showOrderImporter, setShowOrderImporter] = useState(false)
+  const [showInvoiceImporter, setShowInvoiceImporter] = useState(false)
+  const [importerItems, setImporterItems] = useState<any[]>([])
+  const [importerLoading, setImporterLoading] = useState(false)
+
+  // Context menu
+  const contextMenu = useContextMenu<Remito>()
+  const [contextData, setContextData] = useState<Record<string, any>>({})
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -232,41 +252,174 @@ export const Remitos: React.FC = () => {
     setFilterDateTo('')
   }
 
-  // ── Orders filtered by enterprise ─────────────────────────────────────────
+  // ── Enterprise change: clear items from different enterprise (FIX review) ──
 
-  const filteredOrders = form.enterprise_id
-    ? orders.filter(o => (o as any).enterprise_id === form.enterprise_id)
-    : orders
-
-  // ── Order selection: auto-fill items and customer ──────────────────────────
-
-  const handleOrderSelect = async (orderId: string) => {
-    setForm(prev => ({ ...prev, order_id: orderId }))
-    if (!orderId) return
-    try {
-      const detail = await (api as any).getOrder(orderId).catch(() => null)
-      if (detail?.items?.length) {
-        setItems(
-          detail.items.map((it: any) => ({
-            product_name: it.product_name ?? '',
-            description:  it.description  ?? '',
-            quantity:     Number(it.quantity) || 1,
-            unit:         'unidades',
-          }))
-        )
-      }
-      if (detail?.customer_id) {
-        setForm(prev => ({ ...prev, customer_id: detail.customer_id }))
-      }
-    } catch {
-      // ignore
+  const handleEnterpriseChange = (id: string) => {
+    const hadItems = items.some(it => it.source && it.source !== 'manual')
+    if (hadItems && id !== form.enterprise_id) {
+      // Clear linked items when switching enterprise
+      setItems([{ ...EMPTY_ITEM, localId: crypto.randomUUID() }])
     }
+    setForm(prev => ({ ...prev, enterprise_id: id, order_id: '' }))
   }
+
+  // ── Import items from order ────────────────────────────────────────────────
+
+  const handleImportFromOrder = async () => {
+    if (!form.enterprise_id) return
+    setShowOrderImporter(true)
+    setImporterLoading(true)
+    try {
+      const data = await api.getAvailableOrderItemsForRemitoByEnterprise(form.enterprise_id)
+      setImporterItems(data || [])
+    } catch { setImporterItems([]) }
+    finally { setImporterLoading(false) }
+  }
+
+  const handleConfirmOrderImport = (selected: Array<{ item: any; qty: number }>) => {
+    const existingIds = new Set(items.filter(i => i.order_item_id).map(i => i.order_item_id))
+    const newItems: RemitoItem[] = selected
+      .filter(s => !existingIds.has(s.item.order_item_id)) // prevent duplicates
+      .map(s => ({
+        product_name: s.item.product_name,
+        description: s.item.description || '',
+        quantity: s.qty,
+        unit: 'unidades',
+        product_id: s.item.product_id || undefined,
+        unit_price: parseFloat(s.item.unit_price || '0'),
+        vat_rate: s.item.vat_rate || 21,
+        order_item_id: s.item.order_item_id,
+        source: 'order' as const,
+        source_ref: `Pedido #${String(s.item.order_number).padStart(4, '0')}`,
+        source_id: s.item.order_id,
+        qty_available: parseFloat(s.item.qty_available || '0'),
+        localId: crypto.randomUUID(),
+      }))
+    // Replace default empty item if it's the only one
+    setItems(prev => {
+      const filtered = prev.filter(i => i.product_name.trim() || i.source !== 'manual')
+      return [...filtered, ...newItems]
+    })
+    setShowOrderImporter(false)
+  }
+
+  // ── Import items from invoice ──────────────────────────────────────────────
+
+  const handleImportFromInvoice = async () => {
+    if (!form.enterprise_id) return
+    setShowInvoiceImporter(true)
+    setImporterLoading(true)
+    try {
+      const data = await api.getInvoicesWithPendingDelivery(form.enterprise_id)
+      setImporterItems(data || [])
+    } catch { setImporterItems([]) }
+    finally { setImporterLoading(false) }
+  }
+
+  const handleConfirmInvoiceImport = (selected: Array<{ item: any; qty: number }>) => {
+    const existingIds = new Set(items.filter(i => i.invoice_item_id).map(i => i.invoice_item_id))
+    const newItems: RemitoItem[] = selected
+      .filter(s => !existingIds.has(s.item.invoice_item_id))
+      .map(s => ({
+        product_name: s.item.product_name,
+        description: '',
+        quantity: s.qty,
+        unit: 'unidades',
+        unit_price: parseFloat(s.item.unit_price || '0'),
+        vat_rate: s.item.vat_rate || 21,
+        invoice_item_id: s.item.invoice_item_id,
+        order_item_id: s.item.order_item_id || undefined,
+        source: 'invoice' as const,
+        source_ref: `Factura ${s.item.invoice_type || ''}-${s.item.invoice_number || ''}`,
+        qty_available: parseFloat(s.item.qty_available || '0'),
+        localId: crypto.randomUUID(),
+      }))
+    setItems(prev => {
+      const filtered = prev.filter(i => i.product_name.trim() || i.source !== 'manual')
+      return [...filtered, ...newItems]
+    })
+    setShowInvoiceImporter(false)
+  }
+
+  // ── URL params: pre-load from order/invoice/expand ─────────────────────────
+
+  useEffect(() => {
+    const preloadOrderId = searchParams.get('order_id')
+    const preloadInvoiceId = searchParams.get('invoice_id')
+    const expandId = searchParams.get('expand')
+    const shouldOpen = searchParams.get('nuevo') === 'true'
+
+    if (expandId) {
+      setPreviewRemitoId(expandId)
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    if (shouldOpen) {
+      setShowForm(true)
+      if (preloadOrderId) {
+        api.getAvailableOrderItemsForRemito(preloadOrderId).then(data => {
+          if (data?.length > 0) {
+            setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '' }))
+            setItems(data.map((i: any) => ({
+              product_name: i.product_name, description: i.description || '',
+              quantity: parseFloat(i.qty_available), unit: 'unidades',
+              product_id: i.product_id, unit_price: parseFloat(i.unit_price || '0'),
+              vat_rate: i.vat_rate || 21, order_item_id: i.order_item_id,
+              source: 'order' as const,
+              source_ref: `Pedido #${String(i.order_number).padStart(4, '0')}`,
+              qty_available: parseFloat(i.qty_available), localId: crypto.randomUUID(),
+            })))
+          } else {
+            toast.info('Todos los items de este pedido ya fueron remitados')
+          }
+        }).catch(() => toast.error('No se pudieron cargar los items del pedido'))
+      }
+      if (preloadInvoiceId) {
+        api.getAvailableInvoiceItemsForRemito(preloadInvoiceId).then(data => {
+          if (data?.length > 0) {
+            setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '' }))
+            setItems(data.map((i: any) => ({
+              product_name: i.product_name, description: '',
+              quantity: parseFloat(i.qty_available), unit: 'unidades',
+              unit_price: parseFloat(i.unit_price || '0'), vat_rate: i.vat_rate || 21,
+              invoice_item_id: i.invoice_item_id, order_item_id: i.order_item_id,
+              source: 'invoice' as const,
+              source_ref: `Factura ${i.invoice_type}-${i.invoice_number}`,
+              qty_available: parseFloat(i.qty_available), localId: crypto.randomUUID(),
+            })))
+          } else {
+            toast.info('Todos los items de esta factura ya fueron remitados')
+          }
+        }).catch(() => toast.error('No se pudieron cargar los items de la factura'))
+      }
+      setSearchParams({}, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-calculated references ─────────────────────────────────────────────
+
+  const autoPedidoRef = useMemo(() => {
+    const refs = [...new Set(items.filter(i => i.source === 'order' && i.source_ref).map(i => i.source_ref!))]
+    return refs.join(', ')
+  }, [items])
+
+  const autoFacturaRef = useMemo(() => {
+    const refs = [...new Set(items.filter(i => i.source === 'invoice' && i.source_ref).map(i => i.source_ref!))]
+    return refs.join(', ')
+  }, [items])
+
+  // ── Auto-calculate form.order_id from items (FIX review: orphaned order_id) ──
+
+  const derivedOrderId = useMemo(() => {
+    const orderIds = [...new Set(items.filter(i => i.source_id).map(i => i.source_id!))]
+    return orderIds.length === 1 ? orderIds[0] : ''
+  }, [items])
 
   // ── Item helpers ───────────────────────────────────────────────────────────
 
-  const handleAddItem = () => {
-    setItems(prev => [...prev, { ...EMPTY_ITEM }])
+  const handleAddManualItem = () => {
+    setItems(prev => [...prev, { ...EMPTY_ITEM, localId: crypto.randomUUID() }])
   }
 
   const handleRemoveItem = (idx: number) => {
@@ -293,14 +446,26 @@ export const Remitos: React.FC = () => {
       await api.createRemito({
         customer_id:      form.customer_id      || null,
         enterprise_id:    form.enterprise_id    || null,
-        order_id:         form.order_id         || null,
+        order_id:         derivedOrderId         || null,
         delivery_address: form.delivery_address || null,
         receiver_name:    form.receiver_name    || null,
         transport:        form.transport        || null,
         notes:            form.notes            || null,
         date:             form.date             || null,
         tipo:             form.tipo,
-        items:            validItems,
+        pedido_ref:       autoPedidoRef          || null,
+        factura_ref:      autoFacturaRef         || null,
+        items: validItems.map(it => ({
+          product_name:   it.product_name,
+          description:    it.description || null,
+          quantity:       it.quantity,
+          unit:           it.unit,
+          product_id:     it.product_id || null,
+          unit_price:     it.unit_price || null,
+          vat_rate:       it.vat_rate || 21,
+          order_item_id:  it.order_item_id || null,
+          invoice_item_id: it.invoice_item_id || null,
+        })),
       })
       toast.success('Remito creado correctamente')
       setShowForm(false)
@@ -620,34 +785,29 @@ export const Remitos: React.FC = () => {
                 customers={customers}
                 selectedEnterpriseId={form.enterprise_id}
                 selectedCustomerId={form.customer_id}
-                onEnterpriseChange={id => setForm(prev => ({ ...prev, enterprise_id: id, order_id: '' }))}
+                onEnterpriseChange={handleEnterpriseChange}
                 onCustomerChange={id => setForm(prev => ({ ...prev, customer_id: id }))}
                 enterpriseLabel="Empresa"
                 customerLabel={form.tipo === 'recepcion' ? 'Proveedor / Remitente' : 'Cliente / Destinatario'}
               />
 
-              {/* Order + Date */}
+              {/* Date */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Pedido asociado (opcional)</label>
-                  <select
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={form.order_id}
-                    onChange={e => handleOrderSelect(e.target.value)}
-                  >
-                    <option value="">Ninguno</option>
-                    {filteredOrders.map(o => (
-                      <option key={o.id} value={o.id}>
-                        #{String(o.order_number).padStart(4, '0')} — {o.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <DateInput
                   label="Fecha"
                   value={form.date}
                   onChange={val => setForm(prev => ({ ...prev, date: val }))}
                 />
+                {(autoPedidoRef || autoFacturaRef) && (
+                  <div className="space-y-1">
+                    {autoPedidoRef && (
+                      <div className="text-sm"><span className="font-medium text-gray-700">Pedido(s):</span> <span className="text-blue-600">{autoPedidoRef}</span></div>
+                    )}
+                    {autoFacturaRef && (
+                      <div className="text-sm"><span className="font-medium text-gray-700">Factura(s):</span> <span className="text-green-600">{autoFacturaRef}</span></div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Delivery details */}
@@ -678,65 +838,188 @@ export const Remitos: React.FC = () => {
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Items a {form.tipo === 'recepcion' ? 'recepcionar' : 'entregar'}
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleAddItem}
-                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    + Agregar item
-                  </button>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleImportFromOrder}
+                      disabled={!form.enterprise_id}
+                      className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                      + Desde Pedido
+                    </button>
+                    <button type="button" onClick={handleImportFromInvoice}
+                      disabled={!form.enterprise_id}
+                      className="text-sm text-green-600 hover:text-green-800 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                      + Desde Factura
+                    </button>
+                    <button type="button" onClick={handleAddManualItem}
+                      className="text-sm text-gray-600 hover:text-gray-800 font-medium">
+                      + Item manual
+                    </button>
+                  </div>
                 </div>
+
+                {/* Order Items Importer */}
+                {showOrderImporter && (
+                  <div className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50 mb-3 animate-fadeIn">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-medium text-blue-800">Importar items de pedidos</h4>
+                      <button type="button" onClick={() => setShowOrderImporter(false)} className="text-gray-500 hover:text-gray-700">x</button>
+                    </div>
+                    {importerLoading ? <p className="text-sm text-gray-500">Cargando items disponibles...</p> :
+                     importerItems.length === 0 ? <p className="text-sm text-amber-600">No hay items disponibles para remitar en los pedidos de esta empresa</p> :
+                    (() => {
+                      // Group by order
+                      const grouped = importerItems.reduce((acc: any, item: any) => {
+                        const key = item.order_id || 'unknown'
+                        if (!acc[key]) acc[key] = { order_number: item.order_number, title: item.order_title, items: [] }
+                        acc[key].items.push(item)
+                        return acc
+                      }, {})
+                      return (
+                        <div className="space-y-3">
+                          {Object.entries(grouped).map(([orderId, group]: [string, any]) => (
+                            <div key={orderId}>
+                              <div className="text-sm font-medium text-blue-700 mb-1">
+                                Pedido #{String(group.order_number).padStart(4, '0')} — {group.title}
+                              </div>
+                              {group.items.map((item: any) => {
+                                const alreadyImported = items.some(i => i.order_item_id === item.order_item_id)
+                                return (
+                                  <div key={item.order_item_id} className={`flex items-center gap-2 py-1 ${alreadyImported ? 'opacity-40' : ''}`}>
+                                    <span className="text-sm flex-1">{item.product_name}</span>
+                                    <span className="text-xs text-gray-500">disp: {parseFloat(item.qty_available)}</span>
+                                    {!alreadyImported && (
+                                      <button type="button"
+                                        className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded hover:bg-blue-700"
+                                        onClick={() => handleConfirmOrderImport([{ item, qty: parseFloat(item.qty_available) }])}>
+                                        Agregar
+                                      </button>
+                                    )}
+                                    {alreadyImported && <span className="text-xs text-blue-500">Ya importado</span>}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Invoice Items Importer */}
+                {showInvoiceImporter && (
+                  <div className="border-2 border-green-200 rounded-lg p-4 bg-green-50 mb-3 animate-fadeIn">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-medium text-green-800">Importar items de facturas</h4>
+                      <button type="button" onClick={() => setShowInvoiceImporter(false)} className="text-gray-500 hover:text-gray-700">x</button>
+                    </div>
+                    {importerLoading ? <p className="text-sm text-gray-500">Cargando facturas...</p> :
+                     importerItems.length === 0 ? <p className="text-sm text-amber-600">No hay facturas con items pendientes de remitar</p> :
+                    (
+                      <div className="space-y-3">
+                        {importerItems.map((inv: any) => (
+                          <div key={inv.id}>
+                            <div className="text-sm font-medium text-green-700 mb-1">
+                              Factura {inv.invoice_type}-{String(inv.invoice_number).padStart(8, '0')}
+                            </div>
+                            {(inv.items || []).map((item: any) => {
+                              const alreadyImported = items.some(i => i.invoice_item_id === item.invoice_item_id)
+                              return (
+                                <div key={item.invoice_item_id} className={`flex items-center gap-2 py-1 ${alreadyImported ? 'opacity-40' : ''}`}>
+                                  <span className="text-sm flex-1">{item.product_name}</span>
+                                  <span className="text-xs text-gray-500">disp: {parseFloat(item.qty_available)}</span>
+                                  {!alreadyImported && (
+                                    <button type="button"
+                                      className="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700"
+                                      onClick={() => handleConfirmInvoiceImport([{ item, qty: parseFloat(item.qty_available) }])}>
+                                      Agregar
+                                    </button>
+                                  )}
+                                  {alreadyImported && <span className="text-xs text-green-500">Ya importado</span>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Items list */}
                 <div className="space-y-2">
                   {items.map((item, idx) => (
-                    <div key={idx} className="flex gap-2 items-center bg-gray-50 p-3 rounded-lg">
+                    <div key={item.localId || idx} className="flex gap-2 items-center bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      {/* Source badge */}
+                      <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                        item.source === 'order' ? 'bg-blue-100 text-blue-700' :
+                        item.source === 'invoice' ? 'bg-green-100 text-green-700' :
+                        'bg-gray-200 text-gray-600'
+                      }`}>
+                        {item.source_ref || 'Manual'}
+                      </span>
+
+                      {/* Product name */}
                       <div className="flex-1 min-w-0">
                         <input
-                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                           placeholder="Nombre del producto *"
                           value={item.product_name}
                           onChange={e => handleItemChange(idx, 'product_name', e.target.value)}
+                          disabled={item.source !== 'manual' && item.source !== undefined}
                           required
                         />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <input
-                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
-                          placeholder="Descripcion (opcional)"
-                          value={item.description}
-                          onChange={e => handleItemChange(idx, 'description', e.target.value)}
-                        />
-                      </div>
+
+                      {/* Qty available indicator */}
+                      {item.qty_available != null && (
+                        <span className="text-xs text-gray-400 shrink-0 w-12 text-right">
+                          max:{item.qty_available}
+                        </span>
+                      )}
+
+                      {/* Quantity */}
                       <div className="w-20 shrink-0">
                         <input
                           type="number"
-                          min="1"
+                          min="0.01"
+                          max={item.qty_available ?? undefined}
+                          step="any"
                           className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm text-center bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           placeholder="Cant."
                           value={item.quantity}
-                          onChange={e => handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1)}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0
+                            handleItemChange(idx, 'quantity', item.qty_available ? Math.min(val, item.qty_available) : val)
+                          }}
                         />
                       </div>
-                      <div className="w-28 shrink-0">
+
+                      {/* Price (read-only if from source) */}
+                      {item.unit_price != null && item.unit_price > 0 && (
+                        <span className="text-xs text-gray-500 shrink-0 w-20 text-right">
+                          ${item.unit_price.toLocaleString('es-AR')}
+                        </span>
+                      )}
+
+                      {/* Unit */}
+                      <div className="w-24 shrink-0">
                         <select
                           className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-1 focus:ring-blue-500"
                           value={item.unit}
                           onChange={e => handleItemChange(idx, 'unit', e.target.value)}
                         >
                           {UNIT_OPTIONS.map(u => (
-                            <option key={u} value={u}>
-                              {u.charAt(0).toUpperCase() + u.slice(1)}
-                            </option>
+                            <option key={u} value={u}>{u.charAt(0).toUpperCase() + u.slice(1)}</option>
                           ))}
                         </select>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(idx)}
+
+                      {/* Remove */}
+                      <button type="button" onClick={() => handleRemoveItem(idx)}
                         disabled={items.length <= 1}
                         className="w-8 h-8 shrink-0 flex items-center justify-center rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Quitar item"
-                      >
-                        ×
+                        title="Quitar item">
+                        x
                       </button>
                     </div>
                   ))}
@@ -813,7 +1096,15 @@ export const Remitos: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {remitos.map(remito => (
-                  <tr key={remito.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                  <tr key={remito.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-context-menu"
+                    onContextMenu={(e) => {
+                      contextMenu.openMenu(e, remito)
+                      if (!contextData[remito.id]) {
+                        api.getRemitoContextData(remito.id).then(data => {
+                          setContextData(prev => ({ ...prev, [remito.id]: data }))
+                        }).catch(() => {})
+                      }
+                    }}>
                     <td className="px-4 py-3">
                       <span className="font-mono font-bold text-blue-700 text-sm">
                         {fmtRemitoNumber(remito.remito_number)}
@@ -944,6 +1235,60 @@ export const Remitos: React.FC = () => {
           enterprises={enterprises}
           onClose={handleClosePreview}
           onSaved={handlePreviewSaved}
+        />
+      )}
+
+      {/* Context menu */}
+      {contextMenu.menu && (
+        <ContextMenuBase
+          x={contextMenu.menu.x}
+          y={contextMenu.menu.y}
+          header={{
+            title: `Remito ${fmtRemitoNumber(contextMenu.menu.item.remito_number)}`,
+            subtitle: contextMenu.menu.item.enterprise?.name || '',
+          }}
+          items={(() => {
+            const remito = contextMenu.menu.item
+            const data = contextData[remito.id]
+            const menuItems: ContextMenuItem[] = []
+
+            if (!data) {
+              menuItems.push({ id: 'loading', label: 'Cargando...', disabled: true })
+            } else {
+              if (data.invoices?.length > 0) {
+                menuItems.push({ id: 'inv-label', label: `Facturas vinculadas (${data.invoices.length}):`, disabled: true })
+                for (const inv of data.invoices) {
+                  menuItems.push({
+                    id: `inv-${inv.id}`, label: `Factura ${inv.invoice_type}-${inv.invoice_number} ($${parseFloat(inv.total_amount).toLocaleString('es-AR')})`,
+                    onClick: () => { navigate(`/facturas?expand=${inv.id}`); contextMenu.closeMenu() },
+                  })
+                }
+                menuItems.push({ id: 'sep1', label: '', separator: true })
+              }
+              const pending = data.items_status?.filter((i: any) => i.qty_pending > 0) || []
+              if (pending.length > 0) {
+                menuItems.push({ id: 'pend-label', label: `${pending.length} items pendientes de facturar`, disabled: true })
+                menuItems.push({ id: 'sep2', label: '', separator: true })
+              }
+            }
+
+            menuItems.push({ id: 'crear-factura', label: 'Crear factura de este remito',
+              onClick: () => { navigate(`/facturas?nuevo=true&remito_id=${remito.id}`); contextMenu.closeMenu() },
+            })
+            menuItems.push({ id: 'ver', label: 'Ver detalle',
+              onClick: () => { setPreviewRemitoId(remito.id); contextMenu.closeMenu() },
+            })
+            menuItems.push({ id: 'pdf', label: 'Descargar PDF',
+              onClick: () => { handleDownloadPdf(remito.id, remito.remito_number); contextMenu.closeMenu() },
+            })
+            menuItems.push({ id: 'sep3', label: '', separator: true })
+            menuItems.push({ id: 'delete', label: 'Eliminar remito', danger: true,
+              onClick: () => { setDeleteTarget(remito); contextMenu.closeMenu() },
+            })
+
+            return menuItems
+          })()}
+          onClose={contextMenu.closeMenu}
         />
       )}
     </div>
