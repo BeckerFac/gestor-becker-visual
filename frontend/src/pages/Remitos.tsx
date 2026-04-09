@@ -26,6 +26,17 @@ interface RemitoItem {
   description: string
   quantity: number
   unit: string
+  product_id?: string
+  unit_price?: number
+  vat_rate?: number
+  order_item_id?: string
+  invoice_item_id?: string
+  // UI-only fields for item picker
+  source?: 'order' | 'invoice' | 'manual'
+  source_ref?: string       // "Pedido #0003" or "Factura B-002"
+  source_id?: string        // order_id or invoice_id
+  qty_available?: number    // max selectable
+  localId?: string          // unique key for React rendering
 }
 
 interface Remito {

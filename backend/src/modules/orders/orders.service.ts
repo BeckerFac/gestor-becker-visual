@@ -909,6 +909,7 @@ export class OrdersService {
             JOIN invoices i ON ii.invoice_id = i.id
             WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
           ), 0) as qty_remaining,
+          COALESCE(CAST(oi.qty_delivered AS decimal), 0) as qty_delivered,
           COALESCE((
             SELECT json_agg(json_build_object(
               'invoice_id', i.id,
@@ -937,6 +938,7 @@ export class OrdersService {
           subtotal: parseFloat(i.subtotal || '0'),
           qty_invoiced: parseFloat(i.qty_invoiced || '0'),
           qty_remaining: Math.max(0, parseFloat(i.qty_remaining || '0')),
+          qty_delivered: parseFloat(i.qty_delivered || '0'),
         })),
       };
     } catch (error) {

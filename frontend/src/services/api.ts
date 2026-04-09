@@ -1318,6 +1318,36 @@ export const api = {
     return data
   },
 
+  // Plan 11: Remitos ↔ Pedidos ↔ Facturas — Availability endpoints
+  getAvailableOrderItemsForRemito: async (orderId: string) => {
+    const { data } = await client.get(`/remitos/available-order-items/${orderId}`)
+    return data
+  },
+  getAvailableOrderItemsForRemitoByEnterprise: async (enterpriseId: string) => {
+    const { data } = await client.get(`/remitos/available-order-items?enterprise_id=${enterpriseId}`)
+    return data
+  },
+  getAvailableInvoiceItemsForRemito: async (invoiceId: string) => {
+    const { data } = await client.get(`/remitos/available-invoice-items/${invoiceId}`)
+    return data
+  },
+  getInvoicesWithPendingDelivery: async (enterpriseId: string) => {
+    const { data } = await client.get(`/remitos/available-invoice-items?enterprise_id=${enterpriseId}`)
+    return data
+  },
+  getRemitoContextData: async (remitoId: string) => {
+    const { data } = await client.get(`/remitos/${remitoId}/context`)
+    return data
+  },
+  getAvailableRemitoItemsForInvoicing: async (remitoId: string) => {
+    const { data } = await client.get(`/invoices/available-remito-items/${remitoId}`)
+    return data
+  },
+  getRemitosWithPendingItems: async (enterpriseId: string) => {
+    const { data } = await client.get(`/invoices/remitos-with-pending?enterprise_id=${enterpriseId}`)
+    return data
+  },
+
   // Cuenta Corriente
   getCuentaCorrienteResumen: async () => {
     const { data } = await client.get('/cuenta-corriente')
