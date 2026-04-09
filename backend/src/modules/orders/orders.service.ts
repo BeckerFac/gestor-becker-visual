@@ -848,10 +848,26 @@ export class OrdersService {
         receipts = receiptsResult.rows || [];
       }
 
-      return { invoices, receipts };
+      // Remitos vinculados (via remito_orders N:N or legacy remitos.order_id)
+      let remitos: any[] = [];
+      try {
+        const remitosResult = await pool.query(`
+          SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
+            COALESCE((SELECT json_agg(json_build_object(
+              'product_name', ri.product_name, 'quantity', ri.quantity
+            )) FROM remito_items ri WHERE ri.remito_id = r.id), '[]'::json) as items
+          FROM remitos r
+          LEFT JOIN remito_orders ro ON ro.remito_id = r.id
+          WHERE (ro.order_id = $2 OR r.order_id = $2) AND r.company_id = $1
+          ORDER BY r.date DESC
+        `, [companyId, orderId]);
+        remitos = remitosResult.rows || [];
+      } catch {}
+
+      return { invoices, receipts, remitos };
     } catch (error) {
       console.error('Get order context data error:', error);
-      return { invoices: [], receipts: [] };
+      return { invoices: [], receipts: [], remitos: [] };
     }
   }
 

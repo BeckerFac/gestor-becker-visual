@@ -6,8 +6,16 @@ export const remitosRouter = Router();
 
 remitosRouter.get('/', authorize('remitos', 'view'), (req, res) => remitosController.getRemitos(req as any, res));
 remitosRouter.post('/', authorize('remitos', 'create'), (req, res) => remitosController.createRemito(req as any, res));
+
+// Availability endpoints — BEFORE /:id to avoid route conflicts
+remitosRouter.get('/available-order-items', authorize('remitos', 'view'), (req, res) => remitosController.getAvailableOrderItems(req as any, res));
+remitosRouter.get('/available-order-items/:orderId', authorize('remitos', 'view'), (req, res) => remitosController.getAvailableOrderItemsByOrder(req as any, res));
+remitosRouter.get('/available-invoice-items', authorize('remitos', 'view'), (req, res) => remitosController.getAvailableInvoiceItems(req as any, res));
+remitosRouter.get('/available-invoice-items/:invoiceId', authorize('remitos', 'view'), (req, res) => remitosController.getAvailableInvoiceItemsByInvoice(req as any, res));
+
 remitosRouter.get('/:id', authorize('remitos', 'view'), (req, res) => remitosController.getRemito(req as any, res));
 remitosRouter.put('/:id', authorize('remitos', 'edit'), (req, res) => remitosController.updateRemito(req as any, res));
+remitosRouter.get('/:id/context', authorize('remitos', 'view'), (req, res) => remitosController.getContextData(req as any, res));
 remitosRouter.get('/:id/pdf', authorize('remitos', 'view'), (req, res) => remitosController.downloadPdf(req as any, res));
 remitosRouter.put('/:id/status', authorize('remitos', 'edit'), (req, res) => remitosController.updateStatus(req as any, res));
 remitosRouter.delete('/:id', authorize('remitos', 'delete'), (req, res) => remitosController.deleteRemito(req as any, res));

@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -48,6 +48,68 @@ export class RemitosService {
       await db.execute(sql`
         ALTER TABLE remitos ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)
       `).catch(() => {});
+
+      // ═══ Plan 11: Remitos ↔ Pedidos ↔ Facturas — Migraciones ═══
+
+      // Migration: remito_items new columns for item-level linking
+      await pool.query(`ALTER TABLE remito_items ALTER COLUMN quantity TYPE DECIMAL(12,2) USING quantity::decimal(12,2)`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS product_id UUID REFERENCES products(id) ON DELETE SET NULL`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12,2)`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS order_item_id UUID`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS invoice_item_id UUID`).catch(() => {});
+      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`).catch(() => {});
+
+      // Indices for linking columns
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_items_order_item ON remito_items(order_item_id) WHERE order_item_id IS NOT NULL`).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_items_invoice_item ON remito_items(invoice_item_id) WHERE invoice_item_id IS NOT NULL`).catch(() => {});
+
+      // Migration: remito_orders (N:N remito ↔ orders)
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS remito_orders (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          remito_id UUID NOT NULL REFERENCES remitos(id) ON DELETE CASCADE,
+          order_id UUID NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+          UNIQUE(remito_id, order_id)
+        )
+      `).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_remito ON remito_orders(remito_id)`).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_order ON remito_orders(order_id)`).catch(() => {});
+
+      // Migration: invoice_remitos (N:N invoice ↔ remitos)
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS invoice_remitos (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
+          remito_id UUID NOT NULL REFERENCES remitos(id) ON DELETE CASCADE,
+          UNIQUE(invoice_id, remito_id)
+        )
+      `).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_remitos_invoice ON invoice_remitos(invoice_id)`).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_remitos_remito ON invoice_remitos(remito_id)`).catch(() => {});
+
+      // Migration: remito_item_id in invoice_items (link factura item → remito item)
+      await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS remito_item_id UUID`).catch(() => {});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_items_remito_item ON invoice_items(remito_item_id) WHERE remito_item_id IS NOT NULL`).catch(() => {});
+
+      // Migration: qty_delivered in order_items (denormalized delivery tracking)
+      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});
+
+      // Migration: remitos format fields (punto de venta + cross-references)
+      await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS punto_venta INTEGER DEFAULT 1`).catch(() => {});
+      await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS factura_ref TEXT`).catch(() => {});
+      await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS pedido_ref TEXT`).catch(() => {});
+      await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS signed_pdf_url TEXT`).catch(() => {});
+
+      // Migration: company config for remito PDF
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS website VARCHAR(255)`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS ingresos_brutos VARCHAR(50)`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS inicio_actividad DATE`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS rubro_descripcion TEXT`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS punto_venta_remito INTEGER DEFAULT 1`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS cai_remito VARCHAR(20)`).catch(() => {});
+      await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS cai_remito_vto DATE`).catch(() => {});
+
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure remitos tables error:', error);
@@ -517,6 +579,165 @@ export class RemitosService {
 
 </body>
 </html>`;
+  }
+  // ═══════════════════════════════════════════════════════════════════
+  // AVAILABILITY QUERIES — Plan 11, Fase 2
+  // ═══════════════════════════════════════════════════════════════════
+
+  /** Items de un pedido que se pueden remitar (qty_available > 0) */
+  async getAvailableOrderItemsForRemito(companyId: string, orderId: string) {
+    await this.ensureTables();
+    const r = await pool.query(`
+      SELECT
+        oi.id as order_item_id, oi.product_id, oi.product_name, oi.description,
+        oi.quantity, CAST(oi.unit_price AS text) as unit_price, COALESCE(oi.vat_rate, 21) as vat_rate,
+        COALESCE(oi.qty_delivered, 0) as qty_delivered,
+        oi.quantity - COALESCE(oi.qty_delivered, 0) as qty_available,
+        o.order_number, o.title as order_title, o.enterprise_id,
+        e.name as enterprise_name
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN enterprises e ON o.enterprise_id = e.id
+      WHERE o.company_id = $1 AND o.id = $2 AND o.status != 'cancelado'
+        AND oi.quantity - COALESCE(oi.qty_delivered, 0) > 0
+      ORDER BY oi.created_at ASC
+    `, [companyId, orderId]);
+    return r.rows;
+  }
+
+  /** Items de TODOS los pedidos de una empresa que se pueden remitar */
+  async getAvailableOrderItemsForRemitoByEnterprise(companyId: string, enterpriseId: string) {
+    await this.ensureTables();
+    const r = await pool.query(`
+      SELECT
+        oi.id as order_item_id, oi.product_id, oi.product_name, oi.description,
+        oi.quantity, CAST(oi.unit_price AS text) as unit_price, COALESCE(oi.vat_rate, 21) as vat_rate,
+        COALESCE(oi.qty_delivered, 0) as qty_delivered,
+        oi.quantity - COALESCE(oi.qty_delivered, 0) as qty_available,
+        o.id as order_id, o.order_number, o.title as order_title, o.enterprise_id,
+        e.name as enterprise_name
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN enterprises e ON o.enterprise_id = e.id
+      WHERE o.company_id = $1 AND o.enterprise_id = $2 AND o.status != 'cancelado'
+        AND oi.quantity - COALESCE(oi.qty_delivered, 0) > 0
+      ORDER BY o.order_number ASC, oi.created_at ASC
+    `, [companyId, enterpriseId]);
+    return r.rows;
+  }
+
+  /** Items de una factura que todavia no fueron remitados */
+  async getAvailableInvoiceItemsForRemito(companyId: string, invoiceId: string) {
+    await this.ensureTables();
+    const r = await pool.query(`
+      SELECT
+        ii.id as invoice_item_id, ii.product_id, ii.product_name,
+        ii.quantity, CAST(ii.unit_price AS text) as unit_price, COALESCE(ii.vat_rate, 21) as vat_rate,
+        ii.order_item_id,
+        i.invoice_type, i.invoice_number, i.enterprise_id,
+        e.name as enterprise_name,
+        COALESCE(SUM(ri.quantity), 0) as qty_delivered,
+        ii.quantity - COALESCE(SUM(ri.quantity), 0) as qty_available
+      FROM invoice_items ii
+      JOIN invoices i ON ii.invoice_id = i.id
+      LEFT JOIN enterprises e ON i.enterprise_id = e.id
+      LEFT JOIN remito_items ri ON ri.invoice_item_id = ii.id
+        AND ri.remito_id IN (SELECT id FROM remitos WHERE company_id = $1)
+      WHERE i.company_id = $1 AND i.id = $2 AND i.status != 'cancelled'
+      GROUP BY ii.id, ii.product_id, ii.product_name, ii.quantity, ii.unit_price, ii.vat_rate,
+        ii.order_item_id, i.invoice_type, i.invoice_number, i.enterprise_id, e.name
+      HAVING ii.quantity - COALESCE(SUM(ri.quantity), 0) > 0
+      ORDER BY ii.created_at ASC
+    `, [companyId, invoiceId]);
+    return r.rows;
+  }
+
+  /** Facturas de una empresa que tienen items sin remitar */
+  async getInvoicesWithPendingDelivery(companyId: string, enterpriseId: string) {
+    await this.ensureTables();
+    const r = await pool.query(`
+      SELECT i.id, i.invoice_type, i.invoice_number, CAST(i.total_amount AS text) as total_amount,
+        i.status, i.invoice_date,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'invoice_item_id', ii.id,
+            'product_name', ii.product_name,
+            'quantity', ii.quantity,
+            'unit_price', CAST(ii.unit_price AS text),
+            'vat_rate', COALESCE(ii.vat_rate, 21),
+            'order_item_id', ii.order_item_id,
+            'qty_delivered', COALESCE((
+              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
+            ), 0),
+            'qty_available', ii.quantity - COALESCE((
+              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
+            ), 0)
+          ))
+          FROM invoice_items ii
+          WHERE ii.invoice_id = i.id
+            AND ii.quantity - COALESCE((
+              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
+            ), 0) > 0
+        ), '[]'::json) as items
+      FROM invoices i
+      WHERE i.company_id = $1 AND i.enterprise_id = $2 AND i.status != 'cancelled'
+      ORDER BY i.invoice_date ASC
+    `, [companyId, enterpriseId]);
+    // Filter out invoices with no available items
+    return r.rows.filter((inv: any) => {
+      const items = inv.items;
+      return Array.isArray(items) && items.length > 0;
+    });
+  }
+
+  /** Datos de contexto de un remito (facturas vinculadas + status items) */
+  async getRemitoContextData(companyId: string, remitoId: string) {
+    await this.ensureTables();
+    // Facturas vinculadas
+    const invoicesRes = await pool.query(`
+      SELECT i.id, i.invoice_number, i.invoice_type, CAST(i.total_amount AS text) as total_amount, i.status
+      FROM invoices i
+      JOIN invoice_remitos ir ON ir.invoice_id = i.id
+      WHERE ir.remito_id = $1 AND i.company_id = $2
+      ORDER BY i.created_at DESC
+    `, [remitoId, companyId]);
+
+    // Items con status de facturacion
+    const itemsRes = await pool.query(`
+      SELECT ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.invoice_item_id,
+        COALESCE(SUM(ii.quantity), 0) as qty_invoiced,
+        ri.quantity - COALESCE(SUM(ii.quantity), 0) as qty_pending,
+        CASE
+          WHEN ri.order_item_id IS NOT NULL THEN (
+            SELECT 'Pedido #' || LPAD(o.order_number::text, 4, '0')
+            FROM order_items oi JOIN orders o ON oi.order_id = o.id
+            WHERE oi.id = ri.order_item_id
+          )
+          WHEN ri.invoice_item_id IS NOT NULL THEN 'Factura'
+          ELSE 'Manual'
+        END as source_ref
+      FROM remito_items ri
+      LEFT JOIN invoice_items ii ON ii.remito_item_id = ri.id
+        AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled' AND company_id = $2)
+      WHERE ri.remito_id = $1
+      GROUP BY ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.invoice_item_id
+      ORDER BY ri.id
+    `, [remitoId, companyId]);
+
+    return {
+      invoices: invoicesRes.rows,
+      items_status: itemsRes.rows,
+    };
+  }
+
+  /** Reconciliar qty_delivered (safety net) */
+  async recalculateQtyDelivered(orderItemId: string) {
+    await pool.query(`
+      UPDATE order_items SET qty_delivered = (
+        SELECT COALESCE(SUM(ri.quantity), 0)
+        FROM remito_items ri WHERE ri.order_item_id = order_items.id
+      ) WHERE id = $1
+    `, [orderItemId]);
   }
 }
 

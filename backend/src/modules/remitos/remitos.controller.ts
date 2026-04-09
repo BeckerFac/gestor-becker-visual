@@ -43,6 +43,37 @@ export class RemitosController {
     res.json(data);
   }
 
+  // ═══ Availability endpoints ═══
+
+  async getAvailableOrderItems(req: AuthRequest, res: Response) {
+    const enterpriseId = req.query.enterprise_id as string;
+    if (!enterpriseId) return res.status(400).json({ message: 'enterprise_id required' });
+    const data = await remitosService.getAvailableOrderItemsForRemitoByEnterprise(req.user!.company_id, enterpriseId);
+    res.json(data);
+  }
+
+  async getAvailableOrderItemsByOrder(req: AuthRequest, res: Response) {
+    const data = await remitosService.getAvailableOrderItemsForRemito(req.user!.company_id, req.params.orderId);
+    res.json(data);
+  }
+
+  async getAvailableInvoiceItems(req: AuthRequest, res: Response) {
+    const enterpriseId = req.query.enterprise_id as string;
+    if (!enterpriseId) return res.status(400).json({ message: 'enterprise_id required' });
+    const data = await remitosService.getInvoicesWithPendingDelivery(req.user!.company_id, enterpriseId);
+    res.json(data);
+  }
+
+  async getAvailableInvoiceItemsByInvoice(req: AuthRequest, res: Response) {
+    const data = await remitosService.getAvailableInvoiceItemsForRemito(req.user!.company_id, req.params.invoiceId);
+    res.json(data);
+  }
+
+  async getContextData(req: AuthRequest, res: Response) {
+    const data = await remitosService.getRemitoContextData(req.user!.company_id, req.params.id);
+    res.json(data);
+  }
+
   async downloadPdf(req: AuthRequest, res: Response) {
     const pdf = await remitosService.generateRemitoPdf(req.user!.company_id, req.params.id);
     res.setHeader('Content-Type', 'application/pdf');

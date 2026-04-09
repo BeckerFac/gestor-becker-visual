@@ -174,6 +174,18 @@ export class InvoicesController {
     res.json(data);
   }
 
+  async getAvailableRemitoItems(req: AuthRequest, res: Response) {
+    const data = await invoicesService.getAvailableRemitoItemsForInvoicing(req.user!.company_id, req.params.remitoId);
+    res.json(data);
+  }
+
+  async getRemitosWithPendingItems(req: AuthRequest, res: Response) {
+    const enterpriseId = req.query.enterprise_id as string;
+    if (!enterpriseId) return res.status(400).json({ message: 'enterprise_id required' });
+    const data = await invoicesService.getRemitosWithPendingItems(req.user!.company_id, enterpriseId);
+    res.json(data);
+  }
+
   async getInvoiceItemsWithRemaining(req: AuthRequest, res: Response) {
     const data = await invoicesService.getInvoiceItemsWithRemaining(req.user!.company_id, req.params.id);
     res.json(data);
