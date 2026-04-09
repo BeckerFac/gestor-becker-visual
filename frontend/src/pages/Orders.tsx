@@ -1859,6 +1859,73 @@ export const Orders: React.FC = () => {
                                           </div>
                                         )}
 
+                                        {/* Seccion ENTREGA (qty_delivered) */}
+                                        {items.some((it: any) => parseFloat(it.qty_delivered || '0') > 0 || parseFloat(it.quantity || '0') > 0) && (
+                                          <div>
+                                            <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-400 mb-1">Estado de entrega</h5>
+                                            <table className="w-full text-xs">
+                                              <thead>
+                                                <tr className="text-[10px] text-gray-500">
+                                                  <th className="text-left pb-0.5">Producto</th>
+                                                  <th className="text-right pb-0.5">Total</th>
+                                                  <th className="text-right pb-0.5">Facturado</th>
+                                                  <th className="text-right pb-0.5">Entregado</th>
+                                                  <th className="text-left pb-0.5 pl-2">Estado</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {items.map((it: any) => {
+                                                  const qty = parseFloat(it.quantity || '0')
+                                                  const inv = parseFloat(it.qty_invoiced || '0')
+                                                  const del = parseFloat(it.qty_delivered || '0')
+                                                  const fullyInv = inv >= qty
+                                                  const fullyDel = del >= qty
+                                                  let status = 'Pendiente'
+                                                  let statusColor = 'text-gray-400'
+                                                  if (fullyInv && fullyDel) { status = 'Completo'; statusColor = 'text-green-600' }
+                                                  else if (fullyDel) { status = 'Entregado'; statusColor = 'text-blue-600' }
+                                                  else if (fullyInv) { status = 'Facturado'; statusColor = 'text-purple-600' }
+                                                  else if (inv > 0 || del > 0) { status = 'Parcial'; statusColor = 'text-amber-600' }
+                                                  return (
+                                                    <tr key={`del-${it.order_item_id}`} className="border-t border-gray-100 dark:border-gray-700">
+                                                      <td className="py-1">{it.product_name}</td>
+                                                      <td className="py-1 text-right">{qty}</td>
+                                                      <td className="py-1 text-right">
+                                                        <span className={inv >= qty ? 'text-green-600' : inv > 0 ? 'text-amber-600' : 'text-gray-400'}>{inv}/{qty}</span>
+                                                      </td>
+                                                      <td className="py-1 text-right">
+                                                        <span className={del >= qty ? 'text-green-600' : del > 0 ? 'text-blue-600' : 'text-gray-400'}>{del}/{qty}</span>
+                                                      </td>
+                                                      <td className={`py-1 pl-2 font-medium ${statusColor}`}>{status}</td>
+                                                    </tr>
+                                                  )
+                                                })}
+                                              </tbody>
+                                            </table>
+
+                                            {/* Remitos vinculados */}
+                                            {(contextData[order.id]?.remitos || []).length > 0 && (
+                                              <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                                                <span className="text-[10px] text-gray-500">Remitos:</span>
+                                                {(contextData[order.id]?.remitos || []).map((r: any) => (
+                                                  <button key={r.id} onClick={(e) => { e.stopPropagation(); navigate(`/remitos?expand=${r.id}`) }}
+                                                    className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
+                                                    #{String(r.remito_number).padStart(5, '0')} ({r.status})
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+
+                                            {/* Crear remito de pendientes */}
+                                            {items.some((it: any) => parseFloat(it.qty_delivered || '0') < parseFloat(it.quantity || '0')) && (
+                                              <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/remitos?nuevo=true&order_id=${order.id}`) }}
+                                                className="mt-1.5 text-[10px] text-blue-600 hover:text-blue-800 font-medium">
+                                                + Crear remito de items pendientes
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+
                                         {/* Todo facturado */}
                                         {invoiced.length > 0 && uninvoiced.length === 0 && (
                                           <p className="text-xs text-green-600 font-medium">Pedido completamente facturado</p>
