@@ -180,7 +180,7 @@ export const Orders: React.FC = () => {
 
   // Context menu
   const contextMenu = useContextMenu<Order>()
-  const [contextData, setContextData] = useState<Record<string, { invoices: any[]; receipts: any[] }>>({})
+  const [contextData, setContextData] = useState<Record<string, { invoices: any[]; receipts: any[]; remitos?: any[] }>>({})
 
   // Invoicing state per order
   const [invoicingStatus, setInvoicingStatus] = useState<Record<string, InvoicingStatusData>>({})
@@ -2429,6 +2429,38 @@ export const Orders: React.FC = () => {
         } else {
           items.push({ id: 'rec-none', label: '  Sin recibos asociados', disabled: true })
         }
+
+        items.push({ id: 'sep-remitos', label: '', separator: true })
+
+        // --- REMITOS section ---
+        items.push({
+          id: 'remitos-header',
+          label: 'Remitos',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>,
+          disabled: true,
+        })
+
+        const remitos = ctx?.remitos || []
+        if (remitos.length > 0) {
+          for (const rem of remitos) {
+            const statusIcon = rem.status === 'entregado' ? ' ✓' : rem.status === 'firmado' ? ' ✓✓' : ''
+            items.push({
+              id: `rem-${rem.id}`,
+              label: `  #${String(rem.remito_number || 0).padStart(5, '0')}${statusIcon}  ${(rem.items || []).slice(0, 2).map((i: any) => `${i.quantity}x ${i.product_name}`).join(', ')}`,
+              onClick: () => navigate(`/remitos?expand=${rem.id}`),
+            })
+          }
+        } else if (!ctx) {
+          items.push({ id: 'rem-loading', label: '  Cargando...', disabled: true })
+        } else {
+          items.push({ id: 'rem-none', label: '  Sin remitos asociados', disabled: true })
+        }
+
+        items.push({
+          id: 'crear-remito',
+          label: '  + Crear remito',
+          onClick: () => navigate(`/remitos?nuevo=true&order_id=${order.id}`),
+        })
 
         items.push({ id: 'sep-actions', label: '', separator: true })
 
