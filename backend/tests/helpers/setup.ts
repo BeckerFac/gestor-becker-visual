@@ -72,7 +72,10 @@ vi.mock('../../src/config/db', () => ({
       return fn(txMock)
     }),
   },
-  pool: { query: (...args: any[]) => mockPoolQuery(...args) },
+  pool: {
+    query: (...args: any[]) => mockPoolQuery(...args),
+    connect: vi.fn(),
+  },
 }))
 
 // Mock uuid to return deterministic values
