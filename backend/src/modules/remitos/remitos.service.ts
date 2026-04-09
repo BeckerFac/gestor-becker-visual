@@ -208,44 +208,136 @@ export class RemitosService {
 
   async createRemito(companyId: string, userId: string, data: any) {
     await this.ensureTables();
+    const client = await pool.connect();
     try {
-      const remitoId = uuid();
+      await client.query('BEGIN');
 
-      const numResult = await db.execute(sql`
-        SELECT COALESCE(MAX(remito_number), 0) + 1 as next_number FROM remitos WHERE company_id = ${companyId}
-      `);
-      const numRows = getRows(numResult);
-      const remitoNumber = parseInt(numRows[0]?.next_number || '1');
+      // 1. Get next remito number
+      const numResult = await client.query(
+        'SELECT COALESCE(MAX(remito_number), 0) + 1 as next_number FROM remitos WHERE company_id = $1',
+        [companyId]
+      );
+      const remitoNumber = parseInt(numResult.rows[0]?.next_number || '1');
 
-      // Resolve enterprise_id from customer if not provided
+      // 2. Resolve enterprise_id
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
-        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = getRows(custResult);
-        if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
+        const custResult = await client.query('SELECT enterprise_id FROM customers WHERE id = $1', [data.customer_id]);
+        if (custResult.rows[0]?.enterprise_id) enterpriseId = custResult.rows[0].enterprise_id;
       }
 
-      const tipo = data.tipo === 'recepcion' ? 'recepcion' : 'entrega';
-      await db.execute(sql`
-        INSERT INTO remitos (id, company_id, customer_id, enterprise_id, order_id, remito_number, date, delivery_address, receiver_name, transport, tipo, notes, status, created_by)
-        VALUES (${remitoId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.order_id || null}, ${remitoNumber}, ${data.date || new Date().toISOString()}, ${data.delivery_address || null}, ${data.receiver_name || null}, ${data.transport || null}, ${tipo}, ${data.notes || null}, 'pendiente', ${userId})
-      `);
+      // 3. Get punto_venta from company config
+      const puntoVenta = data.punto_venta || 1;
 
-      if (data.items && Array.isArray(data.items)) {
+      // 4. Lock and validate order_items (FOR UPDATE prevents race conditions)
+      const orderItemIds = (data.items || []).filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id);
+      const invoiceItemIds = (data.items || []).filter((i: any) => i.invoice_item_id).map((i: any) => i.invoice_item_id);
+
+      if (orderItemIds.length > 0) {
+        const lockResult = await client.query(
+          `SELECT id, quantity, COALESCE(qty_delivered, 0) as qty_delivered FROM order_items WHERE id = ANY($1) FOR UPDATE`,
+          [orderItemIds]
+        );
+        const lockedItems = new Map(lockResult.rows.map((r: any) => [r.id, r]));
+
+        // Validate each item's quantity
         for (const item of data.items) {
-          const itemId = uuid();
-          await db.execute(sql`
-            INSERT INTO remito_items (id, remito_id, product_name, description, quantity, unit)
-            VALUES (${itemId}, ${remitoId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit || 'unidades'})
-          `);
+          if (!item.order_item_id) continue;
+          const locked = lockedItems.get(item.order_item_id);
+          if (!locked) throw new ApiError(400, `Item de pedido ${item.order_item_id} no encontrado`);
+          const available = parseFloat(locked.quantity) - parseFloat(locked.qty_delivered);
+          if ((item.quantity || 1) > available + 0.01) {
+            throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}". Disponible: ${available}`);
+          }
         }
       }
 
+      // Validate invoice_items availability
+      for (const item of (data.items || [])) {
+        if (!item.invoice_item_id) continue;
+        const avail = await client.query(`
+          SELECT ii.quantity - COALESCE(SUM(ri.quantity), 0) as qty_available, i.enterprise_id
+          FROM invoice_items ii
+          JOIN invoices i ON ii.invoice_id = i.id
+          LEFT JOIN remito_items ri ON ri.invoice_item_id = ii.id
+          WHERE ii.id = $1 AND i.company_id = $2
+          GROUP BY ii.id, ii.quantity, i.enterprise_id
+        `, [item.invoice_item_id, companyId]);
+        if (avail.rows.length === 0) throw new ApiError(400, 'Item de factura no encontrado');
+        if (enterpriseId && avail.rows[0].enterprise_id !== enterpriseId) {
+          throw new ApiError(400, 'La factura pertenece a otra empresa');
+        }
+        if ((item.quantity || 1) > parseFloat(avail.rows[0].qty_available) + 0.01) {
+          throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}" desde factura. Disponible: ${avail.rows[0].qty_available}`);
+        }
+        // Resolve transitive order_item_id if not provided
+        if (!item.order_item_id) {
+          const iiRes = await client.query('SELECT order_item_id FROM invoice_items WHERE id = $1', [item.invoice_item_id]);
+          if (iiRes.rows[0]?.order_item_id) item.order_item_id = iiRes.rows[0].order_item_id;
+        }
+      }
+
+      // 5. Create remito
+      const remitoId = uuid();
+      const tipo = data.tipo === 'recepcion' ? 'recepcion' : 'entrega';
+      await client.query(`
+        INSERT INTO remitos (id, company_id, customer_id, enterprise_id, order_id, remito_number, punto_venta,
+          date, delivery_address, receiver_name, transport, tipo, notes, status,
+          factura_ref, pedido_ref, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pendiente',$14,$15,$16)
+      `, [remitoId, companyId, data.customer_id || null, enterpriseId, data.order_id || null,
+        remitoNumber, puntoVenta, data.date || new Date().toISOString(),
+        data.delivery_address || null, data.receiver_name || null, data.transport || null,
+        tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null, userId]);
+
+      // 6. Create items with linking fields
+      const orderIdsSet = new Set<string>();
+      for (const item of (data.items || [])) {
+        const itemId = uuid();
+        await client.query(`
+          INSERT INTO remito_items (id, remito_id, product_id, product_name, description, quantity, unit,
+            unit_price, vat_rate, order_item_id, invoice_item_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `, [itemId, remitoId, item.product_id || null, item.product_name,
+          item.description || null, item.quantity || 1, item.unit || 'unidades',
+          item.unit_price || null, item.vat_rate || 21,
+          item.order_item_id || null, item.invoice_item_id || null]);
+
+        // Update qty_delivered on order_item
+        if (item.order_item_id) {
+          await client.query(`
+            UPDATE order_items SET qty_delivered = COALESCE(qty_delivered, 0) + $1 WHERE id = $2
+          `, [item.quantity || 1, item.order_item_id]);
+          // Collect order_id for remito_orders
+          const oiRes = await client.query('SELECT order_id FROM order_items WHERE id = $1', [item.order_item_id]);
+          if (oiRes.rows[0]?.order_id) orderIdsSet.add(oiRes.rows[0].order_id);
+        }
+      }
+
+      // 7. Create remito_orders entries
+      for (const orderId of orderIdsSet) {
+        await client.query(`
+          INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
+          ON CONFLICT (remito_id, order_id) DO NOTHING
+        `, [remitoId, orderId]);
+      }
+      // Also add legacy order_id if provided
+      if (data.order_id && !orderIdsSet.has(data.order_id)) {
+        await client.query(`
+          INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
+          ON CONFLICT (remito_id, order_id) DO NOTHING
+        `, [remitoId, data.order_id]).catch(() => {});
+      }
+
+      await client.query('COMMIT');
       return { id: remitoId, remito_number: remitoNumber };
     } catch (error) {
+      await client.query('ROLLBACK');
       console.error('Create remito error:', error);
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to create remito');
+      throw new ApiError(500, `Failed to create remito: ${(error as Error).message}`);
+    } finally {
+      client.release();
     }
   }
 
@@ -324,20 +416,45 @@ export class RemitosService {
 
   async deleteRemito(companyId: string, remitoId: string) {
     await this.ensureTables();
+    const client = await pool.connect();
     try {
-      const result = await db.execute(sql`
-        SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
-      `);
-      const rows = getRows(result);
-      if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+      await client.query('BEGIN');
 
-      await db.execute(sql`DELETE FROM remito_items WHERE remito_id = ${remitoId}`);
-      await db.execute(sql`DELETE FROM remitos WHERE id = ${remitoId}`);
+      const result = await client.query('SELECT id FROM remitos WHERE id = $1 AND company_id = $2', [remitoId, companyId]);
+      if (result.rows.length === 0) throw new ApiError(404, 'Remito not found');
 
+      // Revert qty_delivered for each linked order_item
+      const itemsResult = await client.query(
+        'SELECT order_item_id, quantity FROM remito_items WHERE remito_id = $1 AND order_item_id IS NOT NULL',
+        [remitoId]
+      );
+      for (const item of itemsResult.rows) {
+        await client.query(
+          'UPDATE order_items SET qty_delivered = GREATEST(COALESCE(qty_delivered, 0) - $1, 0) WHERE id = $2',
+          [item.quantity, item.order_item_id]
+        );
+      }
+
+      // Clean up N:N tables
+      await client.query('DELETE FROM remito_orders WHERE remito_id = $1', [remitoId]);
+      // invoice_remitos references are kept (RESTRICT prevents delete if invoices exist)
+
+      await client.query('DELETE FROM remito_items WHERE remito_id = $1', [remitoId]);
+      await client.query('DELETE FROM remitos WHERE id = $1', [remitoId]);
+
+      // Safety: recalculate qty_delivered for affected order_items
+      for (const item of itemsResult.rows) {
+        await this.recalculateQtyDelivered(item.order_item_id);
+      }
+
+      await client.query('COMMIT');
       return { deleted: true };
     } catch (error) {
+      await client.query('ROLLBACK');
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to delete remito');
+    } finally {
+      client.release();
     }
   }
 

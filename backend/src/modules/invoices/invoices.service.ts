@@ -285,6 +285,32 @@ export class InvoicesService {
             `);
             collectedOrderItemIds.push(item.order_item_id);
           }
+
+          // Link invoice_item to remito_item if provided (factura desde remito)
+          if (item.remito_item_id) {
+            await pool.query(
+              'UPDATE invoice_items SET remito_item_id = $1 WHERE id = $2',
+              [item.remito_item_id, itemId]
+            );
+          }
+        }
+
+        // Create invoice_remitos N:N entries if any items came from remitos
+        const remitoItemIds = (data.items || []).filter((i: any) => i.remito_item_id).map((i: any) => i.remito_item_id);
+        if (remitoItemIds.length > 0) {
+          try {
+            const remitoIdsResult = await pool.query(
+              'SELECT DISTINCT remito_id FROM remito_items WHERE id = ANY($1)',
+              [remitoItemIds]
+            );
+            for (const row of remitoIdsResult.rows) {
+              await pool.query(
+                `INSERT INTO invoice_remitos (id, invoice_id, remito_id) VALUES (gen_random_uuid(), $1, $2)
+                 ON CONFLICT (invoice_id, remito_id) DO NOTHING`,
+                [invoiceId, row.remito_id]
+              );
+            }
+          } catch (e) { /* invoice_remitos table may not exist yet */ }
         }
 
         // Update invoice totals
