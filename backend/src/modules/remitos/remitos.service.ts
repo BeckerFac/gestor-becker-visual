@@ -527,172 +527,229 @@ export class RemitosService {
 
   private buildRemitoHtml(company: any, remito: any, tipo?: string): string {
     const items = remito.items || [];
+    const enterprise = remito.enterprise || {};
     const customer = remito.customer || {};
-    const createdAt = new Date(remito.date || remito.created_at).toLocaleDateString('es-AR');
-    const remitoNum = String(remito.remito_number || '').padStart(6, '0');
-    const pvNum = String(company.punto_venta || 3).padStart(5, '0');
+    const fecha = new Date(remito.date || remito.created_at).toLocaleDateString('es-AR');
+    const pv = String(remito.punto_venta || company.punto_venta_remito || company.punto_venta || 1).padStart(4, '0');
+    const num = String(remito.remito_number || 0).padStart(8, '0');
+    const remitoTipo = tipo || remito.tipo || 'entrega';
+    const isRecepcion = remitoTipo === 'recepcion';
 
-    const itemRows = items.map((item: any, idx: number) => `
+    // Receptor data: prefer enterprise, fallback to customer
+    const receptor = {
+      name: enterprise.razon_social || enterprise.name || customer.name || '',
+      address: remito.delivery_address || enterprise.address || customer.address || '',
+      city: enterprise.city || '',
+      province: enterprise.province || '',
+      cp: enterprise.postal_code || '',
+      cuit: enterprise.cuit || customer.cuit || '',
+      iva: enterprise.tax_condition || '',
+    };
+    const domicilio = [receptor.address, receptor.city, receptor.cp ? `(${receptor.cp})` : ''].filter(Boolean).join(', ');
+
+    // Cross-references
+    const facturaRef = remito.factura_ref || '';
+    const pedidoRef = remito.pedido_ref || (remito.order ? `${pv}-${String(remito.order.order_number || 0).padStart(8, '0')}` : '');
+
+    // Item rows
+    const itemRows = items.map((item: any) => `
       <tr>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;text-align:center;">${idx + 1}</td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
-          <strong style="color:#111827;">${item.product_name}</strong>
-          ${item.description ? `<br><span style="color:#6b7280;font-size:12px;">${item.description}</span>` : ''}
-        </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151;font-weight:600;">${Number(item.quantity)}</td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151;">${item.unit || 'unidades'}</td>
+        <td class="qty">${Number(item.quantity)}</td>
+        <td class="desc">${item.quantity}x ${item.product_name}${item.description ? '  ' + item.description : ''}</td>
       </tr>
     `).join('');
 
-    const remitoTipo = tipo || remito.tipo || 'entrega';
-    const isRecepcion = remitoTipo === 'recepcion';
-    const orderRef = remito.order ? `Pedido #${String(remito.order.order_number || '').padStart(4, '0')} — ${remito.order.title || ''}` : '';
+    // Empty rows to fill the page
+    const emptyRows = Math.max(0, 15 - items.length);
+    const emptyRowsHtml = Array(emptyRows).fill('<tr><td class="qty">&nbsp;</td><td class="desc">&nbsp;</td></tr>').join('');
+
+    // Company config
+    const companyName = company.razon_social || company.name || '';
+    const companyRubro = company.rubro_descripcion || '';
+    const companyAddress = [company.address, company.city ? `(${company.postal_code || ''}) ${company.city}` : ''].filter(Boolean).join(' - ');
+    const companyProvince = company.province ? `Prov. de ${company.province} - Argentina` : '';
+    const companyPhone = company.phone ? `Tel.: ${company.phone}` : '';
+    const companyEmail = company.email || '';
+    const companyWeb = company.website || '';
+    const companyIva = company.condicion_iva || company.tax_condition || 'IVA RESPONSABLE INSCRIPTO';
+    const companyCuit = company.cuit || '';
+    const companyIIBB = company.ingresos_brutos || '';
+    const companyInicio = company.inicio_actividad ? new Date(company.inicio_actividad).toLocaleDateString('es-AR') : '';
+    const caiRemito = company.cai_remito || '';
+    const caiVto = company.cai_remito_vto ? new Date(company.cai_remito_vto).toLocaleDateString('es-AR') : '';
 
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Inter',sans-serif; color:#333; line-height:1.5; font-size:13px; }
-  @page { margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color:#000; font-size:11px; line-height:1.3; }
+  @page { margin: 10mm; }
+  table { border-collapse:collapse; }
+  .outer { border:2px solid #000; width:100%; }
+  .outer td, .outer th { border:1px solid #000; padding:4px 6px; vertical-align:top; }
+  .header-left { width:50%; font-size:10px; }
+  .header-right { width:50%; }
+  .company-name { font-size:18px; font-weight:bold; text-align:center; margin-bottom:2px; }
+  .company-sub { font-size:9px; text-align:center; color:#333; }
+  .r-box { width:70px; height:70px; border:2px solid #000; text-align:center; margin:0 auto; }
+  .r-letter { font-size:32px; font-weight:bold; line-height:1; margin-top:6px; }
+  .r-sub { font-size:7px; color:#333; border-top:1px solid #000; margin-top:2px; padding-top:2px; }
+  .remito-title { font-size:16px; font-weight:bold; }
+  .remito-num { font-size:14px; font-weight:bold; margin-top:2px; }
+  .items-table { width:100%; }
+  .items-table td { border-bottom:1px solid #ccc; padding:3px 6px; min-height:20px; }
+  .items-table .qty { width:60px; text-align:center; border-right:1px solid #000; }
+  .items-table .desc { text-align:left; }
+  .items-header { background:#f0f0f0; font-weight:bold; font-size:10px; text-transform:uppercase; }
+  .items-header td { border-bottom:2px solid #000; }
+  .firma-section td { padding:8px 6px; height:60px; vertical-align:bottom; }
+  .footer-row { font-size:8px; color:#333; }
+  .footer-row td { padding:3px 6px; }
 </style></head>
 <body>
 
-  <!-- HEADER with R badge -->
-  <div style="position:relative;padding:20px 40px 16px;border-bottom:2px solid #1a1a2e;display:flex;justify-content:space-between;align-items:flex-start;">
-    <!-- Left: Company info -->
-    <div style="flex:1;padding-right:50px;">
-      <div style="font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:1px;">BECKER<span style="color:#c8102e;">VISUAL</span></div>
-      <div style="font-size:11px;color:#666;margin-top:4px;">${company.name}</div>
-      ${company.address ? `<div style="font-size:11px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.province ? ` - ${company.province}` : ''}</div>` : ''}
-      <div style="font-size:11px;color:#666;">CUIT: ${company.cuit}</div>
-      ${company.iva_condition ? `<div style="font-size:11px;color:#666;">${company.iva_condition}</div>` : ''}
-    </div>
-    <!-- Letter badge R -->
-    <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:60px;height:70px;background:white;border:2px solid #333;text-align:center;z-index:10;">
-      <div style="font-size:28px;font-weight:bold;margin-top:8px;">R</div>
-      <div style="font-size:9px;color:#666;border-top:1px solid #333;padding-top:2px;">COD. 91</div>
-    </div>
-    <!-- Right: Remito number and date -->
-    <div style="flex:1;text-align:right;padding-left:50px;">
-      <div style="font-size:16px;font-weight:700;color:#1a1a2e;letter-spacing:0.5px;">REMITO</div>
-      <div style="font-size:18px;font-weight:700;color:#1a1a2e;margin-top:2px;">${pvNum}-${String(remito.remito_number || '').padStart(8, '0')}</div>
-      <div style="font-size:12px;color:#666;margin-top:4px;"><strong>Fecha:</strong> ${createdAt}</div>
-    </div>
-  </div>
-
-  <!-- DOCUMENT TYPE BANNER -->
-  <div style="background:${isRecepcion ? '#065f46' : '#1a1a2e'};padding:12px 40px;display:flex;justify-content:space-between;align-items:center;">
-    <div style="font-size:18px;font-weight:700;color:white;letter-spacing:1px;">${isRecepcion ? 'REMITO DE RECEPCION' : 'REMITO DE ENTREGA'}</div>
-    <div style="color:rgba(255,255,255,0.8);font-size:13px;"><strong>Fecha:</strong> ${createdAt}</div>
-  </div>
-
-  <!-- EMISOR + DESTINATARIO -->
-  <div style="padding:20px 40px;display:flex;gap:24px;">
-    <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">Remitente</div>
-      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${company.name}</div>
-      <div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${company.cuit}</div>
-      ${company.address ? `<div style="font-size:12px;color:#666;">${company.address}${company.city ? `, ${company.city}` : ''}${company.province ? ` - ${company.province}` : ''}</div>` : ''}
-      ${company.phone ? `<div style="font-size:12px;color:#666;">Tel: ${company.phone}</div>` : ''}
-      ${company.email ? `<div style="font-size:12px;color:#666;">${company.email}</div>` : ''}
-    </div>
-    <div style="flex:1;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:6px;font-weight:600;">Destinatario</div>
-      <div style="font-size:15px;font-weight:600;color:#1a1a2e;">${customer.name || 'Sin especificar'}</div>
-      ${customer.cuit ? `<div style="font-size:12px;color:#666;margin-top:2px;">CUIT: ${customer.cuit}</div>` : ''}
-      ${customer.address ? `<div style="font-size:12px;color:#666;">${customer.address}</div>` : ''}
-      ${customer.email ? `<div style="font-size:12px;color:#666;">${customer.email}</div>` : ''}
-      ${customer.phone ? `<div style="font-size:12px;color:#666;">Tel: ${customer.phone}</div>` : ''}
-    </div>
-  </div>
-
-  <!-- DELIVERY INFO -->
-  <div style="padding:0 40px 16px;">
-    <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:12px 16px;">
-      <div style="display:flex;gap:32px;flex-wrap:wrap;">
-        ${remito.delivery_address ? `<div><span style="font-size:11px;color:#6366f1;font-weight:600;text-transform:uppercase;">Dirección de Entrega:</span><br><span style="font-size:13px;color:#1e1b4b;">${remito.delivery_address}</span></div>` : ''}
-        ${remito.receiver_name ? `<div><span style="font-size:11px;color:#6366f1;font-weight:600;text-transform:uppercase;">Receptor:</span><br><span style="font-size:13px;color:#1e1b4b;">${remito.receiver_name}</span></div>` : ''}
-        ${remito.transport ? `<div><span style="font-size:11px;color:#6366f1;font-weight:600;text-transform:uppercase;">Transporte:</span><br><span style="font-size:13px;color:#1e1b4b;">${remito.transport}</span></div>` : ''}
-        ${orderRef ? `<div><span style="font-size:11px;color:#6366f1;font-weight:600;text-transform:uppercase;">Referencia:</span><br><span style="font-size:13px;color:#1e1b4b;">${orderRef}</span></div>` : ''}
+<!-- Remito documento — formato fiscal argentino -->
+<table class="outer">
+  <!-- ROW 1: Header (emisor left | R badge center | remito info right) -->
+  <tr>
+    <td class="header-left" rowspan="2" style="width:48%; vertical-align:top; padding:8px 10px;">
+      <div class="company-name">${companyName}</div>
+      ${companyRubro ? `<div class="company-sub">${companyRubro}</div>` : ''}
+      <div class="company-sub" style="margin-top:4px;">${companyAddress}</div>
+      ${companyProvince ? `<div class="company-sub">${companyProvince}</div>` : ''}
+      ${companyPhone ? `<div class="company-sub">${companyPhone}</div>` : ''}
+      ${companyEmail ? `<div class="company-sub">${companyEmail}</div>` : ''}
+      ${companyWeb ? `<div class="company-sub">${companyWeb}</div>` : ''}
+      <div class="company-sub" style="font-weight:bold; margin-top:4px;">${companyIva}</div>
+    </td>
+    <td style="width:4%; vertical-align:top; text-align:center; padding:6px;">
+      <div class="r-box">
+        <div class="r-letter">R</div>
+        <div class="r-sub">DOCUMENTO<br>NO VALIDO<br>COMO FACTURA<br>COD. N&deg; 91</div>
       </div>
-    </div>
-  </div>
+    </td>
+    <td class="header-right" style="width:48%; vertical-align:top; padding:8px 10px;">
+      <div class="remito-title">REMITO</div>
+      <div class="remito-num">N&deg; ${pv}-${num}</div>
+      <div style="margin-top:8px; font-size:11px;">
+        <strong>FECHA:</strong> &nbsp;&nbsp;&nbsp; ${fecha}
+      </div>
+    </td>
+  </tr>
+  <tr>
+    <!-- header-left continues (rowspan) -->
+    <td style="border-top:1px solid #000; text-align:center; font-size:8px; padding:2px;">
+      <!-- empty under R box -->
+    </td>
+    <td style="vertical-align:top; padding:6px 10px; font-size:10px;">
+      <div>C.U.I.T. &nbsp;${companyCuit}</div>
+      ${companyIIBB ? `<div>ING. BRUTOS: ${companyIIBB}</div>` : ''}
+      ${companyInicio ? `<div>Inicio de Actividad ${companyInicio}</div>` : ''}
+    </td>
+  </tr>
 
-  <!-- ITEMS TABLE -->
-  <div style="padding:0 40px;">
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-      <thead>
-        <tr style="background:#1a1a2e;color:white;">
-          <th style="padding:10px 12px;text-align:center;font-weight:600;width:40px;font-size:12px;">#</th>
-          <th style="padding:10px 12px;text-align:left;font-weight:600;font-size:12px;">Descripción</th>
-          <th style="padding:10px 12px;text-align:center;font-weight:600;width:80px;font-size:12px;">Cantidad</th>
-          <th style="padding:10px 12px;text-align:center;font-weight:600;width:100px;font-size:12px;">Unidad</th>
+  <!-- ROW 2: Receptor (SEÑOR/ES + DOMICILIO) -->
+  <tr>
+    <td colspan="2" style="padding:6px 10px;">
+      <div style="font-size:9px; font-weight:bold; color:#333;">SEÑOR(ES):</div>
+      <div style="font-size:13px; font-weight:bold; margin-top:2px;">${receptor.name || '&nbsp;'}</div>
+    </td>
+    <td style="padding:6px 10px;">
+      <div style="font-size:9px; font-weight:bold; color:#333;">DOMICILIO:</div>
+      <div style="font-size:11px; margin-top:2px;">${domicilio || '&nbsp;'}</div>
+    </td>
+  </tr>
+
+  <!-- ROW 3: IVA + CUIT receptor -->
+  <tr>
+    <td style="padding:4px 10px;">
+      <span style="font-size:9px; font-weight:bold;">IVA</span>
+      &nbsp;&nbsp;${receptor.iva || '&nbsp;'}
+    </td>
+    <td colspan="2" style="padding:4px 10px;">
+      <span style="font-size:9px; font-weight:bold;">CUIT N&deg;:</span>
+      &nbsp;&nbsp;${receptor.cuit || '&nbsp;'}
+    </td>
+  </tr>
+
+  <!-- ROW 4: CONDICIONES DE PAGO | N° CLIENTE | FACTURA N° | O. PEDIDO N° -->
+  <tr style="font-size:9px;">
+    <td style="padding:2px 6px; font-weight:bold;">CONDICIONES DE PAGO</td>
+    <td style="padding:2px 6px; font-weight:bold; text-align:center;">N&deg; CLIENTE:</td>
+    <td style="padding:2px 6px;">
+      <table style="width:100%; border:none;">
+        <tr>
+          <td style="border:none; padding:0 4px; font-weight:bold;">FACTURA N&deg;:</td>
+          <td style="border:none; padding:0 4px; font-weight:bold;">O. PEDIDO N&deg;:</td>
         </tr>
-      </thead>
-      <tbody>
-        ${itemRows}
-      </tbody>
-    </table>
-  </div>
+      </table>
+    </td>
+  </tr>
+  <tr style="font-size:10px;">
+    <td style="padding:4px 6px;">&nbsp;</td>
+    <td style="padding:4px 6px; text-align:center;">&nbsp;</td>
+    <td style="padding:4px 6px;">
+      <table style="width:100%; border:none;">
+        <tr>
+          <td style="border:none; padding:0 4px;">${facturaRef || '&nbsp;'}</td>
+          <td style="border:none; padding:0 4px;">${pedidoRef || '&nbsp;'}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
 
-  ${remito.notes ? `
-  <div style="padding:16px 40px;">
-    <div style="background:#fef9e7;border-left:4px solid #f0c040;padding:10px 14px;">
-      <div style="font-size:11px;font-weight:600;color:#8a6d00;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;">Observaciones</div>
-      <div style="font-size:12px;color:#5a4800;">${remito.notes}</div>
-    </div>
-  </div>` : ''}
+<!-- ITEMS TABLE -->
+<table class="items-table" style="border:2px solid #000; border-top:none; margin-top:-2px;">
+  <tr class="items-header">
+    <td class="qty" style="border-top:2px solid #000;">CANTIDAD</td>
+    <td class="desc" style="border-top:2px solid #000;">DESCRIPCION</td>
+  </tr>
+  ${itemRows}
+  ${emptyRowsHtml}
+</table>
 
-  ${isRecepcion ? `
-  <!-- SELLO RECEPCIÓN PROPIA — sin firma -->
-  <div style="padding:24px 40px;">
-    <div style="border:3px solid #065f46;border-radius:8px;padding:28px 32px;text-align:center;background:#ecfdf5;">
-      <div style="font-size:28px;font-weight:800;color:#065f46;letter-spacing:1px;margin-bottom:4px;">&#10003; PRODUCTOS RECIBIDOS</div>
-      <div style="font-size:14px;color:#047857;font-weight:500;">Mercadería recibida en conformidad — ${createdAt}</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:8px;">${company.name} — CUIT: ${company.cuit}</div>
-    </div>
-  </div>
-  ` : `
-  <!-- SELLO ENTREGA AL CLIENTE — con firma -->
-  <div style="padding:24px 40px;">
-    <div style="border:3px solid #1a1a2e;border-radius:8px;padding:24px;position:relative;">
-      <div style="position:absolute;top:-14px;left:24px;background:white;padding:0 12px;">
-        <span style="font-size:16px;font-weight:700;color:#059669;letter-spacing:0.5px;">&#10003; PRODUCTOS RECIBIDOS EN CONFORMIDAD</span>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:24px;">
-        <div style="flex:1;">
-          <div style="border-bottom:1px solid #ccc;padding:8px 0;margin-bottom:12px;">
-            <span style="font-size:11px;color:#666;font-weight:500;">Firma:</span>
-          </div>
-          <div style="border-bottom:1px solid #ccc;padding:8px 0;">
-            <span style="font-size:11px;color:#666;font-weight:500;">Aclaración:</span>
-          </div>
-        </div>
-        <div style="flex:1;">
-          <div style="border-bottom:1px solid #ccc;padding:8px 0;margin-bottom:12px;">
-            <span style="font-size:11px;color:#666;font-weight:500;">DNI:</span>
-          </div>
-          <div style="border-bottom:1px solid #ccc;padding:8px 0;">
-            <span style="font-size:11px;color:#666;font-weight:500;">Fecha de Recepción:</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  `}
+<!-- RECIBI CONFORME -->
+<table style="width:100%; border:2px solid #000; border-top:none; margin-top:-2px;">
+  <tr class="firma-section">
+    <td style="width:100%; padding:10px; font-size:10px; font-weight:bold; border:none;">
+      RECIBI CONFORME:
+    </td>
+  </tr>
+  <tr>
+    <td style="border:none; padding:8px 10px;">
+      <table style="width:100%; border:none;">
+        <tr>
+          <td style="border:none; width:50%; padding:8px 0; vertical-align:bottom;">
+            <div style="border-bottom:1px solid #000; padding-bottom:30px; margin-right:20px;">
+              <span style="font-size:9px; font-weight:bold;">ACLARACION:</span>
+            </div>
+          </td>
+          <td style="border:none; width:50%; padding:8px 0; vertical-align:bottom;">
+            <div style="border-bottom:1px solid #000; padding-bottom:30px; margin-left:20px;">
+              <span style="font-size:9px; font-weight:bold;">FIRMA:</span>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
 
-  <!-- FOOTER -->
-  <div style="position:fixed;bottom:0;left:0;right:0;border-top:3px solid #c8102e;padding:12px 40px;background:white;">
-    <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#999;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-weight:700;color:#1a1a2e;font-size:12px;">BECKER<span style="color:#c8102e;">VISUAL</span></span>
-        <span style="color:#666;">${company.name} — Remito N° ${remitoNum}</span>
-      </div>
-      <div>Documento no válido como factura</div>
-      <div>Generado el ${new Date().toLocaleDateString('es-AR')}</div>
-    </div>
-  </div>
+<!-- FOOTER: imprenta datos -->
+<table style="width:100%; margin-top:8px; font-size:7px; color:#666;">
+  <tr class="footer-row">
+    <td style="border:none; width:40%;">&nbsp;</td>
+    <td style="border:none; width:30%; text-align:center;">
+      ORIGINAL &nbsp;BLANCO<br>
+      DUPLICADO &nbsp;COLOR
+    </td>
+    <td style="border:none; width:30%; text-align:right;">
+      ${caiRemito ? `C.A.I.: ${caiRemito}` : ''}
+      ${caiVto ? `<br>F. VTO.: ${caiVto}` : ''}
+    </td>
+  </tr>
+</table>
 
 </body>
 </html>`;
