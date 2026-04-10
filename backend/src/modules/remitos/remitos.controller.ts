@@ -57,15 +57,13 @@ export class RemitosController {
     res.json(data);
   }
 
-  async getAvailableInvoiceItems(req: AuthRequest, res: Response) {
-    const enterpriseId = req.query.enterprise_id as string;
-    if (!enterpriseId) return res.status(400).json({ message: 'enterprise_id required' });
-    const data = await remitosService.getInvoicesWithPendingDelivery(req.user!.company_id, enterpriseId);
+  async getInvoiceItemsForRemito(req: AuthRequest, res: Response) {
+    const data = await remitosService.getInvoiceItemsForRemito(req.user!.company_id, req.params.invoiceId);
     res.json(data);
   }
 
-  async getAvailableInvoiceItemsByInvoice(req: AuthRequest, res: Response) {
-    const data = await remitosService.getAvailableInvoiceItemsForRemito(req.user!.company_id, req.params.invoiceId);
+  async anularRemito(req: AuthRequest, res: Response) {
+    const data = await remitosService.anularRemito(req.user!.company_id, req.params.id, req.user!.id);
     res.json(data);
   }
 

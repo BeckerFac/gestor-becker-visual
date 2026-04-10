@@ -274,46 +274,21 @@ const OrderItemsImporter: React.FC<{
               </p>
               <div className="space-y-1">
                 {group.items.map((oi: any) => {
-                  const directAvailable = parseFloat(oi.qty_available_direct ?? oi.qty_remaining ?? '0')
-                  const remitoPending = parseFloat(oi.qty_remito_pending_invoice ?? '0')
-                  const remitoInfo = oi.remito_info || []
-
+                  const remaining = parseFloat(oi.qty_remaining || '0')
                   return (
-                    <div key={oi.order_item_id}>
-                      {/* Direct-available row */}
-                      {directAvailable > 0 && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="flex-1 text-gray-700 dark:text-gray-300">{oi.product_name}</span>
-                          <span className="text-gray-400">{parseFloat(oi.quantity)}x ${parseFloat(oi.unit_price).toLocaleString('es-AR')}</span>
-                          <span className="text-orange-600">Disponible: {directAvailable}</span>
-                          <input
-                            type="number" min="0" max={directAvailable} step="1"
-                            placeholder="0"
-                            value={selectedQty[oi.order_item_id] || ''}
-                            onChange={e => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: e.target.value }))}
-                            className="w-16 px-1 py-0.5 border rounded text-right text-xs dark:bg-gray-700 dark:border-gray-600"
-                          />
-                          <button type="button" onClick={() => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: directAvailable.toString() }))}
-                            className="text-blue-600 text-[10px] font-medium">Todo</button>
-                        </div>
-                      )}
-                      {/* Remitado row — blocked, link to remito */}
-                      {remitoPending > 0 && (
-                        <div className="flex items-center gap-2 text-xs opacity-60 mt-0.5">
-                          <span className="text-amber-600">🔒</span>
-                          <span className="flex-1 text-gray-500">{oi.product_name}</span>
-                          <span className="text-amber-600">
-                            {remitoPending} en remito
-                            {Array.isArray(remitoInfo) && remitoInfo.map((r: any) => (
-                              <span key={r.remito_id} className="ml-1 text-amber-700 underline cursor-pointer"
-                                onClick={() => window.open(`/remitos?expand=${r.remito_id}`, '_blank')}>
-                                #{String(r.remito_number).padStart(5, '0')}
-                              </span>
-                            ))}
-                            {' '}— facturar desde remito
-                          </span>
-                        </div>
-                      )}
+                    <div key={oi.order_item_id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 text-gray-700 dark:text-gray-300">{oi.product_name}</span>
+                      <span className="text-gray-400">{parseFloat(oi.quantity)}x ${parseFloat(oi.unit_price).toLocaleString('es-AR')}</span>
+                      <span className="text-orange-600">Disponible: {remaining}</span>
+                      <input
+                        type="number" min="0" max={remaining} step="1"
+                        placeholder="0"
+                        value={selectedQty[oi.order_item_id] || ''}
+                        onChange={e => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: e.target.value }))}
+                        className="w-16 px-1 py-0.5 border rounded text-right text-xs dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <button type="button" onClick={() => setSelectedQty(prev => ({ ...prev, [oi.order_item_id]: remaining.toString() }))}
+                        className="text-blue-600 text-[10px] font-medium">Todo</button>
                     </div>
                   )
                 })}
@@ -326,116 +301,6 @@ const OrderItemsImporter: React.FC<{
       <div className="flex justify-end mt-2">
         <button type="button" onClick={handleImport}
           className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
-          Importar seleccionados
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// Inline component: import items from remitos (delivery notes)
-const RemitoItemsImporter: React.FC<{
-  enterpriseId?: string;
-  onImport: (items: any[]) => void;
-  existingRemitoItemIds?: string[];
-}> = ({ enterpriseId, onImport, existingRemitoItemIds = [] }) => {
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [remitos, setRemitos] = useState<any[]>([])
-  const [selectedQty, setSelectedQty] = useState<Record<string, string>>({})
-
-  const loadRemitos = useCallback(async () => {
-    if (!enterpriseId) return
-    setLoading(true)
-    try {
-      const data = await api.getRemitosWithPendingItems(enterpriseId)
-      setRemitos(data || [])
-    } catch { setRemitos([]) }
-    finally { setLoading(false) }
-  }, [enterpriseId])
-
-  useEffect(() => { if (open) loadRemitos() }, [open, loadRemitos])
-
-  const handleImport = () => {
-    const imported: any[] = []
-    for (const remito of remitos) {
-      for (const item of (remito.items || [])) {
-        const qty = parseFloat(selectedQty[item.remito_item_id] || '0')
-        if (qty > 0 && !existingRemitoItemIds.includes(item.remito_item_id)) {
-          imported.push({
-            product_name: item.product_name,
-            quantity: qty,
-            unit_price: parseFloat(item.unit_price || '0'),
-            vat_rate: item.vat_rate || 21,
-            order_item_id: item.order_item_id || null,
-            remito_item_id: item.remito_item_id,
-            qty_to_invoice: qty,
-          })
-        }
-      }
-    }
-    if (imported.length === 0) return
-    onImport(imported)
-    setOpen(false)
-    setSelectedQty({})
-  }
-
-  if (!open) {
-    return (
-      <button type="button" onClick={() => setOpen(true)}
-        className="text-sm text-green-600 hover:text-green-800 font-medium mb-2 ml-2"
-        disabled={!enterpriseId}>
-        Importar items de remitos
-      </button>
-    )
-  }
-
-  return (
-    <div className="border border-green-200 dark:border-green-800 rounded-lg p-3 mb-3 bg-green-50/50 dark:bg-green-950/20">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-sm font-semibold text-green-800 dark:text-green-300">Seleccionar items de remitos</h4>
-        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm">Cerrar</button>
-      </div>
-
-      {loading ? <p className="text-xs text-gray-400">Cargando remitos...</p> : remitos.length === 0 ? (
-        <p className="text-xs text-gray-400 italic">No hay remitos con items pendientes de facturar</p>
-      ) : (
-        <div className="space-y-3 max-h-64 overflow-y-auto">
-          {remitos.map((remito: any) => (
-            <div key={remito.remito_id} className="border border-green-100 dark:border-green-900 rounded p-2">
-              <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Remito #{String(remito.remito_number).padStart(5, '0')} ({remito.date ? new Date(remito.date).toLocaleDateString('es-AR') : ''})
-              </p>
-              <div className="space-y-1">
-                {(remito.items || []).map((item: any) => {
-                  const available = parseFloat(item.qty_available || '0')
-                  const alreadyImported = existingRemitoItemIds.includes(item.remito_item_id)
-                  return (
-                    <div key={item.remito_item_id} className={`flex items-center gap-2 text-xs ${alreadyImported ? 'opacity-40' : ''}`}>
-                      <span className="flex-1 text-gray-700 dark:text-gray-300">{item.product_name}</span>
-                      <span className="text-green-600">Disponible: {available}</span>
-                      {!alreadyImported ? (
-                        <>
-                          <input type="number" min="0" max={available} step="1" placeholder="0"
-                            value={selectedQty[item.remito_item_id] || ''}
-                            onChange={e => setSelectedQty(prev => ({ ...prev, [item.remito_item_id]: e.target.value }))}
-                            className="w-16 px-1 py-0.5 border rounded text-right text-xs dark:bg-gray-700 dark:border-gray-600" />
-                          <button type="button" onClick={() => setSelectedQty(prev => ({ ...prev, [item.remito_item_id]: available.toString() }))}
-                            className="text-green-600 text-[10px] font-medium">Todo</button>
-                        </>
-                      ) : <span className="text-xs text-green-500">Ya importado</span>}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex justify-end mt-2">
-        <button type="button" onClick={handleImport}
-          className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">
           Importar seleccionados
         </button>
       </div>
@@ -1605,28 +1470,7 @@ export const Invoices: React.FC = () => {
                   }}
                 />
 
-                {/* Import from remitos button */}
-                <RemitoItemsImporter
-                  enterpriseId={formEnterpriseId}
-                  existingRemitoItemIds={formItems.filter(i => (i as any).remito_item_id).map(i => (i as any).remito_item_id)}
-                  onImport={(importedItems) => {
-                    const newItems = importedItems.map((ri: any) => {
-                      const qty = parseFloat(ri.qty_to_invoice || ri.quantity)
-                      const price = parseFloat(ri.unit_price || '0')
-                      return {
-                        product_id: ri.product_id || '',
-                        product_name: ri.product_name || '',
-                        quantity: qty,
-                        unit_price: price,
-                        vat_rate: parseFloat(ri.vat_rate || '21'),
-                        subtotal: qty * price,
-                        order_item_id: ri.order_item_id || null,
-                        remito_item_id: ri.remito_item_id,
-                      }
-                    })
-                    setFormItems([...formItems.filter(i => i.product_name), ...newItems])
-                  }}
-                />
+                {/* RemitoItemsImporter removed — remitos are independent of invoicing (Plan 12) */}
 
                 {/* Items table */}
                 <div className="overflow-x-auto">

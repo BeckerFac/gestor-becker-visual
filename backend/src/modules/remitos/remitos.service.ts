@@ -57,12 +57,10 @@ export class RemitosService {
       await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS unit_price DECIMAL(12,2)`).catch(() => {});
       await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21`).catch(() => {});
       await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS order_item_id UUID`).catch(() => {});
-      await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS invoice_item_id UUID`).catch(() => {});
       await pool.query(`ALTER TABLE remito_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`).catch(() => {});
 
-      // Indices for linking columns
+      // Index for order_item linking
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_items_order_item ON remito_items(order_item_id) WHERE order_item_id IS NOT NULL`).catch(() => {});
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_items_invoice_item ON remito_items(invoice_item_id) WHERE invoice_item_id IS NOT NULL`).catch(() => {});
 
       // Migration: remito_orders (N:N remito ↔ orders)
       await pool.query(`
@@ -75,22 +73,6 @@ export class RemitosService {
       `).catch(() => {});
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_remito ON remito_orders(remito_id)`).catch(() => {});
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_order ON remito_orders(order_id)`).catch(() => {});
-
-      // Migration: invoice_remitos (N:N invoice ↔ remitos)
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS invoice_remitos (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
-          remito_id UUID NOT NULL REFERENCES remitos(id) ON DELETE CASCADE,
-          UNIQUE(invoice_id, remito_id)
-        )
-      `).catch(() => {});
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_remitos_invoice ON invoice_remitos(invoice_id)`).catch(() => {});
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_remitos_remito ON invoice_remitos(remito_id)`).catch(() => {});
-
-      // Migration: remito_item_id in invoice_items (link factura item → remito item)
-      await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS remito_item_id UUID`).catch(() => {});
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_invoice_items_remito_item ON invoice_items(remito_item_id) WHERE remito_item_id IS NOT NULL`).catch(() => {});
 
       // Migration: qty_delivered in order_items (denormalized delivery tracking)
       await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});
@@ -255,18 +237,16 @@ export class RemitosService {
       // 3. Get punto_venta from company config
       const puntoVenta = data.punto_venta || 1;
 
-      // 4. Lock and validate order_items (FOR UPDATE prevents race conditions)
-      const orderItemIds = (data.items || []).filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id);
-      const invoiceItemIds = (data.items || []).filter((i: any) => i.invoice_item_id).map((i: any) => i.invoice_item_id);
-
-      // Validate at least one item exists (FIX BUG #12)
+      // 4. Validate items
       const validItems = (data.items || []).filter((i: any) => i.product_name?.trim());
       if (validItems.length === 0 && !data.order_id) {
         throw new ApiError(400, 'El remito debe tener al menos un item');
       }
 
+      // 5. Lock and validate order_items (FOR UPDATE prevents race conditions)
+      const orderItemIds = validItems.filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id);
+
       if (orderItemIds.length > 0) {
-        // Lock order_items AND validate enterprise ownership (FIX BUG #11)
         const lockResult = await client.query(
           `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id
            FROM order_items oi JOIN orders o ON oi.order_id = o.id
@@ -275,11 +255,10 @@ export class RemitosService {
         );
         const lockedItems = new Map(lockResult.rows.map((r: any) => [r.id, r]));
 
-        for (const item of data.items) {
+        for (const item of validItems) {
           if (!item.order_item_id) continue;
           const locked = lockedItems.get(item.order_item_id);
           if (!locked) throw new ApiError(400, `Item de pedido ${item.order_item_id} no encontrado`);
-          // Validate same enterprise (FIX BUG #11)
           if (enterpriseId && locked.enterprise_id && locked.enterprise_id !== enterpriseId) {
             throw new ApiError(400, `El item "${item.product_name}" pertenece a otra empresa`);
           }
@@ -287,31 +266,6 @@ export class RemitosService {
           if ((item.quantity || 1) > available + 0.01) {
             throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}". Disponible: ${available}`);
           }
-        }
-      }
-
-      // Validate invoice_items availability
-      for (const item of (data.items || [])) {
-        if (!item.invoice_item_id) continue;
-        const avail = await client.query(`
-          SELECT ii.quantity - COALESCE(SUM(ri.quantity), 0) as qty_available, i.enterprise_id
-          FROM invoice_items ii
-          JOIN invoices i ON ii.invoice_id = i.id
-          LEFT JOIN remito_items ri ON ri.invoice_item_id = ii.id
-          WHERE ii.id = $1 AND i.company_id = $2
-          GROUP BY ii.id, ii.quantity, i.enterprise_id
-        `, [item.invoice_item_id, companyId]);
-        if (avail.rows.length === 0) throw new ApiError(400, 'Item de factura no encontrado');
-        if (enterpriseId && avail.rows[0].enterprise_id !== enterpriseId) {
-          throw new ApiError(400, 'La factura pertenece a otra empresa');
-        }
-        if ((item.quantity || 1) > parseFloat(avail.rows[0].qty_available) + 0.01) {
-          throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}" desde factura. Disponible: ${avail.rows[0].qty_available}`);
-        }
-        // Resolve transitive order_item_id if not provided
-        if (!item.order_item_id) {
-          const iiRes = await client.query('SELECT order_item_id FROM invoice_items WHERE id = $1', [item.invoice_item_id]);
-          if (iiRes.rows[0]?.order_item_id) item.order_item_id = iiRes.rows[0].order_item_id;
         }
       }
 
@@ -328,28 +282,55 @@ export class RemitosService {
         data.delivery_address || null, data.receiver_name || null, data.transport || null,
         tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null, userId]);
 
-      // 6. Create items with linking fields
+      // 6. Create items + update qty_delivered + deduct stock for manual items
       const orderIdsSet = new Set<string>();
-      for (const item of (data.items || [])) {
+      for (const item of validItems) {
         const itemId = uuid();
+        const qty = item.quantity || 1;
         await client.query(`
           INSERT INTO remito_items (id, remito_id, product_id, product_name, description, quantity, unit,
-            unit_price, vat_rate, order_item_id, invoice_item_id)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            unit_price, vat_rate, order_item_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         `, [itemId, remitoId, item.product_id || null, item.product_name,
-          item.description || null, item.quantity || 1, item.unit || 'unidades',
+          item.description || null, qty, item.unit || 'unidades',
           item.unit_price || null, item.vat_rate || 21,
-          item.order_item_id || null, item.invoice_item_id || null]);
+          item.order_item_id || null]);
 
-        // Update qty_delivered on order_item
         if (item.order_item_id) {
-          await client.query(`
-            UPDATE order_items SET qty_delivered = COALESCE(qty_delivered, 0) + $1 WHERE id = $2
-          `, [item.quantity || 1, item.order_item_id]);
-          // Collect order_id for remito_orders
+          // Item from order: update qty_delivered
+          await client.query(
+            'UPDATE order_items SET qty_delivered = COALESCE(qty_delivered, 0) + $1 WHERE id = $2',
+            [qty, item.order_item_id]
+          );
           const oiRes = await client.query('SELECT order_id FROM order_items WHERE id = $1', [item.order_item_id]);
           if (oiRes.rows[0]?.order_id) orderIdsSet.add(oiRes.rows[0].order_id);
+        } else if (item.product_id) {
+          // Manual item with product: deduct stock if controls_stock
+          const prodCheck = await client.query(
+            'SELECT controls_stock FROM products WHERE id = $1 AND company_id = $2',
+            [item.product_id, companyId]
+          );
+          if (prodCheck.rows[0]?.controls_stock) {
+            // Get default warehouse
+            const whRes = await client.query(
+              'SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1',
+              [companyId]
+            );
+            const warehouseId = whRes.rows[0]?.id;
+            if (warehouseId) {
+              await client.query(`
+                INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
+                  movement_type, reference_type, reference_id, notes, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, 'salida', 'remito', $5, 'Remito item manual', $6)
+              `, [companyId, item.product_id, warehouseId, -qty, remitoId, userId]);
+              await client.query(
+                'UPDATE stock SET quantity = COALESCE(quantity, 0) - $1 WHERE product_id = $2 AND warehouse_id = $3',
+                [qty, item.product_id, warehouseId]
+              );
+            }
+          }
         }
+        // else: manual without product — just text, no stock/qty tracking
       }
 
       // 7. Create remito_orders entries
@@ -442,10 +423,11 @@ export class RemitosService {
       }
 
       const result = await db.execute(sql`
-        SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
+        SELECT id, status FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+      if (rows[0].status === 'anulado') throw new ApiError(400, 'No se puede modificar un remito anulado');
 
       await db.execute(sql`
         UPDATE remitos SET status = ${status}, updated_at = NOW() WHERE id = ${remitoId}
@@ -458,48 +440,91 @@ export class RemitosService {
     }
   }
 
-  async deleteRemito(companyId: string, remitoId: string) {
+  /** Anular remito: revierte qty_delivered + devuelve stock de items manuales. No se elimina. */
+  async anularRemito(companyId: string, remitoId: string, userId: string) {
     await this.ensureTables();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      const result = await client.query('SELECT id FROM remitos WHERE id = $1 AND company_id = $2', [remitoId, companyId]);
+      const result = await client.query(
+        'SELECT id, status FROM remitos WHERE id = $1 AND company_id = $2', [remitoId, companyId]
+      );
       if (result.rows.length === 0) throw new ApiError(404, 'Remito not found');
+      if (result.rows[0].status === 'anulado') throw new ApiError(400, 'El remito ya esta anulado');
 
-      // Revert qty_delivered for each linked order_item
+      // Get all items
       const itemsResult = await client.query(
-        'SELECT order_item_id, quantity FROM remito_items WHERE remito_id = $1 AND order_item_id IS NOT NULL',
+        'SELECT id, order_item_id, product_id, quantity FROM remito_items WHERE remito_id = $1',
         [remitoId]
       );
+
       for (const item of itemsResult.rows) {
-        await client.query(
-          'UPDATE order_items SET qty_delivered = GREATEST(COALESCE(qty_delivered, 0) - $1, 0) WHERE id = $2',
-          [item.quantity, item.order_item_id]
-        );
+        const qty = parseFloat(item.quantity || '0');
+
+        if (item.order_item_id) {
+          // Revert qty_delivered on order_item
+          await client.query(
+            'UPDATE order_items SET qty_delivered = GREATEST(COALESCE(qty_delivered, 0) - $1, 0) WHERE id = $2',
+            [qty, item.order_item_id]
+          );
+        }
+
+        if (item.product_id && !item.order_item_id) {
+          // Manual item with product: return stock if controls_stock
+          const prodCheck = await client.query(
+            'SELECT controls_stock FROM products WHERE id = $1 AND company_id = $2',
+            [item.product_id, companyId]
+          );
+          if (prodCheck.rows[0]?.controls_stock) {
+            const whRes = await client.query(
+              'SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1',
+              [companyId]
+            );
+            const warehouseId = whRes.rows[0]?.id;
+            if (warehouseId) {
+              await client.query(`
+                INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
+                  movement_type, reference_type, reference_id, notes, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, 'entrada', 'anulacion_remito', $5, 'Anulacion remito', $6)
+              `, [companyId, item.product_id, warehouseId, qty, remitoId, userId]);
+              await client.query(
+                'UPDATE stock SET quantity = COALESCE(quantity, 0) + $1 WHERE product_id = $2 AND warehouse_id = $3',
+                [qty, item.product_id, warehouseId]
+              );
+            }
+          }
+        }
       }
-
-      // Clean up N:N tables
-      await client.query('DELETE FROM remito_orders WHERE remito_id = $1', [remitoId]);
-      // invoice_remitos references are kept (RESTRICT prevents delete if invoices exist)
-
-      await client.query('DELETE FROM remito_items WHERE remito_id = $1', [remitoId]);
-      await client.query('DELETE FROM remitos WHERE id = $1', [remitoId]);
 
       // Safety: recalculate qty_delivered for affected order_items
       for (const item of itemsResult.rows) {
-        await this.recalculateQtyDelivered(item.order_item_id);
+        if (item.order_item_id) {
+          await this.recalculateQtyDelivered(item.order_item_id);
+        }
       }
 
+      // Mark as anulado (don't delete)
+      await client.query(
+        'UPDATE remitos SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['anulado', remitoId]
+      );
+
       await client.query('COMMIT');
-      return { deleted: true };
+      return { id: remitoId, status: 'anulado' };
     } catch (error) {
       await client.query('ROLLBACK');
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to delete remito');
+      throw new ApiError(500, `Failed to void remito: ${(error as Error).message}`);
     } finally {
       client.release();
     }
+  }
+
+  /** @deprecated Use anularRemito instead. Kept for backward compat. */
+  async deleteRemito(companyId: string, remitoId: string) {
+    // Redirect to anular
+    return this.anularRemito(companyId, remitoId, '');
   }
 
   async uploadSignedPdf(companyId: string, remitoId: string, base64Data: string) {
@@ -844,106 +869,53 @@ export class RemitosService {
     return r.rows;
   }
 
-  /** Items de una factura que todavia no fueron remitados */
-  async getAvailableInvoiceItemsForRemito(companyId: string, invoiceId: string) {
+  /** Items de una factura resueltos a order_items para crear remito desde factura */
+  async getInvoiceItemsForRemito(companyId: string, invoiceId: string) {
     await this.ensureTables();
     const r = await pool.query(`
-      SELECT
-        ii.id as invoice_item_id, ii.product_id, ii.product_name,
-        ii.quantity, CAST(ii.unit_price AS text) as unit_price, COALESCE(ii.vat_rate, 21) as vat_rate,
+      SELECT ii.id as invoice_item_id, ii.product_id, ii.product_name,
+        ii.quantity as invoice_qty, CAST(ii.unit_price AS text) as unit_price,
+        COALESCE(ii.vat_rate, 21) as vat_rate,
         ii.order_item_id,
-        i.invoice_type, i.invoice_number, i.enterprise_id,
-        e.name as enterprise_name,
-        COALESCE(SUM(ri.quantity), 0) as qty_delivered,
-        ii.quantity - COALESCE(SUM(ri.quantity), 0) as qty_available
+        i.enterprise_id,
+        CASE WHEN ii.order_item_id IS NOT NULL THEN
+          oi.quantity - COALESCE(oi.qty_delivered, 0)
+        ELSE ii.quantity END as qty_available,
+        CASE WHEN ii.order_item_id IS NOT NULL THEN
+          'Pedido #' || LPAD(o.order_number::text, 4, '0')
+        ELSE 'Manual' END as source_ref,
+        o.id as order_id
       FROM invoice_items ii
       JOIN invoices i ON ii.invoice_id = i.id
-      LEFT JOIN enterprises e ON i.enterprise_id = e.id
-      LEFT JOIN remito_items ri ON ri.invoice_item_id = ii.id
-        AND ri.remito_id IN (SELECT id FROM remitos WHERE company_id = $1)
+      LEFT JOIN order_items oi ON ii.order_item_id = oi.id
+      LEFT JOIN orders o ON oi.order_id = o.id
       WHERE i.company_id = $1 AND i.id = $2 AND i.status != 'cancelled'
-      GROUP BY ii.id, ii.product_id, ii.product_name, ii.quantity, ii.unit_price, ii.vat_rate,
-        ii.order_item_id, i.invoice_type, i.invoice_number, i.enterprise_id, e.name
-      HAVING ii.quantity - COALESCE(SUM(ri.quantity), 0) > 0
       ORDER BY ii.created_at ASC
     `, [companyId, invoiceId]);
-    return r.rows;
+    return r.rows.filter((row: any) => parseFloat(row.qty_available || '0') > 0);
   }
 
-  /** Facturas de una empresa que tienen items sin remitar */
-  async getInvoicesWithPendingDelivery(companyId: string, enterpriseId: string) {
-    await this.ensureTables();
-    const r = await pool.query(`
-      SELECT i.id, i.invoice_type, i.invoice_number, CAST(i.total_amount AS text) as total_amount,
-        i.status, i.invoice_date,
-        COALESCE((
-          SELECT json_agg(json_build_object(
-            'invoice_item_id', ii.id,
-            'product_name', ii.product_name,
-            'quantity', ii.quantity,
-            'unit_price', CAST(ii.unit_price AS text),
-            'vat_rate', COALESCE(ii.vat_rate, 21),
-            'order_item_id', ii.order_item_id,
-            'qty_delivered', COALESCE((
-              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
-            ), 0),
-            'qty_available', ii.quantity - COALESCE((
-              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
-            ), 0)
-          ))
-          FROM invoice_items ii
-          WHERE ii.invoice_id = i.id
-            AND ii.quantity - COALESCE((
-              SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.invoice_item_id = ii.id
-            ), 0) > 0
-        ), '[]'::json) as items
-      FROM invoices i
-      WHERE i.company_id = $1 AND i.enterprise_id = $2 AND i.status != 'cancelled'
-      ORDER BY i.invoice_date ASC
-    `, [companyId, enterpriseId]);
-    // Filter out invoices with no available items
-    return r.rows.filter((inv: any) => {
-      const items = inv.items;
-      return Array.isArray(items) && items.length > 0;
-    });
-  }
-
-  /** Datos de contexto de un remito (facturas vinculadas + status items) */
+  /** Datos de contexto de un remito (items status) */
   async getRemitoContextData(companyId: string, remitoId: string) {
     await this.ensureTables();
-    // Facturas vinculadas
-    const invoicesRes = await pool.query(`
-      SELECT i.id, i.invoice_number, i.invoice_type, CAST(i.total_amount AS text) as total_amount, i.status
-      FROM invoices i
-      JOIN invoice_remitos ir ON ir.invoice_id = i.id
-      WHERE ir.remito_id = $1 AND i.company_id = $2
-      ORDER BY i.created_at DESC
-    `, [remitoId, companyId]);
 
-    // Items con status de facturacion
+    // Items con origen
     const itemsRes = await pool.query(`
-      SELECT ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.invoice_item_id,
-        COALESCE(SUM(ii.quantity), 0) as qty_invoiced,
-        ri.quantity - COALESCE(SUM(ii.quantity), 0) as qty_pending,
+      SELECT ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.product_id,
         CASE
           WHEN ri.order_item_id IS NOT NULL THEN (
             SELECT 'Pedido #' || LPAD(o.order_number::text, 4, '0')
             FROM order_items oi JOIN orders o ON oi.order_id = o.id
             WHERE oi.id = ri.order_item_id
           )
-          WHEN ri.invoice_item_id IS NOT NULL THEN 'Factura'
           ELSE 'Manual'
         END as source_ref
       FROM remito_items ri
-      LEFT JOIN invoice_items ii ON ii.remito_item_id = ri.id
-        AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled' AND company_id = $2)
       WHERE ri.remito_id = $1
-      GROUP BY ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.invoice_item_id
       ORDER BY ri.id
-    `, [remitoId, companyId]);
+    `, [remitoId]);
 
     return {
-      invoices: invoicesRes.rows,
       items_status: itemsRes.rows,
     };
   }

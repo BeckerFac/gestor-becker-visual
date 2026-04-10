@@ -27,16 +27,11 @@ describe('Fase 1: DB Migrations (code verification)', () => {
 
     // N:N tables
     expect(source).toContain('CREATE TABLE IF NOT EXISTS remito_orders');
-    expect(source).toContain('CREATE TABLE IF NOT EXISTS invoice_remitos');
 
     // remito_items columns
     expect(source).toContain('order_item_id');
-    expect(source).toContain('invoice_item_id');
     expect(source).toContain('unit_price');
     expect(source).toContain('vat_rate');
-
-    // invoice_items.remito_item_id
-    expect(source).toContain('remito_item_id');
 
     // order_items.qty_delivered
     expect(source).toContain('qty_delivered');
@@ -47,10 +42,11 @@ describe('Fase 1: DB Migrations (code verification)', () => {
 
     // Indices
     expect(source).toContain('idx_remito_items_order_item');
-    expect(source).toContain('idx_invoice_items_remito_item');
 
-    // ON DELETE RESTRICT (not CASCADE) for orders/invoices
+    // ON DELETE RESTRICT for orders
     expect(source).toContain('ON DELETE RESTRICT');
+    // Plan 12: invoice_remitos and invoice_item_id REMOVED
+    // Remitos are independent of invoicing
   });
 });
 
@@ -84,40 +80,13 @@ describe('Fase 2: Availability Queries', () => {
     expect(items[0].qty_available).toBe(7);
   });
 
-  it('getAvailableInvoiceItemsForRemito excludes fully delivered items', async () => {
-    mockPoolQuery.mockImplementation(async (sql: string) => {
-      if (sql.includes('invoice_items') && sql.includes('qty_available')) {
-        return {
-          rows: [
-            { invoice_item_id: 'ii-1', product_name: 'GoBecker', quantity: 3, qty_delivered: 1, qty_available: 2 },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
+  // getAvailableInvoiceItemsForRemito REMOVED in Plan 12 (remitos independent of invoicing)
 
-    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
-    const service = new (RemitosService as any)();
-    service.tablesEnsured = true;
-
-    const items = await service.getAvailableInvoiceItemsForRemito('comp-1', 'inv-1');
-    expect(items).toHaveLength(1);
-    expect(items[0].qty_available).toBe(2);
-  });
-
-  it('getRemitoContextData returns invoices and item status', async () => {
-    let callCount = 0;
+  it('getRemitoContextData returns item status', async () => {
     mockPoolQuery.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) { // invoices query
-        return { rows: [{ id: 'inv-1', invoice_number: 3, invoice_type: 'B', total_amount: '60500', status: 'draft' }] };
-      }
-      if (callCount === 2) { // items status query
-        return { rows: [
-          { id: 'ri-1', product_name: 'Pintura', quantity: 5, qty_invoiced: 3, qty_pending: 2, source_ref: 'Pedido #0003' },
-        ]};
-      }
-      return { rows: [] };
+      return { rows: [
+        { id: 'ri-1', product_name: 'Pintura', quantity: 5, order_item_id: 'oi-1', source_ref: 'Pedido #0003' },
+      ]};
     });
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -125,9 +94,7 @@ describe('Fase 2: Availability Queries', () => {
     service.tablesEnsured = true;
 
     const data = await service.getRemitoContextData('comp-1', 'rem-1');
-    expect(data.invoices).toHaveLength(1);
     expect(data.items_status).toHaveLength(1);
-    expect(data.items_status[0].qty_pending).toBe(2);
     expect(data.items_status[0].source_ref).toBe('Pedido #0003');
   });
 });
@@ -242,7 +209,8 @@ describe('Fase 3: createRemito with linking', () => {
     expect(remitoOrdersInsert).toBeDefined();
   });
 
-  it('createRemito resolves transitive order_item_id from invoice_item', async () => {
+  // Plan 12: invoice_item resolution REMOVED (remitos independent)
+  it.skip('createRemito resolves transitive order_item_id from invoice_item', async () => {
     const executedQueries: Array<{ sql: string; params?: any[] }> = [];
     const mockClient = {
       query: vi.fn().mockImplementation(async (sql: string, params?: any[]) => {
@@ -286,7 +254,8 @@ describe('Fase 3: createRemito with linking', () => {
     expect(updateQty).toBeDefined();
   });
 
-  it('createRemito validates same enterprise for invoice items', async () => {
+  // Plan 12: invoice_item validation REMOVED (remitos independent)
+  it.skip('createRemito validates same enterprise for invoice items', async () => {
     const mockClient = {
       query: vi.fn().mockImplementation(async (sql: string) => {
         if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] };
@@ -318,22 +287,22 @@ describe('Fase 3: createRemito with linking', () => {
 // FASE 3: deleteRemito reverts qty_delivered
 // ═══════════════════════════════════════════════════════════════════
 
-describe('Fase 3: deleteRemito reverts qty_delivered', () => {
+describe('Fase 3: anularRemito reverts qty_delivered', () => {
   beforeEach(() => resetMocks());
 
-  it('deleteRemito reverts qty_delivered and removes remito_orders', async () => {
+  it('anularRemito reverts qty_delivered and sets status to anulado', async () => {
     const executedQueries: Array<{ sql: string; params?: any[] }> = [];
     const mockClient = {
       query: vi.fn().mockImplementation(async (sql: string, params?: any[]) => {
         executedQueries.push({ sql, params });
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         // Find remito
-        if (sql.includes('SELECT id FROM remitos')) return { rows: [{ id: 'rem-1' }] };
-        // Get items with order_item_id
-        if (sql.includes('SELECT order_item_id, quantity FROM remito_items')) {
+        if (sql.includes('SELECT id, status FROM remitos')) return { rows: [{ id: 'rem-1', status: 'pendiente' }] };
+        // Get items
+        if (sql.includes('SELECT id, order_item_id, product_id, quantity FROM remito_items')) {
           return { rows: [
-            { order_item_id: 'oi-1', quantity: 3 },
-            { order_item_id: 'oi-2', quantity: 5 },
+            { id: 'ri-1', order_item_id: 'oi-1', product_id: null, quantity: 3 },
+            { id: 'ri-2', order_item_id: 'oi-2', product_id: null, quantity: 5 },
           ]};
         }
         return { rows: [] };
@@ -348,15 +317,15 @@ describe('Fase 3: deleteRemito reverts qty_delivered', () => {
     const service = new (RemitosService as any)();
     service.tablesEnsured = true;
 
-    await service.deleteRemito('comp-1', 'rem-1');
+    await service.anularRemito('comp-1', 'rem-1', 'user-1');
 
     // Should have reverted qty for both items
     const revertQueries = executedQueries.filter(q => q.sql.includes('GREATEST') && q.sql.includes('qty_delivered'));
     expect(revertQueries).toHaveLength(2);
 
-    // Should have deleted remito_orders
-    const deleteRO = executedQueries.find(q => q.sql.includes('DELETE FROM remito_orders'));
-    expect(deleteRO).toBeDefined();
+    // Should have set status to anulado
+    const statusUpdate = executedQueries.find(q => q.sql.includes('UPDATE remitos SET status') && q.params?.includes('anulado'));
+    expect(statusUpdate).toBeDefined();
   });
 });
 
@@ -364,10 +333,10 @@ describe('Fase 3: deleteRemito reverts qty_delivered', () => {
 // FASE 4: Invoice accepts remito_item_id (integration-level)
 // ═══════════════════════════════════════════════════════════════════
 
-describe('Fase 4: getAvailableOrderItemsForInvoicing includes delivery data', () => {
+describe('Fase 4: getAvailableOrderItemsForInvoicing (simplified)', () => {
   beforeEach(() => resetMocks());
 
-  it('query includes delivery tracking CTEs', async () => {
+  it('query uses simple item_invoiced CTE (no delivery blocking)', async () => {
     const executedQueries: string[] = [];
     mockPoolQuery.mockImplementation(async (sql: string) => {
       executedQueries.push(sql);
@@ -376,20 +345,17 @@ describe('Fase 4: getAvailableOrderItemsForInvoicing includes delivery data', ()
 
     const { InvoicesService } = await import('../src/modules/invoices/invoices.service');
     const service = new (InvoicesService as any)();
-    // Skip ensureMigrations
     service.migrationsRun = true;
 
     try {
       await service.getAvailableOrderItemsForInvoicing('comp-1', {});
-    } catch { /* may fail due to mocks, that's fine */ }
+    } catch { /* may fail due to mocks */ }
 
-    // Verify the query includes all 4 CTEs
-    const mainQuery = executedQueries.find(q => q.includes('item_invoiced') && q.includes('item_delivered'));
+    const mainQuery = executedQueries.find(q => q.includes('item_invoiced') && q.includes('qty_remaining'));
     expect(mainQuery).toBeDefined();
-    expect(mainQuery).toContain('item_delivered');
-    expect(mainQuery).toContain('item_invoiced_via_remito');
-    expect(mainQuery).toContain('item_remito_info');
-    expect(mainQuery).toContain('qty_available_direct');
-    expect(mainQuery).toContain('remito_info');
+    // Should NOT include delivery CTEs (Plan 12: remitos independent)
+    expect(mainQuery).not.toContain('item_delivered');
+    expect(mainQuery).not.toContain('item_invoiced_via_remito');
+    expect(mainQuery).not.toContain('remito_info');
   });
 });

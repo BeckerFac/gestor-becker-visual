@@ -305,42 +305,62 @@ export const Remitos: React.FC = () => {
     setShowOrderImporter(false)
   }
 
-  // ── Import items from invoice ──────────────────────────────────────────────
+  // ── Import items from invoice (resolves to order_items) ──────────────────
 
   const handleImportFromInvoice = async () => {
     if (!form.enterprise_id) return
     setShowInvoiceImporter(true)
     setImporterLoading(true)
     try {
-      const data = await api.getInvoicesWithPendingDelivery(form.enterprise_id)
-      setImporterItems(data || [])
+      // Load invoices of this enterprise to let user pick one
+      const invoicesData = await api.getInvoices({ enterprise_id: form.enterprise_id }).catch(() => ({ items: [] }))
+      const invList = Array.isArray(invoicesData) ? invoicesData : (invoicesData?.items || [])
+      setImporterItems(invList.filter((i: any) => i.status !== 'cancelled'))
     } catch { setImporterItems([]) }
     finally { setImporterLoading(false) }
   }
 
-  const handleConfirmInvoiceImport = (selected: Array<{ item: any; qty: number }>) => {
-    const existingIds = new Set(items.filter(i => i.invoice_item_id).map(i => i.invoice_item_id))
-    const newItems: RemitoItem[] = selected
-      .filter(s => !existingIds.has(s.item.invoice_item_id))
-      .map(s => ({
-        product_name: s.item.product_name,
-        description: '',
-        quantity: s.qty,
-        unit: 'unidades',
-        unit_price: parseFloat(s.item.unit_price || '0'),
-        vat_rate: s.item.vat_rate || 21,
-        invoice_item_id: s.item.invoice_item_id,
-        order_item_id: s.item.order_item_id || undefined,
-        source: 'invoice' as const,
-        source_ref: `Factura ${s.item.invoice_type || ''}-${s.item.invoice_number || ''}`,
-        qty_available: parseFloat(s.item.qty_available || '0'),
-        localId: crypto.randomUUID(),
-      }))
-    setItems(prev => {
-      const filtered = prev.filter(i => i.product_name.trim() || i.source !== 'manual')
-      return [...filtered, ...newItems]
-    })
-    setShowInvoiceImporter(false)
+  const handleSelectInvoiceForImport = async (invoiceId: string) => {
+    try {
+      const invoiceItems = await api.getInvoiceItemsForRemito(invoiceId)
+      const existingOrderItemIds = new Set(items.filter(i => i.order_item_id).map(i => i.order_item_id))
+
+      const newItems: RemitoItem[] = (invoiceItems || []).map((ii: any) => {
+        const isFromOrder = !!ii.order_item_id
+        const isDuplicate = isFromOrder && existingOrderItemIds.has(ii.order_item_id)
+        if (isDuplicate) return null // skip duplicates
+
+        return {
+          product_name: ii.product_name,
+          description: '',
+          quantity: Math.min(parseFloat(ii.invoice_qty || ii.qty_available || '0'), parseFloat(ii.qty_available || '999')),
+          unit: 'unidades',
+          product_id: ii.product_id || undefined,
+          unit_price: parseFloat(ii.unit_price || '0'),
+          vat_rate: ii.vat_rate || 21,
+          order_item_id: ii.order_item_id || undefined,
+          source: isFromOrder ? 'order' as const : 'manual' as const,
+          source_ref: ii.source_ref || (isFromOrder ? `Pedido` : 'Manual'),
+          source_id: ii.order_id || undefined,
+          qty_available: parseFloat(ii.qty_available || '0'),
+          localId: crypto.randomUUID(),
+        }
+      }).filter(Boolean) as RemitoItem[]
+
+      if (newItems.length === 0) {
+        toast.info('No hay items disponibles para remitar de esta factura')
+        return
+      }
+
+      setItems(prev => {
+        const filtered = prev.filter(i => i.product_name.trim() || i.source !== 'manual')
+        return [...filtered, ...newItems]
+      })
+      setShowInvoiceImporter(false)
+      toast.success(`${newItems.length} items importados de la factura`)
+    } catch (e: any) {
+      toast.error('Error al cargar items de la factura')
+    }
   }
 
   // ── URL params: pre-load from order/invoice/expand ─────────────────────────
@@ -378,17 +398,20 @@ export const Remitos: React.FC = () => {
         }).catch(() => toast.error('No se pudieron cargar los items del pedido'))
       }
       if (preloadInvoiceId) {
-        api.getAvailableInvoiceItemsForRemito(preloadInvoiceId).then(data => {
+        api.getInvoiceItemsForRemito(preloadInvoiceId).then((data: any) => {
           if (data?.length > 0) {
             setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '' }))
             setItems(data.map((i: any) => ({
               product_name: i.product_name, description: '',
-              quantity: parseFloat(i.qty_available), unit: 'unidades',
+              quantity: Math.min(parseFloat(i.invoice_qty || i.qty_available || '0'), parseFloat(i.qty_available || '999')),
+              unit: 'unidades',
+              product_id: i.product_id || undefined,
               unit_price: parseFloat(i.unit_price || '0'), vat_rate: i.vat_rate || 21,
-              invoice_item_id: i.invoice_item_id, order_item_id: i.order_item_id,
-              source: 'invoice' as const,
-              source_ref: `Factura ${i.invoice_type}-${i.invoice_number}`,
-              qty_available: parseFloat(i.qty_available), localId: crypto.randomUUID(),
+              order_item_id: i.order_item_id || undefined,
+              source: (i.order_item_id ? 'order' : 'manual') as 'order' | 'manual',
+              source_ref: i.source_ref || (i.order_item_id ? 'Pedido' : 'Manual'),
+              source_id: i.order_id || undefined,
+              qty_available: parseFloat(i.qty_available || '0'), localId: crypto.randomUUID(),
             })))
           } else {
             toast.info('Todos los items de esta factura ya fueron remitados')
@@ -907,40 +930,28 @@ export const Remitos: React.FC = () => {
                   </div>
                 )}
 
-                {/* Invoice Items Importer */}
+                {/* Invoice Importer — select a factura to import its order items */}
                 {showInvoiceImporter && (
                   <div className="border-2 border-green-200 rounded-lg p-4 bg-green-50 mb-3 animate-fadeIn">
                     <div className="flex justify-between items-center mb-3">
-                      <h4 className="font-medium text-green-800">Importar items de facturas</h4>
+                      <h4 className="font-medium text-green-800">Seleccionar factura para importar items</h4>
                       <button type="button" onClick={() => setShowInvoiceImporter(false)} className="text-gray-500 hover:text-gray-700">x</button>
                     </div>
                     {importerLoading ? <p className="text-sm text-gray-500">Cargando facturas...</p> :
-                     importerItems.length === 0 ? <p className="text-sm text-amber-600">No hay facturas con items pendientes de remitar</p> :
+                     importerItems.length === 0 ? <p className="text-sm text-amber-600">No hay facturas de esta empresa</p> :
                     (
-                      <div className="space-y-3">
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
                         {importerItems.map((inv: any) => (
-                          <div key={inv.id}>
-                            <div className="text-sm font-medium text-green-700 mb-1">
-                              Factura {inv.invoice_type}-{String(inv.invoice_number).padStart(8, '0')}
-                            </div>
-                            {(inv.items || []).map((item: any) => {
-                              const alreadyImported = items.some(i => i.invoice_item_id === item.invoice_item_id)
-                              return (
-                                <div key={item.invoice_item_id} className={`flex items-center gap-2 py-1 ${alreadyImported ? 'opacity-40' : ''}`}>
-                                  <span className="text-sm flex-1">{item.product_name}</span>
-                                  <span className="text-xs text-gray-500">disp: {parseFloat(item.qty_available)}</span>
-                                  {!alreadyImported && (
-                                    <button type="button"
-                                      className="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700"
-                                      onClick={() => handleConfirmInvoiceImport([{ item, qty: parseFloat(item.qty_available) }])}>
-                                      Agregar
-                                    </button>
-                                  )}
-                                  {alreadyImported && <span className="text-xs text-green-500">Ya importado</span>}
-                                </div>
-                              )
-                            })}
-                          </div>
+                          <button key={inv.id} type="button"
+                            onClick={() => handleSelectInvoiceForImport(inv.id)}
+                            className="w-full text-left px-3 py-2 rounded hover:bg-green-100 text-sm flex justify-between items-center">
+                            <span className="font-medium text-green-800">
+                              {inv.invoice_type || 'B'}-{String(inv.invoice_number || 0).padStart(8, '0')}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              ${parseFloat(inv.total_amount || '0').toLocaleString('es-AR')} — {inv.status === 'authorized' ? 'Autorizada' : inv.status === 'draft' ? 'Borrador' : inv.status}
+                            </span>
+                          </button>
                         ))}
                       </div>
                     )}

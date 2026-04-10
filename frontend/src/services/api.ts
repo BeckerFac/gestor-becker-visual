@@ -1327,24 +1327,16 @@ export const api = {
     const { data } = await client.get(`/remitos/available-order-items?enterprise_id=${enterpriseId}`)
     return data
   },
-  getAvailableInvoiceItemsForRemito: async (invoiceId: string) => {
-    const { data } = await client.get(`/remitos/available-invoice-items/${invoiceId}`)
-    return data
-  },
-  getInvoicesWithPendingDelivery: async (enterpriseId: string) => {
-    const { data } = await client.get(`/remitos/available-invoice-items?enterprise_id=${enterpriseId}`)
+  getInvoiceItemsForRemito: async (invoiceId: string) => {
+    const { data } = await client.get(`/remitos/invoice-items-for-remito/${invoiceId}`)
     return data
   },
   getRemitoContextData: async (remitoId: string) => {
     const { data } = await client.get(`/remitos/${remitoId}/context`)
     return data
   },
-  getAvailableRemitoItemsForInvoicing: async (remitoId: string) => {
-    const { data } = await client.get(`/invoices/available-remito-items/${remitoId}`)
-    return data
-  },
-  getRemitosWithPendingItems: async (enterpriseId: string) => {
-    const { data } = await client.get(`/invoices/remitos-with-pending?enterprise_id=${enterpriseId}`)
+  anularRemito: async (id: string) => {
+    const { data } = await client.put(`/remitos/${id}/anular`)
     return data
   },
 

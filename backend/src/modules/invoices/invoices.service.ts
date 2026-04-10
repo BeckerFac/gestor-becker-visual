@@ -286,31 +286,6 @@ export class InvoicesService {
             collectedOrderItemIds.push(item.order_item_id);
           }
 
-          // Link invoice_item to remito_item if provided (factura desde remito)
-          if (item.remito_item_id) {
-            await pool.query(
-              'UPDATE invoice_items SET remito_item_id = $1 WHERE id = $2',
-              [item.remito_item_id, itemId]
-            );
-          }
-        }
-
-        // Create invoice_remitos N:N entries if any items came from remitos
-        const remitoItemIds = (data.items || []).filter((i: any) => i.remito_item_id).map((i: any) => i.remito_item_id);
-        if (remitoItemIds.length > 0) {
-          try {
-            const remitoIdsResult = await pool.query(
-              'SELECT DISTINCT remito_id FROM remito_items WHERE id = ANY($1)',
-              [remitoItemIds]
-            );
-            for (const row of remitoIdsResult.rows) {
-              await pool.query(
-                `INSERT INTO invoice_remitos (id, invoice_id, remito_id) VALUES (gen_random_uuid(), $1, $2)
-                 ON CONFLICT (invoice_id, remito_id) DO NOTHING`,
-                [invoiceId, row.remito_id]
-              );
-            }
-          } catch (e) { /* invoice_remitos table may not exist yet */ }
         }
 
         // Update invoice totals
@@ -1337,33 +1312,6 @@ export class InvoicesService {
         JOIN invoices i ON ii.invoice_id = i.id
         WHERE i.status != 'cancelled' AND i.company_id = $1 AND ii.order_item_id IS NOT NULL
         GROUP BY ii.order_item_id
-      ),
-      item_delivered AS (
-        SELECT ri.order_item_id, COALESCE(SUM(ri.quantity), 0) as qty_delivered
-        FROM remito_items ri
-        WHERE ri.order_item_id IS NOT NULL
-        GROUP BY ri.order_item_id
-      ),
-      item_invoiced_via_remito AS (
-        SELECT ri.order_item_id, COALESCE(SUM(ii.quantity), 0) as qty_inv_via_remito
-        FROM invoice_items ii
-        JOIN remito_items ri ON ii.remito_item_id = ri.id
-        JOIN invoices inv ON ii.invoice_id = inv.id AND inv.status != 'cancelled'
-        WHERE ri.order_item_id IS NOT NULL
-        GROUP BY ri.order_item_id
-      ),
-      item_remito_info AS (
-        SELECT ri.order_item_id,
-          json_agg(json_build_object(
-            'remito_id', r.id,
-            'remito_number', r.remito_number,
-            'punto_venta', r.punto_venta,
-            'qty', ri.quantity
-          )) as remitos
-        FROM remito_items ri
-        JOIN remitos r ON ri.remito_id = r.id
-        WHERE ri.order_item_id IS NOT NULL
-        GROUP BY ri.order_item_id
       )
       SELECT
         o.id as order_id, o.order_number, o.title as order_title, o.enterprise_id,
@@ -1374,18 +1322,11 @@ export class InvoicesService {
         CAST(oi.subtotal AS decimal) as subtotal,
         COALESCE(CAST(oi.vat_rate AS decimal), 21) as vat_rate,
         COALESCE(inv.qty_invoiced, 0) as qty_invoiced,
-        CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) as qty_remaining,
-        COALESCE(del.qty_delivered, 0) as qty_delivered,
-        GREATEST(COALESCE(del.qty_delivered, 0) - COALESCE(ivr.qty_inv_via_remito, 0), 0) as qty_remito_pending_invoice,
-        GREATEST(CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) - GREATEST(COALESCE(del.qty_delivered, 0) - COALESCE(ivr.qty_inv_via_remito, 0), 0), 0) as qty_available_direct,
-        COALESCE(rinfo.remitos, '[]'::json) as remito_info
+        CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0) as qty_remaining
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN enterprises e ON o.enterprise_id = e.id
       LEFT JOIN item_invoiced inv ON inv.order_item_id = oi.id
-      LEFT JOIN item_delivered del ON del.order_item_id = oi.id
-      LEFT JOIN item_invoiced_via_remito ivr ON ivr.order_item_id = oi.id
-      LEFT JOIN item_remito_info rinfo ON rinfo.order_item_id = oi.id
       WHERE o.company_id = $1 AND o.status NOT IN ('cancelado', 'cancelled')
         ${enterpriseFilter}
         AND (CAST(oi.quantity AS decimal) - COALESCE(inv.qty_invoiced, 0)) > 0
@@ -1398,60 +1339,6 @@ export class InvoicesService {
     console.error('getAvailableOrderItemsForInvoicing ERROR:', (err as Error).message, { companyId, filters });
     throw err;
   }
-  }
-
-  /** Items de un remito que todavia no fueron facturados */
-  async getAvailableRemitoItemsForInvoicing(companyId: string, remitoId: string) {
-    const { rows } = await pool.query(`
-      SELECT
-        ri.id as remito_item_id, ri.product_id, ri.product_name,
-        ri.quantity, CAST(ri.unit_price AS text) as unit_price, COALESCE(ri.vat_rate, 21) as vat_rate,
-        ri.order_item_id,
-        r.remito_number, r.punto_venta, r.enterprise_id,
-        e.name as enterprise_name,
-        COALESCE(SUM(ii.quantity), 0) as qty_invoiced,
-        ri.quantity - COALESCE(SUM(ii.quantity), 0) as qty_available
-      FROM remito_items ri
-      JOIN remitos r ON ri.remito_id = r.id
-      LEFT JOIN enterprises e ON r.enterprise_id = e.id
-      LEFT JOIN invoice_items ii ON ii.remito_item_id = ri.id
-        AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled' AND company_id = $1)
-      WHERE r.company_id = $1 AND r.id = $2
-      GROUP BY ri.id, ri.product_id, ri.product_name, ri.quantity, ri.unit_price, ri.vat_rate,
-        ri.order_item_id, r.remito_number, r.punto_venta, r.enterprise_id, e.name
-      HAVING ri.quantity - COALESCE(SUM(ii.quantity), 0) > 0
-      ORDER BY ri.id
-    `, [companyId, remitoId]);
-    return rows;
-  }
-
-  /** Remitos de una empresa que tienen items pendientes de facturar */
-  async getRemitosWithPendingItems(companyId: string, enterpriseId: string) {
-    const { rows } = await pool.query(`
-      SELECT r.id as remito_id, r.remito_number, r.punto_venta, r.date, r.status,
-        COALESCE((
-          SELECT json_agg(sub ORDER BY sub.remito_item_id)
-          FROM (
-            SELECT ri.id as remito_item_id, ri.product_name,
-              ri.quantity, CAST(ri.unit_price AS text) as unit_price,
-              COALESCE(ri.vat_rate, 21) as vat_rate, ri.order_item_id,
-              COALESCE((SELECT SUM(ii.quantity) FROM invoice_items ii
-                WHERE ii.remito_item_id = ri.id
-                AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled')
-              ), 0) as qty_invoiced,
-              ri.quantity - COALESCE((SELECT SUM(ii.quantity) FROM invoice_items ii
-                WHERE ii.remito_item_id = ri.id
-                AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled')
-              ), 0) as qty_available
-            FROM remito_items ri WHERE ri.remito_id = r.id
-          ) sub
-          WHERE sub.qty_available > 0
-        ), '[]'::json) as items
-      FROM remitos r
-      WHERE r.company_id = $1 AND r.enterprise_id = $2
-      ORDER BY r.date ASC
-    `, [companyId, enterpriseId]);
-    return rows.filter((r: any) => Array.isArray(r.items) && r.items.length > 0);
   }
 
   /**

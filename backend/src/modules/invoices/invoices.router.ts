@@ -9,8 +9,6 @@ invoicesRouter.post('/', authorize('invoices', 'create'), (req, res) => invoices
 invoicesRouter.post('/import', authorize('invoices', 'create'), (req, res) => invoicesController.importInvoice(req, res));
 // IMPORTANT: Static routes MUST be before /:id to avoid Express matching them as params
 invoicesRouter.get('/available-order-items', authorize('invoices', 'view'), (req, res) => invoicesController.getAvailableOrderItems(req as any, res));
-invoicesRouter.get('/available-remito-items/:remitoId', authorize('invoices', 'view'), (req, res) => invoicesController.getAvailableRemitoItems(req as any, res));
-invoicesRouter.get('/remitos-with-pending', authorize('invoices', 'view'), (req, res) => invoicesController.getRemitosWithPendingItems(req as any, res));
 invoicesRouter.get('/order/:orderId/remaining', authorize('invoices', 'view'), (req, res) => invoicesController.getOrderRemainingToInvoice(req as any, res));
 invoicesRouter.get('/order/:orderId/invoices', authorize('invoices', 'view'), (req, res) => invoicesController.getInvoicesByOrder(req as any, res));
 // Parameterized routes AFTER static ones
