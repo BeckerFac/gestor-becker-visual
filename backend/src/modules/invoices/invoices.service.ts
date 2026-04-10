@@ -1335,7 +1335,7 @@ export class InvoicesService {
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
         JOIN invoices i ON ii.invoice_id = i.id
-        WHERE i.status != 'cancelled' AND ii.order_item_id IS NOT NULL
+        WHERE i.status != 'cancelled' AND i.company_id = $1 AND ii.order_item_id IS NOT NULL
         GROUP BY ii.order_item_id
       ),
       item_delivered AS (

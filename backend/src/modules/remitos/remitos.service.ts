@@ -94,6 +94,7 @@ export class RemitosService {
 
       // Migration: qty_delivered in order_items (denormalized delivery tracking)
       await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});
+      await pool.query(`UPDATE order_items SET qty_delivered = 0 WHERE qty_delivered IS NULL`).catch(() => {});
 
       // Migration: remitos format fields (punto de venta + cross-references)
       await pool.query(`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS punto_venta INTEGER DEFAULT 1`).catch(() => {});
@@ -233,18 +234,30 @@ export class RemitosService {
       const orderItemIds = (data.items || []).filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id);
       const invoiceItemIds = (data.items || []).filter((i: any) => i.invoice_item_id).map((i: any) => i.invoice_item_id);
 
+      // Validate at least one item exists (FIX BUG #12)
+      const validItems = (data.items || []).filter((i: any) => i.product_name?.trim());
+      if (validItems.length === 0 && !data.order_id) {
+        throw new ApiError(400, 'El remito debe tener al menos un item');
+      }
+
       if (orderItemIds.length > 0) {
+        // Lock order_items AND validate enterprise ownership (FIX BUG #11)
         const lockResult = await client.query(
-          `SELECT id, quantity, COALESCE(qty_delivered, 0) as qty_delivered FROM order_items WHERE id = ANY($1) FOR UPDATE`,
-          [orderItemIds]
+          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id
+           FROM order_items oi JOIN orders o ON oi.order_id = o.id
+           WHERE oi.id = ANY($1) AND o.company_id = $2 FOR UPDATE OF oi`,
+          [orderItemIds, companyId]
         );
         const lockedItems = new Map(lockResult.rows.map((r: any) => [r.id, r]));
 
-        // Validate each item's quantity
         for (const item of data.items) {
           if (!item.order_item_id) continue;
           const locked = lockedItems.get(item.order_item_id);
           if (!locked) throw new ApiError(400, `Item de pedido ${item.order_item_id} no encontrado`);
+          // Validate same enterprise (FIX BUG #11)
+          if (enterpriseId && locked.enterprise_id && locked.enterprise_id !== enterpriseId) {
+            throw new ApiError(400, `El item "${item.product_name}" pertenece a otra empresa`);
+          }
           const available = parseFloat(locked.quantity) - parseFloat(locked.qty_delivered);
           if ((item.quantity || 1) > available + 0.01) {
             throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}". Disponible: ${available}`);
@@ -323,10 +336,16 @@ export class RemitosService {
       }
       // Also add legacy order_id if provided
       if (data.order_id && !orderIdsSet.has(data.order_id)) {
-        await client.query(`
-          INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
-          ON CONFLICT (remito_id, order_id) DO NOTHING
-        `, [remitoId, data.order_id]).catch(() => {});
+        // Validate order exists and belongs to same company before linking
+        const orderCheck = await client.query(
+          'SELECT id FROM orders WHERE id = $1 AND company_id = $2', [data.order_id, companyId]
+        );
+        if (orderCheck.rows.length > 0) {
+          await client.query(`
+            INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
+            ON CONFLICT (remito_id, order_id) DO NOTHING
+          `, [remitoId, data.order_id]);
+        }
       }
 
       await client.query('COMMIT');
