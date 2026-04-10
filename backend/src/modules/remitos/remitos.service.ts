@@ -195,12 +195,37 @@ export class RemitosService {
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
-      const itemsResult = await db.execute(sql`
-        SELECT * FROM remito_items WHERE remito_id = ${remitoId} ORDER BY id ASC
-      `);
-      const items = getRows(itemsResult);
+      // Items with invoicing status and source reference
+      const itemsResult = await pool.query(`
+        SELECT ri.*,
+          COALESCE((SELECT SUM(ii.quantity) FROM invoice_items ii
+            WHERE ii.remito_item_id = ri.id
+            AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled')
+          ), 0) as qty_invoiced,
+          CASE
+            WHEN ri.order_item_id IS NOT NULL THEN (
+              SELECT 'Pedido #' || LPAD(o2.order_number::text, 4, '0')
+              FROM order_items oi2 JOIN orders o2 ON oi2.order_id = o2.id
+              WHERE oi2.id = ri.order_item_id
+            )
+            WHEN ri.invoice_item_id IS NOT NULL THEN 'Factura'
+            ELSE 'Manual'
+          END as source_ref
+        FROM remito_items ri WHERE ri.remito_id = $1 ORDER BY ri.id ASC
+      `, [remitoId]);
+      const items = itemsResult.rows || [];
 
-      return { ...rows[0], items };
+      // Also add enterprise info
+      let enterprise = null;
+      if (rows[0].enterprise_id) {
+        const entResult = await pool.query(
+          'SELECT id, name, razon_social, cuit, tax_condition, address, city, province FROM enterprises WHERE id = $1',
+          [rows[0].enterprise_id]
+        );
+        enterprise = entResult.rows[0] || null;
+      }
+
+      return { ...rows[0], items, enterprise };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get remito');

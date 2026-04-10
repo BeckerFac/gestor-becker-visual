@@ -165,6 +165,8 @@ export const Remitos: React.FC = () => {
 
   // Preview modal
   const [previewRemitoId, setPreviewRemitoId] = useState<string | null>(null)
+  const [expandedRemitoId, setExpandedRemitoId] = useState<string | null>(null)
+  const [expandedRemitoDetail, setExpandedRemitoDetail] = useState<Record<string, any>>({})
 
   // Item importers
   const [showOrderImporter, setShowOrderImporter] = useState(false)
@@ -1096,7 +1098,18 @@ export const Remitos: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {remitos.map(remito => (
-                  <tr key={remito.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-context-menu"
+                  <React.Fragment key={remito.id}>
+                  <tr
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer ${expandedRemitoId === remito.id ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                    onClick={() => {
+                      const newId = expandedRemitoId === remito.id ? null : remito.id
+                      setExpandedRemitoId(newId)
+                      if (newId && !expandedRemitoDetail[newId]) {
+                        api.getRemito(newId).then(data => {
+                          setExpandedRemitoDetail(prev => ({ ...prev, [newId]: data }))
+                        }).catch(() => {})
+                      }
+                    }}
                     onContextMenu={(e) => {
                       contextMenu.openMenu(e, remito)
                       if (!contextData[remito.id]) {
@@ -1203,6 +1216,111 @@ export const Remitos: React.FC = () => {
                       </div>
                     </td>
                   </tr>
+                  {/* Expandible row */}
+                  {expandedRemitoId === remito.id && (
+                    <tr>
+                      <td colSpan={10} className="px-4 py-3 bg-gray-50/80 dark:bg-gray-800/30 border-b">
+                        {!expandedRemitoDetail[remito.id] ? (
+                          <p className="text-xs text-gray-400 italic">Cargando detalle...</p>
+                        ) : (() => {
+                          const detail = expandedRemitoDetail[remito.id]
+                          const detailItems = detail.items || []
+                          const ctx = contextData[remito.id]
+                          return (
+                            <div className="space-y-3">
+                              {/* Info del remito */}
+                              <div className="flex gap-6 text-xs">
+                                {detail.receiver_name && (
+                                  <div><span className="font-semibold text-gray-600">Receptor:</span> {detail.receiver_name}</div>
+                                )}
+                                {detail.delivery_address && (
+                                  <div><span className="font-semibold text-gray-600">Direccion:</span> {detail.delivery_address}</div>
+                                )}
+                                {detail.transport && (
+                                  <div><span className="font-semibold text-gray-600">Transporte:</span> {detail.transport}</div>
+                                )}
+                                {detail.notes && (
+                                  <div><span className="font-semibold text-gray-600">Notas:</span> {detail.notes}</div>
+                                )}
+                              </div>
+
+                              {/* Items table */}
+                              {detailItems.length > 0 && (
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-[10px] text-gray-500 uppercase">
+                                      <th className="text-left pb-1">Origen</th>
+                                      <th className="text-left pb-1">Producto</th>
+                                      <th className="text-right pb-1">Cantidad</th>
+                                      <th className="text-right pb-1">Facturado</th>
+                                      <th className="text-left pb-1 pl-2">Estado</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {detailItems.map((item: any, idx: number) => {
+                                      const qtyInv = parseFloat(item.qty_invoiced || '0')
+                                      const qty = parseFloat(item.quantity || '0')
+                                      const sourceRef = item.source_ref || (item.order_item_id ? 'Pedido' : item.invoice_item_id ? 'Factura' : 'Manual')
+                                      return (
+                                        <tr key={idx} className="border-t border-gray-200/50 dark:border-gray-700">
+                                          <td className="py-1.5">
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                              sourceRef.includes('Pedido') ? 'bg-blue-100 text-blue-700' :
+                                              sourceRef.includes('Factura') ? 'bg-green-100 text-green-700' :
+                                              'bg-gray-100 text-gray-600'
+                                            }`}>{sourceRef}</span>
+                                          </td>
+                                          <td className="py-1.5 font-medium text-gray-800 dark:text-gray-200">{item.product_name}</td>
+                                          <td className="py-1.5 text-right">{qty} {item.unit || ''}</td>
+                                          <td className="py-1.5 text-right">
+                                            <span className={qtyInv >= qty ? 'text-green-600' : qtyInv > 0 ? 'text-amber-600' : 'text-gray-400'}>
+                                              {qtyInv}/{qty}
+                                            </span>
+                                          </td>
+                                          <td className="py-1.5 pl-2">
+                                            <span className={`text-[10px] font-medium ${
+                                              qtyInv >= qty ? 'text-green-600' : qtyInv > 0 ? 'text-amber-600' : 'text-gray-400'
+                                            }`}>
+                                              {qtyInv >= qty ? 'Facturado' : qtyInv > 0 ? 'Parcial' : 'Pendiente'}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+
+                              {/* Facturas vinculadas */}
+                              {ctx?.invoices?.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap text-xs">
+                                  <span className="text-gray-500 font-medium">Facturas:</span>
+                                  {ctx.invoices.map((inv: any) => (
+                                    <button key={inv.id}
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.id}`) }}
+                                      className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono hover:bg-blue-100">
+                                      {inv.invoice_type}-{inv.invoice_number} (${parseFloat(inv.total_amount).toLocaleString('es-AR')})
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Actions */}
+                              <div className="flex gap-2">
+                                {detailItems.some((i: any) => parseFloat(i.qty_invoiced || '0') < parseFloat(i.quantity || '0')) && (
+                                  <button onClick={(e) => { e.stopPropagation(); navigate(`/invoices?nuevo=true&remito_id=${remito.id}`) }}
+                                    className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">
+                                    Crear factura de items pendientes
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -1260,7 +1378,7 @@ export const Remitos: React.FC = () => {
                 for (const inv of data.invoices) {
                   menuItems.push({
                     id: `inv-${inv.id}`, label: `Factura ${inv.invoice_type}-${inv.invoice_number} ($${parseFloat(inv.total_amount).toLocaleString('es-AR')})`,
-                    onClick: () => { navigate(`/facturas?expand=${inv.id}`); contextMenu.closeMenu() },
+                    onClick: () => { navigate(`/invoices?expand=${inv.id}`); contextMenu.closeMenu() },
                   })
                 }
                 menuItems.push({ id: 'sep1', label: '', separator: true })
@@ -1273,7 +1391,7 @@ export const Remitos: React.FC = () => {
             }
 
             menuItems.push({ id: 'crear-factura', label: 'Crear factura de este remito',
-              onClick: () => { navigate(`/facturas?nuevo=true&remito_id=${remito.id}`); contextMenu.closeMenu() },
+              onClick: () => { navigate(`/invoices?nuevo=true&remito_id=${remito.id}`); contextMenu.closeMenu() },
             })
             menuItems.push({ id: 'ver', label: 'Ver detalle',
               onClick: () => { setPreviewRemitoId(remito.id); contextMenu.closeMenu() },
