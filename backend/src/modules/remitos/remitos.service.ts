@@ -177,20 +177,15 @@ export class RemitosService {
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
-      // Items with invoicing status and source reference
+      // Items with source reference
       const itemsResult = await pool.query(`
         SELECT ri.*,
-          COALESCE((SELECT SUM(ii.quantity) FROM invoice_items ii
-            WHERE ii.remito_item_id = ri.id
-            AND ii.invoice_id IN (SELECT id FROM invoices WHERE status != 'cancelled')
-          ), 0) as qty_invoiced,
           CASE
             WHEN ri.order_item_id IS NOT NULL THEN (
               SELECT 'Pedido #' || LPAD(o2.order_number::text, 4, '0')
               FROM order_items oi2 JOIN orders o2 ON oi2.order_id = o2.id
               WHERE oi2.id = ri.order_item_id
             )
-            WHEN ri.invoice_item_id IS NOT NULL THEN 'Factura'
             ELSE 'Manual'
           END as source_ref
         FROM remito_items ri WHERE ri.remito_id = $1 ORDER BY ri.id ASC
@@ -357,7 +352,7 @@ export class RemitosService {
       await client.query('COMMIT');
       return { id: remitoId, remito_number: remitoNumber };
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));
       console.error('Create remito error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, `Failed to create remito: ${(error as Error).message}`);
@@ -395,16 +390,8 @@ export class RemitosService {
         WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
 
-      // Replace items if provided
-      if (data.items && Array.isArray(data.items)) {
-        await db.execute(sql`DELETE FROM remito_items WHERE remito_id = ${remitoId}`);
-        for (const item of data.items) {
-          await db.execute(sql`
-            INSERT INTO remito_items (id, remito_id, product_name, description, quantity, unit)
-            VALUES (${uuid()}, ${remitoId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${item.unit || 'unidades'})
-          `);
-        }
-      }
+      // Items are NOT editable (Plan 12: anular + recrear instead)
+      // Only header fields (address, receiver, transport, notes, date) can be updated
 
       return { id: remitoId };
     } catch (error) {
@@ -513,7 +500,7 @@ export class RemitosService {
       await client.query('COMMIT');
       return { id: remitoId, status: 'anulado' };
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, `Failed to void remito: ${(error as Error).message}`);
     } finally {
@@ -522,9 +509,8 @@ export class RemitosService {
   }
 
   /** @deprecated Use anularRemito instead. Kept for backward compat. */
-  async deleteRemito(companyId: string, remitoId: string) {
-    // Redirect to anular
-    return this.anularRemito(companyId, remitoId, '');
+  async deleteRemito(companyId: string, remitoId: string, userId?: string) {
+    return this.anularRemito(companyId, remitoId, userId || 'system');
   }
 
   async uploadSignedPdf(companyId: string, remitoId: string, base64Data: string) {

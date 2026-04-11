@@ -39,7 +39,7 @@ export class RemitosController {
   }
 
   async deleteRemito(req: AuthRequest, res: Response) {
-    const data = await remitosService.deleteRemito(req.user!.company_id, req.params.id);
+    const data = await remitosService.deleteRemito(req.user!.company_id, req.params.id, req.user!.id);
     res.json(data);
   }
 
