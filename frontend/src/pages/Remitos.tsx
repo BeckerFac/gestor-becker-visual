@@ -34,7 +34,7 @@ interface RemitoItem {
   unit_price?: number
   vat_rate?: number
   order_item_id?: string
-  invoice_item_id?: string
+  // invoice_item_id removed (Plan 12: remitos independent of invoicing)
   // UI-only fields for item picker
   source?: 'order' | 'invoice' | 'manual'
   source_ref?: string       // "Pedido #0003" or "Factura B-002"
@@ -489,7 +489,6 @@ export const Remitos: React.FC = () => {
           unit_price:     it.unit_price || null,
           vat_rate:       it.vat_rate || 21,
           order_item_id:  it.order_item_id || null,
-          invoice_item_id: it.invoice_item_id || null,
         })),
       })
       toast.success('Remito creado correctamente')
@@ -1271,7 +1270,7 @@ export const Remitos: React.FC = () => {
                                     {detailItems.map((item: any, idx: number) => {
                                       const qtyInv = parseFloat(item.qty_invoiced || '0')
                                       const qty = parseFloat(item.quantity || '0')
-                                      const sourceRef = item.source_ref || (item.order_item_id ? 'Pedido' : item.invoice_item_id ? 'Factura' : 'Manual')
+                                      const sourceRef = item.source_ref || (item.order_item_id ? 'Pedido' : 'Manual')
                                       return (
                                         <tr key={idx} className="border-t border-gray-200/50 dark:border-gray-700">
                                           <td className="py-1.5">
