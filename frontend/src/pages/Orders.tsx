@@ -724,12 +724,15 @@ export const Orders: React.FC = () => {
     setExpandedOrder(prev => prev === orderId ? null : orderId)
     if (willExpand) {
       loadInvoicingStatus(orderId)
-      if (!orderDetails[orderId]) {
-        try {
-          const detail = await api.getOrderInvoicingDetail(orderId)
-          setOrderDetails(prev => ({ ...prev, [orderId]: detail }))
-        } catch { /* ignore */ }
-      }
+      // Always refetch detail and context to show up-to-date remitos/invoices
+      try {
+        const [detail, ctx] = await Promise.all([
+          api.getOrderInvoicingDetail(orderId),
+          api.getOrderContextData(orderId),
+        ])
+        setOrderDetails(prev => ({ ...prev, [orderId]: detail }))
+        setContextData(prev => ({ ...prev, [orderId]: ctx }))
+      } catch { /* ignore */ }
     }
   }
 
@@ -1621,12 +1624,12 @@ export const Orders: React.FC = () => {
                       onClick={() => toggleExpand(order.id)}
                       onContextMenu={(e) => {
                         contextMenu.openMenu(e, order)
-                        // Load context data (invoices + receipts) for context menu
-                        if (!contextData[order.id]) {
-                          api.getOrderContextData(order.id)
-                            .then(data => setContextData(prev => ({ ...prev, [order.id]: data })))
-                            .catch(() => {})
-                        }
+                        // ALWAYS refetch context (invoices + receipts + remitos) — never use cache.
+                        // Cache causa "sin remitos asociados" stale cuando un remito se crea
+                        // desde otra pagina mientras el pedido ya fue expandido aca.
+                        api.getOrderContextData(order.id)
+                          .then(data => setContextData(prev => ({ ...prev, [order.id]: data })))
+                          .catch(() => {})
                       }}
                     >
                       <td className="px-4 py-3">

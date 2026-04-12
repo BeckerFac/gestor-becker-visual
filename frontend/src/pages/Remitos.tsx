@@ -255,7 +255,7 @@ export const Remitos: React.FC = () => {
     setFilterDateTo('')
   }
 
-  // ── Enterprise change: clear items from different enterprise (FIX review) ──
+  // ── Enterprise change: clear items from different enterprise + autocomplete ──
 
   const handleEnterpriseChange = (id: string) => {
     const hadItems = items.some(it => it.source && it.source !== 'manual')
@@ -263,7 +263,17 @@ export const Remitos: React.FC = () => {
       // Clear linked items when switching enterprise
       setItems([{ ...EMPTY_ITEM, localId: crypto.randomUUID() }])
     }
-    setForm(prev => ({ ...prev, enterprise_id: id, order_id: '' }))
+
+    // Autocomplete receptor info from the selected enterprise (all fields editable after)
+    const selectedEnt = enterprises.find(e => e.id === id) as any
+    setForm(prev => ({
+      ...prev,
+      enterprise_id: id,
+      order_id: '',
+      // Only auto-fill if the user has not typed anything yet (don't overwrite manual input)
+      delivery_address: prev.delivery_address || selectedEnt?.address || '',
+      receiver_name: prev.receiver_name || selectedEnt?.name || selectedEnt?.razon_social || '',
+    }))
   }
 
   // ── Import items from order ────────────────────────────────────────────────

@@ -567,6 +567,29 @@ export class RemitosService {
           INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
           ON CONFLICT (remito_id, order_id) DO NOTHING
         `, [remitoId, data.order_id]);
+        orderIdsSet.add(data.order_id);
+      }
+
+      // 8. Auto-transition order status to 'entregado' when all items are fully delivered
+      //    (consolidated list of affected orders from both item-level links and legacy order_id)
+      for (const affectedOrderId of orderIdsSet) {
+        const allDelivered = await client.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE CAST(oi.quantity AS decimal) > COALESCE(oi.qty_delivered, 0)) as pending_count,
+            COUNT(*) as total_count
+          FROM order_items oi
+          WHERE oi.order_id = $1
+        `, [affectedOrderId]);
+        const row = allDelivered.rows[0];
+        if (row && Number(row.total_count) > 0 && Number(row.pending_count) === 0) {
+          // All items delivered → mark order as entregado (but don't overwrite terminal states)
+          await client.query(`
+            UPDATE orders
+            SET status = 'entregado', updated_at = NOW()
+            WHERE id = $1
+              AND status NOT IN ('entregado', 'cancelado', 'cancelled')
+          `, [affectedOrderId]);
+        }
       }
 
       await client.query('COMMIT');
@@ -581,93 +604,17 @@ export class RemitosService {
     }
   }
 
-  async updateRemito(companyId: string, remitoId: string, data: any) {
-    await this.ensureTables();
-    try {
-      // Verify remito belongs to company
-      const existing = await this.getRemito(companyId, remitoId);
-      if (!existing) throw new ApiError(404, 'Remito not found');
-
-      // BUG S10 #1: block edits to anulado remitos
-      if (existing.status === 'anulado') {
-        throw new ApiError(400, 'No se puede modificar un remito anulado');
-      }
-
-      // BUG S10 #2: validate field lengths
-      if (data.delivery_address && String(data.delivery_address).length > 500) {
-        throw new ApiError(400, 'La direccion de entrega no puede exceder 500 caracteres');
-      }
-      if (data.receiver_name && String(data.receiver_name).length > 255) {
-        throw new ApiError(400, 'El nombre del receptor no puede exceder 255 caracteres');
-      }
-      if (data.transport && String(data.transport).length > 255) {
-        throw new ApiError(400, 'El transporte no puede exceder 255 caracteres');
-      }
-      if (data.notes && String(data.notes).length > 2000) {
-        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
-      }
-      // BUG S10 #3: validate date format
-      if (data.date) {
-        const d = new Date(data.date);
-        if (isNaN(d.getTime())) {
-          throw new ApiError(400, 'Fecha invalida. Debe ser formato ISO 8601');
-        }
-      }
-
-      // BUG S3-MISSED #1: validate customer_id belongs to company (IDOR fix)
-      if (data.customer_id) {
-        const custCheck = await pool.query(
-          'SELECT id FROM customers WHERE id = $1 AND company_id = $2',
-          [data.customer_id, companyId]
-        );
-        if (custCheck.rows.length === 0) {
-          throw new ApiError(400, 'El cliente no existe o no pertenece a tu compania');
-        }
-      }
-      // BUG S3-MISSED #2: validate enterprise_id belongs to company
-      if (data.enterprise_id) {
-        const entCheck = await pool.query(
-          'SELECT id FROM enterprises WHERE id = $1 AND company_id = $2',
-          [data.enterprise_id, companyId]
-        );
-        if (entCheck.rows.length === 0) {
-          throw new ApiError(400, 'La empresa no existe o no pertenece a tu compania');
-        }
-      }
-
-      // Resolve enterprise_id from customer if not provided
-      let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
-      if (!enterpriseId && data.customer_id) {
-        const custResult = await pool.query(
-          'SELECT enterprise_id FROM customers WHERE id = $1 AND company_id = $2',
-          [data.customer_id, companyId]
-        );
-        if (custResult.rows[0]?.enterprise_id) enterpriseId = custResult.rows[0].enterprise_id;
-      }
-
-      // Update remito record
-      await db.execute(sql`
-        UPDATE remitos SET
-          customer_id = ${data.customer_id || existing.customer_id || null},
-          enterprise_id = ${enterpriseId},
-          delivery_address = ${data.delivery_address !== undefined ? data.delivery_address : existing.delivery_address},
-          receiver_name = ${data.receiver_name !== undefined ? data.receiver_name : existing.receiver_name},
-          transport = ${data.transport !== undefined ? data.transport : existing.transport},
-          notes = ${data.notes !== undefined ? data.notes : existing.notes},
-          date = ${data.date || existing.date},
-          updated_at = NOW()
-        WHERE id = ${remitoId} AND company_id = ${companyId}
-      `);
-
-      // Items are NOT editable (Plan 12: anular + recrear instead)
-      // Only header fields (address, receiver, transport, notes, date) can be updated
-
-      return { id: remitoId };
-    } catch (error) {
-      console.error('Update remito error:', error);
-      if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to update remito');
-    }
+  /**
+   * Remitos son INMUTABLES post-creacion. Una vez creado un remito, los datos
+   * quedan congelados como registro fiscal/logistico. Si hay error, se anula
+   * y se crea uno nuevo. Lo unico que puede cambiar es el STATUS (workflow)
+   * via updateRemitoStatus, o anular via anularRemito.
+   */
+  async updateRemito(_companyId: string, _remitoId: string, _data: any): Promise<any> {
+    throw new ApiError(
+      403,
+      'Los remitos no se pueden modificar una vez creados. Si hay un error, anula el remito y crea uno nuevo.'
+    );
   }
 
   async updateRemitoStatus(companyId: string, remitoId: string, status: string) {
@@ -799,6 +746,25 @@ export class RemitosService {
             WHERE ri.order_item_id = order_items.id AND r.status != 'anulado'
           ) WHERE id = $1
         `, [oiId]);
+      }
+
+      // Revert order status 'entregado' → 'pendiente' if items are no longer fully delivered
+      if (affectedOrderItemIds.length > 0) {
+        const affectedOrders = await client.query(`
+          SELECT DISTINCT order_id FROM order_items WHERE id = ANY($1)
+        `, [affectedOrderItemIds]);
+        for (const { order_id } of affectedOrders.rows) {
+          const check = await client.query(`
+            SELECT COUNT(*) FILTER (WHERE CAST(oi.quantity AS decimal) > COALESCE(oi.qty_delivered, 0)) as pending_count
+            FROM order_items oi WHERE oi.order_id = $1
+          `, [order_id]);
+          if (Number(check.rows[0]?.pending_count || 0) > 0) {
+            await client.query(`
+              UPDATE orders SET status = 'pendiente', updated_at = NOW()
+              WHERE id = $1 AND status = 'entregado'
+            `, [order_id]);
+          }
+        }
       }
 
       await client.query('COMMIT');
@@ -1027,7 +993,6 @@ export class RemitosService {
     <td style="width:4%; vertical-align:top; text-align:center; padding:6px;">
       <div class="r-box">
         <div class="r-letter">R</div>
-        <div class="r-sub">DOCUMENTO<br>NO VALIDO<br>COMO FACTURA<br>COD. N&deg; 91</div>
       </div>
     </td>
     <td class="header-right" style="width:48%; vertical-align:top; padding:8px 10px;">

@@ -29,54 +29,30 @@ function minimalClient() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// BUG #1: updateRemito bloquea anulado
+// updateRemito es INMUTABLE post-creacion (cambio de diseno 2026-04-12)
+// Los remitos no se pueden modificar. Solo cambiar status via
+// updateRemitoStatus, o anular via anularRemito.
 // ═══════════════════════════════════════════════════════════════════
 
-describe('Seccion 10 BUG #1: updateRemito bloquea anulados', () => {
-  beforeEach(() => {
-    resetMocks();
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+describe('Seccion 10: updateRemito inmutable', () => {
+  beforeEach(() => resetMocks());
+
+  it('rechaza cualquier intento de update (remito pendiente)', async () => {
+    const service = await makeService();
+    await expect(service.updateRemito('comp-1', 'r1', { notes: 'new' }))
+      .rejects.toThrow(/no se pueden modificar una vez creados/);
   });
 
   it('rechaza update a remito anulado', async () => {
-    mockDbExecute.mockImplementation(async () => ({
-      rows: [{ id: 'r1', status: 'anulado', company_id: 'comp-1' }],
-    }));
     const service = await makeService();
     await expect(service.updateRemito('comp-1', 'r1', { notes: 'new' }))
-      .rejects.toThrow(/anulado/);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// BUG #2: updateRemito field length validation
-// ═══════════════════════════════════════════════════════════════════
-
-describe('Seccion 10 BUG #2: updateRemito valida lengths', () => {
-  beforeEach(() => {
-    resetMocks();
-    mockDbExecute.mockImplementation(async () => ({
-      rows: [{ id: 'r1', status: 'pendiente', company_id: 'comp-1' }],
-    }));
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+      .rejects.toThrow(/no se pueden modificar una vez creados/);
   });
 
-  it('rechaza notes > 2000 chars', async () => {
+  it('rechaza cualquier cambio de delivery_address', async () => {
     const service = await makeService();
-    await expect(service.updateRemito('comp-1', 'r1', { notes: 'A'.repeat(2500) }))
-      .rejects.toThrow(/2000/);
-  });
-
-  it('rechaza delivery_address > 500 chars', async () => {
-    const service = await makeService();
-    await expect(service.updateRemito('comp-1', 'r1', { delivery_address: 'A'.repeat(600) }))
-      .rejects.toThrow(/500/);
-  });
-
-  it('rechaza date invalida en update', async () => {
-    const service = await makeService();
-    await expect(service.updateRemito('comp-1', 'r1', { date: 'garbage-date' }))
-      .rejects.toThrow(/Fecha invalida/);
+    await expect(service.updateRemito('comp-1', 'r1', { delivery_address: 'otra' }))
+      .rejects.toThrow(/no se pueden modificar una vez creados/);
   });
 });
 
