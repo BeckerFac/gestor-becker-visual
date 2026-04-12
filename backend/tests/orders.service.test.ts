@@ -115,15 +115,19 @@ describe('OrdersService', () => {
 
   describe('createOrder', () => {
     it('creates order with valid data and returns id and status', async () => {
-      mockDbExecute.mockResolvedValue({ rows: [] })
-
-      let callIndex = 0
-      mockDbExecute.mockImplementation(() => {
-        callIndex++
-        // After migrations (~9), next_number is call ~10, customer lookup is ~11
-        if (callIndex === 10) return Promise.resolve({ rows: [{ next_number: '5' }] })
-        if (callIndex === 11) return Promise.resolve({ rows: [{ enterprise_id: 'enterprise-1' }] })
-        return Promise.resolve({ rows: [] })
+      mockDbExecute.mockImplementation(async (sqlObj: any) => {
+        const sqlStr = sqlObj?.strings ? sqlObj.strings.join('?') : String(sqlObj)
+        // Customer validation (new in Plan: Seccion 1 fixes)
+        if (sqlStr.includes('SELECT id, enterprise_id FROM customers')) {
+          return { rows: [{ id: 'customer-1', enterprise_id: 'enterprise-1' }] }
+        }
+        if (sqlStr.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'enterprise-1' }] }
+        if (sqlStr.includes('FROM business_units')) return { rows: [{ id: 'bu-1' }] }
+        if (sqlStr.includes('MAX(order_number)')) return { rows: [{ next_number: '5' }] }
+        if (sqlStr.includes('SELECT enterprise_id FROM customers')) {
+          return { rows: [{ enterprise_id: 'enterprise-1' }] }
+        }
+        return { rows: [] }
       })
 
       const result = await service.createOrder('company-1', 'user-1', {

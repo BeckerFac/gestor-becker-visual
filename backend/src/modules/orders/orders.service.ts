@@ -228,8 +228,80 @@ export class OrdersService {
 
   async createOrder(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
-    console.log('createOrder START', { companyId, userId, title: data?.title, itemCount: data?.items?.length || 0 });
     try {
+      // ═══ VALIDATIONS (Plan: fix 8 bugs from endpoint audit) ═══
+      // BUG #2: title required
+      if (!data.title || typeof data.title !== 'string' || !data.title.trim()) {
+        throw new ApiError(400, 'El titulo del pedido es requerido');
+      }
+
+      // BUG #8: priority must be valid
+      const VALID_PRIORITIES = ['baja', 'normal', 'alta', 'urgente'];
+      if (data.priority && !VALID_PRIORITIES.includes(data.priority)) {
+        throw new ApiError(400, `Prioridad invalida. Valores: ${VALID_PRIORITIES.join(', ')}`);
+      }
+
+      // BUG #3: validate items have positive qty/price
+      // BUG #4: validate vat_rate 0-100
+      if (data.items && Array.isArray(data.items)) {
+        for (const item of data.items) {
+          if (!item.product_name || !String(item.product_name).trim()) {
+            throw new ApiError(400, 'Todos los items deben tener product_name');
+          }
+          const qty = Number(item.quantity);
+          if (!Number.isFinite(qty) || qty <= 0) {
+            throw new ApiError(400, `Cantidad invalida en "${item.product_name}". Debe ser > 0`);
+          }
+          const price = Number(item.unit_price);
+          if (!Number.isFinite(price) || price < 0) {
+            throw new ApiError(400, `Precio unitario invalido en "${item.product_name}". Debe ser >= 0`);
+          }
+          const vat = Number(item.vat_rate ?? 21);
+          if (!Number.isFinite(vat) || vat < 0 || vat > 100) {
+            throw new ApiError(400, `IVA invalido en "${item.product_name}". Debe estar entre 0 y 100`);
+          }
+        }
+      }
+
+      // BUG #5: validate discount_percent is numeric and 0-100
+      if (data.discount_percent !== undefined && data.discount_percent !== null) {
+        const dp = Number(data.discount_percent);
+        if (!Number.isFinite(dp) || dp < 0 || dp > 100) {
+          throw new ApiError(400, 'Descuento invalido. Debe ser un numero entre 0 y 100');
+        }
+      }
+
+      // BUG #7: validate enterprise_id belongs to company
+      if (data.enterprise_id) {
+        const entCheck = await db.execute(sql`
+          SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}
+        `);
+        if (((entCheck as any).rows || []).length === 0) {
+          throw new ApiError(400, 'La empresa no existe o no pertenece a tu compania');
+        }
+      }
+
+      // BUG #1: validate customer_id belongs to company (IDOR fix)
+      if (data.customer_id) {
+        const custCheck = await db.execute(sql`
+          SELECT id, enterprise_id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}
+        `);
+        const custRows = (custCheck as any).rows || [];
+        if (custRows.length === 0) {
+          throw new ApiError(400, 'El cliente no existe o no pertenece a tu compania');
+        }
+      }
+
+      // Validate business_unit_id belongs to company (IDOR fix)
+      if (data.business_unit_id) {
+        const buCheck = await db.execute(sql`
+          SELECT id FROM business_units WHERE id = ${data.business_unit_id} AND company_id = ${companyId}
+        `);
+        if (((buCheck as any).rows || []).length === 0) {
+          throw new ApiError(400, 'La unidad de negocio no pertenece a tu compania');
+        }
+      }
+
       const orderId = uuid();
 
       // Auto-assign default business_unit_id if not provided
@@ -248,10 +320,12 @@ export class OrdersService {
       const numRows = (numResult as any).rows || numResult || [];
       const orderNumber = parseInt(numRows[0]?.next_number || '1');
 
-      // Auto-resolve enterprise_id from customer if not provided
+      // Auto-resolve enterprise_id from customer if not provided (customer already validated above)
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
-        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
+        const custResult = await db.execute(sql`
+          SELECT enterprise_id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}
+        `);
         const custRows = (custResult as any).rows || custResult || [];
         if (custRows.length > 0 && custRows[0].enterprise_id) {
           enterpriseId = custRows[0].enterprise_id;
@@ -274,8 +348,8 @@ export class OrdersService {
         totalVat = subtotal * Number(data.vat_rate || 21) / 100;
       }
 
-      // Apply order-level discount
-      const discountPercent = Math.min(Math.max(Number(data.discount_percent || 0), 0), 100);
+      // Apply order-level discount (already validated above)
+      const discountPercent = Number(data.discount_percent || 0);
       const discountMultiplier = 1 - discountPercent / 100;
       const discountedSubtotal = subtotal * discountMultiplier;
       const discountedVat = totalVat * discountMultiplier;
@@ -351,8 +425,12 @@ export class OrdersService {
         });
       } catch (e) { console.error('CRM sync error (order_created):', e); }
 
-      console.log('createOrder SUCCESS', { orderId, orderNumber });
-      return { id: orderId, status: 'pendiente' };
+      return {
+        id: orderId,
+        order_number: orderNumber,
+        total_amount: totalWithVat,
+        status: 'pendiente',
+      };
     } catch (error) {
       await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('createOrder FAILED', { companyId, error });
