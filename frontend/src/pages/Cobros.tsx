@@ -247,6 +247,9 @@ export const Cobros: React.FC = () => {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
+  // Inline "new bank" modal state for the cheque form
+  const [newBankModal, setNewBankModal] = useState<{ chequeIdx: number; name: string } | null>(null)
+  const [creatingBank, setCreatingBank] = useState(false)
   const [cobros, setCobros] = useState<Cobro[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [aging, setAging] = useState<AgingData | null>(null)
@@ -674,9 +677,23 @@ export const Cobros: React.FC = () => {
     const hasInvoiceItems = items.length > 0
 
     const pmTotal = paymentMethods.reduce((s, pm) => s + (parseFloat(pm.amount) || 0), 0)
+    // Retenciones sufridas count as "received" money: client withheld it on our behalf
+    const retTotal = retencionesSufridas.filter(r => r.enabled).reduce((s, r) => s + (Number(r.amount) || 0), 0)
+    // Total real money "received" in this receipt (cash + retentions)
+    const totalReceived = pmTotal + retTotal
+    const totalAssigned = items.reduce((s, i) => s + i.amount, 0)
 
     if (!hasInvoiceItems && pmTotal <= 0) {
       toast.error('Ingresa un monto o selecciona facturas a cobrar')
+      return
+    }
+
+    // BUG fix: el monto del recibo es lo RECIBIDO (formas de pago + retenciones),
+    // NO la suma de lo asignado a facturas. Y lo asignado no puede superar lo recibido.
+    if (hasInvoiceItems && totalAssigned > totalReceived + 0.01) {
+      toast.error(
+        `No podes asignar mas de lo recibido. Recibido: $${totalReceived.toLocaleString('es-AR', { minimumFractionDigits: 2 })} — Asignado: $${totalAssigned.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+      )
       return
     }
 
@@ -693,7 +710,10 @@ export const Cobros: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      const finalAmount = hasInvoiceItems ? items.reduce((s, i) => s + i.amount, 0) : pmTotal
+      // Receipt amount = money actually received. Assignment to invoices is
+      // distribution, not the total. Fallback to totalAssigned only if no
+      // payment methods / retentions were entered (legacy flow).
+      const finalAmount = totalReceived > 0 ? totalReceived : totalAssigned
 
       // Build payment_methods array from the multi-row form
       const paymentMethodsPayload = paymentMethods
@@ -1378,7 +1398,23 @@ export const Cobros: React.FC = () => {
                     {pm.method === 'cheque' && pm.cheque_data && (
                       <div className="grid grid-cols-4 gap-2 mt-2 pl-4 border-l-2 border-amber-300">
                         <input placeholder="N Cheque" value={pm.cheque_data.number} onChange={e => updateChequeData(i, 'number', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input placeholder="Banco emisor" value={pm.cheque_data.bank} onChange={e => updateChequeData(i, 'bank', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <select
+                          value={pm.cheque_data.bank}
+                          onChange={e => {
+                            if (e.target.value === '__new__') {
+                              setNewBankModal({ chequeIdx: i, name: '' })
+                            } else {
+                              updateChequeData(i, 'bank', e.target.value)
+                            }
+                          }}
+                          className="rounded border p-1.5 text-sm dark:bg-gray-800"
+                        >
+                          <option value="">Banco emisor...</option>
+                          {banks.map(b => (
+                            <option key={b.id} value={b.bank_name}>{b.bank_name}</option>
+                          ))}
+                          <option value="__new__">+ Nuevo banco</option>
+                        </select>
                         <input placeholder="Librador" value={pm.cheque_data.drawer} onChange={e => updateChequeData(i, 'drawer', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
                         <input placeholder="CUIT librador" value={pm.cheque_data.drawer_cuit} onChange={e => updateChequeData(i, 'drawer_cuit', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
                         <select value={pm.cheque_data.cheque_type} onChange={e => updateChequeData(i, 'cheque_type', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800">
@@ -1819,6 +1855,67 @@ export const Cobros: React.FC = () => {
           onClose={() => setLinkingCobro(null)}
           onLinked={() => { setLinkingCobro(null); loadData() }}
         />
+      )}
+
+      {/* Modal: crear banco inline (disparado desde el form de cheque) */}
+      {newBankModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+          onClick={() => setNewBankModal(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md p-5 mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-3">Nuevo banco</h3>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Nombre del banco</label>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Ej: Santander, Galicia, Nacion..."
+              value={newBankModal.name}
+              onChange={e => setNewBankModal({ ...newBankModal, name: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Escape') setNewBankModal(null)
+              }}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setNewBankModal(null)}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={creatingBank || !newBankModal.name.trim()}
+                onClick={async () => {
+                  const name = newBankModal.name.trim()
+                  if (!name) return
+                  setCreatingBank(true)
+                  try {
+                    const created = await api.createBank({ bank_name: name })
+                    const fresh = await api.getBanks().catch(() => [])
+                    setBanks(Array.isArray(fresh) ? fresh : (fresh.items || []))
+                    // Assign new bank name to the cheque that opened the modal
+                    updateChequeData(newBankModal.chequeIdx, 'bank', created?.bank_name || name)
+                    setNewBankModal(null)
+                    toast.success('Banco creado')
+                  } catch (err: any) {
+                    toast.error('No se pudo crear el banco: ' + (err?.message || 'error'))
+                  } finally {
+                    setCreatingBank(false)
+                  }
+                }}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {creatingBank ? 'Creando...' : 'Crear banco'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

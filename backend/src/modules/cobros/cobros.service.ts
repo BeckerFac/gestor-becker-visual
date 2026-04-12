@@ -187,6 +187,26 @@ export class CobrosService {
     const pmTotal = paymentMethods.reduce((s, pm) => s + pm.amount, 0);
     const cobroAmount = pmTotal; // The cobro amount IS the sum of payment methods
 
+    // Defense-in-depth: the amount assigned to invoices can NEVER exceed the
+    // amount actually received (payment methods + retenciones sufridas).
+    // This prevents the "recibo $200k, aplicado $605k" bug where a receipt
+    // appeared to cover the full invoice despite only partial cash entering.
+    const retencionesTotal = data.retenciones_sufridas?.reduce(
+      (s: number, r: any) => s + parseFloat(r.amount || '0'), 0
+    ) || 0;
+    const totalReceived = pmTotal + retencionesTotal;
+    if (data.invoice_items && Array.isArray(data.invoice_items) && data.invoice_items.length > 0) {
+      const assigned = data.invoice_items.reduce(
+        (s: number, it: any) => s + parseFloat(it.amount || '0'), 0
+      );
+      if (assigned > totalReceived + 0.01) {
+        throw new ApiError(
+          400,
+          `La suma aplicada a facturas ($${assigned.toFixed(2)}) no puede superar el total recibido ($${totalReceived.toFixed(2)})`
+        );
+      }
+    }
+
     // B.1.4: summaryMethod for the cobro header
     const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
 
