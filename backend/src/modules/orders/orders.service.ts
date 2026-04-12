@@ -115,11 +115,11 @@ export class OrdersService {
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
           CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) as invoiced_amount,
+          COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status NOT IN ('cancelled', 'cancelado')), 0) as invoiced_amount,
           CASE
             WHEN COALESCE(o.total_amount, 0) = 0 THEN 'sin_monto'
-            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) = 0 THEN 'sin_facturar'
-            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
+            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status NOT IN ('cancelled', 'cancelado')), 0) = 0 THEN 'sin_facturar'
+            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status NOT IN ('cancelled', 'cancelado')), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
             ELSE 'parcial'
           END as invoice_status
           ${selectExtra}
@@ -901,7 +901,7 @@ export class OrdersService {
         LEFT JOIN invoice_orders io ON io.invoice_id = i.id
         WHERE i.company_id = $1
           AND (i.order_id = $2 OR io.order_id = $2)
-          AND i.status != 'cancelled'
+          AND i.status NOT IN ('cancelled', 'cancelado')
         ORDER BY i.created_at ASC`,
         [companyId, orderId]
       );
@@ -979,13 +979,13 @@ export class OrdersService {
             SELECT SUM(CAST(ii.quantity AS decimal))
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
-            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+            WHERE ii.order_item_id = oi.id AND i.status NOT IN ('cancelled', 'cancelado')
           ), 0) as qty_invoiced,
           CAST(oi.quantity AS decimal) - COALESCE((
             SELECT SUM(CAST(ii.quantity AS decimal))
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
-            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+            WHERE ii.order_item_id = oi.id AND i.status NOT IN ('cancelled', 'cancelado')
           ), 0) as qty_remaining,
           COALESCE(CAST(oi.qty_delivered AS decimal), 0) as qty_delivered,
           COALESCE((
@@ -998,7 +998,7 @@ export class OrdersService {
             ))
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
-            WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
+            WHERE ii.order_item_id = oi.id AND i.status NOT IN ('cancelled', 'cancelado')
           ), '[]'::json) as invoices
         FROM order_items oi
         WHERE oi.order_id = ${orderId}

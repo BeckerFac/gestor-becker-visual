@@ -111,7 +111,17 @@ export class RemitosService {
   } = {}) {
     await this.ensureTables();
     try {
-      const { enterprise_id, status, tipo, search, date_from, date_to, skip = 0, limit = 100 } = filters;
+      const { enterprise_id, status, tipo, search, date_from, date_to } = filters;
+      // BUG S6 #3/#4: clamp limit/skip to safe ranges
+      const rawLimit = Number(filters.limit);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 100;
+      const rawSkip = Number(filters.skip);
+      const skip = Number.isFinite(rawSkip) && rawSkip >= 0 ? Math.floor(rawSkip) : 0;
+
+      // BUG S6 #12: validate UUID format if enterprise_id provided
+      if (enterprise_id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(enterprise_id)) {
+        throw new ApiError(400, 'enterprise_id invalido');
+      }
 
       let whereClause = sql`r.company_id = ${companyId}`;
       if (enterprise_id) {
@@ -124,12 +134,24 @@ export class RemitosService {
         whereClause = sql`${whereClause} AND r.tipo = ${tipo}`;
       }
       if (search) {
-        whereClause = sql`${whereClause} AND (c.name ILIKE ${'%' + search + '%'} OR r.receiver_name ILIKE ${'%' + search + '%'} OR r.delivery_address ILIKE ${'%' + search + '%'})`;
+        // BUG S10 #9: limit search length to prevent DoS
+        const safe = String(search).slice(0, 200);
+        // BUG S6 #5: escape LIKE wildcards (% and _) in user input
+        const escaped = safe.replace(/[\\%_]/g, (m) => '\\' + m);
+        const pattern = '%' + escaped + '%';
+        whereClause = sql`${whereClause} AND (c.name ILIKE ${pattern} OR r.receiver_name ILIKE ${pattern} OR r.delivery_address ILIKE ${pattern})`;
       }
+      // BUG S10 #11: validate date formats
       if (date_from) {
+        if (isNaN(new Date(date_from).getTime())) {
+          throw new ApiError(400, 'date_from invalido');
+        }
         whereClause = sql`${whereClause} AND r.date >= ${date_from}`;
       }
       if (date_to) {
+        if (isNaN(new Date(date_to).getTime())) {
+          throw new ApiError(400, 'date_to invalido');
+        }
         whereClause = sql`${whereClause} AND r.date <= ${date_to + 'T23:59:59'}`;
       }
 
@@ -153,9 +175,21 @@ export class RemitosService {
         LIMIT ${limit} OFFSET ${skip}
       `);
       const rows = getRows(result);
-      return { items: rows, total: rows.length };
+
+      // BUG S6 #7: total real para paginacion (no rows.length)
+      const countResult = await db.execute(sql`
+        SELECT COUNT(*)::int as total
+        FROM remitos r
+        LEFT JOIN customers c ON r.customer_id = c.id
+        LEFT JOIN enterprises e ON r.enterprise_id = e.id
+        WHERE ${whereClause}
+      `);
+      const total = Number((getRows(countResult)[0] as any)?.total || 0);
+
+      return { items: rows, total };
     } catch (error) {
       console.error('Get remitos error:', error);
+      if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get remitos');
     }
   }
@@ -188,16 +222,16 @@ export class RemitosService {
             )
             ELSE 'Manual'
           END as source_ref
-        FROM remito_items ri WHERE ri.remito_id = $1 ORDER BY ri.id ASC
+        FROM remito_items ri WHERE ri.remito_id = $1 ORDER BY ri.created_at ASC, ri.id ASC
       `, [remitoId]);
       const items = itemsResult.rows || [];
 
-      // Also add enterprise info
+      // Also add enterprise info (BUG S6 #2: scope to company_id)
       let enterprise = null;
       if (rows[0].enterprise_id) {
         const entResult = await pool.query(
-          'SELECT id, name, razon_social, cuit, tax_condition, address, city, province FROM enterprises WHERE id = $1',
-          [rows[0].enterprise_id]
+          'SELECT id, name, razon_social, cuit, tax_condition, address, city, province FROM enterprises WHERE id = $1 AND company_id = $2',
+          [rows[0].enterprise_id, companyId]
         );
         enterprise = entResult.rows[0] || null;
       }
@@ -212,23 +246,63 @@ export class RemitosService {
   async createRemito(companyId: string, userId: string, data: any) {
     await this.ensureTables();
 
-    // ═══ VALIDATIONS (Plan: Seccion 2 — 10 bugs) ═══
+    // ═══ VALIDATIONS (Plan: Seccion 2 + 3 bugs) ═══
     // BUG #5/6: validate each item qty > 0 BEFORE opening connection
+    // BUG #6 Seccion 3: product_name length
     const allItems = data.items || [];
     for (const item of allItems) {
       if (!item.product_name || !String(item.product_name).trim()) continue;
+      if (String(item.product_name).length > 255) {
+        throw new ApiError(400, 'product_name no puede exceder 255 caracteres');
+      }
       const qty = Number(item.quantity);
       if (!Number.isFinite(qty) || qty <= 0) {
         throw new ApiError(400, `Cantidad invalida en "${item.product_name}". Debe ser un numero positivo > 0`);
       }
+      // BUG S10 #7: unit_price no negativo
+      if (item.unit_price !== undefined && item.unit_price !== null) {
+        const up = Number(item.unit_price);
+        if (!Number.isFinite(up) || up < 0) {
+          throw new ApiError(400, `Precio unitario invalido en "${item.product_name}". Debe ser >= 0`);
+        }
+      }
+      // BUG S10 #8: vat_rate 0-100
+      if (item.vat_rate !== undefined && item.vat_rate !== null) {
+        const vr = Number(item.vat_rate);
+        if (!Number.isFinite(vr) || vr < 0 || vr > 100) {
+          throw new ApiError(400, `IVA invalido en "${item.product_name}". Debe estar entre 0 y 100`);
+        }
+      }
     }
 
-    // BUG #7: validate date format
+    // BUG #7: validate date format + BUG S10 #4: date range
     if (data.date) {
       const d = new Date(data.date);
       if (isNaN(d.getTime())) {
         throw new ApiError(400, 'Fecha invalida. Debe ser formato ISO 8601');
       }
+      const now = Date.now();
+      const oneYearFuture = now + 365 * 24 * 3600 * 1000;
+      const fiveYearsPast = now - 5 * 365 * 24 * 3600 * 1000;
+      if (d.getTime() > oneYearFuture) {
+        throw new ApiError(400, 'Fecha invalida: no puede ser mas de un año en el futuro');
+      }
+      if (d.getTime() < fiveYearsPast) {
+        throw new ApiError(400, 'Fecha invalida: no puede ser mas de 5 años en el pasado');
+      }
+    }
+
+    // BUG S10 #5: punto_venta validation
+    if (data.punto_venta !== undefined && data.punto_venta !== null) {
+      const pv = Number(data.punto_venta);
+      if (!Number.isInteger(pv) || pv < 1 || pv > 9999) {
+        throw new ApiError(400, 'punto_venta invalido. Debe ser un entero entre 1 y 9999');
+      }
+    }
+
+    // BUG S10 #6: tipo whitelist estricto
+    if (data.tipo !== undefined && data.tipo !== null && !['entrega', 'recepcion'].includes(data.tipo)) {
+      throw new ApiError(400, `tipo invalido. Valores permitidos: entrega, recepcion`);
     }
 
     // BUG #9: validate text field lengths
@@ -243,6 +317,13 @@ export class RemitosService {
     }
     if (data.notes && String(data.notes).length > 2000) {
       throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+    }
+    // BUG S5 #6: factura_ref length
+    if (data.factura_ref && String(data.factura_ref).length > 100) {
+      throw new ApiError(400, 'La referencia de factura no puede exceder 100 caracteres');
+    }
+    if (data.pedido_ref && String(data.pedido_ref).length > 100) {
+      throw new ApiError(400, 'La referencia de pedido no puede exceder 100 caracteres');
     }
 
     // BUG #2: validate enterprise_id belongs to company (IDOR fix)
@@ -271,6 +352,9 @@ export class RemitosService {
     try {
       await client.query('BEGIN');
 
+      // BUG S3-MISSED #3: advisory lock on company to serialize remito_number generation
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remito_num:${companyId}`]);
+
       // 1. Get next remito number
       const numResult = await client.query(
         'SELECT COALESCE(MAX(remito_number), 0) + 1 as next_number FROM remitos WHERE company_id = $1',
@@ -291,8 +375,14 @@ export class RemitosService {
       // 3. Get punto_venta from company config
       const puntoVenta = data.punto_venta || 1;
 
-      // 4. Validate items
-      const validItems = (data.items || []).filter((i: any) => i.product_name?.trim());
+      // 4. Validate items (BUG S3-MISSED #4: reject empty product_name instead of silent drop)
+      const rawItems = data.items || [];
+      for (const it of rawItems) {
+        if (!it.product_name || !String(it.product_name).trim()) {
+          throw new ApiError(400, 'Cada item debe tener product_name no vacio');
+        }
+      }
+      const validItems = rawItems;
       if (validItems.length === 0 && !data.order_id) {
         throw new ApiError(400, 'El remito debe tener al menos un item');
       }
@@ -303,10 +393,13 @@ export class RemitosService {
       const orderIdsSet = new Set<string>();
 
       if (orderItemIds.length > 0) {
+        // BUG S4 #1: exclude items from cancelled orders
         const lockResult = await client.query(
-          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id, oi.order_id
+          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id, oi.order_id, o.status as order_status
            FROM order_items oi JOIN orders o ON oi.order_id = o.id
-           WHERE oi.id = ANY($1) AND o.company_id = $2 FOR UPDATE OF oi`,
+           WHERE oi.id = ANY($1) AND o.company_id = $2
+             AND o.status NOT IN ('cancelado', 'cancelled')
+           FOR UPDATE OF oi`,
           [orderItemIds, companyId]
         );
         const lockedItems = new Map(lockResult.rows.map((r: any) => [r.id, r]));
@@ -328,9 +421,13 @@ export class RemitosService {
 
         for (const [oiId, totalQty] of qtyByOrderItem.entries()) {
           const locked = lockedItems.get(oiId);
-          if (!locked) throw new ApiError(400, `Item de pedido ${oiId} no encontrado o no pertenece a tu compania`);
-          // BUG #4: enforce enterprise consistency (all items must be from same enterprise)
-          if (locked.enterprise_id && locked.enterprise_id !== enterpriseId) {
+          if (!locked) throw new ApiError(400, `Item de pedido ${oiId} no encontrado, pertenece a otra compania, o el pedido esta cancelado`);
+          // BUG S4 #2: reject items with NULL enterprise_id (dirty data / bypass)
+          if (!locked.enterprise_id) {
+            throw new ApiError(400, `Item ${oiId} no tiene empresa asignada. Pedido invalido.`);
+          }
+          // BUG #4/S4: enforce enterprise consistency (all items must be from same enterprise)
+          if (locked.enterprise_id !== enterpriseId) {
             throw new ApiError(400, `Los items pertenecen a distintas empresas. Un remito solo puede tener items de una empresa.`);
           }
           const available = parseFloat(locked.quantity) - parseFloat(locked.qty_delivered);
@@ -380,27 +477,63 @@ export class RemitosService {
           );
         } else if (item.product_id) {
           // Manual item with product: deduct stock if controls_stock
+          // BUG #5: validate product EXISTS
           const prodCheck = await client.query(
-            'SELECT controls_stock FROM products WHERE id = $1 AND company_id = $2',
+            'SELECT id, controls_stock FROM products WHERE id = $1 AND company_id = $2',
             [item.product_id, companyId]
           );
-          if (prodCheck.rows[0]?.controls_stock) {
+          if (prodCheck.rows.length === 0) {
+            throw new ApiError(400, `Producto ${item.product_id} no existe o no pertenece a tu compania`);
+          }
+          // BUG #7: controls_stock can be boolean true/false or string 't'/'f'
+          const controlsStock = prodCheck.rows[0].controls_stock === true
+            || prodCheck.rows[0].controls_stock === 't'
+            || prodCheck.rows[0].controls_stock === 'true';
+
+          if (controlsStock) {
             // Get default warehouse
             const whRes = await client.query(
               'SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1',
               [companyId]
             );
             const warehouseId = whRes.rows[0]?.id;
-            if (warehouseId) {
-              await client.query(`
-                INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
-                  movement_type, reference_type, reference_id, notes, created_by)
-                VALUES (gen_random_uuid(), $1, $2, $3, $4, 'salida', 'remito', $5, 'Remito item manual', $6)
-              `, [companyId, item.product_id, warehouseId, -qty, remitoId, userId]);
+            if (!warehouseId) {
+              throw new ApiError(400, 'No hay almacenes configurados. No se puede descontar stock');
+            }
+
+            // BUG #1: lock stock row FOR UPDATE before updating
+            const stockRes = await client.query(
+              'SELECT quantity FROM stock WHERE product_id = $1 AND warehouse_id = $2 FOR UPDATE',
+              [item.product_id, warehouseId]
+            );
+
+            // BUG #4: if no stock row exists, create it with 0 (or error if we require existing)
+            const currentQty = stockRes.rows.length > 0 ? parseFloat(stockRes.rows[0].quantity || '0') : 0;
+
+            // BUG #2: prevent stock going negative
+            if (currentQty < qty) {
+              throw new ApiError(400,
+                `Stock insuficiente para "${item.product_name}". Disponible: ${currentQty}, solicitado: ${qty}`
+              );
+            }
+
+            await client.query(`
+              INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
+                movement_type, reference_type, reference_id, notes, created_by)
+              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'salida', 'remito', $5, 'Remito item manual', $6)
+            `, [companyId, item.product_id, warehouseId, -qty, remitoId, userId]);
+
+            if (stockRes.rows.length > 0) {
               await client.query(
                 'UPDATE stock SET quantity = COALESCE(quantity, 0) - $1 WHERE product_id = $2 AND warehouse_id = $3',
                 [qty, item.product_id, warehouseId]
               );
+            } else {
+              // Create stock row with -qty (we already validated currentQty >= qty, so this implies qty=0)
+              await client.query(`
+                INSERT INTO stock (id, company_id, product_id, warehouse_id, quantity)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4)
+              `, [companyId, item.product_id, warehouseId, -qty]);
             }
           }
         }
@@ -416,16 +549,24 @@ export class RemitosService {
       }
       // Also add legacy order_id if provided
       if (data.order_id && !orderIdsSet.has(data.order_id)) {
-        // Validate order exists and belongs to same company before linking
+        // BUG S4 #4: validate order belongs to same company AND same enterprise as remito
         const orderCheck = await client.query(
-          'SELECT id FROM orders WHERE id = $1 AND company_id = $2', [data.order_id, companyId]
+          'SELECT id, enterprise_id, status FROM orders WHERE id = $1 AND company_id = $2',
+          [data.order_id, companyId]
         );
-        if (orderCheck.rows.length > 0) {
-          await client.query(`
-            INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
-            ON CONFLICT (remito_id, order_id) DO NOTHING
-          `, [remitoId, data.order_id]);
+        if (orderCheck.rows.length === 0) {
+          throw new ApiError(400, 'El pedido referenciado no existe o no pertenece a tu compania');
         }
+        if (['cancelado', 'cancelled'].includes(orderCheck.rows[0].status)) {
+          throw new ApiError(400, 'No se puede vincular un remito a un pedido cancelado');
+        }
+        if (enterpriseId && orderCheck.rows[0].enterprise_id && orderCheck.rows[0].enterprise_id !== enterpriseId) {
+          throw new ApiError(400, 'El pedido referenciado pertenece a otra empresa');
+        }
+        await client.query(`
+          INSERT INTO remito_orders (id, remito_id, order_id) VALUES (gen_random_uuid(), $1, $2)
+          ON CONFLICT (remito_id, order_id) DO NOTHING
+        `, [remitoId, data.order_id]);
       }
 
       await client.query('COMMIT');
@@ -447,12 +588,61 @@ export class RemitosService {
       const existing = await this.getRemito(companyId, remitoId);
       if (!existing) throw new ApiError(404, 'Remito not found');
 
+      // BUG S10 #1: block edits to anulado remitos
+      if (existing.status === 'anulado') {
+        throw new ApiError(400, 'No se puede modificar un remito anulado');
+      }
+
+      // BUG S10 #2: validate field lengths
+      if (data.delivery_address && String(data.delivery_address).length > 500) {
+        throw new ApiError(400, 'La direccion de entrega no puede exceder 500 caracteres');
+      }
+      if (data.receiver_name && String(data.receiver_name).length > 255) {
+        throw new ApiError(400, 'El nombre del receptor no puede exceder 255 caracteres');
+      }
+      if (data.transport && String(data.transport).length > 255) {
+        throw new ApiError(400, 'El transporte no puede exceder 255 caracteres');
+      }
+      if (data.notes && String(data.notes).length > 2000) {
+        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+      }
+      // BUG S10 #3: validate date format
+      if (data.date) {
+        const d = new Date(data.date);
+        if (isNaN(d.getTime())) {
+          throw new ApiError(400, 'Fecha invalida. Debe ser formato ISO 8601');
+        }
+      }
+
+      // BUG S3-MISSED #1: validate customer_id belongs to company (IDOR fix)
+      if (data.customer_id) {
+        const custCheck = await pool.query(
+          'SELECT id FROM customers WHERE id = $1 AND company_id = $2',
+          [data.customer_id, companyId]
+        );
+        if (custCheck.rows.length === 0) {
+          throw new ApiError(400, 'El cliente no existe o no pertenece a tu compania');
+        }
+      }
+      // BUG S3-MISSED #2: validate enterprise_id belongs to company
+      if (data.enterprise_id) {
+        const entCheck = await pool.query(
+          'SELECT id FROM enterprises WHERE id = $1 AND company_id = $2',
+          [data.enterprise_id, companyId]
+        );
+        if (entCheck.rows.length === 0) {
+          throw new ApiError(400, 'La empresa no existe o no pertenece a tu compania');
+        }
+      }
+
       // Resolve enterprise_id from customer if not provided
       let enterpriseId = data.enterprise_id || existing.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
-        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
-        const custRows = getRows(custResult);
-        if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
+        const custResult = await pool.query(
+          'SELECT enterprise_id FROM customers WHERE id = $1 AND company_id = $2',
+          [data.customer_id, companyId]
+        );
+        if (custResult.rows[0]?.enterprise_id) enterpriseId = custResult.rows[0].enterprise_id;
       }
 
       // Update remito record
@@ -495,6 +685,20 @@ export class RemitosService {
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
       if (rows[0].status === 'anulado') throw new ApiError(400, 'No se puede modificar un remito anulado');
 
+      // BUG S10 #10: state machine transitions
+      const allowed: Record<string, string[]> = {
+        pendiente: ['entregado'],
+        entregado: ['firmado'],
+        firmado: [],
+      };
+      const current = rows[0].status || 'pendiente';
+      if (current === status) {
+        return { id: remitoId, status };
+      }
+      if (!allowed[current]?.includes(status)) {
+        throw new ApiError(400, `Transicion invalida: ${current} → ${status}. Permitidas desde ${current}: [${allowed[current]?.join(', ') || 'ninguna'}]`);
+      }
+
       await db.execute(sql`
         UPDATE remitos SET status = ${status}, updated_at = NOW() WHERE id = ${remitoId}
       `);
@@ -509,12 +713,18 @@ export class RemitosService {
   /** Anular remito: revierte qty_delivered + devuelve stock de items manuales. No se elimina. */
   async anularRemito(companyId: string, remitoId: string, userId: string) {
     await this.ensureTables();
+    // BUG S8 #7: reject system user (violates FK)
+    if (!userId || userId === 'system') {
+      throw new ApiError(400, 'userId valido requerido para anular');
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
+      // BUG S8 #1: FOR UPDATE to prevent concurrent double-anular
       const result = await client.query(
-        'SELECT id, status FROM remitos WHERE id = $1 AND company_id = $2', [remitoId, companyId]
+        'SELECT id, status FROM remitos WHERE id = $1 AND company_id = $2 FOR UPDATE',
+        [remitoId, companyId]
       );
       if (result.rows.length === 0) throw new ApiError(404, 'Remito not found');
       if (result.rows[0].status === 'anulado') throw new ApiError(400, 'El remito ya esta anulado');
@@ -522,6 +732,12 @@ export class RemitosService {
       // Get all items
       const itemsResult = await client.query(
         'SELECT id, order_item_id, product_id, quantity FROM remito_items WHERE remito_id = $1',
+        [remitoId]
+      );
+
+      // BUG S8 #3: mark anulado FIRST so recalculate excludes this remito's items
+      await client.query(
+        `UPDATE remitos SET status = 'anulado', updated_at = NOW() WHERE id = $1`,
         [remitoId]
       );
 
@@ -536,45 +752,54 @@ export class RemitosService {
           );
         }
 
-        if (item.product_id && !item.order_item_id) {
-          // Manual item with product: return stock if controls_stock
-          const prodCheck = await client.query(
-            'SELECT controls_stock FROM products WHERE id = $1 AND company_id = $2',
-            [item.product_id, companyId]
-          );
-          if (prodCheck.rows[0]?.controls_stock) {
-            const whRes = await client.query(
-              'SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1',
-              [companyId]
+        // BUG S8 #9: return stock even if item also has order_item_id (when product_id present)
+        if (item.product_id) {
+          // BUG S8 #5: filter by movement_type='salida' to find the right warehouse
+          const movRes = await client.query(`
+            SELECT warehouse_id FROM stock_movements
+            WHERE reference_type = 'remito' AND reference_id = $1 AND product_id = $2
+              AND movement_type = 'salida'
+            ORDER BY created_at DESC LIMIT 1
+          `, [remitoId, item.product_id]);
+          const originalWarehouseId = movRes.rows[0]?.warehouse_id;
+
+          if (originalWarehouseId) {
+            // Lock stock row before update
+            await client.query(
+              'SELECT quantity FROM stock WHERE product_id = $1 AND warehouse_id = $2 FOR UPDATE',
+              [item.product_id, originalWarehouseId]
             );
-            const warehouseId = whRes.rows[0]?.id;
-            if (warehouseId) {
-              await client.query(`
-                INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
-                  movement_type, reference_type, reference_id, notes, created_by)
-                VALUES (gen_random_uuid(), $1, $2, $3, $4, 'entrada', 'anulacion_remito', $5, 'Anulacion remito', $6)
-              `, [companyId, item.product_id, warehouseId, qty, remitoId, userId]);
-              await client.query(
-                'UPDATE stock SET quantity = COALESCE(quantity, 0) + $1 WHERE product_id = $2 AND warehouse_id = $3',
-                [qty, item.product_id, warehouseId]
-              );
-            }
+            await client.query(`
+              INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
+                movement_type, reference_type, reference_id, notes, created_by)
+              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'entrada', 'anulacion_remito', $5, 'Anulacion remito', $6)
+            `, [companyId, item.product_id, originalWarehouseId, qty, remitoId, userId]);
+            await client.query(
+              'UPDATE stock SET quantity = COALESCE(quantity, 0) + $1 WHERE product_id = $2 AND warehouse_id = $3',
+              [qty, item.product_id, originalWarehouseId]
+            );
+          } else {
+            // BUG S8 #6: log warning if stock cannot be returned (no original movement found)
+            console.warn(`[anularRemito] No original warehouse found for product ${item.product_id} in remito ${remitoId} — stock NOT returned`);
           }
         }
       }
 
-      // Safety: recalculate qty_delivered for affected order_items
-      for (const item of itemsResult.rows) {
-        if (item.order_item_id) {
-          await this.recalculateQtyDelivered(item.order_item_id);
-        }
+      // BUG S8 #2: use transactional client for recalculate (inside same TX)
+      // BUG S8 #4: exclude anulado remitos from SUM
+      const affectedOrderItemIds = Array.from(new Set(
+        itemsResult.rows.filter((r: any) => r.order_item_id).map((r: any) => r.order_item_id)
+      ));
+      for (const oiId of affectedOrderItemIds) {
+        await client.query(`
+          UPDATE order_items SET qty_delivered = (
+            SELECT COALESCE(SUM(ri.quantity), 0)
+            FROM remito_items ri
+            JOIN remitos r ON ri.remito_id = r.id
+            WHERE ri.order_item_id = order_items.id AND r.status != 'anulado'
+          ) WHERE id = $1
+        `, [oiId]);
       }
-
-      // Mark as anulado (don't delete)
-      await client.query(
-        'UPDATE remitos SET status = $1, updated_at = NOW() WHERE id = $2',
-        ['anulado', remitoId]
-      );
 
       await client.query('COMMIT');
       return { id: remitoId, status: 'anulado' };
@@ -589,17 +814,31 @@ export class RemitosService {
 
   /** @deprecated Use anularRemito instead. Kept for backward compat. */
   async deleteRemito(companyId: string, remitoId: string, userId?: string) {
-    return this.anularRemito(companyId, remitoId, userId || 'system');
+    // BUG S8 #7: require real userId (no 'system' fallback)
+    if (!userId) throw new ApiError(400, 'userId requerido para anular');
+    return this.anularRemito(companyId, remitoId, userId);
   }
 
   async uploadSignedPdf(companyId: string, remitoId: string, base64Data: string) {
     await this.ensureTables();
     try {
+      // BUG S7 #4: validate magic bytes (defense-in-depth, controller also checks)
+      const decoded = Buffer.from(String(base64Data || '').replace(/^data:application\/pdf;base64,/, ''), 'base64');
+      if (decoded.length === 0) throw new ApiError(400, 'PDF vacio');
+      if (decoded.length > 5 * 1024 * 1024) throw new ApiError(400, 'El PDF no puede superar 5MB');
+      if (decoded.toString('ascii', 0, 5) !== '%PDF-') {
+        throw new ApiError(400, 'El archivo no es un PDF valido (magic bytes)');
+      }
+
       const result = await db.execute(sql`
-        SELECT id FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
+        SELECT id, status FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
       `);
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+      // BUG S7 #10: reject upload to anulado
+      if (rows[0].status === 'anulado') {
+        throw new ApiError(400, 'No se puede subir firmado a un remito anulado');
+      }
 
       await db.execute(sql`
         UPDATE remitos SET signed_pdf_url = ${base64Data} WHERE id = ${remitoId}
@@ -627,6 +866,7 @@ export class RemitosService {
   }
 
   async generateRemitoPdf(companyId: string, remitoId: string): Promise<Buffer> {
+    let browser: any = null;
     try {
       const remito = await this.getRemito(companyId, remitoId);
 
@@ -637,59 +877,87 @@ export class RemitosService {
 
       const html = this.buildRemitoHtml(company, remito);
 
-      const browser = await puppeteer.launch({
+      browser = await puppeteer.launch({
         headless: 'new' as any,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
       });
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      // BUG S7 #1/#3: block ALL network requests to prevent SSRF/LFI via injected HTML
+      await page.setRequestInterception(true);
+      page.on('request', (req: any) => {
+        const type = req.resourceType();
+        if (type === 'document') return req.continue();
+        req.abort();
+      });
+      // BUG S7 #7: timeout
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 });
       const pdf = await page.pdf({
         format: 'A4',
         margin: { top: '15mm', right: '15mm', bottom: '20mm', left: '15mm' },
         printBackground: true,
+        timeout: 10000,
       });
-      await browser.close();
-
       return pdf;
     } catch (error) {
       console.error('Generate remito PDF error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to generate remito PDF');
+    } finally {
+      // BUG S7 #2: always close browser even on error
+      if (browser) {
+        try { await browser.close(); } catch (e) { console.error('Browser close failed:', e); }
+      }
     }
   }
 
+  /** BUG S7 #1: HTML escape to prevent XSS/SSRF via user-supplied fields */
+  private escapeHtml(value: any): string {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   private buildRemitoHtml(company: any, remito: any, tipo?: string): string {
+    const esc = (v: any) => this.escapeHtml(v);
     const items = remito.items || [];
     const enterprise = remito.enterprise || {};
     const customer = remito.customer || {};
-    const fecha = new Date(remito.date || remito.created_at).toLocaleDateString('es-AR');
+    // BUG S7 #6: validate date, fallback to today if invalid
+    const rawDate = new Date(remito.date || remito.created_at || Date.now());
+    const fecha = isNaN(rawDate.getTime())
+      ? new Date().toLocaleDateString('es-AR')
+      : rawDate.toLocaleDateString('es-AR');
     const pv = String(remito.punto_venta || company.punto_venta_remito || company.punto_venta || 1).padStart(4, '0');
     const num = String(remito.remito_number || 0).padStart(8, '0');
     const remitoTipo = tipo || remito.tipo || 'entrega';
     const isRecepcion = remitoTipo === 'recepcion';
 
-    // Receptor data: prefer enterprise, fallback to customer
+    // Receptor data: prefer enterprise, fallback to customer (raw, escaped at interpolation site)
     const receptor = {
-      name: enterprise.razon_social || enterprise.name || customer.name || '',
-      address: remito.delivery_address || enterprise.address || customer.address || '',
-      city: enterprise.city || '',
-      province: enterprise.province || '',
-      cp: enterprise.postal_code || '',
-      cuit: enterprise.cuit || customer.cuit || '',
-      iva: enterprise.tax_condition || '',
+      name: esc(enterprise.razon_social || enterprise.name || customer.name || ''),
+      address: esc(remito.delivery_address || enterprise.address || customer.address || ''),
+      city: esc(enterprise.city || ''),
+      province: esc(enterprise.province || ''),
+      cp: esc(enterprise.postal_code || ''),
+      cuit: esc(enterprise.cuit || customer.cuit || ''),
+      iva: esc(enterprise.tax_condition || ''),
     };
     const domicilio = [receptor.address, receptor.city, receptor.cp ? `(${receptor.cp})` : ''].filter(Boolean).join(', ');
 
-    // Cross-references
-    const facturaRef = remito.factura_ref || '';
-    const pedidoRef = remito.pedido_ref || (remito.order ? `${pv}-${String(remito.order.order_number || 0).padStart(8, '0')}` : '');
+    // Cross-references (escaped)
+    const facturaRef = esc(remito.factura_ref || '');
+    const pedidoRef = esc(remito.pedido_ref || (remito.order ? `${pv}-${String(remito.order.order_number || 0).padStart(8, '0')}` : ''));
 
-    // Item rows
+    // Item rows — escape all user text
     const itemRows = items.map((item: any) => `
       <tr>
-        <td class="qty">${Number(item.quantity)}</td>
-        <td class="desc">${item.quantity}x ${item.product_name}${item.description ? '  ' + item.description : ''}</td>
+        <td class="qty">${Number(item.quantity) || 0}</td>
+        <td class="desc">${Number(item.quantity) || 0}x ${esc(item.product_name)}${item.description ? '  ' + esc(item.description) : ''}</td>
       </tr>
     `).join('');
 
@@ -697,19 +965,19 @@ export class RemitosService {
     const emptyRows = Math.max(0, 15 - items.length);
     const emptyRowsHtml = Array(emptyRows).fill('<tr><td class="qty">&nbsp;</td><td class="desc">&nbsp;</td></tr>').join('');
 
-    // Company config
-    const companyName = company.razon_social || company.name || '';
-    const companyRubro = company.rubro_descripcion || '';
-    const companyAddress = [company.address, company.city ? `(${company.postal_code || ''}) ${company.city}` : ''].filter(Boolean).join(' - ');
-    const companyProvince = company.province ? `Prov. de ${company.province} - Argentina` : '';
-    const companyPhone = company.phone ? `Tel.: ${company.phone}` : '';
-    const companyEmail = company.email || '';
-    const companyWeb = company.website || '';
-    const companyIva = company.condicion_iva || company.tax_condition || 'IVA RESPONSABLE INSCRIPTO';
-    const companyCuit = company.cuit || '';
-    const companyIIBB = company.ingresos_brutos || '';
+    // Company config (escaped - defense in depth even for trusted fields)
+    const companyName = esc(company.razon_social || company.name || '');
+    const companyRubro = esc(company.rubro_descripcion || '');
+    const companyAddress = esc([company.address, company.city ? `(${company.postal_code || ''}) ${company.city}` : ''].filter(Boolean).join(' - '));
+    const companyProvince = company.province ? `Prov. de ${esc(company.province)} - Argentina` : '';
+    const companyPhone = company.phone ? `Tel.: ${esc(company.phone)}` : '';
+    const companyEmail = esc(company.email || '');
+    const companyWeb = esc(company.website || '');
+    const companyIva = esc(company.condicion_iva || company.tax_condition || 'IVA RESPONSABLE INSCRIPTO');
+    const companyCuit = esc(company.cuit || '');
+    const companyIIBB = esc(company.ingresos_brutos || '');
     const companyInicio = company.inicio_actividad ? new Date(company.inicio_actividad).toLocaleDateString('es-AR') : '';
-    const caiRemito = company.cai_remito || '';
+    const caiRemito = esc(company.cai_remito || '');
     const caiVto = company.cai_remito_vto ? new Date(company.cai_remito_vto).toLocaleDateString('es-AR') : '';
 
     return `<!DOCTYPE html>
@@ -906,7 +1174,7 @@ export class RemitosService {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN enterprises e ON o.enterprise_id = e.id
-      WHERE o.company_id = $1 AND o.id = $2 AND o.status != 'cancelado'
+      WHERE o.company_id = $1 AND o.id = $2 AND o.status NOT IN ('cancelado', 'cancelled')
         AND oi.quantity - COALESCE(oi.qty_delivered, 0) > 0
       ORDER BY oi.created_at ASC
     `, [companyId, orderId]);
@@ -916,6 +1184,14 @@ export class RemitosService {
   /** Items de TODOS los pedidos de una empresa que se pueden remitar */
   async getAvailableOrderItemsForRemitoByEnterprise(companyId: string, enterpriseId: string) {
     await this.ensureTables();
+    // BUG S4 #3: validate enterprise belongs to company (IDOR fix)
+    const entCheck = await pool.query(
+      'SELECT id FROM enterprises WHERE id = $1 AND company_id = $2',
+      [enterpriseId, companyId]
+    );
+    if (entCheck.rows.length === 0) {
+      throw new ApiError(404, 'Empresa no encontrada o no pertenece a tu compania');
+    }
     const r = await pool.query(`
       SELECT
         oi.id as order_item_id, oi.product_id, oi.product_name, oi.description,
@@ -927,7 +1203,7 @@ export class RemitosService {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN enterprises e ON o.enterprise_id = e.id
-      WHERE o.company_id = $1 AND o.enterprise_id = $2 AND o.status != 'cancelado'
+      WHERE o.company_id = $1 AND o.enterprise_id = $2 AND o.status NOT IN ('cancelado', 'cancelled')
         AND oi.quantity - COALESCE(oi.qty_delivered, 0) > 0
       ORDER BY o.order_number ASC, oi.created_at ASC
     `, [companyId, enterpriseId]);
@@ -937,6 +1213,27 @@ export class RemitosService {
   /** Items de una factura resueltos a order_items para crear remito desde factura */
   async getInvoiceItemsForRemito(companyId: string, invoiceId: string) {
     await this.ensureTables();
+    // BUG S5 #10: validate UUID format before query (prevents error leak)
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoiceId)) {
+      throw new ApiError(400, 'Invoice ID invalido');
+    }
+    // BUG S5 #4: validate invoice exists in company (404 instead of empty)
+    // BUG S5 #1/#2: reject cancelled (ES+EN) and non-authorized invoices
+    const invCheck = await pool.query(
+      `SELECT id, status FROM invoices WHERE id = $1 AND company_id = $2`,
+      [invoiceId, companyId]
+    );
+    if (invCheck.rows.length === 0) {
+      throw new ApiError(404, 'Factura no encontrada o no pertenece a tu compania');
+    }
+    const status = invCheck.rows[0].status;
+    if (['cancelled', 'cancelado'].includes(status)) {
+      throw new ApiError(400, 'No se puede generar un remito desde una factura cancelada');
+    }
+    if (['draft', 'borrador'].includes(status)) {
+      throw new ApiError(400, 'No se puede generar un remito desde una factura en borrador. Autorizala primero.');
+    }
+
     const r = await pool.query(`
       SELECT ii.id as invoice_item_id, ii.product_id, ii.product_name,
         ii.quantity as invoice_qty, CAST(ii.unit_price AS text) as unit_price,
@@ -952,9 +1249,10 @@ export class RemitosService {
         o.id as order_id
       FROM invoice_items ii
       JOIN invoices i ON ii.invoice_id = i.id
-      LEFT JOIN order_items oi ON ii.order_item_id = oi.id
-      LEFT JOIN orders o ON oi.order_id = o.id
-      WHERE i.company_id = $1 AND i.id = $2 AND i.status != 'cancelled'
+      LEFT JOIN order_items oi ON ii.order_item_id = oi.id AND oi.order_id IN (SELECT id FROM orders WHERE company_id = i.company_id)
+      LEFT JOIN orders o ON oi.order_id = o.id AND o.company_id = i.company_id
+      WHERE i.company_id = $1 AND i.id = $2
+        AND i.status NOT IN ('cancelled', 'cancelado')
       ORDER BY ii.created_at ASC
     `, [companyId, invoiceId]);
     return r.rows.filter((row: any) => parseFloat(row.qty_available || '0') > 0);
@@ -964,7 +1262,16 @@ export class RemitosService {
   async getRemitoContextData(companyId: string, remitoId: string) {
     await this.ensureTables();
 
-    // Items con origen
+    // BUG S6 #1: validate remito belongs to company (IDOR fix)
+    const ownership = await pool.query(
+      'SELECT id FROM remitos WHERE id = $1 AND company_id = $2',
+      [remitoId, companyId]
+    );
+    if (ownership.rows.length === 0) {
+      throw new ApiError(404, 'Remito no encontrado');
+    }
+
+    // BUG S6 #9: stable ordering via created_at then id
     const itemsRes = await pool.query(`
       SELECT ri.id, ri.product_name, ri.quantity, ri.order_item_id, ri.product_id,
         CASE
@@ -977,7 +1284,7 @@ export class RemitosService {
         END as source_ref
       FROM remito_items ri
       WHERE ri.remito_id = $1
-      ORDER BY ri.id
+      ORDER BY ri.created_at ASC, ri.id ASC
     `, [remitoId]);
 
     return {

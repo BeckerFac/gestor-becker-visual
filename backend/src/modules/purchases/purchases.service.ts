@@ -83,11 +83,11 @@ export class PurchasesService {
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           COALESCE((SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id), 0) as item_count,
-          COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) as invoiced_amount,
+          COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status NOT IN ('cancelled', 'cancelado')), 0) as invoiced_amount,
           CASE
             WHEN COALESCE(CAST(p.total_amount AS decimal), 0) = 0 THEN 'sin_monto'
-            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) = 0 THEN 'sin_facturar'
-            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status != 'cancelled'), 0) >= CAST(p.total_amount AS decimal) THEN 'facturado'
+            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status NOT IN ('cancelled', 'cancelado')), 0) = 0 THEN 'sin_facturar'
+            WHEN COALESCE((SELECT SUM(CAST(pinv.total_amount AS decimal)) FROM purchase_invoices pinv WHERE pinv.purchase_id = p.id AND pinv.status NOT IN ('cancelled', 'cancelado')), 0) >= CAST(p.total_amount AS decimal) THEN 'facturado'
             ELSE 'parcial'
           END as invoice_status
         FROM purchases p

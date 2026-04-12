@@ -315,7 +315,7 @@ export const Remitos: React.FC = () => {
       // Load invoices of this enterprise to let user pick one
       const invoicesData = await api.getInvoices({ enterprise_id: form.enterprise_id }).catch(() => ({ items: [] }))
       const invList = Array.isArray(invoicesData) ? invoicesData : (invoicesData?.items || [])
-      setImporterItems(invList.filter((i: any) => i.status !== 'cancelled'))
+      setImporterItems(invList.filter((i: any) => !['cancelled', 'cancelado'].includes(i.status)))
     } catch { setImporterItems([]) }
     finally { setImporterLoading(false) }
   }

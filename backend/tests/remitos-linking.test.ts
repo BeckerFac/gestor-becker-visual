@@ -123,7 +123,7 @@ describe('Fase 3: createRemito with linking', () => {
 
       // FOR UPDATE lock on order_items — return item with only 3 available
       if (sql.includes('FOR UPDATE')) {
-        return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 7 }] };
+        return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 7, enterprise_id: 'ent-1', order_id: 'ord-1' }] };
       }
 
       return { rows: [] };
@@ -157,7 +157,7 @@ describe('Fase 3: createRemito with linking', () => {
         executedQueries.push({ sql, params });
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 5 }] };
-        if (sql.includes('FOR UPDATE')) return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0 }] };
+        if (sql.includes('FOR UPDATE')) return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0, enterprise_id: 'ent-1', order_id: 'ord-1' }] };
         if (sql.includes('SELECT order_id FROM order_items')) return { rows: [{ order_id: 'ord-1' }] };
         return { rows: [] };
       }),
@@ -346,8 +346,8 @@ describe('Fase 3: anularRemito reverts qty_delivered', () => {
     const revertQueries = executedQueries.filter(q => q.sql.includes('GREATEST') && q.sql.includes('qty_delivered'));
     expect(revertQueries).toHaveLength(2);
 
-    // Should have set status to anulado
-    const statusUpdate = executedQueries.find(q => q.sql.includes('UPDATE remitos SET status') && q.params?.includes('anulado'));
+    // Should have set status to anulado (now as SQL literal)
+    const statusUpdate = executedQueries.find(q => q.sql.includes('UPDATE remitos SET status') && q.sql.includes('anulado'));
     expect(statusUpdate).toBeDefined();
   });
 });

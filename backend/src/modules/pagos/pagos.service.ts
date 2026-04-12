@@ -355,7 +355,7 @@ export class PagosService {
             SELECT SUM(CAST(pia.amount_applied AS decimal))
             FROM pago_invoice_applications pia
             JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
-            WHERE pi.purchase_id = ${purchaseId} AND pi.status != 'cancelled'
+            WHERE pi.purchase_id = ${purchaseId} AND pi.status NOT IN ('cancelled', 'cancelado')
           ), 0) as total_paid
         FROM purchases p
         WHERE p.id = ${purchaseId}

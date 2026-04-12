@@ -158,9 +158,9 @@ describe('E2E Flow 2: Manual item with stock control', () => {
         executedQueries.push({ sql, params });
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 1 }] };
-        // Product controls stock
-        if (sql.includes('SELECT controls_stock FROM products')) return { rows: [{ controls_stock: true }] };
+        if (sql.includes('FROM products WHERE id')) return { rows: [{ id: 'prod-1', controls_stock: true }] };
         if (sql.includes('FROM warehouses')) return { rows: [{ id: 'wh-1' }] };
+        if (sql.includes('SELECT quantity FROM stock')) return { rows: [{ quantity: '100' }] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -202,7 +202,7 @@ describe('E2E Flow 2: Manual item with stock control', () => {
         executedQueries.push({ sql, params });
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 1 }] };
-        if (sql.includes('SELECT controls_stock FROM products')) return { rows: [{ controls_stock: false }] };
+        if (sql.includes('FROM products WHERE id')) return { rows: [{ id: 'prod-service', controls_stock: false }] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -308,7 +308,7 @@ describe('E2E Flow 3: Anular remito', () => {
 
     // Should have UPDATE remitos SET status = 'anulado'
     const statusUpdate = executedQueries.find(q =>
-      q.sql.includes('UPDATE remitos SET status') && q.params?.includes('anulado')
+      q.sql.includes('UPDATE remitos SET status') && q.sql.includes('anulado')
     );
     expect(statusUpdate).toBeDefined();
 
@@ -328,6 +328,8 @@ describe('E2E Flow 3: Anular remito', () => {
         }
         if (sql.includes('SELECT controls_stock')) return { rows: [{ controls_stock: true }] };
         if (sql.includes('FROM warehouses')) return { rows: [{ id: 'wh-1' }] };
+        if (sql.includes('warehouse_id FROM stock_movements')) return { rows: [{ warehouse_id: 'wh-1' }] };
+        if (sql.includes('SELECT quantity FROM stock')) return { rows: [{ quantity: '0' }] };
         return { rows: [] };
       }),
       release: vi.fn(),
@@ -415,6 +417,9 @@ describe('E2E Flow 4: getInvoiceItemsForRemito', () => {
 
   it('returns invoice items resolved to order_items with qty_available', async () => {
     mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id, status FROM invoices')) {
+        return { rows: [{ id: '11111111-1111-1111-1111-111111111111', status: 'authorized' }] };
+      }
       if (sql.includes('invoice_items') && sql.includes('qty_available')) {
         return {
           rows: [
@@ -452,7 +457,7 @@ describe('E2E Flow 4: getInvoiceItemsForRemito', () => {
     const service = new (RemitosService as any)();
     service.tablesEnsured = true;
 
-    const items = await service.getInvoiceItemsForRemito('comp-1', 'inv-1');
+    const items = await service.getInvoiceItemsForRemito('comp-1', '11111111-1111-1111-1111-111111111111');
     expect(items).toHaveLength(2);
     expect(items[0].order_item_id).toBe('oi-1');
     expect(items[0].source_ref).toBe('Pedido #0001');
@@ -462,6 +467,9 @@ describe('E2E Flow 4: getInvoiceItemsForRemito', () => {
 
   it('filters out items with qty_available = 0', async () => {
     mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id, status FROM invoices')) {
+        return { rows: [{ id: '11111111-1111-1111-1111-111111111111', status: 'authorized' }] };
+      }
       if (sql.includes('invoice_items')) {
         return {
           rows: [
@@ -477,7 +485,7 @@ describe('E2E Flow 4: getInvoiceItemsForRemito', () => {
     const service = new (RemitosService as any)();
     service.tablesEnsured = true;
 
-    const items = await service.getInvoiceItemsForRemito('comp-1', 'inv-1');
+    const items = await service.getInvoiceItemsForRemito('comp-1', '11111111-1111-1111-1111-111111111111');
     expect(items).toHaveLength(1);
     expect(items[0].invoice_item_id).toBe('ii-2');
   });
@@ -514,6 +522,7 @@ describe('E2E Flow 5: Availability queries', () => {
 
   it('getAvailableOrderItemsForRemitoByEnterprise groups by enterprise', async () => {
     mockPoolQuery.mockImplementation(async (sql: string, params: any) => {
+      if (sql.includes('SELECT id FROM enterprises WHERE id')) return { rows: [{ id: 'ent-1' }] };
       if (sql.includes('enterprise_id = $2')) {
         expect(params).toEqual(['comp-1', 'ent-1']);
         return {
@@ -591,7 +600,7 @@ describe('E2E Flow 6: Validation edge cases', () => {
     await expect(service.createRemito('comp-1', 'user-1', {
       enterprise_id: 'ent-1',
       items: [{ product_name: '', quantity: 1 }, { product_name: '   ', quantity: 2 }],
-    })).rejects.toThrow(/al menos un item/);
+    })).rejects.toThrow(/product_name no vacio|al menos un item/);
   });
 });
 

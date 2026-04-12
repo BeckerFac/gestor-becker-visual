@@ -223,13 +223,13 @@ export class PurchaseInvoicesService {
           SELECT SUM(CAST(pii.quantity AS decimal))
           FROM purchase_invoice_items pii
           JOIN purchase_invoices pinv ON pii.purchase_invoice_id = pinv.id
-          WHERE pii.purchase_item_id = pi.id AND pinv.status != 'cancelled'
+          WHERE pii.purchase_item_id = pi.id AND pinv.status NOT IN ('cancelled', 'cancelado')
         ), 0) as qty_invoiced,
         CAST(pi.quantity AS decimal) - COALESCE((
           SELECT SUM(CAST(pii.quantity AS decimal))
           FROM purchase_invoice_items pii
           JOIN purchase_invoices pinv ON pii.purchase_invoice_id = pinv.id
-          WHERE pii.purchase_item_id = pi.id AND pinv.status != 'cancelled'
+          WHERE pii.purchase_item_id = pi.id AND pinv.status NOT IN ('cancelled', 'cancelado')
         ), 0) as qty_remaining
       FROM purchase_items pi
       JOIN purchases p ON pi.purchase_id = p.id

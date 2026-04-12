@@ -67,7 +67,7 @@ export class ReportsService {
             ), 0) as total
           FROM invoices i
           WHERE i.company_id = ${companyId}
-            AND i.status != 'cancelled'
+            AND i.status NOT IN ('cancelled', 'cancelado')
             AND (i.payment_status IS NULL OR i.payment_status != 'pagado')
         `);
 
@@ -119,14 +119,14 @@ export class ReportsService {
             SELECT COUNT(*) as count,
               COALESCE(SUM(
                 CAST(o.total_amount AS decimal) - COALESCE(
-                  (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled'), 0
+                  (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status NOT IN ('cancelled', 'cancelado')), 0
                 )
               ), 0) as total
             FROM orders o
             WHERE o.company_id = ${companyId}
               AND o.status != 'cancelado'
               AND CAST(o.total_amount AS decimal) > COALESCE(
-                (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled'), 0
+                (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status NOT IN ('cancelled', 'cancelado')), 0
               )
           `);
           const uninvoicedRows = (uninvoicedResult as any).rows || [];

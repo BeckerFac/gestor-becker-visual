@@ -32,7 +32,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status != 'cancelled'
+              AND i.status NOT IN ('cancelled', 'cancelado')
               ${buFilter}
           ), 0) as total_ventas,
 
@@ -69,7 +69,7 @@ export class CuentaCorrienteService {
             FROM purchase_invoices pi
             WHERE pi.company_id = ${companyId}
               AND pi.enterprise_id = e.id
-              AND pi.status != 'cancelled'
+              AND pi.status NOT IN ('cancelled', 'cancelado')
               ${buFilter}
           ), 0) as total_compras,
 
@@ -256,7 +256,7 @@ export class CuentaCorrienteService {
             'Factura ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as descripcion,
             i.id as reference_id
           FROM invoices i
-          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
+          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'cancelado')
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -377,7 +377,7 @@ export class CuentaCorrienteService {
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status != 'cancelled'
+            AND i.status NOT IN ('cancelled', 'cancelado')
         `);
       } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
 
@@ -457,7 +457,7 @@ export class CuentaCorrienteService {
             CAST(COALESCE(pi.total_amount, 0) AS decimal) as monto
           FROM purchase_invoices pi
           WHERE pi.company_id = ${companyId} AND pi.enterprise_id = ${enterpriseId}
-            AND pi.status != 'cancelled'
+            AND pi.status NOT IN ('cancelled', 'cancelado')
         `);
       } catch (e) { console.error('PDF: purchase_invoices query failed', (e as any)?.message); }
 

@@ -354,11 +354,11 @@ export class CobroApplicationsService {
           SELECT DISTINCT io.order_id, i.id as invoice_id
           FROM invoices i
           JOIN invoice_orders io ON io.invoice_id = i.id
-          WHERE i.status != 'cancelled'
+          WHERE i.status NOT IN ('cancelled', 'cancelado')
           UNION
           SELECT i.order_id, i.id as invoice_id
           FROM invoices i
-          WHERE i.order_id IS NOT NULL AND i.status != 'cancelled'
+          WHERE i.order_id IS NOT NULL AND i.status NOT IN ('cancelled', 'cancelado')
         ) inv ON inv.order_id = o.id
         LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = inv.invoice_id
         WHERE o.id = ${orderId}
@@ -486,7 +486,7 @@ export class CobroApplicationsService {
     business_unit_id?: string;
   } = {}) {
     // Show all non-cancelled, non-fully-paid invoices (including drafts for testing)
-    let whereClause = sql`i.company_id = ${companyId} AND i.status != 'cancelled' AND (i.payment_status IS NULL OR i.payment_status != 'pagado')`;
+    let whereClause = sql`i.company_id = ${companyId} AND i.status NOT IN ('cancelled', 'cancelado') AND (i.payment_status IS NULL OR i.payment_status != 'pagado')`;
 
     if (filters.enterprise_id) {
       // Match by enterprise_id on invoice OR via customer's enterprise

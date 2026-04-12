@@ -94,6 +94,8 @@ export class InvoicesService {
     try {
       const invoiceId = uuid();
       // Validate: if items have order_item_id, check that we don't invoice more than available
+      // BUG S9 #1: include 'cancelado' (ES) in filter
+      // BUG S9 #4: scope order_item by company (IDOR fix)
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
           if (item.order_item_id) {
@@ -103,9 +105,13 @@ export class InvoicesService {
                 COALESCE((
                   SELECT SUM(CAST(ii.quantity AS decimal))
                   FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id
-                  WHERE ii.order_item_id = ${item.order_item_id} AND i.status != 'cancelled'
+                  WHERE ii.order_item_id = ${item.order_item_id}
+                    AND i.status NOT IN ('cancelled', 'cancelado')
+                    AND i.company_id = ${companyId}
                 ), 0) as invoiced_qty
-              FROM order_items oi WHERE oi.id = ${item.order_item_id}
+              FROM order_items oi
+              JOIN orders o ON oi.order_id = o.id
+              WHERE oi.id = ${item.order_item_id} AND o.company_id = ${companyId}
             `);
             const check = ((checkResult as any).rows || [])[0];
             if (check) {
@@ -142,10 +148,33 @@ export class InvoicesService {
         nextNumber = parseInt(rows[0]?.next_number || '1');
       }
 
+      // BUG S9 #3: validate customer belongs to company (IDOR fix)
+      if (data.customer_id) {
+        const custCheck = await db.execute(sql`
+          SELECT id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}
+        `);
+        const custRows = (custCheck as any).rows || custCheck || [];
+        if (custRows.length === 0) {
+          throw new ApiError(400, 'El cliente no existe o no pertenece a tu compania');
+        }
+      }
+      // BUG S9 #3: validate enterprise belongs to company
+      if (data.enterprise_id) {
+        const entCheck = await db.execute(sql`
+          SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}
+        `);
+        const entRows = (entCheck as any).rows || entCheck || [];
+        if (entRows.length === 0) {
+          throw new ApiError(400, 'La empresa no existe o no pertenece a tu compania');
+        }
+      }
+
       // Resolve enterprise_id from customer if not provided
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
-        const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${data.customer_id}`);
+        const custResult = await db.execute(sql`
+          SELECT enterprise_id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}
+        `);
         const custRows = (custResult as any).rows || custResult || [];
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
@@ -229,21 +258,26 @@ export class InvoicesService {
           let vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
 
           if (item.order_item_id) {
+            // BUG S9 #4: scope to company
             const oiResult = await db.execute(sql`
-              SELECT product_id, product_name, unit_price FROM order_items WHERE id = ${item.order_item_id}
+              SELECT oi.product_id, oi.product_name, oi.unit_price
+              FROM order_items oi JOIN orders o ON oi.order_id = o.id
+              WHERE oi.id = ${item.order_item_id} AND o.company_id = ${companyId}
             `);
             const oiRows = (oiResult as any).rows || oiResult || [];
-            if (oiRows.length > 0) {
-              const oi = oiRows[0];
-              productId = productId || oi.product_id || null;
-              productName = productName || oi.product_name || '';
-              unitPrice = unitPrice || parseFloat(oi.unit_price || '0');
+            if (oiRows.length === 0) {
+              throw new ApiError(400, `Item de pedido ${item.order_item_id} no existe o no pertenece a tu compania`);
             }
+            const oi = oiRows[0];
+            productId = productId || oi.product_id || null;
+            productName = productName || oi.product_name || '';
+            unitPrice = unitPrice || parseFloat(oi.unit_price || '0');
 
             // Also resolve customer_id and enterprise_id from order if not set
             if (!data.customer_id && data.order_id) {
+              // BUG S9 #5: scope orders by company
               const orderResult = await db.execute(sql`
-                SELECT customer_id, enterprise_id FROM orders WHERE id = ${data.order_id}
+                SELECT customer_id, enterprise_id FROM orders WHERE id = ${data.order_id} AND company_id = ${companyId}
               `);
               const orderRows = (orderResult as any).rows || orderResult || [];
               if (orderRows.length > 0) {
@@ -1247,7 +1281,7 @@ export class InvoicesService {
         CAST(o.total_amount AS decimal) as order_total,
         COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as invoiced_total
       FROM orders o
-      LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
+      LEFT JOIN invoices i ON i.order_id = o.id AND i.status NOT IN ('cancelled', 'cancelado')
       WHERE o.id = ${orderId} AND o.company_id = ${companyId}
       GROUP BY o.id, o.total_amount
     `);
@@ -1298,7 +1332,7 @@ export class InvoicesService {
       params.push(filters.enterprise_id);
       // Match orders by enterprise_id directly, or by customer linked to that enterprise
       // Use LEFT JOIN approach to avoid subquery on customers.enterprise_id which may not exist yet
-      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.enterprise_id = $${params.length}))`;
+      enterpriseFilter = ` AND (o.enterprise_id = $${params.length} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id AND c.company_id = $1 AND c.enterprise_id = $${params.length}))`;
     }
     // Ensure required columns exist before query
     try { await pool.query('ALTER TABLE customers ADD COLUMN IF NOT EXISTS enterprise_id UUID'); } catch {}
@@ -1310,7 +1344,8 @@ export class InvoicesService {
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
         JOIN invoices i ON ii.invoice_id = i.id
-        WHERE i.status != 'cancelled' AND i.company_id = $1 AND ii.order_item_id IS NOT NULL
+        WHERE i.status NOT IN ('cancelled', 'cancelado')
+          AND i.company_id = $1 AND ii.order_item_id IS NOT NULL
         GROUP BY ii.order_item_id
       )
       SELECT

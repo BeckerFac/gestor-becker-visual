@@ -1057,7 +1057,7 @@ export class CrmService {
             SELECT SUM(i.total)
             FROM invoices i
             JOIN customers c ON i.customer_id = c.id
-            WHERE c.enterprise_id = e.id AND i.company_id = ${companyId} AND i.status != 'cancelled'
+            WHERE c.enterprise_id = e.id AND i.company_id = ${companyId} AND i.status NOT IN ('cancelled', 'cancelado')
           ), 0)::decimal as total_revenue,
           COALESCE((
             SELECT COUNT(*)

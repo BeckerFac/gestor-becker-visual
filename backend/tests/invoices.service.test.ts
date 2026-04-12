@@ -43,6 +43,8 @@ describe('InvoicesService', () => {
       mockDbVoid() // auto-assign business_unit_id query
       // next number for no_fiscal
       mockDbRows([{ next_number: '1' }])
+      // customer ownership check (new S9 IDOR fix)
+      mockDbRows([{ id: 'cust-1' }])
       // customer enterprise
       mockDbEmpty()
       // INSERT via raw SQL (no_fiscal path)
@@ -136,6 +138,8 @@ describe('InvoicesService', () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
       mockDbRows([{ next_number: '1' }])
+      // customer ownership check (new S9 IDOR fix)
+      mockDbRows([{ id: 'cust-1' }])
       // customer enterprise lookup returns enterprise
       mockDbRows([{ enterprise_id: 'resolved-ent' }])
       mockDbVoid() // INSERT

@@ -488,7 +488,7 @@ export class CobrosService {
             CAST(o.total_amount AS decimal) as order_total,
             COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as total_paid
           FROM orders o
-          LEFT JOIN invoices i ON (i.order_id = o.id OR i.id IN (SELECT io.invoice_id FROM invoice_orders io WHERE io.order_id = o.id)) AND i.status != 'cancelled'
+          LEFT JOIN invoices i ON (i.order_id = o.id OR i.id IN (SELECT io.invoice_id FROM invoice_orders io WHERE io.order_id = o.id)) AND i.status NOT IN ('cancelled', 'cancelado')
           LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
           WHERE o.id = ${orderId}
           GROUP BY o.id, o.total_amount
