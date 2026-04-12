@@ -52,7 +52,7 @@ interface Remito {
   transport: string | null
   notes: string | null
   tipo: 'entrega' | 'recepcion'
-  status: 'pendiente' | 'entregado' | 'firmado'
+  status: 'pendiente' | 'entregado' | 'firmado' | 'anulado'
   enterprise?: { id: string; name: string } | null
   enterprise_tags?: { id: string; name: string; color: string }[]
   customer?: { id: string; name: string; cuit: string } | null
@@ -71,6 +71,7 @@ const STATUS_OPTIONS = [
   { value: 'pendiente', label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
   { value: 'entregado', label: 'Entregado', color: 'bg-blue-100 text-blue-800' },
   { value: 'firmado',   label: 'Firmado',   color: 'bg-green-100 text-green-800' },
+  { value: 'anulado',   label: 'Anulado',   color: 'bg-red-100 text-red-800 line-through' },
 ] as const
 
 const TIPO_OPTIONS = [
@@ -441,6 +442,52 @@ export const Remitos: React.FC = () => {
     return orderIds.length === 1 ? orderIds[0] : ''
   }, [items])
 
+  // ── Create invoice from remito items pendientes ───────────────────────────
+
+  const handleCreateInvoiceFromRemito = async (remitoId: string) => {
+    const remito = remitos.find(r => r.id === remitoId)
+    if (!remito) return
+
+    // Fetch remito detail to get items with qty_invoiced
+    let detailItems: any[] = []
+    try {
+      const detail = await api.getRemito(remitoId)
+      detailItems = detail?.items || []
+    } catch {
+      toast.error('No se pudo cargar los items del remito')
+      return
+    }
+
+    // Build pending items (qty - qty_invoiced > 0, and with order_item_id linkage)
+    const pendingItems = detailItems
+      .filter((item: any) => {
+        const qty = parseFloat(item.quantity || '0')
+        const invoiced = parseFloat(item.qty_invoiced || '0')
+        return qty - invoiced > 0 && item.order_item_id
+      })
+      .map((item: any) => ({
+        order_item_id: item.order_item_id,
+        product_name: item.product_name,
+        quantity: parseFloat(item.quantity || '0') - parseFloat(item.qty_invoiced || '0'),
+        unit_price: parseFloat(item.unit_price || '0'),
+        vat_rate: parseFloat(item.vat_rate || '21'),
+      }))
+
+    if (pendingItems.length === 0) {
+      toast.info('No hay items pendientes de facturar en este remito')
+      return
+    }
+
+    sessionStorage.setItem('invoice_preload', JSON.stringify({
+      enterprise_id: remito.enterprise?.id || null,
+      customer_id: remito.customer?.id || null,
+      invoice_type: 'B',
+      items: pendingItems,
+    }))
+
+    navigate('/invoices?preload=1')
+  }
+
   // ── Item helpers ───────────────────────────────────────────────────────────
 
   const handleAddManualItem = () => {
@@ -517,21 +564,23 @@ export const Remitos: React.FC = () => {
     }
   }
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
+  // ── Anular ─────────────────────────────────────────────────────────────────
 
   const handleDeleteRemito = async () => {
     if (!deleteTarget) return
     setDeleting(true)
     try {
       await api.deleteRemito(deleteTarget.id)
-      toast.success('Remito eliminado correctamente')
-      await loadRemitos(currentPage)
+      toast.success('Remito anulado correctamente')
     } catch (e: any) {
       toast.error(e.message)
       setError(e.message)
     } finally {
       setDeleting(false)
       setDeleteTarget(null)
+      // Always reload list — even on error — to reflect current server state.
+      // Prevents stale "pendiente" showing for remitos already anulado.
+      await loadRemitos(currentPage)
     }
   }
 
@@ -1110,7 +1159,7 @@ export const Remitos: React.FC = () => {
                 {remitos.map(remito => (
                   <React.Fragment key={remito.id}>
                   <tr
-                    className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer ${expandedRemitoId === remito.id ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer ${expandedRemitoId === remito.id ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''} ${remito.status === 'anulado' ? 'opacity-50 bg-red-50/30 dark:bg-red-900/10' : ''}`}
                     onClick={() => {
                       const newId = expandedRemitoId === remito.id ? null : remito.id
                       setExpandedRemitoId(newId)
@@ -1161,69 +1210,98 @@ export const Remitos: React.FC = () => {
                       {remito.item_count} item{remito.item_count !== 1 ? 's' : ''}
                     </td>
                     <td className="px-4 py-3">
-                      <PermissionGate module="remitos" action="edit">
-                        <select
-                          className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                            STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700 dark:text-gray-300'
-                          }`}
-                          value={remito.status}
-                          onChange={e => handleStatusChange(remito.id, e.target.value)}
-                          title="Cambiar estado"
-                        >
-                          {STATUS_OPTIONS.map(s => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
-                      </PermissionGate>
+                      {remito.status === 'anulado' ? (
+                        <span className="inline-block text-xs font-medium rounded-full px-2 py-1 bg-red-100 text-red-800 line-through">
+                          Anulado
+                        </span>
+                      ) : (
+                        <PermissionGate module="remitos" action="edit">
+                          <select
+                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
+                              STATUS_OPTIONS.find(s => s.value === remito.status)?.color || 'bg-gray-100 text-gray-700 dark:text-gray-300'
+                            }`}
+                            value={remito.status}
+                            onChange={e => handleStatusChange(remito.id, e.target.value)}
+                            title="Cambiar estado"
+                          >
+                            {STATUS_OPTIONS.filter(s => s.value !== 'anulado').map(s => (
+                              <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                          </select>
+                        </PermissionGate>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handlePreviewRemito(remito.id)}
-                          className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
-                          title="Ver remito"
-                        >
-                          Ver
-                        </button>
-                        <button
-                          onClick={() => handleDownloadPdf(remito.id, remito.remito_number)}
-                          disabled={downloadingPdfId === remito.id}
-                          className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                          title="Descargar PDF"
-                        >
-                          {downloadingPdfId === remito.id ? 'Generando...' : 'PDF'}
-                        </button>
-                        <label
-                          className="px-2 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors cursor-pointer"
-                          title="Subir PDF firmado"
-                        >
-                          Firmado
-                          <input
-                            type="file"
-                            accept="application/pdf"
-                            className="hidden"
-                            onChange={e => handleUploadSignedPdf(remito.id, e)}
-                          />
-                        </label>
-                        {(remito as any).signed_pdf_url && (
+                      {remito.status === 'anulado' ? (
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => handleDownloadSignedPdf(remito.id, remito.remito_number)}
-                            className="px-2 py-1 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 transition-colors"
-                            title="Descargar PDF firmado"
+                            onClick={() => handlePreviewRemito(remito.id)}
+                            className="px-2 py-1 bg-gray-500 text-white rounded text-xs font-medium hover:bg-gray-600 transition-colors"
+                            title="Ver detalle (solo lectura)"
                           >
-                            Ver Firmado
+                            Ver
                           </button>
-                        )}
-                        <PermissionGate module="remitos" action="delete">
                           <button
-                            onClick={() => setDeleteTarget(remito)}
-                            className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"
-                            title="Eliminar remito"
+                            onClick={() => handleDownloadPdf(remito.id, remito.remito_number)}
+                            disabled={downloadingPdfId === remito.id}
+                            className="px-2 py-1 bg-gray-400 text-white rounded text-xs font-medium hover:bg-gray-500 transition-colors disabled:opacity-60"
+                            title="Descargar PDF"
                           >
-                            ×
+                            {downloadingPdfId === remito.id ? 'Generando...' : 'PDF'}
                           </button>
-                        </PermissionGate>
-                      </div>
+                          <span className="text-[10px] text-red-600 dark:text-red-400 font-medium italic ml-1">
+                            Anulado — sin acciones
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handlePreviewRemito(remito.id)}
+                            className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
+                            title="Ver remito"
+                          >
+                            Ver
+                          </button>
+                          <button
+                            onClick={() => handleDownloadPdf(remito.id, remito.remito_number)}
+                            disabled={downloadingPdfId === remito.id}
+                            className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            title="Descargar PDF"
+                          >
+                            {downloadingPdfId === remito.id ? 'Generando...' : 'PDF'}
+                          </button>
+                          <label
+                            className="px-2 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors cursor-pointer"
+                            title="Subir PDF firmado"
+                          >
+                            Firmado
+                            <input
+                              type="file"
+                              accept="application/pdf"
+                              className="hidden"
+                              onChange={e => handleUploadSignedPdf(remito.id, e)}
+                            />
+                          </label>
+                          {(remito as any).signed_pdf_url && (
+                            <button
+                              onClick={() => handleDownloadSignedPdf(remito.id, remito.remito_number)}
+                              className="px-2 py-1 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 transition-colors"
+                              title="Descargar PDF firmado"
+                            >
+                              Ver Firmado
+                            </button>
+                          )}
+                          <PermissionGate module="remitos" action="delete">
+                            <button
+                              onClick={() => setDeleteTarget(remito)}
+                              className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-700 transition-colors text-base font-bold"
+                              title="Anular remito"
+                            >
+                              ×
+                            </button>
+                          </PermissionGate>
+                        </div>
+                      )}
                     </td>
                   </tr>
                   {/* Expandible row */}
@@ -1317,8 +1395,8 @@ export const Remitos: React.FC = () => {
 
                               {/* Actions */}
                               <div className="flex gap-2">
-                                {detailItems.some((i: any) => parseFloat(i.qty_invoiced || '0') < parseFloat(i.quantity || '0')) && (
-                                  <button onClick={(e) => { e.stopPropagation(); navigate(`/invoices?nuevo=true&remito_id=${remito.id}`) }}
+                                {remito.status !== 'anulado' && detailItems.some((i: any) => parseFloat(i.qty_invoiced || '0') < parseFloat(i.quantity || '0')) && (
+                                  <button onClick={(e) => { e.stopPropagation(); handleCreateInvoiceFromRemito(remito.id) }}
                                     className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">
                                     Crear factura de items pendientes
                                   </button>
@@ -1347,9 +1425,9 @@ export const Remitos: React.FC = () => {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Eliminar remito"
-        message={`¿Eliminar el remito ${deleteTarget ? fmtRemitoNumber(deleteTarget.remito_number) : ''}? Esta accion no se puede deshacer.`}
-        confirmLabel="Eliminar"
+        title="Anular remito"
+        message={`¿Anular el remito ${deleteTarget ? fmtRemitoNumber(deleteTarget.remito_number) : ''}? Se revertira qty_delivered de los items de pedido y se devolvera el stock de items manuales. El remito quedara marcado como ANULADO y no podra modificarse.`}
+        confirmLabel="Anular"
         variant="danger"
         loading={deleting}
         onConfirm={handleDeleteRemito}
@@ -1377,8 +1455,21 @@ export const Remitos: React.FC = () => {
           }}
           items={(() => {
             const remito = contextMenu.menu.item
+            const isAnulado = remito.status === 'anulado'
             const data = contextData[remito.id]
             const menuItems: ContextMenuItem[] = []
+
+            if (isAnulado) {
+              menuItems.push({ id: 'anulado-label', label: 'REMITO ANULADO — solo lectura', disabled: true })
+              menuItems.push({ id: 'sep-anulado', label: '', separator: true })
+              menuItems.push({ id: 'ver', label: 'Ver detalle',
+                onClick: () => { setPreviewRemitoId(remito.id); contextMenu.closeMenu() },
+              })
+              menuItems.push({ id: 'pdf', label: 'Descargar PDF',
+                onClick: () => { handleDownloadPdf(remito.id, remito.remito_number); contextMenu.closeMenu() },
+              })
+              return menuItems
+            }
 
             if (!data) {
               menuItems.push({ id: 'loading', label: 'Cargando...', disabled: true })
@@ -1400,8 +1491,8 @@ export const Remitos: React.FC = () => {
               }
             }
 
-            menuItems.push({ id: 'crear-factura', label: 'Crear factura de este remito',
-              onClick: () => { navigate(`/invoices?nuevo=true&remito_id=${remito.id}`); contextMenu.closeMenu() },
+            menuItems.push({ id: 'crear-factura', label: 'Crear factura de items pendientes',
+              onClick: () => { handleCreateInvoiceFromRemito(remito.id); contextMenu.closeMenu() },
             })
             menuItems.push({ id: 'ver', label: 'Ver detalle',
               onClick: () => { setPreviewRemitoId(remito.id); contextMenu.closeMenu() },
@@ -1410,7 +1501,7 @@ export const Remitos: React.FC = () => {
               onClick: () => { handleDownloadPdf(remito.id, remito.remito_number); contextMenu.closeMenu() },
             })
             menuItems.push({ id: 'sep3', label: '', separator: true })
-            menuItems.push({ id: 'delete', label: 'Eliminar remito', danger: true,
+            menuItems.push({ id: 'delete', label: 'Anular remito', danger: true,
               onClick: () => { setDeleteTarget(remito); contextMenu.closeMenu() },
             })
 
