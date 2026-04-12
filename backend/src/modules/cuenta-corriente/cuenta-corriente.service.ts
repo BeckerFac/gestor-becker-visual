@@ -32,7 +32,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status NOT IN ('cancelled', 'cancelado')
+              AND i.status != 'cancelled'
               ${buFilter}
           ), 0) as total_ventas,
 
@@ -256,7 +256,7 @@ export class CuentaCorrienteService {
             'Factura ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as descripcion,
             i.id as reference_id
           FROM invoices i
-          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'cancelado')
+          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -377,7 +377,7 @@ export class CuentaCorrienteService {
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status NOT IN ('cancelled', 'cancelado')
+            AND i.status != 'cancelled'
         `);
       } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
 

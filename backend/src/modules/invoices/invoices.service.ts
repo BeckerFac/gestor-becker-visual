@@ -106,7 +106,7 @@ export class InvoicesService {
                   SELECT SUM(CAST(ii.quantity AS decimal))
                   FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id
                   WHERE ii.order_item_id = ${item.order_item_id}
-                    AND i.status NOT IN ('cancelled', 'cancelado')
+                    AND i.status != 'cancelled'
                     AND i.company_id = ${companyId}
                 ), 0) as invoiced_qty
               FROM order_items oi
@@ -1281,7 +1281,7 @@ export class InvoicesService {
         CAST(o.total_amount AS decimal) as order_total,
         COALESCE(SUM(CAST(i.total_amount AS decimal)), 0) as invoiced_total
       FROM orders o
-      LEFT JOIN invoices i ON i.order_id = o.id AND i.status NOT IN ('cancelled', 'cancelado')
+      LEFT JOIN invoices i ON i.order_id = o.id AND i.status != 'cancelled'
       WHERE o.id = ${orderId} AND o.company_id = ${companyId}
       GROUP BY o.id, o.total_amount
     `);
@@ -1344,7 +1344,7 @@ export class InvoicesService {
         SELECT ii.order_item_id, COALESCE(SUM(CAST(ii.quantity AS decimal)), 0) as qty_invoiced
         FROM invoice_items ii
         JOIN invoices i ON ii.invoice_id = i.id
-        WHERE i.status NOT IN ('cancelled', 'cancelado')
+        WHERE i.status != 'cancelled'
           AND i.company_id = $1 AND ii.order_item_id IS NOT NULL
         GROUP BY ii.order_item_id
       )

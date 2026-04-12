@@ -1252,7 +1252,7 @@ export class RemitosService {
       LEFT JOIN order_items oi ON ii.order_item_id = oi.id AND oi.order_id IN (SELECT id FROM orders WHERE company_id = i.company_id)
       LEFT JOIN orders o ON oi.order_id = o.id AND o.company_id = i.company_id
       WHERE i.company_id = $1 AND i.id = $2
-        AND i.status NOT IN ('cancelled', 'cancelado')
+        AND i.status != 'cancelled'
       ORDER BY ii.created_at ASC
     `, [companyId, invoiceId]);
     return r.rows.filter((row: any) => parseFloat(row.qty_available || '0') > 0);

@@ -640,7 +640,7 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
               'invoiced_qty', COALESCE((
                 SELECT SUM(ii.quantity) FROM invoice_items ii
                 JOIN invoices inv ON inv.id = ii.invoice_id
-                WHERE ii.order_item_id = oi.id AND inv.status NOT IN ('cancelled', 'cancelado')
+                WHERE ii.order_item_id = oi.id AND inv.status != 'cancelled'
               ), 0)
             ) ORDER BY oi.created_at) FROM order_items oi WHERE oi.order_id = o.id), '[]'::json) as items
           FROM orders o
@@ -748,7 +748,7 @@ async function executeTool(companyId: string, userId: string, toolName: string, 
             COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as cobrado
           FROM invoices i
           LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
-          WHERE i.company_id = $1 AND i.enterprise_id = $2 AND i.status NOT IN ('cancelled', 'cancelado')
+          WHERE i.company_id = $1 AND i.enterprise_id = $2 AND i.status != 'cancelled'
           GROUP BY i.id, i.invoice_type, i.invoice_number, i.total_amount
           HAVING CAST(i.total_amount AS decimal) > COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0)
           ORDER BY i.created_at ASC
