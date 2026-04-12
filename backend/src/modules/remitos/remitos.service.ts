@@ -211,6 +211,62 @@ export class RemitosService {
 
   async createRemito(companyId: string, userId: string, data: any) {
     await this.ensureTables();
+
+    // ═══ VALIDATIONS (Plan: Seccion 2 — 10 bugs) ═══
+    // BUG #5/6: validate each item qty > 0 BEFORE opening connection
+    const allItems = data.items || [];
+    for (const item of allItems) {
+      if (!item.product_name || !String(item.product_name).trim()) continue;
+      const qty = Number(item.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new ApiError(400, `Cantidad invalida en "${item.product_name}". Debe ser un numero positivo > 0`);
+      }
+    }
+
+    // BUG #7: validate date format
+    if (data.date) {
+      const d = new Date(data.date);
+      if (isNaN(d.getTime())) {
+        throw new ApiError(400, 'Fecha invalida. Debe ser formato ISO 8601');
+      }
+    }
+
+    // BUG #9: validate text field lengths
+    if (data.delivery_address && String(data.delivery_address).length > 500) {
+      throw new ApiError(400, 'La direccion de entrega no puede exceder 500 caracteres');
+    }
+    if (data.receiver_name && String(data.receiver_name).length > 255) {
+      throw new ApiError(400, 'El nombre del receptor no puede exceder 255 caracteres');
+    }
+    if (data.transport && String(data.transport).length > 255) {
+      throw new ApiError(400, 'El transporte no puede exceder 255 caracteres');
+    }
+    if (data.notes && String(data.notes).length > 2000) {
+      throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+    }
+
+    // BUG #2: validate enterprise_id belongs to company (IDOR fix)
+    if (data.enterprise_id) {
+      const entCheck = await pool.query(
+        'SELECT id FROM enterprises WHERE id = $1 AND company_id = $2',
+        [data.enterprise_id, companyId]
+      );
+      if (entCheck.rows.length === 0) {
+        throw new ApiError(400, 'La empresa no existe o no pertenece a tu compania');
+      }
+    }
+
+    // BUG #3: validate customer_id belongs to company (IDOR fix)
+    if (data.customer_id) {
+      const custCheck = await pool.query(
+        'SELECT id, enterprise_id FROM customers WHERE id = $1 AND company_id = $2',
+        [data.customer_id, companyId]
+      );
+      if (custCheck.rows.length === 0) {
+        throw new ApiError(400, 'El cliente no existe o no pertenece a tu compania');
+      }
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -225,7 +281,10 @@ export class RemitosService {
       // 2. Resolve enterprise_id
       let enterpriseId = data.enterprise_id || null;
       if (!enterpriseId && data.customer_id) {
-        const custResult = await client.query('SELECT enterprise_id FROM customers WHERE id = $1', [data.customer_id]);
+        const custResult = await client.query(
+          'SELECT enterprise_id FROM customers WHERE id = $1 AND company_id = $2',
+          [data.customer_id, companyId]
+        );
         if (custResult.rows[0]?.enterprise_id) enterpriseId = custResult.rows[0].enterprise_id;
       }
 
@@ -239,28 +298,50 @@ export class RemitosService {
       }
 
       // 5. Lock and validate order_items (FOR UPDATE prevents race conditions)
-      const orderItemIds = validItems.filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id);
+      const orderItemIds = [...new Set(validItems.filter((i: any) => i.order_item_id).map((i: any) => i.order_item_id))];
+
+      const orderIdsSet = new Set<string>();
 
       if (orderItemIds.length > 0) {
         const lockResult = await client.query(
-          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id
+          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id, oi.order_id
            FROM order_items oi JOIN orders o ON oi.order_id = o.id
            WHERE oi.id = ANY($1) AND o.company_id = $2 FOR UPDATE OF oi`,
           [orderItemIds, companyId]
         );
         const lockedItems = new Map(lockResult.rows.map((r: any) => [r.id, r]));
 
+        // BUG #4: if no enterpriseId provided, derive from first order_item
+        if (!enterpriseId && lockResult.rows.length > 0) {
+          enterpriseId = lockResult.rows[0].enterprise_id;
+        }
+
+        // BUG #1: accumulate qty by order_item_id BEFORE validating
+        const qtyByOrderItem = new Map<string, number>();
         for (const item of validItems) {
           if (!item.order_item_id) continue;
-          const locked = lockedItems.get(item.order_item_id);
-          if (!locked) throw new ApiError(400, `Item de pedido ${item.order_item_id} no encontrado`);
-          if (enterpriseId && locked.enterprise_id && locked.enterprise_id !== enterpriseId) {
-            throw new ApiError(400, `El item "${item.product_name}" pertenece a otra empresa`);
+          qtyByOrderItem.set(
+            item.order_item_id,
+            (qtyByOrderItem.get(item.order_item_id) || 0) + Number(item.quantity || 1)
+          );
+        }
+
+        for (const [oiId, totalQty] of qtyByOrderItem.entries()) {
+          const locked = lockedItems.get(oiId);
+          if (!locked) throw new ApiError(400, `Item de pedido ${oiId} no encontrado o no pertenece a tu compania`);
+          // BUG #4: enforce enterprise consistency (all items must be from same enterprise)
+          if (locked.enterprise_id && locked.enterprise_id !== enterpriseId) {
+            throw new ApiError(400, `Los items pertenecen a distintas empresas. Un remito solo puede tener items de una empresa.`);
           }
           const available = parseFloat(locked.quantity) - parseFloat(locked.qty_delivered);
-          if ((item.quantity || 1) > available + 0.01) {
-            throw new ApiError(400, `No se pueden remitar ${item.quantity} de "${item.product_name}". Disponible: ${available}`);
+          if (totalQty > available + 0.01) {
+            throw new ApiError(400,
+              `No se pueden remitar ${totalQty} unidades del item ${oiId}. Disponible: ${available}. ` +
+              `(Verifica que no estes enviando el mismo item dos veces)`
+            );
           }
+          // Collect order_id directly from lock result (BUG #8: avoid N+1 query)
+          if (locked.order_id) orderIdsSet.add(locked.order_id);
         }
       }
 
@@ -278,10 +359,10 @@ export class RemitosService {
         tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null, userId]);
 
       // 6. Create items + update qty_delivered + deduct stock for manual items
-      const orderIdsSet = new Set<string>();
+      // orderIdsSet was already populated above from lockResult (no N+1 query)
       for (const item of validItems) {
         const itemId = uuid();
-        const qty = item.quantity || 1;
+        const qty = Number(item.quantity);
         await client.query(`
           INSERT INTO remito_items (id, remito_id, product_id, product_name, description, quantity, unit,
             unit_price, vat_rate, order_item_id)
@@ -297,8 +378,6 @@ export class RemitosService {
             'UPDATE order_items SET qty_delivered = COALESCE(qty_delivered, 0) + $1 WHERE id = $2',
             [qty, item.order_item_id]
           );
-          const oiRes = await client.query('SELECT order_id FROM order_items WHERE id = $1', [item.order_item_id]);
-          if (oiRes.rows[0]?.order_id) orderIdsSet.add(oiRes.rows[0].order_id);
         } else if (item.product_id) {
           // Manual item with product: deduct stock if controls_stock
           const prodCheck = await client.query(

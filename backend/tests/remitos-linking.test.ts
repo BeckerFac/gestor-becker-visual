@@ -129,7 +129,11 @@ describe('Fase 3: createRemito with linking', () => {
       return { rows: [] };
     });
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
 
     // Mock pool.connect to return our mock client
     const { pool } = await import('../src/config/db');
@@ -160,7 +164,11 @@ describe('Fase 3: createRemito with linking', () => {
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -186,14 +194,17 @@ describe('Fase 3: createRemito with linking', () => {
         executedQueries.push({ sql, params });
         if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
         if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 1 }] };
-        if (sql.includes('FOR UPDATE')) return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0 }] };
-        if (sql.includes('SELECT order_id FROM order_items')) return { rows: [{ order_id: 'ord-1' }] };
+        if (sql.includes('FOR UPDATE')) return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0, enterprise_id: 'ent-1', order_id: 'ord-1' }] };
         return { rows: [] };
       }),
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -235,7 +246,11 @@ describe('Fase 3: createRemito with linking', () => {
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -269,7 +284,11 @@ describe('Fase 3: createRemito with linking', () => {
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -310,7 +329,11 @@ describe('Fase 3: anularRemito reverts qty_delivered', () => {
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');

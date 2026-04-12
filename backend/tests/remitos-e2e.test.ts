@@ -27,7 +27,7 @@ describe('E2E Flow 1: Pedido → Remito', () => {
         if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 1 }] };
         // FOR UPDATE lock
         if (sql.includes('FOR UPDATE')) {
-          return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0, enterprise_id: 'ent-1' }] };
+          return { rows: [{ id: 'oi-1', quantity: 10, qty_delivered: 0, enterprise_id: 'ent-1', order_id: 'ord-1' }] };
         }
         if (sql.includes('SELECT order_id FROM order_items')) return { rows: [{ order_id: 'ord-1' }] };
         if (sql.includes('SELECT id FROM orders WHERE id =')) return { rows: [{ id: 'ord-1' }] };
@@ -36,7 +36,11 @@ describe('E2E Flow 1: Pedido → Remito', () => {
       release: vi.fn(),
     };
 
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -92,7 +96,11 @@ describe('E2E Flow 1: Pedido → Remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -118,7 +126,11 @@ describe('E2E Flow 1: Pedido → Remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -128,7 +140,7 @@ describe('E2E Flow 1: Pedido → Remito', () => {
     await expect(service.createRemito('comp-1', 'user-1', {
       enterprise_id: 'ent-1',
       items: [{ product_name: 'Pintura', quantity: 3, order_item_id: 'oi-1' }],
-    })).rejects.toThrow(/otra empresa/);
+    })).rejects.toThrow(/otra empresa|distintas empresas/);
   });
 });
 
@@ -153,7 +165,11 @@ describe('E2E Flow 2: Manual item with stock control', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -191,7 +207,11 @@ describe('E2E Flow 2: Manual item with stock control', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -218,7 +238,11 @@ describe('E2E Flow 2: Manual item with stock control', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -262,7 +286,11 @@ describe('E2E Flow 3: Anular remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -304,7 +332,11 @@ describe('E2E Flow 3: Anular remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -336,7 +368,11 @@ describe('E2E Flow 3: Anular remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -355,7 +391,11 @@ describe('E2E Flow 3: Anular remito', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -511,7 +551,11 @@ describe('E2E Flow 6: Validation edge cases', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
@@ -533,7 +577,11 @@ describe('E2E Flow 6: Validation edge cases', () => {
       }),
       release: vi.fn(),
     };
-    mockPoolQuery.mockImplementation(async () => ({ rows: [] }));
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
     (pool.connect as any).mockResolvedValue(mockClient);
 
     const { RemitosService } = await import('../src/modules/remitos/remitos.service');
