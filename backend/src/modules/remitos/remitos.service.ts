@@ -865,7 +865,7 @@ export class RemitosService {
         ii.order_item_id,
         i.enterprise_id,
         CASE WHEN ii.order_item_id IS NOT NULL THEN
-          oi.quantity - COALESCE(oi.qty_delivered, 0)
+          LEAST(ii.quantity, GREATEST(oi.quantity - COALESCE(oi.qty_delivered, 0), 0))
         ELSE ii.quantity END as qty_available,
         CASE WHEN ii.order_item_id IS NOT NULL THEN
           'Pedido #' || LPAD(o.order_number::text, 4, '0')
