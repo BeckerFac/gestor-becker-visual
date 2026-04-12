@@ -458,6 +458,8 @@ export const Cobros: React.FC = () => {
     if (invoiceParamProcessed.current || loading) return
     const invoiceId = searchParams.get('invoice_id')
     const amount = searchParams.get('amount')
+    // invoice_status: used to switch the tab to the correct list (borrador / emitidas)
+    const invoiceStatus = searchParams.get('invoice_status')
     if (!invoiceId) return
 
     invoiceParamProcessed.current = true
@@ -480,6 +482,13 @@ export const Cobros: React.FC = () => {
           : ''
 
         const remaining = amount || '0'
+
+        // Auto-switch tab based on the source invoice status.
+        // If the user clicked "Registrar recibo" on a draft invoice, land on
+        // "Facturas Borrador". If it was an emitted one, "Facturas Emitidas".
+        const effectiveStatus = invoiceStatus || targetInvoice?.status
+        if (effectiveStatus === 'draft') setLinkTab('invoices_borrador')
+        else if (effectiveStatus === 'authorized' || effectiveStatus === 'emitido') setLinkTab('invoices_emitidas')
 
         setForm({
           enterprise_id: enterpriseId,
@@ -632,12 +641,22 @@ export const Cobros: React.FC = () => {
   }, [invoiceItems])
 
   // Derived lists for the two tabs
+  // Filter by ACTUAL remaining balance (total - cobrado) instead of payment_status
+  // because backend may not update payment_status on every cobro creation,
+  // and we never want to show fully-paid invoices in the "pending" list.
+  const hasRemainingBalance = (inv: InvoiceForReceipt): boolean => {
+    const total = parseFloat(inv.total_amount || '0')
+    const cobrado = parseFloat(inv.total_cobrado || '0')
+    return Math.max(0, total - cobrado) > 0.01
+  }
   const invoicesEmitidas = useMemo(() =>
-    invoicesForReceipt.filter(inv => inv.status === 'authorized' || inv.status === 'emitido'),
+    invoicesForReceipt.filter(inv =>
+      (inv.status === 'authorized' || inv.status === 'emitido') && hasRemainingBalance(inv)
+    ),
     [invoicesForReceipt]
   )
   const invoicesBorrador = useMemo(() =>
-    invoicesForReceipt.filter(inv => inv.status === 'draft'),
+    invoicesForReceipt.filter(inv => inv.status === 'draft' && hasRemainingBalance(inv)),
     [invoicesForReceipt]
   )
 
@@ -1367,8 +1386,8 @@ export const Cobros: React.FC = () => {
                           <option value="diferido">Diferido</option>
                           <option value="cruzado">Cruzado</option>
                         </select>
-                        <input type="date" placeholder="Emision" value={pm.cheque_data.issue_date} onChange={e => updateChequeData(i, 'issue_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
-                        <input type="date" placeholder="Vencimiento" value={pm.cheque_data.due_date} onChange={e => updateChequeData(i, 'due_date', e.target.value)} className="rounded border p-1.5 text-sm dark:bg-gray-800" />
+                        <DateInput label="Emision" value={pm.cheque_data.issue_date} onChange={val => updateChequeData(i, 'issue_date', val)} />
+                        <DateInput label="Vencimiento" value={pm.cheque_data.due_date} onChange={val => updateChequeData(i, 'due_date', val)} />
                       </div>
                     )}
                   </div>
@@ -1431,12 +1450,10 @@ export const Cobros: React.FC = () => {
                               className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
                           </div>
                           <div>
-                            <label className="text-xs text-gray-500">Fecha retencion</label>
-                            <input type="date" value={ret.retention_date || ''}
-                              onChange={e => setRetencionesSufridas(prev => prev.map((r, i) =>
-                                i === idx ? { ...r, retention_date: e.target.value } : r
-                              ))}
-                              className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100" />
+                            <DateInput label="Fecha retencion" value={ret.retention_date || ''}
+                              onChange={val => setRetencionesSufridas(prev => prev.map((r, i) =>
+                                i === idx ? { ...r, retention_date: val } : r
+                              ))} />
                           </div>
                           {ret.type === 'iibb' && (
                             <div>

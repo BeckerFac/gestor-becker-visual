@@ -2062,7 +2062,7 @@ export const Invoices: React.FC = () => {
                             </span>
                           ) : (
                             <button
-                              onClick={(e) => { e.stopPropagation(); navigate(`/cobros?invoice_id=${invoice.id}&amount=${remaining.toFixed(2)}`) }}
+                              onClick={(e) => { e.stopPropagation(); navigate(`/cobros?invoice_id=${invoice.id}&amount=${remaining.toFixed(2)}&invoice_status=${invoice.status}`) }}
                               title="Click para registrar cobro"
                               className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 hover:scale-105 ${meta.color}`}
                             >
@@ -2133,7 +2133,7 @@ export const Invoices: React.FC = () => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                window.location.href = `/cobros?invoice_id=${invoice.id}&amount=${invoice.total_amount}&enterprise_id=${invoice.enterprise?.id || ''}`
+                                window.location.href = `/cobros?invoice_id=${invoice.id}&amount=${invoice.total_amount}&enterprise_id=${invoice.enterprise?.id || ''}&invoice_status=${invoice.status}`
                               }}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded hover:bg-amber-700 transition-colors"
                               title="Registrar recibo para esta factura"
