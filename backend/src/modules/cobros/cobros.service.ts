@@ -227,7 +227,21 @@ export class CobrosService {
       try {
 
       const cobroCurrency = data.currency || 'ARS';
-      const cobroExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+      let cobroExchangeRate: number | null = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+      // PR3-T5: auto-fetch BCRA rate si moneda != ARS y no se paso manual.
+      // Evita el bug de guardar NULL y despues `amount * null = NaN` en reports.
+      if (cobroCurrency !== 'ARS' && (!cobroExchangeRate || !Number.isFinite(cobroExchangeRate))) {
+        try {
+          const { currencyService } = await import('../currency/currency.service');
+          const dateStr = data.payment_date ? String(data.payment_date).slice(0, 10) : undefined;
+          cobroExchangeRate = await currencyService.getExchangeRate(cobroCurrency, dateStr);
+        } catch (e) {
+          throw new ApiError(
+            400,
+            `No se pudo obtener cotizacion BCRA para ${cobroCurrency}. Ingresa el tipo de cambio manualmente.`
+          );
+        }
+      }
 
       // Calculate total_amount = payment methods sum + retenciones sufridas
       const totalRetenciones = data.retenciones_sufridas?.reduce((s: number, r: any) => s + parseFloat(r.amount), 0) || 0;

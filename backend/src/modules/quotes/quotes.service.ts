@@ -197,6 +197,15 @@ export class QuotesService {
     const quote = await this.getQuote(companyId, quoteId);
     const items = quote.items || [];
 
+    // PR3-T1: guardrail — no se puede aceptar una cotizacion sin items
+    if (items.length === 0) {
+      throw new ApiError(400, 'No se puede aceptar una cotizacion sin items. Agrega al menos un producto.');
+    }
+    const quoteTotal = parseFloat(quote.total_amount || '0');
+    if (!Number.isFinite(quoteTotal) || quoteTotal <= 0) {
+      throw new ApiError(400, 'No se puede aceptar una cotizacion con total $0 o invalido.');
+    }
+
     // Generate order_number
     const numResult = await db.execute(sql`
       SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = ${companyId}
@@ -443,6 +452,19 @@ export class QuotesService {
     }
   }
 
+  // PR3-T4: label dinamico de IVA segun las rates reales de los items
+  // (antes hardcodeado a "IVA (21%)" en 3 templates distintos).
+  private computeVatLabel(items: any[]): string {
+    const rates = new Set<number>();
+    for (const it of items || []) {
+      const r = Number(it.vat_rate ?? 21);
+      if (Number.isFinite(r)) rates.add(r);
+    }
+    if (rates.size === 0) return 'IVA:';
+    if (rates.size === 1) return `IVA (${[...rates][0]}%):`;
+    return 'IVA (varios):';
+  }
+
   private buildClasicoTemplate(quote: any, company: any, bannerHtml: string): string {
     const esc = (s: string) => this.escapeHtml(s);
     const items = quote.items || [];
@@ -540,7 +562,7 @@ export class QuotesService {
         <span style="font-weight:500;font-size:13px;">$ ${Number(quote.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:8px 14px;background:#f8f9fa;border-bottom:1px solid #e5e7eb;">
-        <span style="color:#666;font-size:13px;">IVA (21%):</span>
+        <span style="color:#666;font-size:13px;">${this.computeVatLabel(quote.items || [])}</span>
         <span style="font-weight:500;font-size:13px;">$ ${Number(quote.vat_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:10px 14px;background:#1a1a2e;">
@@ -676,7 +698,7 @@ export class QuotesService {
         <span style="font-weight:500;font-size:13px;color:#374151;">$ ${Number(quote.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:10px 16px;background:white;border-top:1px solid #f3f4f6;">
-        <span style="color:#6b7280;font-size:13px;">IVA (21%):</span>
+        <span style="color:#6b7280;font-size:13px;">${this.computeVatLabel(quote.items || [])}</span>
         <span style="font-weight:500;font-size:13px;color:#374151;">$ ${Number(quote.vat_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:12px 16px;background:#3b82f6;">
@@ -807,7 +829,7 @@ export class QuotesService {
         <span style="font-weight:600;font-size:13px;color:#312e81;">$ ${Number(quote.subtotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #c7d2fe;">
-        <span style="color:#4338ca;font-size:13px;">IVA (21%):</span>
+        <span style="color:#4338ca;font-size:13px;">${this.computeVatLabel(quote.items || [])}</span>
         <span style="font-weight:600;font-size:13px;color:#312e81;">$ ${Number(quote.vat_amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:14px 16px;background:${accentColor};">

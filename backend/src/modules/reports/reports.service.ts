@@ -18,16 +18,22 @@ export class ReportsService {
     userPermissions?: Map<string, Set<string>>,
   ) {
     try {
+      // PR3-T3: timezone Argentina (-03:00). Sin offset, concat 'T23:59:59'
+      // se interpretaba como UTC → reports AR perdian 3h de facturas del dia.
+      const AR_OFFSET = '-03:00';
       let periodStart: Date;
       if (dateFrom) {
-        periodStart = new Date(dateFrom);
+        periodStart = new Date(`${dateFrom}T00:00:00${AR_OFFSET}`);
       } else {
-        periodStart = new Date();
-        periodStart.setDate(1);
+        const now = new Date();
+        periodStart = new Date(
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01T00:00:00${AR_OFFSET}`
+        );
       }
-      periodStart.setHours(0, 0, 0, 0);
 
-      const periodEnd = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
+      const periodEnd = dateTo
+        ? new Date(`${dateTo}T23:59:59.999${AR_OFFSET}`)
+        : new Date();
 
       // Default empty values
       let salesMonth = 0;

@@ -782,6 +782,33 @@ export class OrdersService {
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Pedido no encontrado');
 
+      // PR3-T2: guardrails explicitos antes de borrar
+      // La FK de remito_orders es ON DELETE RESTRICT — intentar borrar sin
+      // chequear devolvia error 500 generico. Ahora devuelve 409 con mensaje.
+      const remitosCheck = await db.execute(sql`
+        SELECT COUNT(*)::int as cnt FROM remito_orders WHERE order_id = ${orderId}
+      `);
+      const remitoCount = Number(((remitosCheck as any).rows || [])[0]?.cnt || 0);
+      if (remitoCount > 0) {
+        throw new ApiError(
+          409,
+          `No se puede eliminar el pedido: tiene ${remitoCount} remito(s) asociado(s). Anula los remitos primero.`
+        );
+      }
+      // Tambien chequear facturas no-canceladas
+      const invCheck = await db.execute(sql`
+        SELECT COUNT(*)::int as cnt FROM invoices
+        WHERE order_id = ${orderId} AND company_id = ${companyId}
+          AND status NOT IN ('cancelled')
+      `);
+      const invCount = Number(((invCheck as any).rows || [])[0]?.cnt || 0);
+      if (invCount > 0) {
+        throw new ApiError(
+          409,
+          `No se puede eliminar el pedido: tiene ${invCount} factura(s) asociada(s). Cancela las facturas primero.`
+        );
+      }
+
       await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
       await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
       await db.execute(sql`UPDATE cheques SET order_id = NULL WHERE order_id = ${orderId}`);
