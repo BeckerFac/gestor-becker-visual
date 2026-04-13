@@ -24,13 +24,18 @@ async function start() {
       logger.warn('Security validation warnings detected. Review before deploying to production.');
     }
 
-    // Validate critical environment variables
-    if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) {
-      logger.fatal('FATAL: JWT_SECRET must be set and at least 16 characters');
+    // Validate critical environment variables — FATAL if missing
+    // (PR1-T1: bump min to 32 chars, also validate DATABASE_URL explicitly)
+    if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+      logger.fatal('FATAL: JWT_SECRET must be set and at least 32 characters');
       process.exit(1);
     }
-    if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 16) {
-      logger.fatal('FATAL: JWT_REFRESH_SECRET must be set and at least 16 characters');
+    if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 32) {
+      logger.fatal('FATAL: JWT_REFRESH_SECRET must be set and at least 32 characters');
+      process.exit(1);
+    }
+    if (!env.DATABASE_URL) {
+      logger.fatal('FATAL: DATABASE_URL must be set (no hardcoded fallback allowed)');
       process.exit(1);
     }
 

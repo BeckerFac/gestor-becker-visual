@@ -48,17 +48,18 @@ export class CustomersService {
       }).returning();
 
       // Set fields not in Drizzle schema via raw SQL
+      // PR1-T5: scope all UPDATE/SELECT by company_id (defense-in-depth IDOR)
       if (data.notes) {
-        await db.execute(sql`UPDATE customers SET notes = ${data.notes} WHERE id = ${customerId}`);
+        await db.execute(sql`UPDATE customers SET notes = ${data.notes} WHERE id = ${customerId} AND company_id = ${companyId}`);
       }
       if (data.enterprise_id !== undefined) {
-        await db.execute(sql`UPDATE customers SET enterprise_id = ${data.enterprise_id || null} WHERE id = ${customerId}`);
+        await db.execute(sql`UPDATE customers SET enterprise_id = ${data.enterprise_id || null} WHERE id = ${customerId} AND company_id = ${companyId}`);
       }
       if (data.role !== undefined) {
-        await db.execute(sql`UPDATE customers SET role = ${data.role || null} WHERE id = ${customerId}`);
+        await db.execute(sql`UPDATE customers SET role = ${data.role || null} WHERE id = ${customerId} AND company_id = ${companyId}`);
       }
 
-      const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId}`);
+      const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId} AND company_id = ${companyId}`);
       const rows = (result as any).rows || result || [];
       return rows[0] || customer[0];
     } catch (error) {
@@ -141,8 +142,8 @@ export class CustomersService {
           .where(and(eq(customers.company_id, companyId), eq(customers.id, customerId)));
       }
 
-      // Return updated customer via raw SQL
-      const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId}`);
+      // Return updated customer via raw SQL — PR1-T5: scoped by company_id
+      const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId} AND company_id = ${companyId}`);
       const rows = (result as any).rows || result || [];
       return rows[0];
     } catch (error) {

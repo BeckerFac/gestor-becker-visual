@@ -211,7 +211,7 @@ describe('EnterprisesService', () => {
         if (sqlStr.includes('SELECT * FROM enterprises WHERE id')) {
           return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Corp A', cuit: '30-71234567-9' }] })
         }
-        if (sqlStr.includes('SELECT * FROM customers WHERE enterprise_id')) {
+        if (/SELECT \* FROM customers[\s\S]*enterprise_id/.test(sqlStr)) {
           return Promise.resolve({ rows: [
             { id: 'contact-1', name: 'Juan Perez', enterprise_id: 'ent-1' },
           ] })

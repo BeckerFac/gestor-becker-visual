@@ -7,8 +7,10 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '3000', 10),
 
-  // Database
-  DATABASE_URL: process.env.DATABASE_URL || 'postgresql://gestor_user:gestor_password_dev@localhost:5432/gobecker',
+  // Database — NO fallback: must be explicitly set, validated at startup.
+  // Previous fallback to hardcoded dev creds was a security hazard
+  // (misconfigured deploy could silently connect to local DB).
+  DATABASE_URL: process.env.DATABASE_URL || '',
 
   // JWT - secure defaults (15m access, 7d refresh)
   JWT_SECRET: process.env.JWT_SECRET || '',
@@ -73,18 +75,23 @@ export const env = {
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isProduction = env.NODE_ENV === 'production';
 
-// Validate critical secrets on import (non-fatal for test environments)
+// Validate critical secrets on import.
+// In NODE_ENV !== 'test', validation failure is FATAL (throws / exits).
+// Tests with mocked DB/JWT bypass this via NODE_ENV=test.
 export function validateSecrets(): boolean {
   const errors: string[] = [];
 
-  if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) {
-    errors.push('JWT_SECRET must be set and at least 16 characters');
+  if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+    errors.push('JWT_SECRET must be set and at least 32 characters');
   }
-  if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 16) {
-    errors.push('JWT_REFRESH_SECRET must be set and at least 16 characters');
+  if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 32) {
+    errors.push('JWT_REFRESH_SECRET must be set and at least 32 characters');
   }
   if (!env.DATABASE_URL) {
-    errors.push('DATABASE_URL must be set');
+    errors.push('DATABASE_URL must be set (no default, no fallback)');
+  }
+  if (env.DATABASE_URL && env.DATABASE_URL.includes('gestor_password_dev')) {
+    errors.push('DATABASE_URL still contains the old dev fallback string — set a real DATABASE_URL');
   }
 
   // Warn about weak secrets in production

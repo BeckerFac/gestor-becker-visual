@@ -75,8 +75,13 @@ export class EnterprisesService {
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
 
+      // PR1-T6: scope contacts lookup by company_id for defense-in-depth.
+      // Even though enterprise was validated by company_id above, customers
+      // rows should never be fetched without the tenant filter.
       const contactsResult = await db.execute(sql`
-        SELECT * FROM customers WHERE enterprise_id = ${enterpriseId} ORDER BY name ASC
+        SELECT * FROM customers
+        WHERE enterprise_id = ${enterpriseId} AND company_id = ${companyId}
+        ORDER BY name ASC
       `);
       const contacts = (contactsResult as any).rows || contactsResult || [];
 

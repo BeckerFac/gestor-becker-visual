@@ -40,7 +40,18 @@ async function getSubscriptionInfo(companyId: string): Promise<SubscriptionInfo>
     // Paid plan - full access
     daysRemaining = -1; // unlimited
   } else if (status === 'trial') {
-    if (company.trial_ends_at) {
+    // PR1-T2: fail-closed if trial_ends_at is NULL.
+    // Previously, NULL fell through leaving isReadOnly=false → unlimited access.
+    if (!company.trial_ends_at) {
+      status = 'expired';
+      isReadOnly = true;
+      daysRemaining = 0;
+      await db.execute(sql`
+        UPDATE companies
+        SET subscription_status = 'expired'
+        WHERE id = ${companyId} AND subscription_status = 'trial' AND trial_ends_at IS NULL
+      `);
+    } else {
       const trialEnd = new Date(company.trial_ends_at);
       daysRemaining = Math.ceil((trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -74,6 +85,7 @@ async function getSubscriptionInfo(companyId: string): Promise<SubscriptionInfo>
         }
       }
     }
+  // end of PR1-T2 else block
   } else if (status === 'grace') {
     if (company.grace_ends_at) {
       const graceEnd = new Date(company.grace_ends_at);
