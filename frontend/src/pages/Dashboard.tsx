@@ -121,11 +121,20 @@ export const Dashboard: React.FC = () => {
         const [dashRes, insightsRes, agingRes] = await Promise.all([
           api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
+            // PR6-T3: fallback completo — shape total del dashboard para que
+            // ningun campo termine como `undefined` en la UI (que renderiza "undefined").
             return {
-              sales_month: 0, collections_pending: 0,
-              cheques_pending_count: 0, cheques_pending_amount: 0,
-              orders_unpaid_count: 0, orders_unpaid_amount: 0,
-              recent_invoices: [], recent_orders: [],
+              sales_month: 0,
+              collections_pending: 0,
+              collections_pending_count: 0,
+              cheques_pending_count: 0,
+              cheques_pending_amount: 0,
+              orders_unpaid_count: 0,
+              orders_unpaid_amount: 0,
+              orders_uninvoiced_count: 0,
+              orders_uninvoiced_amount: 0,
+              recent_invoices: [],
+              recent_orders: [],
             }
           }),
           api.getInsights().catch(() => ({ actions: [], top_customers: [] })),

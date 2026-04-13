@@ -263,18 +263,25 @@ export const Products: React.FC = () => {
 
   const canViewCosts = useCan('products', 'view_costs')
 
-  // Export data
+  // Export data — PR6-T4: evitar "NaN" en columnas numericas del CSV
+  // parseFloat(undefined) = NaN → toLocaleString devuelve "NaN" en Excel.
+  // Si el parse falla, dejamos '-' (mismo placeholder que usaba el else).
+  const safeNum = (v: unknown): number | string => {
+    if (v === null || v === undefined || v === '') return '-'
+    const n = parseFloat(String(v))
+    return Number.isFinite(n) ? n : '-'
+  }
   const exportData = products.map(p => ({
     sku: p.sku,
     nombre: p.name,
     tipo: p.category_name || p.product_type || '-',
     ...(canViewCosts ? {
-      costo: p.pricing ? parseFloat(p.pricing.cost) : '-',
+      costo: p.pricing ? safeNum(p.pricing.cost) : '-',
       margen: p.pricing ? `${p.pricing.margin_percent}%` : '-',
     } : {}),
     iva: p.pricing ? `${p.pricing.vat_rate}%` : '-',
-    precio_final: p.pricing ? parseFloat(p.pricing.final_price) : '-',
-    stock: hasStockProducts && p.controls_stock ? parseFloat(String(p.stock_quantity ?? 0)) : '-',
+    precio_final: p.pricing ? safeNum(p.pricing.final_price) : '-',
+    stock: hasStockProducts && p.controls_stock ? safeNum(p.stock_quantity ?? 0) : '-',
     estado: p.active ? 'Activo' : 'Inactivo',
   }))
 

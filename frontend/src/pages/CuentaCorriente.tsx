@@ -93,9 +93,11 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // PR6-T2: validacion robusta — parseFloat("abc") = NaN, `!NaN` es true,
+    // pero `NaN === 0` es false (bug teorico). Number.isFinite cubre todo.
     const amount = parseFloat(monto)
-    if (!amount || amount === 0) {
-      toast.error('El monto debe ser mayor a 0')
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('El monto debe ser un numero positivo mayor a 0')
       return
     }
     if (!motivo.trim()) {

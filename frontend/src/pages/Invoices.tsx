@@ -222,11 +222,20 @@ const OrderItemsImporter: React.FC<{
   useEffect(() => { if (open) loadItems() }, [open, loadItems])
 
   const handleImport = () => {
+    // PR6-T1: safe parse — parseFloat("") = NaN y NaN > 0 = false, pero si el
+    // value tiene caracteres raros ("5abc") parseFloat devuelve 5 (inconsistente).
+    // Usar Number.isFinite garantiza numero limpio.
+    const safeQty = (k: string): number => {
+      const raw = selectedQty[k]
+      if (!raw) return 0
+      const n = parseFloat(String(raw))
+      return Number.isFinite(n) && n > 0 ? n : 0
+    }
     const items = orderItems
-      .filter(oi => selectedQty[oi.order_item_id] && parseFloat(selectedQty[oi.order_item_id]) > 0)
+      .filter(oi => safeQty(oi.order_item_id) > 0)
       .map(oi => ({
         ...oi,
-        qty_to_invoice: parseFloat(selectedQty[oi.order_item_id]),
+        qty_to_invoice: safeQty(oi.order_item_id),
       }))
     if (items.length === 0) return
     onImport(items)
