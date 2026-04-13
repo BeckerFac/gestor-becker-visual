@@ -178,16 +178,30 @@ export const Enterprises: React.FC = () => {
       }
       if (editingEnterpriseId) {
         await api.updateEnterprise(editingEnterpriseId, payload)
-        // Link price list only if it actually changed
+        // PR4-T: no silenciar errores de vincular lista de precios.
+        // Antes: `.catch(() => {})` mostraba toast "actualizada" aunque la
+        // vinculacion hubiera fallado, creando estado inconsistente.
         if (price_list_id !== originalPriceListId) {
-          await api.linkEnterpriseToPriceList(editingEnterpriseId, price_list_id || '').catch(() => {})
+          try {
+            await api.linkEnterpriseToPriceList(editingEnterpriseId, price_list_id || '')
+          } catch (linkErr: any) {
+            toast.error('Empresa actualizada pero fallo vincular lista de precios: ' + (linkErr?.message || ''))
+            setShowEnterpriseForm(false)
+            setEditingEnterpriseId(null)
+            setEnterpriseForm(emptyEnterpriseForm)
+            await loadData()
+            return
+          }
         }
         toast.success('Empresa actualizada correctamente')
       } else {
         const created = await api.createEnterprise(payload)
-        // Link price list to newly created enterprise
         if (price_list_id && created?.id) {
-          await api.linkEnterpriseToPriceList(created.id, price_list_id).catch(() => {})
+          try {
+            await api.linkEnterpriseToPriceList(created.id, price_list_id)
+          } catch (linkErr: any) {
+            toast.error('Empresa creada pero fallo vincular lista de precios: ' + (linkErr?.message || ''))
+          }
         }
         toast.success('Empresa creada correctamente')
       }

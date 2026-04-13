@@ -1502,6 +1502,38 @@ async function runAutoMigrations() {
       try { await pool.query(m); } catch (_) {}
     }
 
+    // PR4-T5: composite indexes (company_id, created_at) y (company_id, status)
+    // para acelerar listados paginados. CONCURRENTLY no bloquea la tabla.
+    // Idempotente: IF NOT EXISTS + try/catch por si otro proceso lo crea.
+    const indexMigrations: string[] = [
+      // Listados ordenados por fecha
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_company_created ON orders(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_invoices_company_created ON invoices(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_remitos_company_created ON remitos(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cobros_company_created ON cobros(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quotes_company_created ON quotes(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_purchases_company_created ON purchases(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_company_created ON customers(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_enterprises_company_created ON enterprises(company_id, created_at DESC)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_products_company_created ON products(company_id, created_at DESC)',
+      // Filtros por status
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_company_status ON orders(company_id, status)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_invoices_company_status ON invoices(company_id, status)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_remitos_company_status ON remitos(company_id, status)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cheques_company_status ON cheques(company_id, status)',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quotes_company_status ON quotes(company_id, status)',
+    ];
+    for (const idxSql of indexMigrations) {
+      try {
+        await pool.query(idxSql);
+      } catch (err: any) {
+        // 55006 = concurrent index build in progress; 42P07 = already exists
+        if (err?.code !== '55006' && err?.code !== '42P07') {
+          console.warn('Index migration warning:', err?.message || err);
+        }
+      }
+    }
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);

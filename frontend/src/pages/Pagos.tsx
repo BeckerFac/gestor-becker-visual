@@ -175,31 +175,35 @@ export const Pagos: React.FC = () => {
     .reduce((sum, r) => sum + r.amount, 0)
 
   // Pre-fill retenciones from padron when enterprise changes
+  // PR4-T: cleanup con cancelled flag para evitar setState despues de unmount
   useEffect(() => {
-    if (form.enterprise_id) {
-      api.calculateRetenciones(form.enterprise_id, parseFloat(form.amount || '0') || 0)
-        .then((data: any) => {
-          if (data && Array.isArray(data) && data.length > 0) {
-            setRetenciones(prev => prev.map(r => {
-              const match = data.find((d: any) => d.type === r.type)
-              if (match) {
-                return {
-                  ...r,
-                  enabled: true,
-                  rate: match.rate || r.rate,
-                  base_amount: match.base_amount || parseFloat(form.amount || '0') || 0,
-                  amount: match.amount || 0,
-                  regime: match.regime || '',
-                }
-              }
-              return r
-            }))
-          }
-        })
-        .catch(() => { /* no padron data, keep manual */ })
-    } else {
+    if (!form.enterprise_id) {
       setRetenciones(INITIAL_RETENCIONES)
+      return
     }
+    let cancelled = false
+    api.calculateRetenciones(form.enterprise_id, parseFloat(form.amount || '0') || 0)
+      .then((data: any) => {
+        if (cancelled) return
+        if (data && Array.isArray(data) && data.length > 0) {
+          setRetenciones(prev => prev.map(r => {
+            const match = data.find((d: any) => d.type === r.type)
+            if (match) {
+              return {
+                ...r,
+                enabled: true,
+                rate: match.rate || r.rate,
+                base_amount: match.base_amount || parseFloat(form.amount || '0') || 0,
+                amount: match.amount || 0,
+                regime: match.regime || '',
+              }
+            }
+            return r
+          }))
+        }
+      })
+      .catch(() => { /* no padron data, keep manual */ })
+    return () => { cancelled = true }
   }, [form.enterprise_id])
 
   const loadData = useCallback(async () => {
