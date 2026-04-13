@@ -91,19 +91,39 @@ export class InventoryService {
       const stockRows = (existingStock as any).rows || existingStock || [];
 
       if (stockRows.length === 0) {
+        // PR2-T7: si es egreso y no hay stock row previo, rechazar
+        // (no podemos vender/mover mercaderia que no existe).
+        if (stockDelta < 0) {
+          throw new ApiError(
+            400,
+            `Stock insuficiente: no existe registro de stock para el producto ${data.product_id}`
+          );
+        }
         await db.insert(stock).values({
           id: uuid(),
           product_id: data.product_id,
           warehouse_id: warehouseId,
-          quantity: Math.max(0, stockDelta).toString(),
+          quantity: stockDelta.toString(),
           min_level: '0',
           max_level: '0',
         });
       } else {
+        // PR2-T7: lock + validar que el nuevo valor no sea negativo.
+        // El Math.max(0,...) original ENMASCARABA egresos mayores al stock
+        // (el movimiento se guardaba pero quantity quedaba en 0).
+        await db.execute(sql`
+          SELECT quantity FROM stock WHERE id = ${stockRows[0].id} FOR UPDATE
+        `);
         const currentQty = parseFloat(stockRows[0].quantity || '0');
         const newQty = currentQty + stockDelta;
+        if (newQty < 0) {
+          throw new ApiError(
+            400,
+            `Stock insuficiente: disponible ${currentQty}, intentaste egresar ${Math.abs(stockDelta)}`
+          );
+        }
         await db.execute(sql`
-          UPDATE stock SET quantity = ${Math.max(0, newQty).toString()}, updated_at = NOW()
+          UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
           WHERE id = ${stockRows[0].id}
         `);
       }

@@ -409,13 +409,20 @@ export class RemitosService {
           enterpriseId = lockResult.rows[0].enterprise_id;
         }
 
-        // BUG #1: accumulate qty by order_item_id BEFORE validating
+        // BUG #1 + PR2-T8: accumulate qty by order_item_id with NaN guard
         const qtyByOrderItem = new Map<string, number>();
         for (const item of validItems) {
           if (!item.order_item_id) continue;
+          const q = Number(item.quantity);
+          if (!Number.isFinite(q) || q <= 0) {
+            throw new ApiError(
+              400,
+              `Cantidad invalida en item ${item.order_item_id}: "${item.quantity}". Debe ser un numero positivo.`
+            );
+          }
           qtyByOrderItem.set(
             item.order_item_id,
-            (qtyByOrderItem.get(item.order_item_id) || 0) + Number(item.quantity || 1)
+            (qtyByOrderItem.get(item.order_item_id) || 0) + q
           );
         }
 
@@ -430,7 +437,17 @@ export class RemitosService {
           if (locked.enterprise_id !== enterpriseId) {
             throw new ApiError(400, `Los items pertenecen a distintas empresas. Un remito solo puede tener items de una empresa.`);
           }
-          const available = parseFloat(locked.quantity) - parseFloat(locked.qty_delivered);
+          // PR2-T8: parseFloat puede devolver NaN si locked.quantity es string corrupto.
+          // `available = NaN - X = NaN` y `totalQty > NaN` es false (bypass silencioso).
+          const lockedQty = parseFloat(locked.quantity);
+          const lockedDelivered = parseFloat(locked.qty_delivered);
+          if (!Number.isFinite(lockedQty) || !Number.isFinite(lockedDelivered)) {
+            throw new ApiError(
+              400,
+              `Datos corruptos en item de pedido ${oiId}: quantity/qty_delivered no numericos`
+            );
+          }
+          const available = lockedQty - lockedDelivered;
           if (totalQty > available + 0.01) {
             throw new ApiError(400,
               `No se pueden remitar ${totalQty} unidades del item ${oiId}. Disponible: ${available}. ` +

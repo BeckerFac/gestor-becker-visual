@@ -30,8 +30,9 @@ export class CobroApplicationsService {
     }
 
     // Get cobro from unified cobros table (receipts migrated in auto-migration)
+    // PR2-T6: incluir currency + exchange_rate para validar multi-currency
     const cobroResult = await db.execute(sql`
-      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
+      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status, currency, exchange_rate
       FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
     `);
     const cobro = ((cobroResult as any).rows || [])[0];
@@ -39,11 +40,30 @@ export class CobroApplicationsService {
 
     // Get invoice
     const invoiceResult = await db.execute(sql`
-      SELECT id, company_id, enterprise_id, business_unit_id, total_amount, status, payment_status, order_id
+      SELECT id, company_id, enterprise_id, business_unit_id, total_amount, status, payment_status, order_id, invoice_type, currency, exchange_rate
       FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
     `);
     const invoice = ((invoiceResult as any).rows || [])[0];
     if (!invoice) throw new ApiError(404, 'Factura no encontrada');
+
+    // PR2-T5: bloquear aplicar cobro directo a Notas de Credito.
+    // Las NCs reducen la deuda de la factura original (no reciben cobros).
+    const NC_TYPES = ['NC_A', 'NC_B', 'NC_C', 'NC_E'];
+    if (invoice.invoice_type && NC_TYPES.includes(invoice.invoice_type)) {
+      throw new ApiError(400, 'No se pueden aplicar cobros a Notas de Credito. Aplica el cobro a la factura original.');
+    }
+
+    // PR2-T6: rechazar currency mismatch entre cobro e invoice.
+    // Conversion via exchange_rate se difiere hasta tener flow dedicado.
+    const cobroCurrency = cobro.currency || 'ARS';
+    const invoiceCurrency = invoice.currency || 'ARS';
+    if (cobroCurrency !== invoiceCurrency) {
+      throw new ApiError(
+        400,
+        `Moneda del cobro (${cobroCurrency}) no coincide con la factura (${invoiceCurrency}). ` +
+        `Convierte el monto manualmente o usa un cobro en la misma moneda.`
+      );
+    }
 
     // V1: Same business unit
     if (cobro.business_unit_id && invoice.business_unit_id && cobro.business_unit_id !== invoice.business_unit_id) {

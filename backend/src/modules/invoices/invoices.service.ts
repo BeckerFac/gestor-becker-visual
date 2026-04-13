@@ -129,6 +129,14 @@ export class InvoicesService {
       const fiscalType = data.fiscal_type === 'interno' ? 'interno' : (data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal');
       const invoiceType = (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? null : (data.invoice_type || 'B');
 
+      // PR2-T3: advisory lock para serializar generacion de invoice_number
+      // Previene race condition cuando 2 requests crean facturas del mismo tipo
+      // simultaneamente (mismo patron que remitos.service.ts). El lock se libera
+      // en el COMMIT / ROLLBACK mas abajo.
+      await db.execute(sql`BEGIN`);
+      const lockKey = `invoice_num:${companyId}:${fiscalType}:${invoiceType || 'null'}`;
+      await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
+
       // Get next sequential invoice number — separate sequences for fiscal vs internal
       let nextNumber: number;
       if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
@@ -179,9 +187,7 @@ export class InvoicesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
-      // -- BEGIN TRANSACTION: all DB writes from here until COMMIT --
-      await db.execute(sql`BEGIN`);
-
+      // -- TRANSACTION started above (PR2-T3 advisory lock) --
       const isExportType = ['E', 'NC_E', 'ND_E'].includes(invoiceType || '');
       if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
         // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
@@ -761,12 +767,18 @@ export class InvoicesService {
     await this.ensureMigrations();
     try {
       const invResult = await db.execute(sql`
-        SELECT id, status, order_id FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
+        SELECT id, status, order_id, cae FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
       `);
       const invRows = (invResult as any).rows || [];
       if (invRows.length === 0) throw new ApiError(404, 'Factura no encontrada');
       const deletableStatuses = ['draft', 'emitido'];
       if (!deletableStatuses.includes(invRows[0].status)) throw new ApiError(400, 'Solo se pueden eliminar facturas en borrador o comprobantes internos');
+      // PR2-T1: fiscal compliance — NUNCA eliminar facturas con CAE asignado
+      // (registro AFIP). Incluso si el status es 'draft' o 'emitido', si tiene
+      // CAE significa que fue transmitida a AFIP y no se puede borrar.
+      if (invRows[0].cae) {
+        throw new ApiError(400, 'No se puede eliminar una factura con CAE asignado (registro fiscal AFIP). Use nota de credito para revertir.');
+      }
 
       const orderId = invRows[0].order_id;
 
@@ -810,6 +822,22 @@ export class InvoicesService {
       }
       if (!data.invoice_date) {
         throw new ApiError(400, 'Fecha de emision es requerida');
+      }
+      // PR2-T2: validar rango de fecha (copy del patron en remitos.service.ts)
+      {
+        const d = new Date(data.invoice_date);
+        if (isNaN(d.getTime())) {
+          throw new ApiError(400, 'Fecha de emision invalida. Debe ser formato ISO 8601');
+        }
+        const now = Date.now();
+        const oneYearFuture = now + 365 * 24 * 3600 * 1000;
+        const fiveYearsPast = now - 5 * 365 * 24 * 3600 * 1000;
+        if (d.getTime() > oneYearFuture) {
+          throw new ApiError(400, 'Fecha de emision invalida: no puede ser mas de un año en el futuro');
+        }
+        if (d.getTime() < fiveYearsPast) {
+          throw new ApiError(400, 'Fecha de emision invalida: no puede ser mas de 5 años en el pasado');
+        }
       }
       if (!data.cae || !/^\d{14}$/.test(data.cae)) {
         throw new ApiError(400, 'CAE invalido (debe ser de 14 digitos)');

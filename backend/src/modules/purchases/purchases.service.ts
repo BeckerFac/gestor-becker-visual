@@ -147,6 +147,12 @@ export class PurchasesService {
     try {
       const purchaseId = uuid();
 
+      // PR2-T4: advisory lock para serializar generacion de purchase_number.
+      // Previene race condition cuando 2 usuarios crean compras simultaneamente
+      // y obtienen el mismo numero. Lock se libera al final de la tx.
+      await db.execute(sql`BEGIN`);
+      await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`purchase_num:${companyId}`}))`);
+
       const numResult = await db.execute(sql`
         SELECT COALESCE(MAX(purchase_number), 0) + 1 as next_number FROM purchases WHERE company_id = ${companyId}
       `);
@@ -178,6 +184,9 @@ export class PurchasesService {
           `);
         }
       }
+
+      // PR2-T4: commit tx antes de auto-stock (el auto-stock tiene su propio error handling)
+      await db.execute(sql`COMMIT`);
 
       const result = await this.getPurchase(companyId, purchaseId);
 
@@ -215,6 +224,8 @@ export class PurchasesService {
 
       return result;
     } catch (error) {
+      // PR2-T4: rollback si la tx estaba abierta
+      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create purchase error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create purchase');

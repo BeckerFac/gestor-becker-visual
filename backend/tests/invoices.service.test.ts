@@ -20,6 +20,8 @@ describe('InvoicesService', () => {
       // migrations
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       // next number query
       mockDbRows([{ next_number: '10' }])
       // customer enterprise lookup
@@ -41,6 +43,8 @@ describe('InvoicesService', () => {
     it('creates no_fiscal invoice with status emitido', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       // next number for no_fiscal
       mockDbRows([{ next_number: '1' }])
       // customer ownership check (new S9 IDOR fix)
@@ -63,6 +67,8 @@ describe('InvoicesService', () => {
     it('creates interno invoice', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // raw INSERT
@@ -78,6 +84,8 @@ describe('InvoicesService', () => {
     it('creates invoice with items and calculates totals', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // no customer enterprise
       mockDbVoid() // INSERT invoice
@@ -103,6 +111,8 @@ describe('InvoicesService', () => {
     it('validates quantity is greater than zero', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid() // INSERT invoice
@@ -120,6 +130,8 @@ describe('InvoicesService', () => {
     it('validates unit_price max boundary', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
@@ -137,6 +149,8 @@ describe('InvoicesService', () => {
     it('resolves enterprise_id from customer when not provided', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       // customer ownership check (new S9 IDOR fix)
       mockDbRows([{ id: 'cust-1' }])
@@ -284,6 +298,8 @@ describe('InvoicesService', () => {
     it('handles invoice with negative amount in validation', async () => {
       for (let i = 0; i < 33; i++) mockDbVoid()
       mockDbVoid() // auto-assign business_unit_id query
+      mockDbVoid() // PR2-T3: BEGIN tx
+      mockDbVoid() // PR2-T3: pg_advisory_xact_lock
       mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
