@@ -125,11 +125,11 @@ describe('Seccion 7 BUG #4: uploadSignedPdf valida magic bytes', () => {
       .rejects.toThrow(/vacio/);
   });
 
-  it('rechaza PDF > 5MB', async () => {
-    const bigBuffer = Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(6 * 1024 * 1024)]);
+  it('rechaza PDF > 2MB (C6: limite reducido por bloat en DB)', async () => {
+    const bigBuffer = Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(3 * 1024 * 1024)]);
     const service = await makeService();
     await expect(service.uploadSignedPdf('comp-1', 'r1', bigBuffer.toString('base64')))
-      .rejects.toThrow(/5MB/);
+      .rejects.toThrow(/2MB/);
   });
 
   it('acepta PDF valido con magic bytes', async () => {

@@ -267,9 +267,33 @@ export class CobrosService {
         const enterpriseId = data.enterprise_id || null;
         const retencionDate = data.payment_date || new Date().toISOString();
         for (const ret of data.retenciones_sufridas) {
+          // C8: sanity check para retenciones (IIBB / Ganancias / IVA).
+          // Rates tipicos AR: IIBB 0-5%, Ganancias 0-6%, IVA 0-21%.
+          // Si rate > 30% o base_amount <= 0, algo esta mal — loguear warning.
+          // La tabla por jurisdiccion queda diferida a futuro PR.
+          const rate = parseFloat(ret.rate || '0');
+          const baseAmount = parseFloat(ret.base_amount || '0');
+          const amount = parseFloat(ret.amount || '0');
+          if (!Number.isFinite(rate) || rate < 0 || rate > 30) {
+            console.warn(`[retencion ${ret.type}] rate fuera de rango esperado [0-30%]: ${rate}% — cobroId=${cobroId}`);
+          }
+          if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+            throw new ApiError(400, `Retencion ${ret.type}: base_amount invalido (${ret.base_amount})`);
+          }
+          if (!Number.isFinite(amount) || amount < 0) {
+            throw new ApiError(400, `Retencion ${ret.type}: amount invalido (${ret.amount})`);
+          }
+          // Sanity: amount no deberia exceder base_amount * 1.1 (10% margen por redondeo)
+          if (amount > baseAmount * 1.1) {
+            throw new ApiError(
+              400,
+              `Retencion ${ret.type}: el amount ($${amount}) excede el base_amount ($${baseAmount})`
+            );
+          }
+
           await db.execute(sql`
             INSERT INTO retenciones (id, company_id, type, enterprise_id, cobro_id, base_amount, rate, amount, certificate_file, date, created_by, direction)
-            VALUES (gen_random_uuid(), ${companyId}, ${ret.type}, ${enterpriseId}, ${cobroId}, ${parseFloat(ret.base_amount).toString()}, ${parseFloat(ret.rate).toString()}, ${parseFloat(ret.amount).toString()}, ${ret.certificate_file || null}, ${retencionDate}, ${userId}, 'sufrida')
+            VALUES (gen_random_uuid(), ${companyId}, ${ret.type}, ${enterpriseId}, ${cobroId}, ${baseAmount.toString()}, ${rate.toString()}, ${amount.toString()}, ${ret.certificate_file || null}, ${retencionDate}, ${userId}, 'sufrida')
           `);
         }
       }

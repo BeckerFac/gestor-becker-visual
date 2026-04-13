@@ -8,6 +8,7 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { toast } from '@/hooks/useToast'
 import { DataTable } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { num } from '@/utils/num'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { api } from '@/services/api'
@@ -184,7 +185,7 @@ export const Cheques: React.FC = () => {
       </div>
     )},
     { key: 'amount' as const, label: 'Monto', render: (v: any) => (
-      <span className="font-bold text-green-700">{formatCurrency(parseFloat(v || '0'))}</span>
+      <span className="font-bold text-green-700">{formatCurrency(num(v))}</span>
     )},
     { key: 'due_date' as const, label: 'Recibo', render: (v: any, row: Cheque) => {
       const alert = getDueDateAlert(v, row.status)
@@ -243,7 +244,7 @@ export const Cheques: React.FC = () => {
               banco: c.bank,
               librador: c.drawer,
               cuit_librador: c.drawer_cuit || '-',
-              monto: parseFloat(c.amount || '0'),
+              monto: num(c.amount),
               emision: formatDate(c.issue_date),
               cobro: formatDate(c.due_date),
               cliente: c.customer_name || '-',
@@ -272,7 +273,7 @@ export const Cheques: React.FC = () => {
               banco: c.bank,
               librador: c.drawer,
               cuit_librador: c.drawer_cuit || '-',
-              monto: parseFloat(c.amount || '0'),
+              monto: num(c.amount),
               emision: c.issue_date,
               cobro: c.due_date,
               cliente: c.customer_name || '-',
@@ -427,7 +428,7 @@ export const Cheques: React.FC = () => {
                     </div>
                     <div>
                       <span className="text-xs text-gray-500 block">Monto</span>
-                      <span className="font-bold text-green-700">{formatCurrency(parseFloat(cheque.amount || '0'))}</span>
+                      <span className="font-bold text-green-700">{formatCurrency(num(cheque.amount))}</span>
                     </div>
                     <div>
                       <span className="text-xs text-gray-500 block">Emision</span>

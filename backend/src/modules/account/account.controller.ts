@@ -26,26 +26,31 @@ export class AccountController {
         [companyId]
       );
 
-      // Fetch all company business data
+      // C5: LIMIT hard de 50k rows por tabla para prevenir timeout + OOM.
+      // Export masivo sin limite podia tirar el proceso con 500k+ rows/tabla.
+      // El cliente recibe un flag `truncated` por tabla para saber que pedir
+      // export completo via script SQL si le falta data.
+      const MAX_ROWS = 50000;
+      const LIM = `LIMIT ${MAX_ROWS}`;
       const queries = [
-        pool.query('SELECT id, name, email, phone, cuit, tax_condition, address, city, province, notes, created_at FROM customers WHERE company_id = $1', [companyId]),
-        pool.query('SELECT * FROM enterprises WHERE company_id = $1', [companyId]),
-        pool.query('SELECT * FROM products WHERE company_id = $1', [companyId]),
-        pool.query('SELECT * FROM orders WHERE company_id = $1 ORDER BY created_at DESC', [companyId]),
-        pool.query('SELECT * FROM invoices WHERE company_id = $1 ORDER BY created_at DESC', [companyId]),
-        pool.query('SELECT * FROM quotes WHERE company_id = $1 ORDER BY created_at DESC', [companyId]),
-        pool.query('SELECT * FROM cheques WHERE company_id = $1 ORDER BY created_at DESC', [companyId]),
-        pool.query('SELECT * FROM cobros WHERE company_id = $1 ORDER BY created_at DESC', [companyId]).catch(() => ({ rows: [] })),
-        pool.query('SELECT * FROM pagos WHERE company_id = $1 ORDER BY created_at DESC', [companyId]).catch(() => ({ rows: [] })),
-        pool.query('SELECT * FROM purchases WHERE company_id = $1 ORDER BY created_at DESC', [companyId]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT id, name, email, phone, cuit, tax_condition, address, city, province, notes, created_at FROM customers WHERE company_id = $1 ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM enterprises WHERE company_id = $1 ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM products WHERE company_id = $1 ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM orders WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM invoices WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM quotes WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM cheques WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]),
+        pool.query(`SELECT * FROM cobros WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT * FROM pagos WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT * FROM purchases WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]).catch(() => ({ rows: [] })),
         pool.query(
           `SELECT s.*, p.name as product_name, p.sku
            FROM stock s JOIN products p ON s.product_id = p.id
-           WHERE s.company_id = $1`,
+           WHERE s.company_id = $1 ${LIM}`,
           [companyId]
         ).catch(() => ({ rows: [] })),
-        pool.query('SELECT * FROM tags WHERE company_id = $1', [companyId]).catch(() => ({ rows: [] })),
-        pool.query('SELECT * FROM remitos WHERE company_id = $1 ORDER BY created_at DESC', [companyId]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT * FROM tags WHERE company_id = $1 ${LIM}`, [companyId]).catch(() => ({ rows: [] })),
+        pool.query(`SELECT * FROM remitos WHERE company_id = $1 ORDER BY created_at DESC ${LIM}`, [companyId]).catch(() => ({ rows: [] })),
       ];
 
       const [
@@ -53,11 +58,30 @@ export class AccountController {
         quotes, cheques, cobros, pagos, purchases, inventory, tags, remitos,
       ] = await Promise.all(queries);
 
+      // C5: flag `truncated` indica si alguna tabla topo el LIMIT.
+      const mkTrunc = (r: any) => (r?.rows?.length === MAX_ROWS);
+      const truncated: Record<string, boolean> = {
+        clientes: mkTrunc(customers), empresas: mkTrunc(enterprises),
+        productos: mkTrunc(products), pedidos: mkTrunc(orders),
+        facturas: mkTrunc(invoices), cotizaciones: mkTrunc(quotes),
+        cheques: mkTrunc(cheques), cobros: mkTrunc(cobros),
+        pagos: mkTrunc(pagos), compras: mkTrunc(purchases),
+        inventario: mkTrunc(inventory), etiquetas: mkTrunc(tags),
+        remitos: mkTrunc(remitos),
+      };
+      const hasTruncated = Object.values(truncated).some(v => v);
+
       const exportData = {
         exported_at: new Date().toISOString(),
         legal_basis: 'Ley 25.326 - Proteccion de Datos Personales (Argentina)',
         user: userResult.rows[0] || null,
         company: companyResult.rows[0] || null,
+        export_limit_per_table: MAX_ROWS,
+        truncated,
+        has_truncated_tables: hasTruncated,
+        note: hasTruncated
+          ? `Algunas tablas tienen mas de ${MAX_ROWS} registros. Contacta a soporte para un export completo.`
+          : 'Export completo: todas las tablas dentro del limite.',
         data: {
           clientes: customers.rows,
           empresas: enterprises.rows,

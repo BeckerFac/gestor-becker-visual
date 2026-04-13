@@ -808,7 +808,11 @@ export class RemitosService {
       // BUG S7 #4: validate magic bytes (defense-in-depth, controller also checks)
       const decoded = Buffer.from(String(base64Data || '').replace(/^data:application\/pdf;base64,/, ''), 'base64');
       if (decoded.length === 0) throw new ApiError(400, 'PDF vacio');
-      if (decoded.length > 5 * 1024 * 1024) throw new ApiError(400, 'El PDF no puede superar 5MB');
+      // C6: hardening — bajar limite a 2MB porque guardamos base64 en una
+      // columna TEXT (bloat severo en DB con 5MB). Proximo PR: mover a storage.
+      if (decoded.length > 2 * 1024 * 1024) {
+        throw new ApiError(400, 'El PDF firmado no puede superar 2MB (limite temporal hasta migracion a storage externo)');
+      }
       if (decoded.toString('ascii', 0, 5) !== '%PDF-') {
         throw new ApiError(400, 'El archivo no es un PDF valido (magic bytes)');
       }

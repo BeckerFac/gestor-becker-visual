@@ -328,18 +328,39 @@ export const CustomerPortal: React.FC = () => {
 
   // Compute customer account balance from orders and invoices
   const accountBalance = useMemo(() => {
-    const totalOrdered = orders.reduce((sum, o) => sum + parseFloat(o.total_amount || '0'), 0)
-    const totalInvoiced = invoices.reduce((sum, inv) => sum + parseFloat(inv.total_amount || '0'), 0)
+    // C2: helpers defensivos para clasificar payment_status case-insensitive
+    // cubriendo 'pagado'/'pagada'/'paid' por si aparecen en data migrada.
+    const isPaid = (ps?: string | null) => {
+      if (!ps) return false
+      const v = String(ps).toLowerCase()
+      return v === 'pagado' || v === 'pagada' || v === 'paid'
+    }
+    const isPartial = (ps?: string | null) => {
+      if (!ps) return false
+      return String(ps).toLowerCase() === 'parcial'
+    }
+    const isPending = (ps?: string | null) => {
+      if (!ps) return true
+      const v = String(ps).toLowerCase()
+      return v === 'pendiente' || v === 'pending'
+    }
+    const safeParse = (v: unknown) => {
+      const n = parseFloat(String(v ?? '0'))
+      return Number.isFinite(n) ? n : 0
+    }
+
+    const totalOrdered = orders.reduce((sum, o) => sum + safeParse(o.total_amount), 0)
+    const totalInvoiced = invoices.reduce((sum, inv) => sum + safeParse(inv.total_amount), 0)
     const totalPaid = orders
-      .filter(o => o.payment_status === 'pagado')
-      .reduce((sum, o) => sum + parseFloat(o.total_amount || '0'), 0)
+      .filter(o => isPaid(o.payment_status))
+      .reduce((sum, o) => sum + safeParse(o.total_amount), 0)
     const totalPartial = orders
-      .filter(o => o.payment_status === 'parcial')
-      .reduce((sum, o) => sum + parseFloat(o.total_amount || '0') * 0.5, 0)
-    const pendingOrders = orders.filter(o => !o.payment_status || o.payment_status === 'pendiente').length
+      .filter(o => isPartial(o.payment_status))
+      .reduce((sum, o) => sum + safeParse(o.total_amount) * 0.5, 0)
+    const pendingOrders = orders.filter(o => isPending(o.payment_status)).length
     const pendingAmount = orders
-      .filter(o => !o.payment_status || o.payment_status === 'pendiente')
-      .reduce((sum, o) => sum + parseFloat(o.total_amount || '0'), 0)
+      .filter(o => isPending(o.payment_status))
+      .reduce((sum, o) => sum + safeParse(o.total_amount), 0)
 
     return {
       totalOrdered,

@@ -3,7 +3,10 @@ import rateLimit from 'express-rate-limit';
 import { authController } from './auth.controller';
 import { authMiddleware } from '../../middlewares/auth';
 
-const isTest = process.env.NODE_ENV === 'test';
+// C1: VITEST env es mas confiable que NODE_ENV
+// (Render puede no tener NODE_ENV=production seteado explicitamente).
+// Vitest setea VITEST=true automaticamente durante el test run.
+const isTest = !!process.env.VITEST || process.env.NODE_ENV === 'test';
 
 const customerLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes

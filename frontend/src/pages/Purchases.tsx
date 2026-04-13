@@ -115,9 +115,12 @@ const PurchaseInvoicesSection: React.FC<{ purchaseId: string; enterpriseId: stri
         invoice_number: piForm.invoice_number,
         invoice_date: piForm.invoice_date,
         cae: piForm.cae || undefined,
-        subtotal: parseFloat(piForm.subtotal) || 0,
-        vat_amount: parseFloat(piForm.vat_amount) || 0,
-        total_amount: parseFloat(piForm.total_amount),
+        // C3: parseFloat(undefined) = NaN, y NaN || 0 = 0 pero parseFloat('') = NaN, y NaN || 0 = 0 tambien,
+        // PERO parseFloat('$100') = NaN y el propio `|| 0` lo rescata. El issue real es line 120 donde
+        // total_amount va sin fallback: si piForm.total_amount es '', parseFloat('') = NaN -> envia NaN al backend.
+        subtotal: (() => { const n = parseFloat(piForm.subtotal); return Number.isFinite(n) ? n : 0 })(),
+        vat_amount: (() => { const n = parseFloat(piForm.vat_amount); return Number.isFinite(n) ? n : 0 })(),
+        total_amount: (() => { const n = parseFloat(piForm.total_amount); return Number.isFinite(n) ? n : 0 })(),
         notes: piForm.notes || undefined,
       })
       toast.success('Factura de compra registrada')

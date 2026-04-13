@@ -1534,6 +1534,67 @@ async function runAutoMigrations() {
       }
     }
 
+    // C7: stock.quantity VARCHAR(50) → DECIMAL migration Phase 1+2
+    // Phase 1: ADD COLUMN quantity_num (instant, metadata-only)
+    // Phase 2: backfill chunked (idempotente — WHERE IS NULL)
+    // Phase 3 (doble escritura en services): ya se hara cuando se toque stock service
+    // Phase 4 (DROP columna VARCHAR): diferida a PR6 con ventana corta
+    try {
+      await pool.query('ALTER TABLE stock ADD COLUMN IF NOT EXISTS quantity_num DECIMAL(14,3)');
+      await pool.query('ALTER TABLE stock ADD COLUMN IF NOT EXISTS min_level_num DECIMAL(14,3)');
+      await pool.query('ALTER TABLE stock ADD COLUMN IF NOT EXISTS max_level_num DECIMAL(14,3)');
+      await pool.query('ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS quantity_num DECIMAL(14,3)');
+
+      // Backfill chunked — cada ALTER COLUMN sobre tabla grande locka la tabla.
+      // Este approach evita el lock: UPDATE WHERE IS NULL en chunks de 5000 rows.
+      // Ejecutado una sola vez al boot del proceso (idempotente por el WHERE NULL).
+      let iterations = 0;
+      const maxIterations = 1000; // safety: 5M rows max
+      while (iterations < maxIterations) {
+        const res = await pool.query(`
+          WITH batch AS (
+            SELECT id FROM stock WHERE quantity_num IS NULL LIMIT 5000
+          )
+          UPDATE stock s
+          SET quantity_num = NULLIF(s.quantity, '')::decimal,
+              min_level_num = NULLIF(s.min_level, '')::decimal,
+              max_level_num = NULLIF(s.max_level, '')::decimal
+          FROM batch
+          WHERE s.id = batch.id
+          RETURNING 1
+        `).catch(() => ({ rowCount: 0 }));
+        const count = (res as any).rowCount ?? 0;
+        if (count === 0) break;
+        iterations++;
+      }
+      // stock_movements backfill
+      iterations = 0;
+      while (iterations < maxIterations) {
+        const res = await pool.query(`
+          WITH batch AS (
+            SELECT id FROM stock_movements WHERE quantity_num IS NULL LIMIT 5000
+          )
+          UPDATE stock_movements m
+          SET quantity_num = NULLIF(m.quantity::text, '')::decimal
+          FROM batch
+          WHERE m.id = batch.id
+          RETURNING 1
+        `).catch(() => ({ rowCount: 0 }));
+        const count = (res as any).rowCount ?? 0;
+        if (count === 0) break;
+        iterations++;
+      }
+
+      // Index sobre la nueva columna para queries de rango (alertas de stock bajo)
+      try {
+        await pool.query('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_stock_quantity_num ON stock(quantity_num) WHERE quantity_num IS NOT NULL');
+      } catch (e: any) {
+        if (e?.code !== '55006' && e?.code !== '42P07') console.warn('Stock index warning:', e?.message);
+      }
+    } catch (e: any) {
+      console.warn('Stock migration phase 1-2 warning:', e?.message || e);
+    }
+
     console.log('Auto-migrations completed');
   } catch (error) {
     console.error('⚠️ Auto-migration warning:', error);
