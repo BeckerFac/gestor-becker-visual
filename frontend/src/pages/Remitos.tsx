@@ -91,6 +91,8 @@ const EMPTY_FORM = {
   receiver_name: '',
   transport: '',
   notes: '',
+  factura_ref: '',
+  pedido_ref: '',
   date: new Date().toISOString().split('T')[0],
   tipo: 'entrega' as 'entrega' | 'recepcion',
 }
@@ -191,6 +193,9 @@ export const Remitos: React.FC = () => {
   const [form, setForm]   = useState(EMPTY_FORM)
   const [items, setItems] = useState<RemitoItem[]>([{ ...EMPTY_ITEM }])
 
+  // Emisor (company) info for the read-only header in the form
+  const [myCompany, setMyCompany] = useState<any>(null)
+
   // ── Load data ──────────────────────────────────────────────────────────────
 
   const loadRemitos = useCallback(async (page = 1) => {
@@ -215,14 +220,16 @@ export const Remitos: React.FC = () => {
   }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo])
 
   const loadStaticData = useCallback(async () => {
-    const [entRes, custRes, ordRes] = await Promise.all([
+    const [entRes, custRes, ordRes, companyRes] = await Promise.all([
       api.getEnterprises().catch(() => ({ items: [] })),
       api.getCustomers().catch(() => ({ items: [] })),
       api.getOrders({ status: undefined }).catch(() => ({ items: [] })),
+      api.getMyCompany().catch(() => null),
     ])
     setEnterprises(Array.isArray(entRes) ? entRes : entRes?.items ?? [])
     setCustomers(Array.isArray(custRes) ? custRes : custRes?.items ?? [])
     setOrders(Array.isArray(ordRes) ? ordRes : ordRes?.items ?? [])
+    setMyCompany(companyRes)
   }, [])
 
   useEffect(() => {
@@ -535,8 +542,8 @@ export const Remitos: React.FC = () => {
         notes:            form.notes            || null,
         date:             form.date             || null,
         tipo:             form.tipo,
-        pedido_ref:       autoPedidoRef          || null,
-        factura_ref:      autoFacturaRef         || null,
+        pedido_ref:       form.pedido_ref || autoPedidoRef || null,
+        factura_ref:      form.factura_ref || autoFacturaRef || null,
         items: validItems.map(it => ({
           product_name:   it.product_name,
           description:    it.description || null,
@@ -834,6 +841,35 @@ export const Remitos: React.FC = () => {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreateRemito} className="space-y-5">
+              {/* Emisor: company config read-only (confirms who issues the remito) */}
+              {myCompany && (
+                <div className="border-2 border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Emisor (tu empresa)</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5">
+                        {myCompany.razon_social || myCompany.name}
+                      </p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-600 dark:text-gray-400">
+                        {myCompany.cuit && <span>CUIT: <span className="font-mono">{myCompany.cuit}</span></span>}
+                        {(myCompany.condicion_iva || myCompany.tax_condition) && <span>{myCompany.condicion_iva || myCompany.tax_condition}</span>}
+                        {myCompany.ingresos_brutos && <span>ING. BRUTOS: <span className="font-mono">{myCompany.ingresos_brutos}</span></span>}
+                      </div>
+                      {(myCompany.address || myCompany.city) && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {[myCompany.address, myCompany.city, myCompany.province].filter(Boolean).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0">
+                      <div className="w-12 h-14 border-2 border-gray-800 dark:border-gray-300 flex items-center justify-center bg-white">
+                        <span className="text-2xl font-bold text-gray-900 leading-none">R</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Tipo selector */}
               <div className="flex gap-3">
                 <button
@@ -874,24 +910,33 @@ export const Remitos: React.FC = () => {
                 customerLabel={form.tipo === 'recepcion' ? 'Proveedor / Remitente' : 'Cliente / Destinatario'}
               />
 
-              {/* Date */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Date + refs (factura/pedido) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <DateInput
                   label="Fecha"
                   value={form.date}
                   onChange={val => setForm(prev => ({ ...prev, date: val }))}
                 />
-                {(autoPedidoRef || autoFacturaRef) && (
-                  <div className="space-y-1">
-                    {autoPedidoRef && (
-                      <div className="text-sm"><span className="font-medium text-gray-700">Pedido(s):</span> <span className="text-blue-600">{autoPedidoRef}</span></div>
-                    )}
-                    {autoFacturaRef && (
-                      <div className="text-sm"><span className="font-medium text-gray-700">Factura(s):</span> <span className="text-green-600">{autoFacturaRef}</span></div>
-                    )}
-                  </div>
-                )}
+                <Input
+                  label="O. Pedido N°"
+                  placeholder={autoPedidoRef || 'Opcional'}
+                  value={form.pedido_ref}
+                  onChange={e => setForm(prev => ({ ...prev, pedido_ref: e.target.value }))}
+                />
+                <Input
+                  label="Factura N°"
+                  placeholder={autoFacturaRef || 'Opcional'}
+                  value={form.factura_ref}
+                  onChange={e => setForm(prev => ({ ...prev, factura_ref: e.target.value }))}
+                />
               </div>
+              {(autoPedidoRef || autoFacturaRef) && (
+                <p className="text-xs text-gray-500 -mt-2 pl-1">
+                  {autoPedidoRef && <>Pedido(s) detectado(s) automaticamente: <span className="text-blue-600">{autoPedidoRef}</span>. </>}
+                  {autoFacturaRef && <>Factura(s) detectada(s): <span className="text-green-600">{autoFacturaRef}</span>. </>}
+                  Podes sobrescribir los valores manualmente.
+                </p>
+              )}
 
               {/* Delivery details */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
