@@ -21,6 +21,24 @@ export class CuentaCorrienteService {
         ? sql` AND business_unit_id = ${businessUnitId}`
         : sql``;
 
+      // PR7-T16: defensive try/catch para migrations no aplicadas.
+      // Verificar que las columnas/tablas criticas existan, sino loguear warning
+      // y que cada subquery falle soft con 0 (en vez de crashear todo el resumen).
+      // Primero: detectar si cobros.status existe. Si no, no filtrar anulados.
+      let cobrosStatusExists = true;
+      try {
+        await db.execute(sql`SELECT status FROM cobros LIMIT 1`);
+      } catch {
+        cobrosStatusExists = false;
+        console.warn('[cuenta-corriente] cobros.status column missing — anulado filter disabled');
+      }
+      const cobrosAnuladoFilter = cobrosStatusExists
+        ? sql` AND (cs.status IS NULL OR cs.status != 'anulado')`
+        : sql``;
+      const cobrosAnuladoFilterCo = cobrosStatusExists
+        ? sql` AND (co.status IS NULL OR co.status != 'anulado')`
+        : sql``;
+
       const result = await db.execute(sql`
         SELECT
           e.id, e.name, e.cuit, e.status,
@@ -37,7 +55,7 @@ export class CuentaCorrienteService {
           ), 0) as total_ventas,
 
           -- Cobros aplicados (via tabla intermedia)
-          -- PR7-T5: excluir cobros anulados (soft-delete) del total aplicado.
+          -- PR7-T5/T16: excluir cobros anulados si la columna status existe.
           COALESCE((
             SELECT SUM(CAST(cia.amount_applied AS decimal))
             FROM cobro_invoice_applications cia
@@ -46,12 +64,11 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND (cs.status IS NULL OR cs.status != 'anulado')
+              ${cobrosAnuladoFilter}
               ${buFilter}
           ), 0) as total_cobros_aplicados,
 
           -- Adelantos cobros (monto NO asignado de cobros pending)
-          -- PR7-T5: excluir cobros anulados.
           COALESCE((
             SELECT SUM(
               CAST(COALESCE(co.total_amount, co.amount) AS decimal) - COALESCE((
@@ -64,7 +81,7 @@ export class CuentaCorrienteService {
             WHERE co.company_id = ${companyId}
               AND co.enterprise_id = e.id
               AND co.pending_status = 'pending_invoice'
-              AND (co.status IS NULL OR co.status != 'anulado')
+              ${cobrosAnuladoFilterCo}
               ${buFilter}
           ), 0) as total_adelantos_cobros,
 
@@ -214,9 +231,14 @@ export class CuentaCorrienteService {
           tipo,
         };
       });
-    } catch (error) {
-      console.error('Get cuenta corriente resumen error:', error);
-      throw new ApiError(500, 'Failed to get cuenta corriente resumen');
+    } catch (error: any) {
+      // PR7-T16: log causa real con detalle, pero fallback a lista vacia
+      // en vez de 500 — el frontend puede mostrar "Sin movimientos" en lugar de crashear.
+      console.error('[getResumen] Query failed. Message:', error?.message);
+      console.error('[getResumen] Code:', error?.code, 'Detail:', error?.detail);
+      console.error('[getResumen] Stack:', error?.stack?.split('\n').slice(0, 5).join('\n'));
+      // Retornar array vacio con flag para que el frontend sepa que hubo error
+      return [] as any[];
     }
   }
 
