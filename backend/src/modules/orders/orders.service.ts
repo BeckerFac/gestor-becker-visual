@@ -115,12 +115,46 @@ export class OrdersService {
           CASE WHEN o.bank_id IS NOT NULL THEN json_build_object('id', bk.id, 'bank_name', bk.bank_name) ELSE NULL END as bank,
           CASE WHEN o.quote_id IS NOT NULL THEN json_build_object('id', qt.id, 'quote_number', qt.quote_number) ELSE NULL END as quote,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) as invoiced_amount,
+          -- PR7-T6+T7: distinguir drafts de facturas autorizadas, e incluir facturas
+          -- vinculadas via invoice_orders (N:N) ademas del legacy inv.order_id.
+          -- Un draft NO cuenta como "facturado" — puede modificarse/borrarse todavia.
+          COALESCE((
+            SELECT SUM(CAST(inv.total_amount AS decimal))
+            FROM invoices inv
+            WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
+              AND inv.status IN ('authorized', 'emitido')
+          ), 0) as invoiced_amount,
+          COALESCE((
+            SELECT SUM(CAST(inv.total_amount AS decimal))
+            FROM invoices inv
+            WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
+              AND inv.status = 'draft'
+          ), 0) as draft_invoiced_amount,
           CASE
             WHEN COALESCE(o.total_amount, 0) = 0 THEN 'sin_monto'
-            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) = 0 THEN 'sin_facturar'
-            WHEN COALESCE((SELECT SUM(CAST(inv.total_amount AS decimal)) FROM invoices inv WHERE inv.order_id = o.id AND inv.status != 'cancelled'), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
-            ELSE 'parcial'
+            -- Authorized/emitido cubre todo -> facturado
+            WHEN COALESCE((
+              SELECT SUM(CAST(inv.total_amount AS decimal))
+              FROM invoices inv
+              WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
+                AND inv.status IN ('authorized', 'emitido')
+            ), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
+            -- Hay auth/emitido pero no alcanzan a cubrir total -> parcial
+            WHEN COALESCE((
+              SELECT SUM(CAST(inv.total_amount AS decimal))
+              FROM invoices inv
+              WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
+                AND inv.status IN ('authorized', 'emitido')
+            ), 0) > 0 THEN 'parcial'
+            -- No hay auth/emitido pero si drafts -> borrador
+            WHEN COALESCE((
+              SELECT SUM(CAST(inv.total_amount AS decimal))
+              FROM invoices inv
+              WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
+                AND inv.status = 'draft'
+            ), 0) > 0 THEN 'borrador'
+            -- Ni drafts ni auth -> sin facturar
+            ELSE 'sin_facturar'
           END as invoice_status
           ${selectExtra}
         FROM orders o
@@ -904,6 +938,48 @@ export class OrdersService {
    * Invoices: via invoice_orders N:N + legacy invoices.order_id
    * Receipts: via cobro_invoice_applications on those invoices
    */
+  /**
+   * Unified remitos-for-order query. Matches via 3 routes:
+   *   1) remito_orders N:N
+   *   2) legacy remitos.order_id
+   *   3) remito_items.order_item_id -> order_items.order_id (item-level flow)
+   * Falls back gracefully if remito_items.order_item_id column does not exist.
+   */
+  private async getRemitosForOrder(companyId: string, orderId: string): Promise<any[]> {
+    try {
+      const result = await pool.query(`
+        SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
+          COALESCE((SELECT json_agg(json_build_object(
+            'product_name', ri2.product_name, 'quantity', ri2.quantity
+          )) FROM remito_items ri2 WHERE ri2.remito_id = r.id), '[]'::json) as items
+        FROM remitos r
+        LEFT JOIN remito_orders ro ON ro.remito_id = r.id
+        LEFT JOIN remito_items ri ON ri.remito_id = r.id
+        LEFT JOIN order_items oi ON oi.id = ri.order_item_id
+        WHERE r.company_id = $1
+          AND (ro.order_id = $2 OR r.order_id = $2 OR oi.order_id = $2)
+        ORDER BY r.date DESC
+      `, [companyId, orderId]);
+      return result.rows || [];
+    } catch {
+      try {
+        const fallback = await pool.query(`
+          SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
+            COALESCE((SELECT json_agg(json_build_object(
+              'product_name', ri.product_name, 'quantity', ri.quantity
+            )) FROM remito_items ri WHERE ri.remito_id = r.id), '[]'::json) as items
+          FROM remitos r
+          LEFT JOIN remito_orders ro ON ro.remito_id = r.id
+          WHERE (ro.order_id = $2 OR r.order_id = $2) AND r.company_id = $1
+          ORDER BY r.date DESC
+        `, [companyId, orderId]);
+        return fallback.rows || [];
+      } catch {
+        return [];
+      }
+    }
+  }
+
   async getOrderContextData(companyId: string, orderId: string) {
     try {
       // Ensure invoice_orders table exists
@@ -953,21 +1029,7 @@ export class OrdersService {
         receipts = receiptsResult.rows || [];
       }
 
-      // Remitos vinculados (via remito_orders N:N or legacy remitos.order_id)
-      let remitos: any[] = [];
-      try {
-        const remitosResult = await pool.query(`
-          SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
-            COALESCE((SELECT json_agg(json_build_object(
-              'product_name', ri.product_name, 'quantity', ri.quantity
-            )) FROM remito_items ri WHERE ri.remito_id = r.id), '[]'::json) as items
-          FROM remitos r
-          LEFT JOIN remito_orders ro ON ro.remito_id = r.id
-          WHERE (ro.order_id = $2 OR r.order_id = $2) AND r.company_id = $1
-          ORDER BY r.date DESC
-        `, [companyId, orderId]);
-        remitos = remitosResult.rows || [];
-      } catch {}
+      const remitos = await this.getRemitosForOrder(companyId, orderId);
 
       return { invoices, receipts, remitos };
     } catch (error) {
@@ -1020,6 +1082,7 @@ export class OrdersService {
               'invoice_id', i.id,
               'invoice_number', i.invoice_number,
               'invoice_type', i.invoice_type,
+              'status', i.status,
               'qty', CAST(ii.quantity AS decimal),
               'invoice_date', i.invoice_date
             ))
@@ -1033,8 +1096,27 @@ export class OrdersService {
       `);
       const items = (itemsResult as any).rows || [];
 
+      // PR7: cobros vinculados via facturas del pedido (para mostrar en expand)
+      const cobrosResult = await db.execute(sql`
+        SELECT DISTINCT c.id, c.cobro_num, c.amount, c.total_amount, c.payment_method,
+          c.payment_date, c.status, c.reference,
+          cia.amount_applied, cia.invoice_id,
+          i.invoice_number, i.invoice_type
+        FROM cobro_invoice_applications cia
+        JOIN cobros c ON cia.cobro_id = c.id
+        JOIN invoices i ON cia.invoice_id = i.id
+        WHERE i.order_id = ${orderId}
+           OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+        ORDER BY c.payment_date DESC NULLS LAST
+      `).catch(() => ({ rows: [] }));
+      const cobros = ((cobrosResult as any).rows || []);
+
+      const remitos = await this.getRemitosForOrder(companyId, orderId);
+
       return {
         order: orderRows[0],
+        cobros,
+        remitos,
         items: items.map((i: any) => ({
           ...i,
           quantity: parseFloat(i.quantity || '0'),

@@ -32,7 +32,9 @@ export class CobrosController {
   }
 
   async deleteCobro(req: AuthRequest, res: Response) {
-    const data = await cobrosService.deleteCobro(req.user!.company_id, req.params.id);
+    // PR7-T5: pasar userId + reason para audit trail del soft delete
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+    const data = await cobrosService.deleteCobro(req.user!.company_id, req.params.id, req.user!.id, reason);
     res.json(data);
   }
 

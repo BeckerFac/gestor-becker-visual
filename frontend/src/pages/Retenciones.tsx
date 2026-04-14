@@ -112,12 +112,16 @@ export const Retenciones: React.FC = () => {
   useEffect(() => { setCurrentPage(1) }, [filterType, filterEnterprise, filterPeriod, pageSize])
 
   // Auto-calculate amount when base_amount or rate change
+  // PR7-T4: Number.isFinite es mas robusto que !isNaN (valida tambien Infinity)
   useEffect(() => {
     const base = parseFloat(form.base_amount)
     const rate = parseFloat(form.rate)
-    if (!isNaN(base) && !isNaN(rate) && base > 0 && rate >= 0) {
+    if (Number.isFinite(base) && Number.isFinite(rate) && base > 0 && rate >= 0 && rate <= 100) {
       const calculated = Math.round(base * rate / 100 * 100) / 100
       setForm(prev => ({ ...prev, amount: calculated.toFixed(2) }))
+    } else if (form.base_amount && form.rate) {
+      // Si los inputs son invalidos, no dejes el amount obsoleto calculado antes
+      setForm(prev => ({ ...prev, amount: '' }))
     }
   }, [form.base_amount, form.rate])
 
@@ -134,14 +138,30 @@ export const Retenciones: React.FC = () => {
       toast.error('Tipo, monto base y alicuota son requeridos')
       return
     }
+    // PR7-T4: validar que los numeros sean finitos antes de enviar al backend
+    const base = parseFloat(form.base_amount)
+    const rate = parseFloat(form.rate)
+    const amount = parseFloat(form.amount)
+    if (!Number.isFinite(base) || base <= 0) {
+      toast.error('Monto base invalido')
+      return
+    }
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast.error('Alicuota invalida (debe estar entre 0 y 100)')
+      return
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error('Monto de retencion invalido')
+      return
+    }
     try {
       setSaving(true)
       await api.createRetencion({
         type: form.type,
         enterprise_id: form.enterprise_id || undefined,
-        base_amount: parseFloat(form.base_amount),
-        rate: parseFloat(form.rate),
-        amount: parseFloat(form.amount),
+        base_amount: base,
+        rate,
+        amount,
         certificate_number: form.certificate_number || undefined,
         date: form.date || undefined,
         period: form.period || undefined,

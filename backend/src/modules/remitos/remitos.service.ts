@@ -152,7 +152,8 @@ export class RemitosService {
         if (isNaN(new Date(date_to).getTime())) {
           throw new ApiError(400, 'date_to invalido');
         }
-        whereClause = sql`${whereClause} AND r.date <= ${date_to + 'T23:59:59'}`;
+        // PR7-T1: offset AR -03:00
+        whereClause = sql`${whereClause} AND r.date <= ${date_to + 'T23:59:59.999-03:00'}`;
       }
 
       const result = await db.execute(sql`

@@ -91,6 +91,11 @@ interface Receipt {
     enterprise_name: string
     customer_name: string
   }[]
+  // PR7-T5: soft delete fields
+  status?: string // 'activo' | 'anulado'
+  anulled_at?: string | null
+  anulled_by?: string | null
+  anulled_reason?: string | null
   // Legacy compat
   items?: any[]
   cobro_id?: string
@@ -1604,7 +1609,10 @@ export const Cobros: React.FC = () => {
                   <tr
                     id={`receipt-row-${receipt.id}`}
                     onClick={() => setExpandedReceiptId(prev => prev === receipt.id ? null : receipt.id)}
-                    className="border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                    className={`border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
+                      receipt.status === 'anulado' ? 'opacity-60 bg-red-50/30 dark:bg-red-900/10' : ''
+                    }`}
+                    title={receipt.status === 'anulado' ? `Anulado — ${receipt.anulled_reason || 'sin motivo'}` : undefined}
                   >
                     <td className="px-4 py-3 font-mono font-semibold text-gray-800 dark:text-gray-200">
                       #{String(receipt.receipt_number).padStart(6, '0')}
@@ -1659,28 +1667,42 @@ export const Cobros: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[150px] truncate" title={receipt.notes || ''}>{receipt.notes || '-'}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <PermissionGate module="cobros" action="create">
-                          <button
-                            onClick={() => setLinkingCobro({
-                              id: (receipt as any).cobro_id || receipt.id,
-                              amount: parseFloat(receipt.total_amount || '0'),
-                              enterprise_id: receipt.enterprise_id || undefined,
-                            })}
-                            className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors"
-                          >
-                            Vincular
-                          </button>
-                        </PermissionGate>
-                        <PermissionGate module="cobros" action="delete">
-                          <button
-                            onClick={() => setDeleteTarget(receipt)}
-                            className="text-red-500 hover:text-red-700 text-sm transition-colors"
-                          >
-                            Anular
-                          </button>
-                        </PermissionGate>
-                      </div>
+                      {/* PR7-T5: si el cobro esta anulado, solo mostrar badge read-only */}
+                      {receipt.status === 'anulado' ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-block text-[11px] font-bold rounded-full px-2 py-0.5 bg-red-100 text-red-800 line-through">
+                            ANULADO
+                          </span>
+                          {receipt.anulled_at && (
+                            <span className="text-[10px] text-gray-500" title={receipt.anulled_reason || ''}>
+                              {new Date(receipt.anulled_at).toLocaleDateString('es-AR')}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <PermissionGate module="cobros" action="create">
+                            <button
+                              onClick={() => setLinkingCobro({
+                                id: (receipt as any).cobro_id || receipt.id,
+                                amount: parseFloat(receipt.total_amount || '0'),
+                                enterprise_id: receipt.enterprise_id || undefined,
+                              })}
+                              className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors"
+                            >
+                              Vincular
+                            </button>
+                          </PermissionGate>
+                          <PermissionGate module="cobros" action="delete">
+                            <button
+                              onClick={() => setDeleteTarget(receipt)}
+                              className="text-red-500 hover:text-red-700 text-sm transition-colors"
+                            >
+                              Anular
+                            </button>
+                          </PermissionGate>
+                        </div>
+                      )}
                     </td>
                   </tr>
                   {expandedReceiptId === receipt.id && (

@@ -164,14 +164,25 @@ describe('CobroApplicationsService', () => {
       ).rejects.toThrow('No se puede vincular cobro a factura cancelada')
     })
 
-    it('throws 409 when duplicate link exists', async () => {
-      mockDbRows([{ ...validCobro, business_unit_id: null }])
-      mockDbRows([{ ...validInvoice, business_unit_id: null }])
-      mockDbRows([{ id: 'existing-app' }]) // duplicate found
+    it('incrementa amount_applied cuando ya existe vinculacion', async () => {
+      mockDbRows([{ ...validCobro, business_unit_id: null }])          // 1. cobro SELECT
+      mockDbRows([{ ...validInvoice, business_unit_id: null }])        // 2. invoice SELECT
+      mockDbRows([{ id: 'existing-app', amount_applied: '2000' }])     // 3. existingResult
+      mockDbRows([{ total: '10000', allocated: '2000' }])              // 4. getCobroUnallocatedBalance
+      mockDbRows([{ total: '10000', applied: '2000' }])                // 5. getInvoiceRemainingBalance
+      mockDbVoid()                                                     // 6. UPDATE application (existingApp branch)
+      mockDbRows([{ total: '10000', applied: '5000' }])                // 7. recalculateInvoicePaymentStatus SELECT
+      mockDbVoid()                                                     // 8. recalculateInvoicePaymentStatus UPDATE
+      mockDbRows([])                                                   // 9. linkedOrderIds (empty)
+      mockDbVoid()                                                     // 10. UPDATE cobros pending_status=NULL (validCobro tiene pending_status='pending_invoice')
+      mockDbRows([{                                                    // 11. final SELECT with result
+        id: 'existing-app', cobro_id: cobroId, invoice_id: invoiceId,
+        amount_applied: '5000', invoice_number: 1, invoice_type: 'A',
+      }])
 
-      await expect(
-        service.linkCobroToInvoice(companyId, userId, cobroId, invoiceId, 5000)
-      ).rejects.toThrow('Este cobro ya esta vinculado a esta factura')
+      const result = await service.linkCobroToInvoice(companyId, userId, cobroId, invoiceId, 3000)
+      expect(result).toBeDefined()
+      expect(result.id).toBe('existing-app')
     })
 
     it('throws 400 when cobro unallocated balance insufficient', async () => {

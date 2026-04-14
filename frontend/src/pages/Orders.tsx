@@ -921,10 +921,22 @@ export const Orders: React.FC = () => {
   const filteredOrders = useMemo(() => {
     let result = orders
     if (filterStatus.length > 0) result = result.filter(o => filterStatus.includes(o.status))
-    if (filterType.length > 0) result = result.filter(o => {
-      const types = (o.product_type || 'otro').split(', ').map((t: string) => t.trim())
-      return types.some((t: string) => filterType.includes(t))
-    })
+    if (filterType.length > 0) {
+      // PR7: si selecciona una categoria padre, matchear tambien sus subcategorias.
+      const expandedFilter = new Set<string>(filterType)
+      for (const name of filterType) {
+        const parent = categories.find(c => c.name === name && !c.parent_id)
+        if (parent) {
+          categories
+            .filter(c => c.parent_id === parent.id)
+            .forEach(child => expandedFilter.add(child.name))
+        }
+      }
+      result = result.filter(o => {
+        const types = (o.product_type || 'otro').split(', ').map((t: string) => t.trim())
+        return types.some((t: string) => expandedFilter.has(t))
+      })
+    }
     if (filterEnterprise.length > 0) result = result.filter(o => o.enterprise && filterEnterprise.includes(o.enterprise.id))
     if (filterInvoice.length > 0) {
       result = result.filter(o => {
@@ -936,28 +948,48 @@ export const Orders: React.FC = () => {
     if (filterPayment.length > 0) {
       result = result.filter(o => filterPayment.includes(o.payment_status))
     }
-    if (dateFrom) result = result.filter(o => {
-      const d = o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : ''
-      return d >= dateFrom
-    })
-    if (dateTo) result = result.filter(o => {
-      const d = o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : ''
-      return d <= dateTo
-    })
+    // PR7-T6: usar fecha LOCAL (AR) en vez de toISOString (UTC) para matchear
+    // los dateFrom/dateTo que PeriodSelector genera en hora local. Sin esto,
+    // pedidos creados despues de 21hs AR tienen UTC del dia siguiente y se
+    // escapan del rango "Semana".
+    const toLocalYMD = (iso: string): string => {
+      if (!iso) return ''
+      const d = new Date(iso)
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+    if (dateFrom) result = result.filter(o => toLocalYMD(o.created_at) >= dateFrom)
+    if (dateTo) result = result.filter(o => toLocalYMD(o.created_at) <= dateTo)
     return result
-  }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, filterPayment, dateFrom, dateTo])
+  }, [orders, filterStatus, filterType, filterEnterprise, filterInvoice, filterPayment, dateFrom, dateTo, categories])
 
   const periodSummary = useMemo(() => {
+    // PR7-T6: usar hora local (AR) en vez de toISOString (UTC) para evitar
+    // off-by-one cuando el cliente esta en AR despues de 21hs.
+    const toLocal = (d: Date) => {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
     const now = new Date()
-    const today = now.toISOString().split('T')[0]
+    const today = toLocal(now)
     let pFrom = '', pTo = today
     if (summaryPeriod === 'hoy') { pFrom = today }
-    else if (summaryPeriod === 'semana') { const d = new Date(now); const dow = now.getDay(); d.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); pFrom = d.toISOString().split('T')[0] }
-    else if (summaryPeriod === 'mes') { pFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0] }
-    else if (summaryPeriod === '3meses') { pFrom = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split('T')[0] }
-    else if (summaryPeriod === 'anual') { pFrom = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0] }
+    // PR7-T6: Semana = ultimos 7 dias (rolling), consistente con PeriodSelector
+    else if (summaryPeriod === 'semana') { const d = new Date(now); d.setDate(now.getDate() - 6); pFrom = toLocal(d) }
+    else if (summaryPeriod === 'mes') { pFrom = toLocal(new Date(now.getFullYear(), now.getMonth(), 1)) }
+    else if (summaryPeriod === '3meses') { pFrom = toLocal(new Date(now.getFullYear(), now.getMonth() - 2, 1)) }
+    else if (summaryPeriod === 'anual') { pFrom = toLocal(new Date(now.getFullYear(), 0, 1)) }
 
-    const filtered = pFrom ? orders.filter(o => o.created_at >= pFrom) : orders
+    // PR7-T6: comparar por local-date-string para que created_at en UTC
+    // se clasifique por la fecha que el usuario ve en su browser.
+    const filtered = pFrom ? orders.filter(o => {
+      const created = o.created_at ? toLocal(new Date(o.created_at)) : ''
+      return created >= pFrom
+    }) : orders
     return {
       pendientes: filtered.filter(o => o.status === 'pendiente').length,
       en_produccion: filtered.filter(o => o.status === 'en_produccion').length,
@@ -1119,7 +1151,24 @@ export const Orders: React.FC = () => {
             />
             <MultiSelectFilter
               label="Tipo"
-              options={[...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])].map(t => ({ value: t, label: t }))}
+              options={(() => {
+                // PR7: "Tipo" = categorias/subcategorias reales de Productos (no lista hardcodeada).
+                // Padres primero, luego hijos con indentacion visual.
+                const parents = categories.filter(c => !c.parent_id)
+                const opts: { value: string; label: string }[] = []
+                parents.forEach(p => {
+                  opts.push({ value: p.name, label: p.name })
+                  categories
+                    .filter(c => c.parent_id === p.id)
+                    .forEach(child => opts.push({ value: child.name, label: `  ${child.name}` }))
+                })
+                // Fallback: si todavia no hay categorias, usar los tipos distintos que ya tienen los pedidos
+                if (opts.length === 0) {
+                  const fallback = [...new Set([...DEFAULT_PRODUCT_TYPES, ...productTypes])]
+                  return fallback.map(t => ({ value: t, label: t }))
+                }
+                return opts
+              })()}
               selected={filterType}
               onChange={setFilterType}
               placeholder="Todos"
@@ -1693,6 +1742,7 @@ export const Orders: React.FC = () => {
                               <p className="text-[10px] text-gray-400 mt-0.5">{formatCurrency(invoicedAmt)} / {formatCurrency(totalAmt)}</p>
                             </div>
                           )
+                          if (invStatus === 'borrador') return <span className="text-xs font-medium rounded-full px-2 py-1 bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">Borrador</span>
                           return <span className="text-xs font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">Sin facturar</span>
                         })()}
                       </td>
@@ -1783,12 +1833,20 @@ export const Orders: React.FC = () => {
                                     const invoiced = items.filter((it: any) => parseFloat(it.qty_invoiced) > 0)
                                     const uninvoiced = items.filter((it: any) => parseFloat(it.qty_remaining) > 0)
 
+                                    // PR7: detectar si TODAS las facturas vinculadas estan en draft
+                                    const allInvoicesDraft = invoiced.length > 0 && invoiced.every((it: any) =>
+                                      (it.invoices || []).length > 0 &&
+                                      (it.invoices || []).every((inv: any) => inv.status === 'draft')
+                                    )
+                                    const sectionTitle = allInvoicesDraft ? 'Borrador' : 'Facturado'
+                                    const sectionColor = allInvoicesDraft ? 'text-orange-700 dark:text-orange-400' : 'text-green-700 dark:text-green-400'
+
                                     return (
                                       <div className="space-y-3">
-                                        {/* Seccion FACTURADO */}
+                                        {/* Seccion FACTURADO / BORRADOR */}
                                         {invoiced.length > 0 && (
                                           <div>
-                                            <h5 className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Facturado</h5>
+                                            <h5 className={`text-xs font-semibold mb-1 ${sectionColor}`}>{sectionTitle}</h5>
                                             <table className="w-full text-xs">
                                               <thead>
                                                 <tr className="text-[10px] text-gray-500">
@@ -1811,16 +1869,23 @@ export const Orders: React.FC = () => {
                                                       <td className="py-1 text-right font-medium">${(qtyInv * price).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
                                                       <td className="py-1 pl-2">
                                                         <div className="flex flex-wrap gap-0.5">
-                                                          {(it.invoices || []).map((inv: any, idx: number) => (
-                                                            <button
-                                                              key={idx}
-                                                              onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.invoice_id}`) }}
-                                                              className="inline-block px-1 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-mono dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800/50 cursor-pointer transition-colors"
-                                                              title="Ir a factura"
-                                                            >
-                                                              {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud)
-                                                            </button>
-                                                          ))}
+                                                          {(it.invoices || []).map((inv: any, idx: number) => {
+                                                            const isDraft = inv.status === 'draft'
+                                                            return (
+                                                              <button
+                                                                key={idx}
+                                                                onClick={(e) => { e.stopPropagation(); navigate(`/invoices?expand=${inv.invoice_id}`) }}
+                                                                className={`inline-block px-1 py-0.5 rounded text-[10px] font-mono cursor-pointer transition-colors ${
+                                                                  isDraft
+                                                                    ? 'bg-orange-50 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 hover:bg-orange-100'
+                                                                    : 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800/50'
+                                                                }`}
+                                                                title={isDraft ? 'Factura en borrador' : 'Ir a factura'}
+                                                              >
+                                                                {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud){isDraft ? ' · Borrador' : ''}
+                                                              </button>
+                                                            )
+                                                          })}
                                                         </div>
                                                       </td>
                                                     </tr>
@@ -1828,6 +1893,66 @@ export const Orders: React.FC = () => {
                                                 })}
                                               </tbody>
                                             </table>
+                                          </div>
+                                        )}
+
+                                        {/* Seccion REMITOS vinculados al pedido (nivel raiz, hermana de Facturado/Recibos) */}
+                                        {(() => {
+                                          const remitosList = (detail.remitos && detail.remitos.length > 0)
+                                            ? detail.remitos
+                                            : (contextData[order.id]?.remitos || [])
+                                          if (remitosList.length === 0) return null
+                                          return (
+                                            <div>
+                                              <h5 className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1">Remitos vinculados</h5>
+                                              <div className="flex flex-wrap gap-1">
+                                                {remitosList.map((r: any) => {
+                                                  const isAnulado = r.status === 'anulado'
+                                                  const pv = r.punto_venta ? String(r.punto_venta).padStart(4, '0') + '-' : ''
+                                                  return (
+                                                    <button
+                                                      key={r.id}
+                                                      onClick={(e) => { e.stopPropagation(); navigate(`/remitos?expand=${r.id}`) }}
+                                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                                                        isAnulado
+                                                          ? 'bg-red-50 text-red-700 line-through dark:bg-red-900/40 dark:text-red-300'
+                                                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300'
+                                                      }`}
+                                                      title={`Remito ${r.status}`}
+                                                    >
+                                                      {pv}#{String(r.remito_number || '').padStart(5, '0')} · {r.status}
+                                                    </button>
+                                                  )
+                                                })}
+                                              </div>
+                                            </div>
+                                          )
+                                        })()}
+
+                                        {/* PR7: Seccion RECIBOS vinculados al pedido */}
+                                        {(detail.cobros || []).length > 0 && (
+                                          <div>
+                                            <h5 className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1">Recibos vinculados</h5>
+                                            <div className="flex flex-wrap gap-1">
+                                              {(detail.cobros || []).map((c: any) => {
+                                                const isAnulado = c.status === 'anulado'
+                                                const amt = parseFloat(c.amount_applied || '0')
+                                                return (
+                                                  <button
+                                                    key={`${c.id}-${c.invoice_id}`}
+                                                    onClick={(e) => { e.stopPropagation(); navigate(`/cobros?expand=${c.id}`) }}
+                                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                                                      isAnulado
+                                                        ? 'bg-red-50 text-red-700 line-through dark:bg-red-900/40 dark:text-red-300'
+                                                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                                    }`}
+                                                    title={`${c.payment_method || ''} · ${c.invoice_type || ''} ${c.invoice_number || ''}`}
+                                                  >
+                                                    #{String(c.cobro_num || '').padStart(4, '0')} · ${amt.toLocaleString('es-AR', {minimumFractionDigits: 2})}{isAnulado ? ' · Anulado' : ''}
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
                                           </div>
                                         )}
 
@@ -1905,19 +2030,6 @@ export const Orders: React.FC = () => {
                                                 })}
                                               </tbody>
                                             </table>
-
-                                            {/* Remitos vinculados */}
-                                            {(contextData[order.id]?.remitos || []).length > 0 && (
-                                              <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                                                <span className="text-[10px] text-gray-500">Remitos:</span>
-                                                {(contextData[order.id]?.remitos || []).map((r: any) => (
-                                                  <button key={r.id} onClick={(e) => { e.stopPropagation(); navigate(`/remitos?expand=${r.id}`) }}
-                                                    className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
-                                                    #{String(r.remito_number).padStart(5, '0')} ({r.status})
-                                                  </button>
-                                                ))}
-                                              </div>
-                                            )}
 
                                             {/* Crear remito de pendientes */}
                                             {items.some((it: any) => parseFloat(it.qty_delivered || '0') < parseFloat(it.quantity || '0')) && (

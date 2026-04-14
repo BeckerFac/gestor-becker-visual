@@ -519,9 +519,9 @@ export class CuentaCorrienteService {
 
       const totalBalance = runningBalance;
 
-      // Filter by date range
-      const fromDate = new Date(dateFrom + 'T00:00:00');
-      const toDate = new Date(dateTo + 'T23:59:59');
+      // PR7-T1: offset AR -03:00 para consistencia con reports
+      const fromDate = new Date(dateFrom + 'T00:00:00-03:00');
+      const toDate = new Date(dateTo + 'T23:59:59.999-03:00');
 
       const filteredMovimientos = allWithSaldo.filter((m: any) => {
         const fecha = new Date(m.fecha);

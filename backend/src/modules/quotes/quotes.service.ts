@@ -59,7 +59,8 @@ export class QuotesService {
         whereClause = sql`${whereClause} AND q.created_at >= ${date_from}`;
       }
       if (date_to) {
-        whereClause = sql`${whereClause} AND q.created_at <= ${date_to + 'T23:59:59'}`;
+        // PR7-T1: offset AR -03:00 para no perder las ultimas 3h del dia en UTC
+        whereClause = sql`${whereClause} AND q.created_at <= ${date_to + 'T23:59:59.999-03:00'}`;
       }
 
       // C9: LATERAL JOIN para tags evita subquery correlado por cada row

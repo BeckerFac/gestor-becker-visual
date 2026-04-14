@@ -1534,6 +1534,21 @@ async function runAutoMigrations() {
       }
     }
 
+    // PR7-T5: fraude interno — cobros se soft-deleted con status='anulado'
+    // en vez de DELETE fisico. Audit trail completo para prevenir abuso.
+    try {
+      await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`);
+      await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_by UUID REFERENCES users(id)`);
+      await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_reason TEXT`);
+      // Backfill cobros existentes con status='activo' (antes del cambio)
+      await pool.query(`UPDATE cobros SET status = 'activo' WHERE status IS NULL`);
+      // Index para filtrado rapido
+      await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cobros_status ON cobros(company_id, status)`).catch(() => {});
+    } catch (e: any) {
+      console.warn('Cobro soft-delete migration warning:', e?.message || e);
+    }
+
     // C7: stock.quantity VARCHAR(50) → DECIMAL migration Phase 1+2
     // Phase 1: ADD COLUMN quantity_num (instant, metadata-only)
     // Phase 2: backfill chunked (idempotente — WHERE IS NULL)

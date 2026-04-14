@@ -80,14 +80,13 @@ export class CobroApplicationsService {
       throw new ApiError(400, 'No se puede vincular cobro a factura cancelada');
     }
 
-    // V4: Check duplicate
+    // V4: Si ya existe vinculacion, incrementamos amount_applied en vez de rechazar.
+    // Permite re-vincular saldo restante del mismo cobro a la misma factura en varios pasos.
     const existingResult = await db.execute(sql`
-      SELECT id FROM cobro_invoice_applications
+      SELECT id, amount_applied FROM cobro_invoice_applications
       WHERE cobro_id = ${cobroId} AND invoice_id = ${invoiceId}
     `);
-    if (((existingResult as any).rows || []).length > 0) {
-      throw new ApiError(409, 'Este cobro ya esta vinculado a esta factura');
-    }
+    const existingApp = ((existingResult as any).rows || [])[0];
 
     // V5: Check cobro unallocated balance
     const cobroBalance = await this.getCobroUnallocatedBalance(cobroId);
@@ -101,12 +100,24 @@ export class CobroApplicationsService {
       throw new ApiError(400, `Solo quedan $${invoiceBalance.toFixed(2)} por cobrar en esta factura`);
     }
 
-    // INSERT application
-    const appId = uuid();
-    await db.execute(sql`
-      INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by, notes)
-      VALUES (${appId}, ${cobroId}, ${invoiceId}, ${amountApplied.toString()}, ${userId}, ${notes || null})
-    `);
+    // INSERT o UPDATE application
+    let appId: string;
+    if (existingApp) {
+      appId = existingApp.id;
+      const newAmount = parseFloat(existingApp.amount_applied || '0') + amountApplied;
+      await db.execute(sql`
+        UPDATE cobro_invoice_applications
+        SET amount_applied = ${newAmount.toString()},
+            notes = COALESCE(${notes || null}, notes)
+        WHERE id = ${appId}
+      `);
+    } else {
+      appId = uuid();
+      await db.execute(sql`
+        INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by, notes)
+        VALUES (${appId}, ${cobroId}, ${invoiceId}, ${amountApplied.toString()}, ${userId}, ${notes || null})
+      `);
+    }
 
     // Recalculate invoice payment_status
     await this.recalculateInvoicePaymentStatus(invoiceId);

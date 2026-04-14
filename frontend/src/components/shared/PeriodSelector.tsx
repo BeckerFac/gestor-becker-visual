@@ -12,13 +12,25 @@ interface PeriodSelectorProps {
   onChange: (period: Period) => void
 }
 
+// PR7-T6: calcular fechas usando hora local del browser (AR) en vez de toISOString
+// que serializa a UTC. Esto evita el off-by-one cuando el cliente esta en AR
+// despues de las 21:00 (00:00 UTC = dia siguiente).
+const toLocalYMD = (d: Date): string => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 const getPeriods = (): Period[] => {
   const now = new Date()
-  const today = now.toISOString().split('T')[0]
+  const today = toLocalYMD(now)
 
+  // PR7-T6: "Semana" = ultimos 7 dias (rolling window) en vez de semana ISO.
+  // Antes: si hoy era lunes, startOfWeek=hoy → el filtro semana solo mostraba hoy
+  // y se perdian pedidos del domingo/sabado que el usuario acababa de crear.
   const startOfWeek = new Date(now)
-  const dayOfWeek = now.getDay()
-  startOfWeek.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
+  startOfWeek.setDate(now.getDate() - 6) // hoy + 6 dias atras = 7 dias totales
 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 
@@ -28,10 +40,10 @@ const getPeriods = (): Period[] => {
 
   return [
     { label: 'Hoy', value: 'hoy', dateFrom: today, dateTo: today },
-    { label: 'Semana', value: 'semana', dateFrom: startOfWeek.toISOString().split('T')[0], dateTo: today },
-    { label: 'Mes', value: 'mes', dateFrom: startOfMonth.toISOString().split('T')[0], dateTo: today },
-    { label: '3 Meses', value: '3meses', dateFrom: start3Months.toISOString().split('T')[0], dateTo: today },
-    { label: 'Anual', value: 'anual', dateFrom: startOfYear.toISOString().split('T')[0], dateTo: today },
+    { label: 'Semana', value: 'semana', dateFrom: toLocalYMD(startOfWeek), dateTo: today },
+    { label: 'Mes', value: 'mes', dateFrom: toLocalYMD(startOfMonth), dateTo: today },
+    { label: '3 Meses', value: '3meses', dateFrom: toLocalYMD(start3Months), dateTo: today },
+    { label: 'Anual', value: 'anual', dateFrom: toLocalYMD(startOfYear), dateTo: today },
     { label: 'Todos', value: 'todos', dateFrom: '', dateTo: '' },
   ]
 }

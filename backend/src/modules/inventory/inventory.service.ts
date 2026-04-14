@@ -83,38 +83,53 @@ export class InventoryService {
       const isIncoming = ['purchase', 'adjustment', 'return_customer'].includes(movementType);
       const stockDelta = isIncoming ? quantity : -quantity;
 
+      // PR7-T2: Stock migration Phase 3 — doble escritura a quantity (VARCHAR legacy)
+      // y quantity_num (DECIMAL nuevo). COALESCE(quantity_num::text, quantity) al leer
+      // prioriza el valor tipado. Durante el backfill ambos reflejan el mismo numero.
+      // Phase 4 (drop VARCHAR) va en un PR dedicado con ventana coordinada.
+
       // Upsert stock record
       const existingStock = await db.execute(sql`
-        SELECT id, quantity FROM stock
+        SELECT id, quantity, quantity_num FROM stock
         WHERE product_id = ${data.product_id} AND warehouse_id = ${warehouseId}
       `);
       const stockRows = (existingStock as any).rows || existingStock || [];
 
       if (stockRows.length === 0) {
         // PR2-T7: si es egreso y no hay stock row previo, rechazar
-        // (no podemos vender/mover mercaderia que no existe).
         if (stockDelta < 0) {
           throw new ApiError(
             400,
             `Stock insuficiente: no existe registro de stock para el producto ${data.product_id}`
           );
         }
-        await db.insert(stock).values({
-          id: uuid(),
-          product_id: data.product_id,
-          warehouse_id: warehouseId,
-          quantity: stockDelta.toString(),
-          min_level: '0',
-          max_level: '0',
-        });
+        // PR7-T2: doble escritura en INSERT
+        await db.execute(sql`
+          INSERT INTO stock (id, product_id, warehouse_id, quantity, quantity_num, min_level, max_level)
+          VALUES (
+            ${uuid()},
+            ${data.product_id},
+            ${warehouseId},
+            ${stockDelta.toString()},
+            ${stockDelta.toString()}::decimal,
+            '0',
+            '0'
+          )
+        `);
       } else {
         // PR2-T7: lock + validar que el nuevo valor no sea negativo.
-        // El Math.max(0,...) original ENMASCARABA egresos mayores al stock
-        // (el movimiento se guardaba pero quantity quedaba en 0).
         await db.execute(sql`
-          SELECT quantity FROM stock WHERE id = ${stockRows[0].id} FOR UPDATE
+          SELECT quantity, quantity_num FROM stock WHERE id = ${stockRows[0].id} FOR UPDATE
         `);
-        const currentQty = parseFloat(stockRows[0].quantity || '0');
+        // PR7-T2: leer con prioridad a quantity_num (Phase 3 prep).
+        // Si quantity_num ya fue backfilleado, usarlo; si no, parsear legacy.
+        const numericQty = stockRows[0].quantity_num;
+        const currentQty = numericQty !== null && numericQty !== undefined
+          ? parseFloat(String(numericQty))
+          : parseFloat(stockRows[0].quantity || '0');
+        if (!Number.isFinite(currentQty)) {
+          throw new ApiError(500, `Stock corrupto para producto ${data.product_id}: quantity no parseable`);
+        }
         const newQty = currentQty + stockDelta;
         if (newQty < 0) {
           throw new ApiError(
@@ -122,8 +137,12 @@ export class InventoryService {
             `Stock insuficiente: disponible ${currentQty}, intentaste egresar ${Math.abs(stockDelta)}`
           );
         }
+        // PR7-T2: doble escritura en UPDATE
         await db.execute(sql`
-          UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
+          UPDATE stock
+          SET quantity = ${newQty.toString()},
+              quantity_num = ${newQty.toString()}::decimal,
+              updated_at = NOW()
           WHERE id = ${stockRows[0].id}
         `);
       }

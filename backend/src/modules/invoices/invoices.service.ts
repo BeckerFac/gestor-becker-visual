@@ -487,7 +487,8 @@ export class InvoicesService {
         whereClause = sql`${whereClause} AND i.invoice_date >= ${date_from}`;
       }
       if (date_to) {
-        whereClause = sql`${whereClause} AND i.invoice_date <= ${date_to + 'T23:59:59'}`;
+        // PR7-T1: offset AR -03:00 (no perder las ultimas 3h del dia)
+        whereClause = sql`${whereClause} AND i.invoice_date <= ${date_to + 'T23:59:59.999-03:00'}`;
       }
 
       const result = await db.execute(sql`

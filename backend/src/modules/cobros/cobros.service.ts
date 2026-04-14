@@ -161,9 +161,15 @@ export class CobrosService {
       } catch { /* no business units yet */ }
     }
 
-    const methodsRequiringBank = ['transferencia', 'cheque'];
-    if (methodsRequiringBank.includes(data.payment_method) && !data.bank_id) {
-      throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia o cheque');
+    // PR7: cheques guardan el banco como string en cheque_data.bank (del dropdown nuevo),
+    // no en bank_id (UUID). Solo transferencia top-level necesita bank_id UUID.
+    // Si hay payment_methods array, cada metodo valida su propio bank_id/cheque_data.
+    if (
+      data.payment_method === 'transferencia' &&
+      !data.bank_id &&
+      !(Array.isArray(data.payment_methods) && data.payment_methods.length > 0)
+    ) {
+      throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia');
     }
 
     // B.1.2: Parse payment_methods with backward compat
@@ -441,41 +447,69 @@ export class CobrosService {
     }
   }
 
-  async deleteCobro(companyId: string, cobroId: string) {
+  /**
+   * PR7-T5: Anular cobro (soft delete) en vez de DELETE fisico.
+   *
+   * Fraude interno: si un empleado podia DELETE un cobro legitimo, podia
+   * robar el dinero y que no quede rastro. Ahora:
+   * - status = 'anulado'
+   * - anulled_at, anulled_by, anulled_reason persistidos (audit trail)
+   * - cobro_invoice_applications se preservan (no CASCADE DELETE)
+   * - recalculateInvoicePaymentStatus excluye cobros anulados al sumar
+   * - La row sigue visible en /api/cobros con badge "Anulado"
+   */
+  async deleteCobro(companyId: string, cobroId: string, userId?: string, reason?: string) {
     await this.ensureTables();
     try {
-      const check = await db.execute(sql`SELECT id, order_id, company_id FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+      const check = await db.execute(sql`
+        SELECT id, order_id, company_id, status
+        FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
+      `);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
-      const orderId = rows[0].order_id;
 
-      // Read cobro data for accounting reversal BEFORE delete
-      let cobroForAccounting: any = null;
-      try {
-        cobroForAccounting = rows[0];
-      } catch {}
+      // Idempotencia: si ya esta anulado, no fallar, solo avisar
+      if (rows[0].status === 'anulado') {
+        throw new ApiError(400, 'Este cobro ya esta anulado');
+      }
 
-      // Transaction: get linked invoices + delete cobro atomically
+      const cobroForAccounting: any = rows[0];
+
+      // Transaction: anular + get linked invoices atomicamente
       let invoiceIds: string[] = [];
       await db.execute(sql`BEGIN`);
       try {
+        // Get linked invoices ANTES de anular (para recalcular)
+        const linkedInvoices = await db.execute(sql`
+          SELECT invoice_id FROM cobro_invoice_applications WHERE cobro_id = ${cobroId}
+        `);
+        invoiceIds = ((linkedInvoices as any).rows || []).map((r: any) => r.invoice_id);
 
-      // Get linked invoices before deleting (for recalculation)
-      const linkedInvoices = await db.execute(sql`
-        SELECT invoice_id FROM cobro_invoice_applications WHERE cobro_id = ${cobroId}
-      `);
-      invoiceIds = ((linkedInvoices as any).rows || []).map((r: any) => r.invoice_id);
+        // PR7-T5: SOFT DELETE — UPDATE status en vez de DELETE fisico
+        // Las cobro_invoice_applications se mantienen (audit trail),
+        // pero recalculateInvoicePaymentStatus las excluye via JOIN con cobro status.
+        await db.execute(sql`
+          UPDATE cobros
+          SET status = 'anulado',
+              anulled_at = NOW(),
+              anulled_by = ${userId || null},
+              anulled_reason = ${reason || null}
+          WHERE id = ${cobroId} AND company_id = ${companyId}
+        `);
 
-      // Delete cobro (CASCADE will delete cobro_invoice_applications)
-      await db.execute(sql`DELETE FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}`);
+        // Marcar cheques asociados como anulados tambien (si no fueron endosados)
+        await db.execute(sql`
+          UPDATE cheques SET status = 'anulado'
+          WHERE cobro_id = ${cobroId} AND status = 'a_cobrar'
+        `);
 
-      await db.execute(sql`COMMIT`);
+        await db.execute(sql`COMMIT`);
       } catch (txError) {
         try { await db.execute(sql`ROLLBACK`); } catch (e) { /* rollback best-effort */ }
         throw txError;
       }
 
-      // Recalculate payment_status for affected invoices + cascade to orders
+      // Recalcular payment_status de facturas afectadas (ahora excluyendo cobros anulados)
       for (const invId of invoiceIds) {
         await this.recalculateInvoicePaymentStatus(invId);
         await this.recalculateOrderStatusFromInvoice(invId);
@@ -489,22 +523,27 @@ export class CobrosService {
         } catch (accErr) { console.warn('Accounting reversal skipped (cobro):', (accErr as Error).message); }
       }
 
-      return { success: true };
+      return { success: true, status: 'anulado' };
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to delete cobro');
+      throw new ApiError(500, 'Failed to anular cobro');
     }
   }
 
   private async recalculateInvoicePaymentStatus(invoiceId: string) {
     try {
+      // PR7-T5: JOIN con cobros para excluir aplicaciones de cobros anulados.
+      // Antes: LEFT JOIN cobro_invoice_applications sumaba TODO, incluso anulados.
+      // Ahora: solo cuenta cobros con status='activo' o NULL (legacy).
       const result = await db.execute(sql`
         SELECT
           CAST(i.total_amount AS decimal) as total,
           COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
         FROM invoices i
         LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        LEFT JOIN cobros c ON cia.cobro_id = c.id
         WHERE i.id = ${invoiceId}
+          AND (c.status IS NULL OR c.status != 'anulado')
         GROUP BY i.id, i.total_amount
       `);
       const row = ((result as any).rows || [])[0];
