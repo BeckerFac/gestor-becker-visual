@@ -1101,7 +1101,12 @@ export class OrdersService {
             WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
               AND i.invoice_type::text NOT LIKE 'NC%'
           ), 0) as qty_remaining,
-          COALESCE(CAST(oi.qty_delivered AS decimal), 0) as qty_delivered,
+          COALESCE((
+            SELECT SUM(CAST(ri.quantity AS decimal))
+            FROM remito_items ri
+            JOIN remitos r ON r.id = ri.remito_id
+            WHERE ri.order_item_id = oi.id AND r.status != 'anulado'
+          ), 0) as qty_delivered,
           COALESCE((
             SELECT json_agg(json_build_object(
               'invoice_id', i.id,
