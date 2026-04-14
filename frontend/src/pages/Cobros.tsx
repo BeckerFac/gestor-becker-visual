@@ -1683,18 +1683,29 @@ export const Cobros: React.FC = () => {
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <PermissionGate module="cobros" action="create">
-                            <button
-                              onClick={() => setLinkingCobro({
-                                id: (receipt as any).cobro_id || receipt.id,
-                                amount: parseFloat(receipt.total_amount || '0'),
-                                enterprise_id: receipt.enterprise_id || undefined,
-                              })}
-                              className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors"
-                            >
-                              Vincular
-                            </button>
-                          </PermissionGate>
+                          {/* PR7-T15: solo mostrar Vincular si el recibo tiene saldo sin asignar.
+                              Si total_assigned >= total_amount (con tolerancia de 1 centavo), ya
+                              no hay nada que vincular — ocultar boton. */}
+                          {(() => {
+                            const total = parseFloat(receipt.amount || receipt.total_amount || '0')
+                            const assigned = parseFloat(String(receipt.total_assigned || '0'))
+                            const pending = total - assigned
+                            if (pending <= 0.01) return null
+                            return (
+                              <PermissionGate module="cobros" action="create">
+                                <button
+                                  onClick={() => setLinkingCobro({
+                                    id: (receipt as any).cobro_id || receipt.id,
+                                    amount: parseFloat(receipt.total_amount || receipt.amount || '0'),
+                                    enterprise_id: receipt.enterprise_id || undefined,
+                                  })}
+                                  className="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors"
+                                >
+                                  Vincular
+                                </button>
+                              </PermissionGate>
+                            )
+                          })()}
                           <PermissionGate module="cobros" action="delete">
                             <button
                               onClick={() => setDeleteTarget(receipt)}
