@@ -88,7 +88,7 @@ export class RemitosService {
             WHERE ro.remito_id = r.id AND ro.order_id = r.order_id
           )
         ON CONFLICT (remito_id, order_id) DO NOTHING
-      `).catch(() => {});
+      `).catch((err: any) => console.error('[PR7-T7 backfill remito_orders legacy]', err.message));
       await pool.query(`
         INSERT INTO remito_orders (id, remito_id, order_id)
         SELECT DISTINCT gen_random_uuid(), ri.remito_id, oi.order_id
@@ -101,7 +101,7 @@ export class RemitosService {
             WHERE ro.remito_id = ri.remito_id AND ro.order_id = oi.order_id
           )
         ON CONFLICT (remito_id, order_id) DO NOTHING
-      `).catch(() => {});
+      `).catch((err: any) => console.error('[PR7-T7 backfill remito_orders items]', err.message));
 
       // Migration: qty_delivered in order_items (denormalized delivery tracking)
       await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});

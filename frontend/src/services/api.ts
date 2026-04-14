@@ -904,8 +904,8 @@ export const api = {
     const { data } = await client.post('/cobros', cobroData)
     return data
   },
-  deleteCobro: async (id: string) => {
-    const { data } = await client.delete(`/cobros/${id}`)
+  deleteCobro: async (id: string, reason?: string) => {
+    const { data } = await client.delete(`/cobros/${id}`, { data: { reason } })
     return data
   },
   getCobrosSummary: async () => {

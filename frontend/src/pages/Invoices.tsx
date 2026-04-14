@@ -16,6 +16,7 @@ import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toLocalYMD } from '@/utils/dates'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
@@ -925,8 +926,8 @@ export const Invoices: React.FC = () => {
 
   const filteredInvoices = useMemo(() => {
     let result = invoices
-    if (dateFrom) result = result.filter(inv => inv.invoice_date >= dateFrom)
-    if (dateTo) result = result.filter(inv => inv.invoice_date <= dateTo)
+    if (dateFrom) result = result.filter(inv => toLocalYMD(inv.invoice_date) >= dateFrom)
+    if (dateTo) result = result.filter(inv => toLocalYMD(inv.invoice_date) <= dateTo)
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       result = result.filter(inv =>

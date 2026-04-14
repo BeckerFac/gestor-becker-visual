@@ -1678,7 +1678,10 @@ export const Orders: React.FC = () => {
                         // desde otra pagina mientras el pedido ya fue expandido aca.
                         api.getOrderContextData(order.id)
                           .then(data => setContextData(prev => ({ ...prev, [order.id]: data })))
-                          .catch(() => {})
+                          .catch(err => {
+                            console.error('Error loading order context:', err)
+                            setContextData(prev => ({ ...prev, [order.id]: { invoices: [], receipts: [], remitos: [], error: true } as any }))
+                          })
                       }}
                     >
                       <td className="px-4 py-3">
@@ -1830,16 +1833,26 @@ export const Orders: React.FC = () => {
                                       return <p className="text-xs text-gray-400 italic">Cargando detalle...</p>
                                     }
                                     const items = detail.items || []
-                                    const invoiced = items.filter((it: any) => parseFloat(it.qty_invoiced) > 0)
-                                    const uninvoiced = items.filter((it: any) => parseFloat(it.qty_remaining) > 0)
+                                    const invoiced = items.filter((it: any) => parseFloat(it.qty_invoiced || '0') > 0)
+                                    const uninvoiced = items.filter((it: any) => parseFloat(it.qty_remaining || '0') > 0)
 
-                                    // PR7: detectar si TODAS las facturas vinculadas estan en draft
-                                    const allInvoicesDraft = invoiced.length > 0 && invoiced.every((it: any) =>
-                                      (it.invoices || []).length > 0 &&
-                                      (it.invoices || []).every((inv: any) => inv.status === 'draft')
+                                    // PR7: clasificacion granular de estados de facturacion
+                                    const anyInvoiceDraft = invoiced.length > 0 && invoiced.some((it: any) =>
+                                      (it.invoices || []).some((inv: any) => inv.status === 'draft')
                                     )
-                                    const sectionTitle = allInvoicesDraft ? 'Borrador' : 'Facturado'
-                                    const sectionColor = allInvoicesDraft ? 'text-orange-700 dark:text-orange-400' : 'text-green-700 dark:text-green-400'
+                                    const anyInvoiceAuthorized = invoiced.length > 0 && invoiced.some((it: any) =>
+                                      (it.invoices || []).some((inv: any) => inv.status !== 'draft' && inv.status !== 'cancelled')
+                                    )
+                                    const sectionTitle = anyInvoiceAuthorized && !anyInvoiceDraft
+                                      ? 'Facturado'
+                                      : !anyInvoiceAuthorized && anyInvoiceDraft
+                                      ? 'Borrador'
+                                      : 'Facturado (con borradores)'
+                                    const sectionColor = anyInvoiceAuthorized && !anyInvoiceDraft
+                                      ? 'text-green-700 dark:text-green-400'
+                                      : !anyInvoiceAuthorized && anyInvoiceDraft
+                                      ? 'text-orange-700 dark:text-orange-400'
+                                      : 'text-amber-700 dark:text-amber-400'
 
                                     return (
                                       <div className="space-y-3">
@@ -1859,7 +1872,7 @@ export const Orders: React.FC = () => {
                                               </thead>
                                               <tbody>
                                                 {invoiced.map((it: any) => {
-                                                  const qtyInv = parseFloat(it.qty_invoiced)
+                                                  const qtyInv = parseFloat(it.qty_invoiced || '0')
                                                   const price = parseFloat(it.unit_price || '0')
                                                   return (
                                                     <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
@@ -1882,7 +1895,7 @@ export const Orders: React.FC = () => {
                                                                 }`}
                                                                 title={isDraft ? 'Factura en borrador' : 'Ir a factura'}
                                                               >
-                                                                {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty)} ud){isDraft ? ' · Borrador' : ''}
+                                                                {inv.invoice_type || ''} {inv.invoice_number} ({parseFloat(inv.qty || '0')} ud){isDraft ? ' · Borrador' : ''}
                                                               </button>
                                                             )
                                                           })}
@@ -1930,16 +1943,36 @@ export const Orders: React.FC = () => {
                                         })()}
 
                                         {/* PR7: Seccion RECIBOS vinculados al pedido */}
-                                        {(detail.cobros || []).length > 0 && (
+                                        {(() => {
+                                          // Bug 4 fix: deduplicar cobros que aparecen 2+ veces por JOIN del backend
+                                          // (mismo cobro aplicado a multiples facturas del mismo pedido). Sumamos
+                                          // amount_applied para que el total mostrado refleje el aplicado real.
+                                          const dedupCobros: any[] = []
+                                          const cobroMap = new Map<string, any>()
+                                          for (const c of (detail.cobros || [])) {
+                                            const existing = cobroMap.get(c.id)
+                                            if (existing) {
+                                              existing.amount_applied = String(
+                                                parseFloat(existing.amount_applied || '0') +
+                                                parseFloat(c.amount_applied || '0')
+                                              )
+                                            } else {
+                                              const copy = { ...c }
+                                              cobroMap.set(c.id, copy)
+                                              dedupCobros.push(copy)
+                                            }
+                                          }
+                                          if (dedupCobros.length === 0) return null
+                                          return (
                                           <div>
                                             <h5 className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1">Recibos vinculados</h5>
                                             <div className="flex flex-wrap gap-1">
-                                              {(detail.cobros || []).map((c: any) => {
+                                              {dedupCobros.map((c: any) => {
                                                 const isAnulado = c.status === 'anulado'
                                                 const amt = parseFloat(c.amount_applied || '0')
                                                 return (
                                                   <button
-                                                    key={`${c.id}-${c.invoice_id}`}
+                                                    key={c.id}
                                                     onClick={(e) => { e.stopPropagation(); navigate(`/cobros?expand=${c.id}`) }}
                                                     className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
                                                       isAnulado
@@ -1954,7 +1987,8 @@ export const Orders: React.FC = () => {
                                               })}
                                             </div>
                                           </div>
-                                        )}
+                                          )
+                                        })()}
 
                                         {/* Seccion SIN FACTURAR */}
                                         {uninvoiced.length > 0 && (
@@ -1971,8 +2005,8 @@ export const Orders: React.FC = () => {
                                               </thead>
                                               <tbody>
                                                 {uninvoiced.map((it: any) => {
-                                                  const remaining = parseFloat(it.qty_remaining)
-                                                  const price = parseFloat(it.unit_price)
+                                                  const remaining = parseFloat(it.qty_remaining || '0')
+                                                  const price = parseFloat(it.unit_price || '0')
                                                   return (
                                                     <tr key={it.order_item_id} className="border-t border-gray-100 dark:border-gray-700">
                                                       <td className="py-1">{it.product_name}</td>
@@ -2575,6 +2609,8 @@ export const Orders: React.FC = () => {
           }
         } else if (!ctx) {
           items.push({ id: 'inv-loading', label: '  Cargando...', disabled: true })
+        } else if ((ctx as any)?.error) {
+          items.push({ id: 'inv-error', label: '  Error al cargar — reintenta', disabled: true })
         } else {
           items.push({ id: 'inv-none', label: '  Sin facturas', disabled: true })
         }
@@ -2608,6 +2644,8 @@ export const Orders: React.FC = () => {
           }
         } else if (!ctx) {
           items.push({ id: 'rec-loading', label: '  Cargando...', disabled: true })
+        } else if ((ctx as any)?.error) {
+          items.push({ id: 'rec-error', label: '  Error al cargar — reintenta', disabled: true })
         } else {
           items.push({ id: 'rec-none', label: '  Sin recibos asociados', disabled: true })
         }
@@ -2634,6 +2672,8 @@ export const Orders: React.FC = () => {
           }
         } else if (!ctx) {
           items.push({ id: 'rem-loading', label: '  Cargando...', disabled: true })
+        } else if ((ctx as any)?.error) {
+          items.push({ id: 'rem-error', label: '  Error al cargar — reintenta', disabled: true })
         } else {
           items.push({ id: 'rem-none', label: '  Sin remitos asociados', disabled: true })
         }

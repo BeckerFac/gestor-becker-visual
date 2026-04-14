@@ -70,6 +70,16 @@ export class CobrosService {
       await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0`).catch(() => {});
       await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0`).catch(() => {});
       await db.execute(sql`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`).catch(() => {});
+
+      // PR7-T5: soft-delete columns. ALTER guarded so old tenants get them on first call.
+      // Don't fully swallow: log so failures are visible, but don't crash service init.
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`).catch((e: any) => console.error('ensureTables cobros migration (status):', e));
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMPTZ`).catch((e: any) => console.error('ensureTables cobros migration (anulled_at):', e));
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_by UUID REFERENCES users(id)`).catch((e: any) => console.error('ensureTables cobros migration (anulled_by):', e));
+      await db.execute(sql`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS anulled_reason TEXT`).catch((e: any) => console.error('ensureTables cobros migration (anulled_reason):', e));
+      await db.execute(sql`UPDATE cobros SET status = 'activo' WHERE status IS NULL`).catch((e: any) => console.error('ensureTables cobros migration (backfill status):', e));
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_cobros_status ON cobros(company_id, status)`).catch((e: any) => console.error('ensureTables cobros migration (idx_cobros_status):', e));
+
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure cobros tables error:', error);
@@ -124,7 +134,7 @@ export class CobrosService {
             WHERE cia.cobro_id = c.id
           ), '[]'::json) as linked_invoices,
           -- Total assigned to invoices
-          COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 WHERE cia2.cobro_id = c.id), 0) as total_assigned,
+          COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 JOIN cobros c2 ON cia2.cobro_id = c2.id WHERE cia2.cobro_id = c.id AND (c2.status IS NULL OR c2.status != 'anulado')), 0) as total_assigned,
           -- Payment methods breakdown
           COALESCE(
             (SELECT json_agg(json_build_object(
@@ -188,6 +198,21 @@ export class CobrosService {
           reference: data.reference,
           cheque_data: data.cheque_data,
         }];
+
+    // PR7-T5: validate each payment method individually (per-item) BEFORE inserts.
+    // Antes solo se validaba el top-level, los items dentro del array entraban sin validar.
+    for (const pm of paymentMethods) {
+      if (pm.method === 'transferencia' && !pm.bank_id) {
+        throw new ApiError(400, `Transferencia requiere bank_id`);
+      }
+      if (pm.method === 'cheque') {
+        if (!pm.cheque_data) throw new ApiError(400, 'Cheque requiere cheque_data');
+        const cd = pm.cheque_data;
+        if (!cd.bank || !cd.number || !cd.drawer) {
+          throw new ApiError(400, 'Cheque incompleto: bank/number/drawer requeridos');
+        }
+      }
+    }
 
     // B.1.3: Total = sum of payment methods (payment methods define the amount received)
     const pmTotal = paymentMethods.reduce((s, pm) => s + pm.amount, 0);

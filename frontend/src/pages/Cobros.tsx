@@ -16,6 +16,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toLocalYMD } from '@/utils/dates'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { CobroInvoiceLinker } from '@/components/cobros/CobroInvoiceLinker'
@@ -383,6 +384,7 @@ export const Cobros: React.FC = () => {
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<Receipt | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
 
   // Linking state for existing cobros
   const [linkingCobro, setLinkingCobro] = useState<{ id: string; amount: number; enterprise_id?: string } | null>(null)
@@ -788,14 +790,20 @@ export const Cobros: React.FC = () => {
 
   const handleDelete = async () => {
     if (!deleteTarget) return
+    const reason = deleteReason.trim()
+    if (reason.length < 5) {
+      toast.error('El motivo es obligatorio (minimo 5 caracteres)')
+      return
+    }
     setDeleting(true)
     try {
-      await api.deleteCobro(deleteTarget.id)
+      await api.deleteCobro(deleteTarget.id, reason)
       toast.success('Recibo anulado')
       setDeleteTarget(null)
+      setDeleteReason('')
       await loadData()
     } catch (e: any) {
-      toast.error(e.message)
+      toast.error(e.response?.data?.error || e.message)
     } finally {
       setDeleting(false)
     }
@@ -820,14 +828,8 @@ export const Cobros: React.FC = () => {
       })
     }
     if (filterMethod) result = result.filter(r => r.payment_method === filterMethod)
-    if (dateFrom) result = result.filter(r => {
-      const d = r.payment_date ? new Date(r.payment_date).toISOString().split('T')[0] : ''
-      return d >= dateFrom
-    })
-    if (dateTo) result = result.filter(r => {
-      const d = r.payment_date ? new Date(r.payment_date).toISOString().split('T')[0] : ''
-      return d <= dateTo
-    })
+    if (dateFrom) result = result.filter(r => toLocalYMD(r.payment_date) >= dateFrom)
+    if (dateTo) result = result.filter(r => toLocalYMD(r.payment_date) <= dateTo)
     return result
   }, [receipts, filterEnterprise, filterMethod, dateFrom, dateTo, enterprises])
 
@@ -1857,16 +1859,47 @@ export const Cobros: React.FC = () => {
         </Card>
       )}
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        title="Anular cobro"
-        message={`Anular el recibo #${deleteTarget ? String(deleteTarget.receipt_number).padStart(6, '0') : ''}? Los montos vinculados se desasignaran. Esta accion no se puede deshacer.`}
-        confirmLabel="Anular"
-        variant="danger"
-        loading={deleting}
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Anular cobro</h3>
+            <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+              Anular el recibo #{String(deleteTarget.receipt_number).padStart(6, '0')}? Los montos vinculados se desasignaran. Esta accion no se puede deshacer.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Motivo de la anulacion (obligatorio)
+            </label>
+            <textarea
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              minLength={5}
+              rows={3}
+              placeholder="Explica brevemente por que se anula este recibo..."
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              autoFocus
+            />
+            <div className="text-xs text-gray-500 mt-1">{deleteReason.trim().length}/5 minimo</div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => { setDeleteTarget(null); setDeleteReason('') }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting || deleteReason.trim().length < 5}
+                onClick={handleDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50"
+              >
+                {deleting ? 'Anulando...' : 'Anular'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: vincular cobro existente a facturas */}
       {linkingCobro && (

@@ -37,17 +37,21 @@ export class CuentaCorrienteService {
           ), 0) as total_ventas,
 
           -- Cobros aplicados (via tabla intermedia)
+          -- PR7-T5: excluir cobros anulados (soft-delete) del total aplicado.
           COALESCE((
             SELECT SUM(CAST(cia.amount_applied AS decimal))
             FROM cobro_invoice_applications cia
             JOIN invoices i ON cia.invoice_id = i.id
+            JOIN cobros cs ON cia.cobro_id = cs.id
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND (cs.status IS NULL OR cs.status != 'anulado')
               ${buFilter}
           ), 0) as total_cobros_aplicados,
 
           -- Adelantos cobros (monto NO asignado de cobros pending)
+          -- PR7-T5: excluir cobros anulados.
           COALESCE((
             SELECT SUM(
               CAST(COALESCE(co.total_amount, co.amount) AS decimal) - COALESCE((
@@ -60,6 +64,7 @@ export class CuentaCorrienteService {
             WHERE co.company_id = ${companyId}
               AND co.enterprise_id = e.id
               AND co.pending_status = 'pending_invoice'
+              AND (co.status IS NULL OR co.status != 'anulado')
               ${buFilter}
           ), 0) as total_adelantos_cobros,
 
@@ -391,6 +396,7 @@ export class CuentaCorrienteService {
           FROM cobro_invoice_applications cia
           JOIN cobros co ON cia.cobro_id = co.id
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
+            AND (co.status IS NULL OR co.status != 'anulado')
         `);
       } catch (e) { console.error('PDF: cobros query failed', (e as any)?.message); }
 
@@ -406,6 +412,7 @@ export class CuentaCorrienteService {
           FROM cobros co
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
             AND co.pending_status = 'pending_invoice'
+            AND (co.status IS NULL OR co.status != 'anulado')
         `);
       } catch (e) { console.error('PDF: adelantos query failed', (e as any)?.message); }
 

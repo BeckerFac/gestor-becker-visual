@@ -95,9 +95,15 @@ export class PagosService {
       } catch { /* no business units yet */ }
     }
 
-    const methodsRequiringBank = ['transferencia', 'cheque'];
-    if (methodsRequiringBank.includes(data.payment_method) && !data.bank_id) {
-      throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia o cheque');
+    // PR7-T5: cheque NO requiere bank_id top-level — los cheques guardan el banco como
+    // string en cheque_data.bank (igual que cobros). Solo transferencia top-level necesita bank_id UUID.
+    // Si hay payment_methods array, cada metodo valida su propio bank_id/cheque_data.
+    if (
+      data.payment_method === 'transferencia' &&
+      !data.bank_id &&
+      !(Array.isArray(data.payment_methods) && data.payment_methods.length > 0)
+    ) {
+      throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia');
     }
 
     const pagoId = uuid();

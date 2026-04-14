@@ -15,6 +15,7 @@ import { PermissionGate } from '@/components/shared/PermissionGate'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toLocalYMD } from '@/utils/dates'
 
 interface PurchaseInvoice {
   id: string
@@ -197,14 +198,8 @@ export const PurchaseInvoices: React.FC = () => {
   const filteredInvoices = useMemo(() => {
     let result = invoices
     if (filterType) result = result.filter(i => i.invoice_type === filterType)
-    if (dateFrom) result = result.filter(i => {
-      const d = i.invoice_date ? new Date(i.invoice_date).toISOString().split('T')[0] : ''
-      return d >= dateFrom
-    })
-    if (dateTo) result = result.filter(i => {
-      const d = i.invoice_date ? new Date(i.invoice_date).toISOString().split('T')[0] : ''
-      return d <= dateTo
-    })
+    if (dateFrom) result = result.filter(i => toLocalYMD(i.invoice_date) >= dateFrom)
+    if (dateTo) result = result.filter(i => toLocalYMD(i.invoice_date) <= dateTo)
     return result
   }, [invoices, filterType, dateFrom, dateTo])
 

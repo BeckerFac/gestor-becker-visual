@@ -396,6 +396,9 @@ export const Remitos: React.FC = () => {
     }
 
     if (shouldOpen) {
+      // Bug 2 fix: limpiar URL params al INICIO (antes de cualquier fetch async)
+      // para evitar que StrictMode dispare el preload 2 veces.
+      setSearchParams({}, { replace: true })
       setShowForm(true)
       if (preloadOrderId) {
         // PR7-T7: guardar preloadOrderId como source_id en items + form.order_id fallback,
@@ -421,6 +424,10 @@ export const Remitos: React.FC = () => {
         }).catch(() => toast.error('No se pudieron cargar los items del pedido'))
       }
       if (preloadInvoiceId) {
+        // Bug 3 fix: guardar referencia a la factura en factura_ref para que el
+        // remito quede trazable aunque los items no tengan order_item_id (factura
+        // sin pedido). El backend no tiene columna invoice_id en remitos.
+        setForm(prev => ({ ...prev, factura_ref: prev.factura_ref || `FACTURA-${preloadInvoiceId}` }))
         api.getInvoiceItemsForRemito(preloadInvoiceId).then((data: any) => {
           if (data?.length > 0) {
             setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '' }))
@@ -441,7 +448,6 @@ export const Remitos: React.FC = () => {
           }
         }).catch(() => toast.error('No se pudieron cargar los items de la factura'))
       }
-      setSearchParams({}, { replace: true })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -520,10 +520,11 @@ export class InvoicesService {
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color)) FROM entity_tags et JOIN tags t ON et.tag_id=t.id WHERE et.entity_id=COALESCE(e.id, c.enterprise_id) AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
           (i.afip_response->'FeCabResp'->>'PtoVta')::int as punto_venta,
           -- total_cobrado using cobro_invoice_applications (N:N correct system)
-          COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0) as total_cobrado,
+          -- PR7-T5: excluir cobros anulados (soft-delete) del total cobrado.
+          COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia JOIN cobros cs ON cia.cobro_id = cs.id WHERE cia.invoice_id = i.id AND (cs.status IS NULL OR cs.status != 'anulado')), 0) as total_cobrado,
           CASE
-            WHEN CAST(i.total_amount AS decimal) > 0 AND COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 WHERE cia2.invoice_id = i.id), 0) >= CAST(i.total_amount AS decimal) THEN 'pagado'
-            WHEN COALESCE((SELECT SUM(CAST(cia3.amount_applied AS decimal)) FROM cobro_invoice_applications cia3 WHERE cia3.invoice_id = i.id), 0) > 0 THEN 'parcial'
+            WHEN CAST(i.total_amount AS decimal) > 0 AND COALESCE((SELECT SUM(CAST(cia2.amount_applied AS decimal)) FROM cobro_invoice_applications cia2 JOIN cobros cs2 ON cia2.cobro_id = cs2.id WHERE cia2.invoice_id = i.id AND (cs2.status IS NULL OR cs2.status != 'anulado')), 0) >= CAST(i.total_amount AS decimal) THEN 'pagado'
+            WHEN COALESCE((SELECT SUM(CAST(cia3.amount_applied AS decimal)) FROM cobro_invoice_applications cia3 JOIN cobros cs3 ON cia3.cobro_id = cs3.id WHERE cia3.invoice_id = i.id AND (cs3.status IS NULL OR cs3.status != 'anulado')), 0) > 0 THEN 'parcial'
             ELSE 'pendiente'
           END as payment_status
         FROM invoices i
@@ -1433,6 +1434,7 @@ export class InvoicesService {
       FROM cobro_invoice_applications cia
       JOIN cobros c ON cia.cobro_id = c.id
       WHERE cia.invoice_id = ${invoiceId}
+        AND (c.status IS NULL OR c.status != 'anulado')
       ORDER BY cia.applied_at ASC
     `);
     const cobros_aplicados = (cobrosResult as any).rows || [];

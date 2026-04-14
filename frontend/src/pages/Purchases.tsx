@@ -13,6 +13,7 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toLocalYMD } from '@/utils/dates'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
@@ -445,14 +446,8 @@ export const Purchases: React.FC = () => {
 
   const filteredPurchases = useMemo(() => {
     let result = purchases
-    if (dateFrom) result = result.filter(p => {
-      const d = p.date ? new Date(p.date).toISOString().split('T')[0] : ''
-      return d >= dateFrom
-    })
-    if (dateTo) result = result.filter(p => {
-      const d = p.date ? new Date(p.date).toISOString().split('T')[0] : ''
-      return d <= dateTo
-    })
+    if (dateFrom) result = result.filter(p => toLocalYMD(p.date) >= dateFrom)
+    if (dateTo) result = result.filter(p => toLocalYMD(p.date) <= dateTo)
     return result
   }, [purchases, dateFrom, dateTo])
 

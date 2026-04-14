@@ -32,11 +32,16 @@ export class CobroApplicationsService {
     // Get cobro from unified cobros table (receipts migrated in auto-migration)
     // PR2-T6: incluir currency + exchange_rate para validar multi-currency
     const cobroResult = await db.execute(sql`
-      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status, currency, exchange_rate
+      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status, currency, exchange_rate, status
       FROM cobros WHERE id = ${cobroId} AND company_id = ${companyId}
     `);
     const cobro = ((cobroResult as any).rows || [])[0];
     if (!cobro) throw new ApiError(404, 'Cobro no encontrado');
+
+    // PR7-T5: bloquear vinculacion si el cobro fue anulado (soft-delete).
+    if (cobro.status === 'anulado') {
+      throw new ApiError(400, 'No se puede vincular un cobro anulado a facturas');
+    }
 
     // Get invoice
     const invoiceResult = await db.execute(sql`
@@ -245,13 +250,16 @@ export class CobroApplicationsService {
    * Get remaining balance for an invoice (total - applied cobros).
    */
   async getInvoiceRemainingBalance(invoiceId: string): Promise<number> {
+    // PR7-T5: excluir applications de cobros anulados (soft-delete).
     const result = await db.execute(sql`
       SELECT
         CAST(i.total_amount AS decimal) as total,
         COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
       FROM invoices i
       LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+      LEFT JOIN cobros c ON cia.cobro_id = c.id
       WHERE i.id = ${invoiceId}
+        AND (c.status IS NULL OR c.status != 'anulado')
       GROUP BY i.id, i.total_amount
     `);
     const row = ((result as any).rows || [])[0];
@@ -263,6 +271,7 @@ export class CobroApplicationsService {
    * Get unallocated balance for a cobro (total - applied to invoices).
    */
   async getCobroUnallocatedBalance(cobroId: string): Promise<number> {
+    // PR7-T5: cobros anulados no tienen saldo disponible — devolver 0.
     const result = await db.execute(sql`
       SELECT
         CAST(COALESCE(c.total_amount, c.amount) AS decimal) as total,
@@ -270,6 +279,7 @@ export class CobroApplicationsService {
       FROM cobros c
       LEFT JOIN cobro_invoice_applications cia ON cia.cobro_id = c.id
       WHERE c.id = ${cobroId}
+        AND (c.status IS NULL OR c.status != 'anulado')
       GROUP BY c.id, c.total_amount, c.amount
     `);
     const row = ((result as any).rows || [])[0];
@@ -343,13 +353,16 @@ export class CobroApplicationsService {
    */
   async recalculateInvoicePaymentStatus(invoiceId: string) {
     try {
+      // PR7-T5: excluir applications de cobros anulados del calculo.
       const result = await db.execute(sql`
         SELECT
           CAST(i.total_amount AS decimal) as total,
           COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
         FROM invoices i
         LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
+        LEFT JOIN cobros c ON cia.cobro_id = c.id
         WHERE i.id = ${invoiceId}
+          AND (c.status IS NULL OR c.status != 'anulado')
         GROUP BY i.id, i.total_amount
       `);
       const row = ((result as any).rows || [])[0];
@@ -392,7 +405,9 @@ export class CobroApplicationsService {
           WHERE i.order_id IS NOT NULL AND i.status != 'cancelled'
         ) inv ON inv.order_id = o.id
         LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = inv.invoice_id
+        LEFT JOIN cobros c ON cia.cobro_id = c.id
         WHERE o.id = ${orderId}
+          AND (c.status IS NULL OR c.status != 'anulado')
         GROUP BY o.id, o.total_amount
       `);
       const row = ((result as any).rows || [])[0];
@@ -426,6 +441,7 @@ export class CobroApplicationsService {
       FROM cobros c
       LEFT JOIN cobro_invoice_applications cia ON cia.cobro_id = c.id
       WHERE c.company_id = ${companyId} AND c.enterprise_id = ${enterpriseId}
+        AND (c.status IS NULL OR c.status != 'anulado')
       GROUP BY c.id
       HAVING CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) > 0.01
       ORDER BY c.payment_date ASC
@@ -486,7 +502,8 @@ export class CobroApplicationsService {
     enterprise_id?: string;
     business_unit_id?: string;
   } = {}) {
-    let whereClause = sql`c.company_id = ${companyId} AND c.pending_status = 'pending_invoice'`;
+    // PR7-T5: excluir cobros anulados de pendientes.
+    let whereClause = sql`c.company_id = ${companyId} AND c.pending_status = 'pending_invoice' AND (c.status IS NULL OR c.status != 'anulado')`;
 
     if (filters.enterprise_id) {
       whereClause = sql`${whereClause} AND c.enterprise_id = ${filters.enterprise_id}`;
@@ -500,6 +517,7 @@ export class CobroApplicationsService {
         e.name as enterprise_name,
         b.bank_name,
         COALESCE(c.total_amount, c.amount) - COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.cobro_id = c.id), 0) as unallocated_balance
+        -- nota: cobros anulados ya excluidos en WHERE de afuera
       FROM cobros c
       LEFT JOIN enterprises e ON c.enterprise_id = e.id
       LEFT JOIN banks b ON c.bank_id = b.id
@@ -532,7 +550,7 @@ export class CobroApplicationsService {
       SELECT i.id, i.invoice_number, i.invoice_type, i.invoice_date,
         i.total_amount, i.payment_status, i.status, i.fiscal_type,
         e.name as enterprise_name,
-        i.total_amount - COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia WHERE cia.invoice_id = i.id), 0) as remaining_balance
+        i.total_amount - COALESCE((SELECT SUM(CAST(cia.amount_applied AS decimal)) FROM cobro_invoice_applications cia JOIN cobros cc ON cia.cobro_id = cc.id WHERE cia.invoice_id = i.id AND (cc.status IS NULL OR cc.status != 'anulado')), 0) as remaining_balance
       FROM invoices i
       LEFT JOIN enterprises e ON i.enterprise_id = e.id
       WHERE ${whereClause}

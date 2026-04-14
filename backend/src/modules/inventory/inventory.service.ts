@@ -9,7 +9,9 @@ export class InventoryService {
   async getStock(companyId: string) {
     try {
       const result = await db.execute(sql`
-        SELECT s.id, s.quantity, s.min_level, s.max_level,
+        SELECT s.id,
+               COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) as quantity,
+               s.min_level, s.max_level,
                p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
                json_build_object('id', w.id, 'name', w.name) as warehouse,
@@ -158,7 +160,9 @@ export class InventoryService {
   async getLowStock(companyId: string) {
     try {
       const result = await db.execute(sql`
-        SELECT s.id, s.quantity, s.min_level, p.low_stock_threshold,
+        SELECT s.id,
+               COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) as quantity,
+               s.min_level, p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
                json_build_object('id', w.id, 'name', w.name) as warehouse
         FROM stock s
@@ -166,9 +170,9 @@ export class InventoryService {
         JOIN warehouses w ON s.warehouse_id = w.id
         WHERE p.company_id = ${companyId}
           AND p.controls_stock = true
-          AND CAST(s.quantity AS decimal) <= COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0)
+          AND COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) <= COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0)
           AND COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0) > 0
-        ORDER BY CAST(s.quantity AS decimal) ASC
+        ORDER BY COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) ASC
       `);
 
       const rows = (result as any).rows || result || [];
@@ -211,6 +215,9 @@ export class InventoryService {
       }
 
       const quantityChange = parseFloat(String(data.quantity_change));
+      if (!Number.isFinite(quantityChange)) {
+        throw new ApiError(400, `quantity_change invalido: ${data.quantity_change}`);
+      }
 
       // Create movement
       const movementId = uuid();
@@ -219,9 +226,9 @@ export class InventoryService {
         VALUES (${movementId}, ${data.product_id}, ${warehouseId}, 'adjustment', ${quantityChange.toString()}, ${(data.reason || '') + (quantityChange < 0 ? ' (salida)' : ' (ingreso)')}, ${userId})
       `);
 
-      // Upsert stock
+      // Upsert stock — PR7-T2: doble escritura quantity + quantity_num
       const existingStock = await db.execute(sql`
-        SELECT id, quantity FROM stock
+        SELECT id, quantity, quantity_num FROM stock
         WHERE product_id = ${data.product_id} AND warehouse_id = ${warehouseId}
       `);
       const stockRows = (existingStock as any).rows || existingStock || [];
@@ -230,14 +237,22 @@ export class InventoryService {
       if (stockRows.length === 0) {
         newQty = Math.max(0, quantityChange);
         await db.execute(sql`
-          INSERT INTO stock (id, product_id, warehouse_id, quantity, min_level, max_level)
-          VALUES (${uuid()}, ${data.product_id}, ${warehouseId}, ${newQty.toString()}, '0', '0')
+          INSERT INTO stock (id, product_id, warehouse_id, quantity, quantity_num, min_level, max_level)
+          VALUES (${uuid()}, ${data.product_id}, ${warehouseId}, ${newQty.toString()}, ${newQty.toString()}::decimal, '0', '0')
         `);
       } else {
-        const currentQty = parseFloat(stockRows[0].quantity || '0');
+        const numericQty = stockRows[0].quantity_num;
+        const currentQty = numericQty !== null && numericQty !== undefined
+          ? parseFloat(String(numericQty))
+          : parseFloat(stockRows[0].quantity || '0');
+        if (!Number.isFinite(currentQty)) {
+          throw new ApiError(500, `Stock corrupto para producto ${data.product_id}: quantity no parseable`);
+        }
         newQty = Math.max(0, currentQty + quantityChange);
         await db.execute(sql`
-          UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
+          UPDATE stock SET quantity = ${newQty.toString()},
+            quantity_num = ${newQty.toString()}::decimal,
+            updated_at = NOW()
           WHERE id = ${stockRows[0].id}
         `);
       }
@@ -355,6 +370,9 @@ export class InventoryService {
         }
 
         const quantity = parseFloat(String(item.quantity));
+        if (!Number.isFinite(quantity)) {
+          throw new ApiError(400, `quantity invalido para producto ${item.product_id}: ${item.quantity}`);
+        }
 
         // Create movement
         const movementId = uuid();
@@ -363,9 +381,9 @@ export class InventoryService {
           VALUES (${movementId}, ${item.product_id}, ${warehouseId}, 'purchase', ${quantity.toString()}, 'purchase', ${purchaseId}, ${customNote || 'Ingreso por compra'}, ${userId})
         `);
 
-        // Upsert stock
+        // Upsert stock — PR7-T2: doble escritura quantity + quantity_num
         const existingStock = await db.execute(sql`
-          SELECT id, quantity FROM stock
+          SELECT id, quantity, quantity_num FROM stock
           WHERE product_id = ${item.product_id} AND warehouse_id = ${warehouseId}
         `);
         const stockRows = (existingStock as any).rows || existingStock || [];
@@ -374,14 +392,22 @@ export class InventoryService {
         if (stockRows.length === 0) {
           newQty = Math.max(0, quantity);
           await db.execute(sql`
-            INSERT INTO stock (id, product_id, warehouse_id, quantity, min_level, max_level)
-            VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, ${newQty.toString()}, '0', '0')
+            INSERT INTO stock (id, product_id, warehouse_id, quantity, quantity_num, min_level, max_level)
+            VALUES (${uuid()}, ${item.product_id}, ${warehouseId}, ${newQty.toString()}, ${newQty.toString()}::decimal, '0', '0')
           `);
         } else {
-          const currentQty = parseFloat(stockRows[0].quantity || '0');
+          const numericQty = stockRows[0].quantity_num;
+          const currentQty = numericQty !== null && numericQty !== undefined
+            ? parseFloat(String(numericQty))
+            : parseFloat(stockRows[0].quantity || '0');
+          if (!Number.isFinite(currentQty)) {
+            throw new ApiError(500, `Stock corrupto para producto ${item.product_id}: quantity no parseable`);
+          }
           newQty = currentQty + quantity;
           await db.execute(sql`
-            UPDATE stock SET quantity = ${newQty.toString()}, updated_at = NOW()
+            UPDATE stock SET quantity = ${newQty.toString()},
+              quantity_num = ${newQty.toString()}::decimal,
+              updated_at = NOW()
             WHERE id = ${stockRows[0].id}
           `);
         }

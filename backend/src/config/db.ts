@@ -198,6 +198,7 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS orders_payment_idx ON orders(company_id, payment_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_company_idx ON invoices(company_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS invoices_status_idx ON invoices(company_id, status)`);
+    await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_invoices_order_status ON invoices(order_id, status) WHERE order_id IS NOT NULL`).catch(() => {});
 
     // --- Account adjustments (manual balance adjustments for cuenta corriente) ---
     await pool.query(`

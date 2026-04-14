@@ -16,6 +16,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toLocalYMD } from '@/utils/dates'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { PagoInvoiceLinker } from '@/components/pagos/PagoInvoiceLinker'
 import { CurrencySelector } from '@/components/shared/CurrencySelector'
@@ -462,14 +463,8 @@ export const Pagos: React.FC = () => {
   const filteredPagos = useMemo(() => {
     let result = pagos
     if (filterMethod) result = result.filter(p => p.payment_method === filterMethod)
-    if (dateFrom) result = result.filter(p => {
-      const d = p.payment_date ? new Date(p.payment_date).toISOString().split('T')[0] : ''
-      return d >= dateFrom
-    })
-    if (dateTo) result = result.filter(p => {
-      const d = p.payment_date ? new Date(p.payment_date).toISOString().split('T')[0] : ''
-      return d <= dateTo
-    })
+    if (dateFrom) result = result.filter(p => toLocalYMD(p.payment_date) >= dateFrom)
+    if (dateTo) result = result.filter(p => toLocalYMD(p.payment_date) <= dateTo)
     return result
   }, [pagos, filterMethod, dateFrom, dateTo])
 
