@@ -951,37 +951,54 @@ export class OrdersService {
    * Falls back gracefully if remito_items.order_item_id column does not exist.
    */
   private async getRemitosForOrder(companyId: string, orderId: string): Promise<any[]> {
+    // PR7-T10: UNION de 3 subqueries explicitas (en vez de LEFT JOINs con OR).
+    // Mas robusto: cada path retorna su propio set de remito_id, luego dedupe.
+    // Tambien logs de diagnostico para saber que path matcheo.
     try {
       const result = await pool.query(`
-        SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
+        WITH matched_remitos AS (
+          -- Path 1: remito_orders N:N
+          SELECT DISTINCT r.id
+          FROM remitos r
+          JOIN remito_orders ro ON ro.remito_id = r.id
+          WHERE r.company_id = $1 AND ro.order_id = $2
+          UNION
+          -- Path 2: legacy remitos.order_id
+          SELECT r.id
+          FROM remitos r
+          WHERE r.company_id = $1 AND r.order_id = $2
+          UNION
+          -- Path 3: via remito_items.order_item_id -> order_items.order_id
+          SELECT DISTINCT r.id
+          FROM remitos r
+          JOIN remito_items ri ON ri.remito_id = r.id
+          JOIN order_items oi ON oi.id = ri.order_item_id
+          WHERE r.company_id = $1 AND oi.order_id = $2
+        )
+        SELECT r.id, r.remito_number, r.punto_venta, r.status, r.date,
           COALESCE((SELECT json_agg(json_build_object(
             'product_name', ri2.product_name, 'quantity', ri2.quantity
           )) FROM remito_items ri2 WHERE ri2.remito_id = r.id), '[]'::json) as items
         FROM remitos r
-        LEFT JOIN remito_orders ro ON ro.remito_id = r.id
-        LEFT JOIN remito_items ri ON ri.remito_id = r.id
-        LEFT JOIN order_items oi ON oi.id = ri.order_item_id
-        WHERE r.company_id = $1
-          AND (ro.order_id = $2 OR r.order_id = $2 OR oi.order_id = $2)
-        ORDER BY r.date DESC
+        WHERE r.id IN (SELECT id FROM matched_remitos)
+        ORDER BY r.date DESC NULLS LAST
       `, [companyId, orderId]);
-      return result.rows || [];
-    } catch {
-      try {
-        const fallback = await pool.query(`
-          SELECT DISTINCT r.id, r.remito_number, r.punto_venta, r.status, r.date,
-            COALESCE((SELECT json_agg(json_build_object(
-              'product_name', ri.product_name, 'quantity', ri.quantity
-            )) FROM remito_items ri WHERE ri.remito_id = r.id), '[]'::json) as items
-          FROM remitos r
-          LEFT JOIN remito_orders ro ON ro.remito_id = r.id
-          WHERE (ro.order_id = $2 OR r.order_id = $2) AND r.company_id = $1
-          ORDER BY r.date DESC
-        `, [companyId, orderId]);
-        return fallback.rows || [];
-      } catch {
-        return [];
+      const rows = result.rows || [];
+      if (rows.length === 0) {
+        // Diagnostic: count remitos in each path independently to know which failed
+        const diag = await pool.query(`
+          SELECT
+            (SELECT COUNT(*) FROM remito_orders ro JOIN remitos r ON r.id=ro.remito_id WHERE r.company_id=$1 AND ro.order_id=$2) AS via_n2n,
+            (SELECT COUNT(*) FROM remitos WHERE company_id=$1 AND order_id=$2) AS via_legacy,
+            (SELECT COUNT(*) FROM remito_items ri JOIN remitos r ON r.id=ri.remito_id JOIN order_items oi ON oi.id=ri.order_item_id WHERE r.company_id=$1 AND oi.order_id=$2) AS via_items,
+            (SELECT COUNT(*) FROM order_items WHERE order_id=$2 AND COALESCE(qty_delivered,0) > 0) AS items_delivered
+        `, [companyId, orderId]).catch(() => ({ rows: [{}] }));
+        console.warn(`[getRemitosForOrder] order=${orderId} company=${companyId} returned 0 remitos. Diagnostic:`, diag.rows[0]);
       }
+      return rows;
+    } catch (err: any) {
+      console.error('[getRemitosForOrder] query failed:', err.message);
+      return [];
     }
   }
 
