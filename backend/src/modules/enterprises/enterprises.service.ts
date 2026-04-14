@@ -95,6 +95,10 @@ export class EnterprisesService {
   async createEnterprise(companyId: string, data: any) {
     await this.ensureTables();
     try {
+      // PR7-T14: normalizar CUIT al inicio para evitar inconsistencias de whitespace
+      // (un "  " pasaba el trim-check pero fallaba regex; un "20-12345678-9" entraba con guiones).
+      const cuitNormalized = (data.cuit || '').replace(/[-\s]/g, '').trim() || null;
+
       // Option B: AFIP fiscal data required only on create (updateEnterprise stays permissive)
       const missingFields: string[] = [];
       if (!data.name?.trim()) missingFields.push('nombre');
@@ -103,14 +107,14 @@ export class EnterprisesService {
 
       const taxCond = (data.tax_condition || '').toLowerCase();
       const isConsumidorFinal = taxCond.includes('consumidor final');
-      if (!isConsumidorFinal && !data.cuit?.trim()) {
+      if (!isConsumidorFinal && !cuitNormalized) {
         missingFields.push('CUIT');
       }
 
       const hasFiscalAddress = data.fiscal_address?.trim() || data.address?.trim();
       if (!hasFiscalAddress) missingFields.push('direccion fiscal');
 
-      if (data.cuit && !/^\d{11}$/.test(data.cuit.replace(/[-\s]/g, ''))) {
+      if (cuitNormalized && !/^\d{11}$/.test(cuitNormalized)) {
         throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos.');
       }
 
@@ -118,9 +122,9 @@ export class EnterprisesService {
         throw new ApiError(400, `Faltan datos obligatorios para crear empresa: ${missingFields.join(', ')}. Son requeridos para facturar en AFIP.`);
       }
 
-      if (data.cuit) {
+      if (cuitNormalized) {
         const existing = await db.execute(sql`
-          SELECT id FROM enterprises WHERE company_id = ${companyId} AND cuit = ${data.cuit}
+          SELECT id FROM enterprises WHERE company_id = ${companyId} AND cuit = ${cuitNormalized}
         `);
         const rows = (existing as any).rows || existing || [];
         if (rows.length > 0) throw new ApiError(409, 'Enterprise with this CUIT already exists');
@@ -129,7 +133,7 @@ export class EnterprisesService {
       const enterpriseId = uuid();
       await db.execute(sql`
         INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount)
-        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${data.cuit || null}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0})
+        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${cuitNormalized}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0})
       `);
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);

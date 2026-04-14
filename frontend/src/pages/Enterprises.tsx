@@ -148,6 +148,21 @@ export const Enterprises: React.FC = () => {
 
   useEffect(() => { loadData(); loadTags() }, [])
 
+  // PR7-T14: abrir form en edicion cuando se navega con ?edit=<id>.
+  // Usado por el CTA "Completar datos fiscales" del modal de factura e InvoicePreviewModal.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const editId = params.get('edit')
+    if (editId && enterprises.length > 0) {
+      const ent = enterprises.find(e => e.id === editId)
+      if (ent) {
+        handleEditEnterprise(ent)
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enterprises])
+
   const handleExpandEnterprise = async (enterpriseId: string) => {
     if (expandedId === enterpriseId) {
       setExpandedId(null)
