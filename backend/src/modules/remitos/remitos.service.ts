@@ -74,6 +74,35 @@ export class RemitosService {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_remito ON remito_orders(remito_id)`).catch(() => {});
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_remito_orders_order ON remito_orders(order_id)`).catch(() => {});
 
+      // PR7-T7: Backfill remito_orders para remitos huerfanos. Tres vias:
+      //   1) legacy remitos.order_id ya seteado
+      //   2) items con order_item_id → order_items.order_id
+      // Ejecutar una sola vez (idempotente gracias a ON CONFLICT).
+      await pool.query(`
+        INSERT INTO remito_orders (id, remito_id, order_id)
+        SELECT gen_random_uuid(), r.id, r.order_id
+        FROM remitos r
+        WHERE r.order_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM remito_orders ro
+            WHERE ro.remito_id = r.id AND ro.order_id = r.order_id
+          )
+        ON CONFLICT (remito_id, order_id) DO NOTHING
+      `).catch(() => {});
+      await pool.query(`
+        INSERT INTO remito_orders (id, remito_id, order_id)
+        SELECT DISTINCT gen_random_uuid(), ri.remito_id, oi.order_id
+        FROM remito_items ri
+        JOIN order_items oi ON oi.id = ri.order_item_id
+        WHERE ri.order_item_id IS NOT NULL
+          AND oi.order_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM remito_orders ro
+            WHERE ro.remito_id = ri.remito_id AND ro.order_id = oi.order_id
+          )
+        ON CONFLICT (remito_id, order_id) DO NOTHING
+      `).catch(() => {});
+
       // Migration: qty_delivered in order_items (denormalized delivery tracking)
       await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});
       await pool.query(`UPDATE order_items SET qty_delivered = 0 WHERE qty_delivered IS NULL`).catch(() => {});

@@ -398,9 +398,13 @@ export const Remitos: React.FC = () => {
     if (shouldOpen) {
       setShowForm(true)
       if (preloadOrderId) {
+        // PR7-T7: guardar preloadOrderId como source_id en items + form.order_id fallback,
+        // asi derivedOrderId resuelve al pedido aunque los items no tengan order_item_id
+        // (ej: "Todos ya remitados" y usuario arma items manuales) — evita remitos huerfanos.
+        setForm(prev => ({ ...prev, order_id: preloadOrderId }))
         api.getAvailableOrderItemsForRemito(preloadOrderId).then(data => {
           if (data?.length > 0) {
-            setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '' }))
+            setForm(prev => ({ ...prev, enterprise_id: data[0].enterprise_id || '', order_id: preloadOrderId }))
             setItems(data.map((i: any) => ({
               product_name: i.product_name, description: i.description || '',
               quantity: parseFloat(i.qty_available), unit: 'unidades',
@@ -408,6 +412,7 @@ export const Remitos: React.FC = () => {
               vat_rate: i.vat_rate || 21, order_item_id: i.order_item_id,
               source: 'order' as const,
               source_ref: `Pedido #${String(i.order_number).padStart(4, '0')}`,
+              source_id: preloadOrderId,
               qty_available: parseFloat(i.qty_available), localId: crypto.randomUUID(),
             })))
           } else {
@@ -455,9 +460,13 @@ export const Remitos: React.FC = () => {
   // ── Auto-calculate form.order_id from items (FIX review: orphaned order_id) ──
 
   const derivedOrderId = useMemo(() => {
+    // PR7-T7: fallback a form.order_id si los items no tienen source_id
+    // (caso: preload desde /orders context menu sin auto-items disponibles).
     const orderIds = [...new Set(items.filter(i => i.source_id).map(i => i.source_id!))]
-    return orderIds.length === 1 ? orderIds[0] : ''
-  }, [items])
+    if (orderIds.length === 1) return orderIds[0]
+    if (orderIds.length === 0 && form.order_id) return form.order_id
+    return ''
+  }, [items, form.order_id])
 
   // ── Create invoice from remito items pendientes ───────────────────────────
 
