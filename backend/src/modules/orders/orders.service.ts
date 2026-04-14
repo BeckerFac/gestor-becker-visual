@@ -123,14 +123,14 @@ export class OrdersService {
             FROM invoices inv
             WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
               AND inv.status IN ('authorized', 'emitido')
-              AND inv.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+              AND inv.invoice_type::text NOT LIKE 'NC%'
           ), 0) as invoiced_amount,
           COALESCE((
             SELECT SUM(CAST(inv.total_amount AS decimal))
             FROM invoices inv
             WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
               AND inv.status = 'draft'
-              AND inv.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+              AND inv.invoice_type::text NOT LIKE 'NC%'
           ), 0) as draft_invoiced_amount,
           CASE
             WHEN COALESCE(o.total_amount, 0) = 0 THEN 'sin_monto'
@@ -140,7 +140,7 @@ export class OrdersService {
               FROM invoices inv
               WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
                 AND inv.status IN ('authorized', 'emitido')
-                AND inv.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+                AND inv.invoice_type::text NOT LIKE 'NC%'
             ), 0) >= CAST(o.total_amount AS decimal) THEN 'facturado'
             -- Hay auth/emitido pero no alcanzan a cubrir total -> parcial
             WHEN COALESCE((
@@ -148,7 +148,7 @@ export class OrdersService {
               FROM invoices inv
               WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
                 AND inv.status IN ('authorized', 'emitido')
-                AND inv.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+                AND inv.invoice_type::text NOT LIKE 'NC%'
             ), 0) > 0 THEN 'parcial'
             -- No hay auth/emitido pero si drafts -> borrador
             WHEN COALESCE((
@@ -156,7 +156,7 @@ export class OrdersService {
               FROM invoices inv
               WHERE (inv.order_id = o.id OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = o.id))
                 AND inv.status = 'draft'
-                AND inv.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+                AND inv.invoice_type::text NOT LIKE 'NC%'
             ), 0) > 0 THEN 'borrador'
             -- Ni drafts ni auth -> sin facturar
             ELSE 'sin_facturar'
@@ -1074,14 +1074,14 @@ export class OrdersService {
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
             WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
-              AND i.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+              AND i.invoice_type::text NOT LIKE 'NC%'
           ), 0) as qty_invoiced,
           CAST(oi.quantity AS decimal) - COALESCE((
             SELECT SUM(CAST(ii.quantity AS decimal))
             FROM invoice_items ii
             JOIN invoices i ON ii.invoice_id = i.id
             WHERE ii.order_item_id = oi.id AND i.status != 'cancelled'
-              AND i.invoice_type NOT IN ('NC_A','NC_B','NC_C','NC_E')
+              AND i.invoice_type::text NOT LIKE 'NC%'
           ), 0) as qty_remaining,
           COALESCE(CAST(oi.qty_delivered AS decimal), 0) as qty_delivered,
           COALESCE((

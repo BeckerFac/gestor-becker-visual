@@ -103,6 +103,24 @@ export class RemitosService {
         ON CONFLICT (remito_id, order_id) DO NOTHING
       `).catch((err: any) => console.error('[PR7-T7 backfill remito_orders items]', err.message));
 
+      // PR7-T9: 3er via — parsear pedido_ref ("#0006" / "0006" / "Pedido 0006")
+      // y matchear contra orders.order_number + company_id. Cubre remitos donde
+      // el usuario tipeo la referencia pero no linkeo items.
+      await pool.query(`
+        INSERT INTO remito_orders (id, remito_id, order_id)
+        SELECT DISTINCT gen_random_uuid(), r.id, o.id
+        FROM remitos r
+        JOIN orders o ON o.company_id = r.company_id
+          AND o.order_number = CAST(NULLIF(regexp_replace(r.pedido_ref, '[^0-9]', '', 'g'), '') AS integer)
+        WHERE r.pedido_ref IS NOT NULL
+          AND r.pedido_ref ~ '[0-9]'
+          AND NOT EXISTS (
+            SELECT 1 FROM remito_orders ro
+            WHERE ro.remito_id = r.id AND ro.order_id = o.id
+          )
+        ON CONFLICT (remito_id, order_id) DO NOTHING
+      `).catch((err: any) => console.error('[PR7-T9 backfill remito_orders pedido_ref]', err.message));
+
       // Migration: qty_delivered in order_items (denormalized delivery tracking)
       await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS qty_delivered DECIMAL(12,2) DEFAULT 0`).catch(() => {});
       await pool.query(`UPDATE order_items SET qty_delivered = 0 WHERE qty_delivered IS NULL`).catch(() => {});
