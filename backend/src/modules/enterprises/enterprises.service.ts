@@ -95,12 +95,30 @@ export class EnterprisesService {
   async createEnterprise(companyId: string, data: any) {
     await this.ensureTables();
     try {
+      // Option B: AFIP fiscal data required only on create (updateEnterprise stays permissive)
+      const missingFields: string[] = [];
+      if (!data.name?.trim()) missingFields.push('nombre');
+      if (!data.razon_social?.trim()) missingFields.push('razon social');
+      if (!data.tax_condition?.trim()) missingFields.push('condicion IVA');
+
+      const taxCond = (data.tax_condition || '').toLowerCase();
+      const isConsumidorFinal = taxCond.includes('consumidor final');
+      if (!isConsumidorFinal && !data.cuit?.trim()) {
+        missingFields.push('CUIT');
+      }
+
+      const hasFiscalAddress = data.fiscal_address?.trim() || data.address?.trim();
+      if (!hasFiscalAddress) missingFields.push('direccion fiscal');
+
+      if (data.cuit && !/^\d{11}$/.test(data.cuit.replace(/[-\s]/g, ''))) {
+        throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos.');
+      }
+
+      if (missingFields.length > 0) {
+        throw new ApiError(400, `Faltan datos obligatorios para crear empresa: ${missingFields.join(', ')}. Son requeridos para facturar en AFIP.`);
+      }
+
       if (data.cuit) {
-        // Validate CUIT format: 11 digits (with or without dashes)
-        const cleanCuit = data.cuit.replace(/-/g, '');
-        if (!/^\d{11}$/.test(cleanCuit)) {
-          throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos (XX-XXXXXXXX-X)');
-        }
         const existing = await db.execute(sql`
           SELECT id FROM enterprises WHERE company_id = ${companyId} AND cuit = ${data.cuit}
         `);

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { InvoiceTemplate } from './InvoiceTemplate'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { DateInput } from '@/components/ui/DateInput'
 import type { PreviewItem } from '@/hooks/useInvoicePreview'
+import { checkEnterpriseFiscalData } from '@/utils/fiscal'
 
 const INVOICE_TYPES = ['A', 'B', 'C', 'E']
 
@@ -168,7 +170,9 @@ export function InvoicePreviewModal({
   onFchVtoPagoChange,
 }: InvoicePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
   const [showConfirmAuthorize, setShowConfirmAuthorize] = useState(false)
+  const fiscalCheck = useMemo(() => checkEnterpriseFiscalData(invoice?.enterprise), [invoice?.enterprise])
 
   // Local editable state for fields not managed by the hook
   const [localCustomerName, setLocalCustomerName] = useState('')
@@ -380,8 +384,13 @@ export function InvoicePreviewModal({
         detail: localConcepto === 1 ? 'No aplica (Productos)' : (!!localFchServDesde && !!localFchServHasta && !!localFchVtoPago ? 'Fechas OK' : 'Faltan fechas de servicio (obligatorias para Servicios)'),
         critical: localConcepto !== 1,
       },
+      {
+        label: 'Datos fiscales del cliente completos',
+        ok: fiscalCheck.complete,
+        detail: fiscalCheck.complete ? 'Datos fiscales OK' : `Faltan: ${fiscalCheck.missing.join(', ')}`,
+      },
     ]
-  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta, localCondicionIva, localConcepto, localFchServDesde, localFchServHasta, localFchVtoPago])
+  }, [localCustomerName, localCustomerCuit, cuitValidation, invoiceType, items, subtotal, vatAmount, total, dateValidation, puntoVenta, localCondicionIva, localConcepto, localFchServDesde, localFchServHasta, localFchVtoPago, fiscalCheck])
 
   const allChecksPassed = checklist.every(c => c.ok)
 
@@ -909,6 +918,17 @@ export function InvoicePreviewModal({
                         </div>
                       </div>
                     ))}
+                    {!fiscalCheck.complete && invoice?.enterprise?.id && (
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-xs">
+                        <button
+                          type="button"
+                          onClick={() => { onClose?.(); navigate(`/enterprises?edit=${invoice.enterprise.id}`) }}
+                          className="text-red-700 dark:text-red-300 underline font-medium"
+                        >
+                          {'\u2192'} Completar datos fiscales de la empresa
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1023,7 +1043,7 @@ export function InvoicePreviewModal({
                           }}
                           disabled={authorizing || !allChecksPassed}
                           className="inline-flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                          title={!allChecksPassed ? 'Hay requisitos pendientes en el checklist' : ''}
+                          title={!allChecksPassed ? (!fiscalCheck.complete ? `Datos fiscales del cliente incompletos: ${fiscalCheck.missing.join(', ')}` : 'Hay requisitos pendientes en el checklist') : ''}
                         >
                           {authFailed ? 'Reintentar AFIP' : 'Autorizar con AFIP'}
                         </button>

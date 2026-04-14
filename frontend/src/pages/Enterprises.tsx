@@ -14,6 +14,7 @@ import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { checkEnterpriseFiscalData } from '@/utils/fiscal'
 
 interface Enterprise {
   id: string
@@ -175,6 +176,22 @@ export const Enterprises: React.FC = () => {
         fiscal_city: same_fiscal_address ? null : formData.fiscal_city,
         fiscal_province: same_fiscal_address ? null : formData.fiscal_province,
         fiscal_postal_code: same_fiscal_address ? null : formData.fiscal_postal_code,
+      }
+      // Option B: validar datos AFIP obligatorios solo al crear
+      if (!editingEnterpriseId) {
+        const check = checkEnterpriseFiscalData({
+          name: formData.name,
+          razon_social: formData.razon_social,
+          cuit: formData.cuit,
+          tax_condition: formData.tax_condition,
+          address: formData.address,
+          fiscal_address: same_fiscal_address ? formData.address : formData.fiscal_address,
+        })
+        if (!check.complete) {
+          toast.error(`Faltan datos obligatorios para facturar en AFIP: ${check.missing.join(', ')}`)
+          setSaving(false)
+          return
+        }
       }
       if (editingEnterpriseId) {
         await api.updateEnterprise(editingEnterpriseId, payload)
@@ -428,23 +445,28 @@ export const Enterprises: React.FC = () => {
           <CardHeader><h3 className="text-lg font-semibold">{editingEnterpriseId ? 'Editar Empresa' : 'Nueva Empresa'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleEnterpriseSubmit} className="space-y-4">
+              {!editingEnterpriseId && (
+                <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 p-3 rounded-lg text-sm mb-4">
+                  ⚠ Al crear una empresa son obligatorios los datos fiscales (CUIT, razon social, condicion IVA, direccion) para poder facturar en AFIP.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input label="Nombre Comercial *" placeholder="Nombre de la empresa" value={enterpriseForm.name} onChange={e => setEnterpriseForm({ ...enterpriseForm, name: e.target.value })} required />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Razon Social<HelpTip text="Nombre legal de la empresa como figura en AFIP." /></label>
-                  <Input placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} />
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Razon Social{!editingEnterpriseId && <span className="text-red-600"> *</span>}<HelpTip text="Nombre legal de la empresa como figura en AFIP." /></label>
+                  <Input placeholder="Razon social legal" value={enterpriseForm.razon_social} onChange={e => setEnterpriseForm({ ...enterpriseForm, razon_social: e.target.value })} required={!editingEnterpriseId} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CUIT<HelpTip text="CUIT de 11 digitos. Se valida automaticamente." /></label>
-                  <Input placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} />
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">CUIT{!editingEnterpriseId && !enterpriseForm.tax_condition.toLowerCase().includes('consumidor final') && <span className="text-red-600"> *</span>}<HelpTip text="CUIT de 11 digitos. Se valida automaticamente." /></label>
+                  <Input placeholder="20-12345678-9" value={enterpriseForm.cuit} onChange={e => setEnterpriseForm({ ...enterpriseForm, cuit: e.target.value })} required={!editingEnterpriseId && !enterpriseForm.tax_condition.toLowerCase().includes('consumidor final')} />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Input label="Telefono" placeholder="+54 11 1234-5678" value={enterpriseForm.phone} onChange={e => setEnterpriseForm({ ...enterpriseForm, phone: e.target.value })} />
                 <Input label="Email" type="email" placeholder="email@empresa.com" value={enterpriseForm.email} onChange={e => setEnterpriseForm({ ...enterpriseForm, email: e.target.value })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condicion IVA<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
-                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condicion IVA{!editingEnterpriseId && <span className="text-red-600"> *</span>}<HelpTip text="Necesario para determinar el tipo de factura cuando factures a esta empresa." /></label>
+                  <select required={!editingEnterpriseId} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" value={enterpriseForm.tax_condition} onChange={e => setEnterpriseForm({ ...enterpriseForm, tax_condition: e.target.value })}>
                     <option>Responsable Inscripto</option>
                     <option>Monotributo</option>
                     <option>Exento</option>
@@ -474,7 +496,7 @@ export const Enterprises: React.FC = () => {
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Direccion de la Empresa</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <Input label="Direccion" placeholder="Av. Ejemplo 1234" value={enterpriseForm.address} onChange={e => setEnterpriseForm({ ...enterpriseForm, address: e.target.value })} />
+                  <Input label={!editingEnterpriseId ? 'Direccion *' : 'Direccion'} placeholder="Av. Ejemplo 1234" value={enterpriseForm.address} onChange={e => setEnterpriseForm({ ...enterpriseForm, address: e.target.value })} required={!editingEnterpriseId && enterpriseForm.same_fiscal_address} />
                   <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.city} onChange={e => setEnterpriseForm({ ...enterpriseForm, city: e.target.value })} />
                   <Input label="Provincia" placeholder="CABA" value={enterpriseForm.province} onChange={e => setEnterpriseForm({ ...enterpriseForm, province: e.target.value })} />
                   <Input label="Codigo Postal" placeholder="C1234ABC" value={enterpriseForm.postal_code} onChange={e => setEnterpriseForm({ ...enterpriseForm, postal_code: e.target.value })} />
@@ -507,7 +529,7 @@ export const Enterprises: React.FC = () => {
                 </div>
                 {!enterpriseForm.same_fiscal_address && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <Input label="Direccion Fiscal" placeholder="Av. Fiscal 5678" value={enterpriseForm.fiscal_address} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_address: e.target.value })} />
+                    <Input label={!editingEnterpriseId ? 'Direccion Fiscal *' : 'Direccion Fiscal'} placeholder="Av. Fiscal 5678" value={enterpriseForm.fiscal_address} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_address: e.target.value })} required={!editingEnterpriseId && !enterpriseForm.same_fiscal_address} />
                     <Input label="Ciudad" placeholder="Buenos Aires" value={enterpriseForm.fiscal_city} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_city: e.target.value })} />
                     <Input label="Provincia" placeholder="CABA" value={enterpriseForm.fiscal_province} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_province: e.target.value })} />
                     <Input label="Codigo Postal" placeholder="C1234ABC" value={enterpriseForm.fiscal_postal_code} onChange={e => setEnterpriseForm({ ...enterpriseForm, fiscal_postal_code: e.target.value })} />
@@ -600,6 +622,25 @@ export const Enterprises: React.FC = () => {
                         <span className="text-xs text-gray-400">({ent.razon_social})</span>
                       )}
                       <TagBadges tags={ent.tags} />
+                      {/* AFIP fiscal data warning badge */}
+                      {(() => {
+                        const fiscal = checkEnterpriseFiscalData(ent as any)
+                        if (fiscal.complete) return null
+                        return (
+                          <button
+                            type="button"
+                            title={`Faltan: ${fiscal.missing.join(', ')}. Click para completar.`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleEditEnterprise(ent)
+                              setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
+                            }}
+                            className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-800 hover:bg-red-200"
+                          >
+                            ⚠ Datos AFIP incompletos
+                          </button>
+                        )
+                      })()}
                       {/* Overdue debt badge */}
                       {enterpriseHealth.has(ent.name) && (
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${

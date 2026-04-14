@@ -1682,6 +1682,10 @@ export const Orders: React.FC = () => {
                             console.error('Error loading order context:', err)
                             setContextData(prev => ({ ...prev, [order.id]: { invoices: [], receipts: [], remitos: [], error: true } as any }))
                           })
+                        // Fetch invoicing detail (qty_invoiced/qty_remaining/qty_delivered) para gatear acciones
+                        api.getOrderInvoicingDetail(order.id)
+                          .then(detail => setOrderDetails(prev => ({ ...prev, [order.id]: detail })))
+                          .catch(err => console.error('Error loading order invoicing detail:', err))
                       }}
                     >
                       <td className="px-4 py-3">
@@ -2065,8 +2069,13 @@ export const Orders: React.FC = () => {
                                               </tbody>
                                             </table>
 
-                                            {/* Crear remito de pendientes */}
-                                            {items.some((it: any) => parseFloat(it.qty_delivered || '0') < parseFloat(it.quantity || '0')) && (
+                                            {/* Crear remito de pendientes (epsilon 0.001 para floats) */}
+                                            {(() => {
+                                              const fullyDelivered = items.length > 0 && (items as any[]).every((it: any) =>
+                                                parseFloat(it.qty_delivered || '0') >= parseFloat(it.quantity || '0') - 0.001
+                                              )
+                                              return !fullyDelivered
+                                            })() && (
                                               <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/remitos?nuevo=true&order_id=${order.id}`) }}
                                                 className="mt-1.5 text-[10px] text-blue-600 hover:text-blue-800 font-medium">
                                                 + Crear remito de items pendientes
@@ -2584,6 +2593,16 @@ export const Orders: React.FC = () => {
         const invoices = ctx?.invoices || []
         const receipts = ctx?.receipts || []
 
+        // Gating: detectar si el pedido esta 100% facturado / 100% entregado a nivel item.
+        // Si orderDetails no esta cargado, dejamos pasar (fallback al comportamiento previo).
+        const itemsDetail: any[] = orderDetails[order.id]?.items || []
+        const fullyInvoiced = itemsDetail.length > 0 && itemsDetail.every((it: any) =>
+          parseFloat(it.qty_remaining || '0') <= 0.001
+        )
+        const fullyDelivered = itemsDetail.length > 0 && itemsDetail.every((it: any) =>
+          parseFloat(it.qty_delivered || '0') >= parseFloat(it.quantity || '0') - 0.001
+        )
+
         const items: ContextMenuItem[] = []
 
         // --- FACTURAS section ---
@@ -2615,8 +2634,9 @@ export const Orders: React.FC = () => {
           items.push({ id: 'inv-none', label: '  Sin facturas', disabled: true })
         }
 
-        // Create invoice (if not fully invoiced)
-        if (invoiceStatus !== 'facturado') {
+        // Create invoice (if not fully invoiced).
+        // Gate: invoice_status del pedido + chequeo item-level (fullyInvoiced) cuando hay detail.
+        if (invoiceStatus !== 'facturado' && !fullyInvoiced) {
           items.push({
             id: 'create-invoice',
             label: invoices.length > 0 ? '  + Facturar items pendientes' : '  + Crear Factura',
@@ -2678,11 +2698,14 @@ export const Orders: React.FC = () => {
           items.push({ id: 'rem-none', label: '  Sin remitos asociados', disabled: true })
         }
 
-        items.push({
-          id: 'crear-remito',
-          label: '  + Crear remito',
-          onClick: () => navigate(`/remitos?nuevo=true&order_id=${order.id}`),
-        })
+        // Gate: ocultar si todos los items ya fueron entregados (item-level).
+        if (!fullyDelivered) {
+          items.push({
+            id: 'crear-remito',
+            label: '  + Crear remito',
+            onClick: () => navigate(`/remitos?nuevo=true&order_id=${order.id}`),
+          })
+        }
 
         items.push({ id: 'sep-actions', label: '', separator: true })
 

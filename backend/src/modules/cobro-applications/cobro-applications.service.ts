@@ -45,7 +45,7 @@ export class CobroApplicationsService {
 
     // Get invoice
     const invoiceResult = await db.execute(sql`
-      SELECT id, company_id, enterprise_id, business_unit_id, total_amount, status, payment_status, order_id, invoice_type, currency, exchange_rate
+      SELECT id, company_id, enterprise_id, business_unit_id, total_amount, status, payment_status, order_id, invoice_type, invoice_number, currency, exchange_rate
       FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
     `);
     const invoice = ((invoiceResult as any).rows || [])[0];
@@ -83,6 +83,14 @@ export class CobroApplicationsService {
     // V3: Invoice not cancelled
     if (invoice.status === 'cancelled') {
       throw new ApiError(400, 'No se puede vincular cobro a factura cancelada');
+    }
+
+    // V3.5: Invoice not fully paid (integridad financiera)
+    if (invoice.payment_status === 'pagado') {
+      throw new ApiError(
+        400,
+        `La factura ${invoice.invoice_type} ${invoice.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
+      );
     }
 
     // V4: Si ya existe vinculacion, incrementamos amount_applied en vez de rechazar.

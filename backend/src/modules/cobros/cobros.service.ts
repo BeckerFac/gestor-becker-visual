@@ -241,6 +241,21 @@ export class CobrosService {
     // B.1.4: summaryMethod for the cobro header
     const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
 
+    // Integridad financiera: si viene invoice_id legacy directo, validar que no este pagada.
+    if (data.invoice_id) {
+      const invCheck = await db.execute(sql`
+        SELECT invoice_number, invoice_type, payment_status
+        FROM invoices WHERE id = ${data.invoice_id} AND company_id = ${companyId}
+      `);
+      const invRow = ((invCheck as any).rows || [])[0];
+      if (invRow && invRow.payment_status === 'pagado') {
+        throw new ApiError(
+          400,
+          `La factura ${invRow.invoice_type} ${invRow.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
+        );
+      }
+    }
+
     try {
       const cobroId = uuid();
       // Check if invoice_items are provided (N:N linking to invoices)
@@ -354,6 +369,21 @@ export class CobrosService {
           if (item.amount && parseFloat(item.amount) > 0) {
             const current = invoiceTotals.get(item.invoice_id) || 0;
             invoiceTotals.set(item.invoice_id, current + parseFloat(item.amount));
+          }
+        }
+
+        // Integridad financiera: bloquear cobros sobre facturas ya 100% pagadas.
+        for (const invoiceId of invoiceTotals.keys()) {
+          const invCheck = await db.execute(sql`
+            SELECT invoice_number, invoice_type, payment_status
+            FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
+          `);
+          const invRow = ((invCheck as any).rows || [])[0];
+          if (invRow && invRow.payment_status === 'pagado') {
+            throw new ApiError(
+              400,
+              `La factura ${invRow.invoice_type} ${invRow.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
+            );
           }
         }
 

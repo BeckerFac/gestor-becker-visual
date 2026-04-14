@@ -21,6 +21,7 @@ import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { CurrencySelector } from '@/components/shared/CurrencySelector'
+import { checkEnterpriseFiscalData } from '@/utils/fiscal'
 
 // ---- Types ----
 
@@ -58,7 +59,15 @@ interface Invoice {
   amount_foreign?: string
 }
 
-interface Enterprise { id: string; name: string; cuit?: string | null }
+interface Enterprise {
+  id: string
+  name: string
+  cuit?: string | null
+  razon_social?: string | null
+  tax_condition?: string | null
+  address?: string | null
+  fiscal_address?: string | null
+}
 interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
 interface Product { id: string; sku: string; name: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string }
 
@@ -88,6 +97,16 @@ const INVOICE_TYPE_DESCRIPTIONS: Record<string, string> = {
 
 const isNcNdType = (t: string) => t.startsWith('NC_') || t.startsWith('ND_')
 const isExportType = (t: string) => t === 'E' || t === 'NC_E' || t === 'ND_E'
+
+function deriveInvoiceTypeFromTaxCondition(taxCondition: string | null | undefined): 'A' | 'B' | 'C' | null {
+  if (!taxCondition) return null
+  const t = taxCondition.toLowerCase()
+  if (t.includes('responsable inscripto')) return 'A'
+  if (t.includes('monotribut')) return 'A'
+  if (t.includes('consumidor final')) return 'B'
+  if (t.includes('exento')) return 'C'
+  return null
+}
 
 // Common AFIP destination country codes
 const EXPORT_COUNTRIES = [
@@ -358,6 +377,7 @@ export const Invoices: React.FC = () => {
   const [formEnterpriseId, setFormEnterpriseId] = useState('')
   const [formCustomerId, setFormCustomerId] = useState('')
   const [formInvoiceType, setFormInvoiceType] = useState<InvoiceType>('C')
+  const [invoiceTypeManuallySet, setInvoiceTypeManuallySet] = useState(false)
   // formOrderId removed: invoices can now link to N orders via item-level order_item_id
   const [formRelatedInvoiceId, setFormRelatedInvoiceId] = useState('')
   const [authorizedInvoices, setAuthorizedInvoices] = useState<Invoice[]>([])
@@ -722,7 +742,25 @@ export const Invoices: React.FC = () => {
   }, [formItems])
 
   const isExportFormValid = !isExportType(formInvoiceType) || (!!exportCountry && !!exportClientName && !!exportClientAddress)
-  const isFormStep1Valid = !!formEnterpriseId && (vistaMode !== 'venta_fiscal' || !isNcNdType(formInvoiceType) || !!formRelatedInvoiceId) && isExportFormValid
+  const selectedEnterprise = useMemo(
+    () => enterprises.find(e => e.id === formEnterpriseId) || null,
+    [enterprises, formEnterpriseId]
+  )
+  const fiscalOk = isNcNdType(formInvoiceType) || isExportType(formInvoiceType)
+    ? true
+    : !!selectedEnterprise && checkEnterpriseFiscalData(selectedEnterprise).complete
+  const isFormStep1Valid = !!formEnterpriseId && (vistaMode !== 'venta_fiscal' || !isNcNdType(formInvoiceType) || !!formRelatedInvoiceId) && isExportFormValid && fiscalOk
+
+  // Auto-derive invoice type from enterprise tax_condition (skips NC/ND/E and manual override)
+  useEffect(() => {
+    if (!selectedEnterprise || invoiceTypeManuallySet) return
+    if (isNcNdType(formInvoiceType) || isExportType(formInvoiceType)) return
+    const derived = deriveInvoiceTypeFromTaxCondition(selectedEnterprise.tax_condition)
+    if (derived && derived !== formInvoiceType) {
+      setFormInvoiceType(derived)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEnterprise])
   const isFormStep2Valid = formItems.length > 0 && formItems.every(i => i.product_name.trim() && i.unit_price >= 0 && i.quantity > 0)
 
   const handleCreateInvoice = async () => {
@@ -1188,12 +1226,30 @@ export const Invoices: React.FC = () => {
                   customers={customers}
                   selectedEnterpriseId={formEnterpriseId}
                   selectedCustomerId={formCustomerId}
-                  onEnterpriseChange={setFormEnterpriseId}
+                  onEnterpriseChange={(id) => { setFormEnterpriseId(id); setInvoiceTypeManuallySet(false) }}
                   onCustomerChange={setFormCustomerId}
                   enterpriseRequired
                   enterpriseLabel="Empresa emisora"
                   customerLabel="Cliente / Contacto"
                 />
+
+                {/* Fiscal data warning */}
+                {selectedEnterprise && !isNcNdType(formInvoiceType) && !isExportType(formInvoiceType) && (() => {
+                  const fiscal = checkEnterpriseFiscalData(selectedEnterprise)
+                  if (fiscal.complete) return null
+                  return (
+                    <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-xs text-red-800 dark:text-red-300">
+                      {'\u26A0'} Datos fiscales incompletos: {fiscal.missing.join(', ')}.
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/enterprises?edit=${selectedEnterprise.id}`)}
+                        className="ml-2 underline font-medium"
+                      >
+                        Completar datos fiscales
+                      </button>
+                    </div>
+                  )
+                })()}
 
                 {/* Invoice type - only for fiscal invoices */}
                 {vistaMode === 'venta_fiscal' && (
@@ -1201,12 +1257,17 @@ export const Invoices: React.FC = () => {
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
                       Tipo de Comprobante <span className="text-red-500">*</span>
                     </label>
+                    {selectedEnterprise && !invoiceTypeManuallySet && !isNcNdType(formInvoiceType) && !isExportType(formInvoiceType) && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+                        Auto-seleccionado segun condicion IVA del cliente. Click para cambiar.
+                      </p>
+                    )}
                     <div className="grid grid-cols-3 gap-3">
                       {INVOICE_TYPES.map(t => (
                         <button
                           key={t}
                           type="button"
-                          onClick={() => { setFormInvoiceType(t); setFormRelatedInvoiceId('') }}
+                          onClick={() => { setFormInvoiceType(t); setFormRelatedInvoiceId(''); setInvoiceTypeManuallySet(true) }}
                           className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                             formInvoiceType === t
                               ? 'border-blue-500 bg-blue-50'
@@ -2394,16 +2455,18 @@ export const Invoices: React.FC = () => {
             className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[220px]"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-            {/* Registrar Recibo */}
-            <button
-              onClick={() => {
-                setContextMenu(null)
-                navigate(`/cobros?invoice_id=${inv.id}&amount=${saldo.toFixed(2)}`)
-              }}
-              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-            >
-              <span className="text-green-600">$</span> Registrar Recibo
-            </button>
+            {/* Registrar Recibo - solo si no esta 100% pagada */}
+            {inv.payment_status !== 'pagado' && (
+              <button
+                onClick={() => {
+                  setContextMenu(null)
+                  navigate(`/cobros?invoice_id=${inv.id}&amount=${saldo.toFixed(2)}`)
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+              >
+                <span className="text-green-600">$</span> Registrar Recibo
+              </button>
+            )}
 
             {/* Ver Detalle */}
             <button

@@ -164,6 +164,21 @@ describe('CobroApplicationsService', () => {
       ).rejects.toThrow('No se puede vincular cobro a factura cancelada')
     })
 
+    it('rechaza vincular cobro a factura ya pagada', async () => {
+      mockDbRows([{ ...validCobro, business_unit_id: null }])
+      mockDbRows([{
+        ...validInvoice,
+        business_unit_id: null,
+        payment_status: 'pagado',
+        invoice_number: 1,
+        invoice_type: 'A',
+      }])
+
+      await expect(
+        service.linkCobroToInvoice(companyId, userId, cobroId, invoiceId, 5000)
+      ).rejects.toThrow('ya esta completamente pagada')
+    })
+
     it('incrementa amount_applied cuando ya existe vinculacion', async () => {
       mockDbRows([{ ...validCobro, business_unit_id: null }])          // 1. cobro SELECT
       mockDbRows([{ ...validInvoice, business_unit_id: null }])        // 2. invoice SELECT

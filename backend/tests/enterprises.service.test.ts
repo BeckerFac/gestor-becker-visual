@@ -48,6 +48,7 @@ describe('EnterprisesService', () => {
         name: 'BECKER SRL',
         razon_social: 'BECKER SRL',
         cuit: '30-71234567-9',
+        tax_condition: 'Responsable Inscripto',
         postal_code: '1425',
         fiscal_address: 'Av. Santa Fe 1234',
         fiscal_city: 'CABA',
@@ -69,12 +70,15 @@ describe('EnterprisesService', () => {
       await expect(
         service.createEnterprise('company-1', {
           name: 'Duplicate Corp',
+          razon_social: 'Duplicate Corp SRL',
           cuit: '30-71234567-9',
+          tax_condition: 'Responsable Inscripto',
+          fiscal_address: 'Calle Falsa 123',
         })
       ).rejects.toThrow('Enterprise with this CUIT already exists')
     })
 
-    it('allows creation without CUIT (skips duplicate check)', async () => {
+    it('allows creation without CUIT for Consumidor Final', async () => {
       mockByContent({
         'INSERT INTO enterprises': { rows: [] },
         'SELECT * FROM enterprises WHERE id': { rows: [{ id: 'ent-2', name: 'No CUIT Corp' }] },
@@ -82,9 +86,57 @@ describe('EnterprisesService', () => {
 
       const result = await service.createEnterprise('company-1', {
         name: 'No CUIT Corp',
+        razon_social: 'No CUIT Corp',
+        tax_condition: 'Consumidor Final',
+        fiscal_address: 'Calle 1',
       })
 
       expect(result.name).toBe('No CUIT Corp')
+    })
+
+    it('rejects creation when CUIT missing for Responsable Inscripto', async () => {
+      await expect(
+        service.createEnterprise('company-1', {
+          name: 'Sin CUIT SRL',
+          razon_social: 'Sin CUIT SRL',
+          tax_condition: 'Responsable Inscripto',
+          fiscal_address: 'Calle 1',
+        })
+      ).rejects.toThrow(/CUIT/)
+    })
+
+    it('rejects creation when razon social missing', async () => {
+      await expect(
+        service.createEnterprise('company-1', {
+          name: 'Corp',
+          cuit: '30-71234567-9',
+          tax_condition: 'Responsable Inscripto',
+          fiscal_address: 'Calle 1',
+        })
+      ).rejects.toThrow(/razon social/)
+    })
+
+    it('rejects creation when fiscal address missing', async () => {
+      await expect(
+        service.createEnterprise('company-1', {
+          name: 'Corp',
+          razon_social: 'Corp SRL',
+          cuit: '30-71234567-9',
+          tax_condition: 'Responsable Inscripto',
+        })
+      ).rejects.toThrow(/direccion fiscal/)
+    })
+
+    it('rejects invalid CUIT format', async () => {
+      await expect(
+        service.createEnterprise('company-1', {
+          name: 'Corp',
+          razon_social: 'Corp SRL',
+          cuit: '123',
+          tax_condition: 'Responsable Inscripto',
+          fiscal_address: 'Calle 1',
+        })
+      ).rejects.toThrow(/CUIT invalido/)
     })
   })
 

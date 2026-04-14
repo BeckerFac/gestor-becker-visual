@@ -66,6 +66,10 @@ describe('Security Tests', () => {
 
       await svc.createEnterprise('company-1', {
         name: '<img src=x onerror=alert(1)>',
+        razon_social: '<img src=x onerror=alert(1)>',
+        tax_condition: 'Responsable Inscripto',
+        cuit: '30-71234567-9',
+        fiscal_address: 'Calle Falsa 123',
         notes: 'javascript:alert(1)',
       })
 
