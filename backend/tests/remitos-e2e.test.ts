@@ -646,4 +646,52 @@ describe('E2E Flow 7: getRemito returns items with source_ref', () => {
     expect(remito.items[0].source_ref).toBe('Pedido #0001');
     expect(remito.items[1].source_ref).toBe('Manual');
   });
+
+  // PR7-T18: validar que la query de getRemito calcula qty_pending_to_invoice
+  // usando subqueries con GREATEST/LEAST y excluyendo facturas canceladas + NCs.
+  it('query includes qty_pending_to_invoice calculation excluding cancelled + NCs', async () => {
+    let capturedSql = '';
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM remito_items') && sql.includes('source_ref')) {
+        capturedSql = sql;
+        return {
+          rows: [{
+            id: 'ri-1',
+            product_name: 'Pintura',
+            quantity: 5,
+            order_item_id: 'oi-1',
+            source_ref: 'Pedido #0001',
+            order_item_total: '10',
+            order_item_invoiced: '5',
+            qty_pending_to_invoice: '0', // 5 remito, 5 ya facturadas → 0 pending
+          }],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const { mockDbExecute } = await import('./helpers/setup');
+    mockDbExecute.mockImplementation(async () => ({
+      rows: [{ id: 'rem-1', remito_number: 1, enterprise_id: 'ent-1' }],
+    }));
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    const remito = await service.getRemito('comp-1', 'rem-1');
+
+    // La query debe referenciar qty_pending_to_invoice
+    expect(capturedSql).toContain('qty_pending_to_invoice');
+    expect(capturedSql).toContain('order_item_total');
+    expect(capturedSql).toContain('order_item_invoiced');
+    // Excluye canceladas y NCs
+    expect(capturedSql).toContain("status != 'cancelled'");
+    expect(capturedSql).toContain("invoice_type::text NOT LIKE 'NC%'");
+    // Usa GREATEST/LEAST para clamp
+    expect(capturedSql).toMatch(/GREATEST|LEAST/);
+
+    // El item debe tener el valor calculado
+    expect(remito.items[0].qty_pending_to_invoice).toBe('0');
+  });
 });

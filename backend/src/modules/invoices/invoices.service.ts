@@ -96,6 +96,8 @@ export class InvoicesService {
       // Validate: if items have order_item_id, check that we don't invoice more than available
       // BUG S9 #1: include 'cancelado' (ES) in filter
       // BUG S9 #4: scope order_item by company (IDOR fix)
+      // PR7-T18: excluir NCs del conteo (consistent con getRemito y orders.service.ts)
+      //          NC no cuenta como facturacion para el calculo de disponible.
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
           if (item.order_item_id) {
@@ -107,6 +109,7 @@ export class InvoicesService {
                   FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id
                   WHERE ii.order_item_id = ${item.order_item_id}
                     AND i.status != 'cancelled'
+                    AND i.invoice_type::text NOT LIKE 'NC%'
                     AND i.company_id = ${companyId}
                 ), 0) as invoiced_qty
               FROM order_items oi
@@ -119,7 +122,7 @@ export class InvoicesService {
               const requesting = parseFloat(item.quantity) || 0;
               if (requesting > available + 0.01) {
                 const oiName = item.product_name || 'Item';
-                throw new ApiError(400, `${oiName}: solo quedan ${available.toFixed(2)} unidades disponibles para facturar (pediste ${requesting})`);
+                throw new ApiError(400, `${oiName}: solo quedan ${available.toFixed(2)} unidades disponibles para facturar (pediste ${requesting}). Ya existen facturas que cubren esa cantidad.`);
               }
             }
           }

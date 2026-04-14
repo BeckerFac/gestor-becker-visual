@@ -480,7 +480,9 @@ export const Remitos: React.FC = () => {
     const remito = remitos.find(r => r.id === remitoId)
     if (!remito) return
 
-    // Fetch remito detail to get items with qty_invoiced
+    // PR7-T18: leer detalle con qty_pending_to_invoice (backend calcula
+    // min(remito_qty, order_item_total - already_invoiced) excluyendo NCs y
+    // canceladas). Items manuales (order_item_id=NULL) reciben qty completa.
     let detailItems: any[] = []
     try {
       const detail = await api.getRemito(remitoId)
@@ -490,24 +492,35 @@ export const Remitos: React.FC = () => {
       return
     }
 
-    // Build pending items (qty - qty_invoiced > 0, and with order_item_id linkage)
+    if (detailItems.length === 0) {
+      toast.error('El remito no tiene items')
+      return
+    }
+
+    // Construir items pendientes usando qty_pending_to_invoice del backend.
     const pendingItems = detailItems
       .filter((item: any) => {
-        const qty = parseFloat(item.quantity || '0')
-        const invoiced = parseFloat(item.qty_invoiced || '0')
-        return qty - invoiced > 0 && item.order_item_id
+        const pending = parseFloat(item.qty_pending_to_invoice || '0')
+        return pending > 0.001 // epsilon para floats
       })
       .map((item: any) => ({
-        order_item_id: item.order_item_id,
+        order_item_id: item.order_item_id || null,
         product_name: item.product_name,
-        quantity: parseFloat(item.quantity || '0') - parseFloat(item.qty_invoiced || '0'),
+        quantity: parseFloat(item.qty_pending_to_invoice || '0'),
         unit_price: parseFloat(item.unit_price || '0'),
         vat_rate: parseFloat(item.vat_rate || '21'),
       }))
 
     if (pendingItems.length === 0) {
-      toast.info('No hay items pendientes de facturar en este remito')
+      toast.info('Todos los items de este remito ya fueron facturados')
       return
+    }
+
+    // Mostrar al usuario cuantos items se saltaron (UX)
+    const totalItems = detailItems.length
+    const skipped = totalItems - pendingItems.length
+    if (skipped > 0) {
+      toast.info(`Se omitieron ${skipped} item${skipped > 1 ? 's' : ''} ya facturado${skipped > 1 ? 's' : ''}. Quedan ${pendingItems.length} para facturar.`)
     }
 
     sessionStorage.setItem('invoice_preload', JSON.stringify({

@@ -261,7 +261,14 @@ export class RemitosService {
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
 
-      // Items with source reference
+      // PR7-T18: items incluyen qty_pending_to_invoice para el flujo
+      // "Crear factura desde remito". Por cada remito_item con order_item_id:
+      //   order_item_total     = order_items.quantity
+      //   order_item_invoiced  = SUM(invoice_items.quantity) de TODAS las facturas
+      //                          no canceladas ni NC que referencian ese order_item_id
+      //   qty_pending_to_invoice = LEAST(ri.quantity, order_item_total - order_item_invoiced)
+      // Para items manuales (order_item_id=NULL), qty_pending_to_invoice = ri.quantity
+      // (no hay forma de saber si ya se facturo manualmente).
       const itemsResult = await pool.query(`
         SELECT ri.*,
           CASE
@@ -271,7 +278,42 @@ export class RemitosService {
               WHERE oi2.id = ri.order_item_id
             )
             ELSE 'Manual'
-          END as source_ref
+          END as source_ref,
+          CASE
+            WHEN ri.order_item_id IS NOT NULL THEN (
+              SELECT CAST(oi.quantity AS decimal)
+              FROM order_items oi WHERE oi.id = ri.order_item_id
+            )
+            ELSE NULL
+          END as order_item_total,
+          CASE
+            WHEN ri.order_item_id IS NOT NULL THEN COALESCE((
+              SELECT SUM(CAST(ii.quantity AS decimal))
+              FROM invoice_items ii
+              JOIN invoices inv ON ii.invoice_id = inv.id
+              WHERE ii.order_item_id = ri.order_item_id
+                AND inv.status != 'cancelled'
+                AND inv.invoice_type::text NOT LIKE 'NC%'
+            ), 0)
+            ELSE 0
+          END as order_item_invoiced,
+          CASE
+            WHEN ri.order_item_id IS NOT NULL THEN GREATEST(
+              LEAST(
+                CAST(ri.quantity AS decimal),
+                (SELECT CAST(oi.quantity AS decimal) FROM order_items oi WHERE oi.id = ri.order_item_id) - COALESCE((
+                  SELECT SUM(CAST(ii.quantity AS decimal))
+                  FROM invoice_items ii
+                  JOIN invoices inv ON ii.invoice_id = inv.id
+                  WHERE ii.order_item_id = ri.order_item_id
+                    AND inv.status != 'cancelled'
+                    AND inv.invoice_type::text NOT LIKE 'NC%'
+                ), 0)
+              ),
+              0
+            )
+            ELSE CAST(ri.quantity AS decimal)
+          END as qty_pending_to_invoice
         FROM remito_items ri WHERE ri.remito_id = $1 ORDER BY ri.created_at ASC, ri.id ASC
       `, [remitoId]);
       const items = itemsResult.rows || [];
