@@ -585,7 +585,7 @@ export class RemitosService {
             await client.query(`
               INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
                 movement_type, reference_type, reference_id, notes, created_by)
-              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'salida', 'remito', $5, 'Remito item manual', $6)
+              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', 'remito', $5, 'Remito item manual', $6)
             `, [companyId, item.product_id, warehouseId, -qty, remitoId, userId]);
 
             if (stockRes.rows.length > 0) {
@@ -764,13 +764,14 @@ export class RemitosService {
           );
         }
 
-        // BUG S8 #9: return stock even if item also has order_item_id (when product_id present)
+        // PR7-T11: return stock even if item also has order_item_id (when product_id present).
+        // Usa 'sale' (enum stock_movement_type) para matchear el INSERT de create.
+        // Revierte con 'return_customer' (entrada de stock porque el cliente "devuelve").
         if (item.product_id) {
-          // BUG S8 #5: filter by movement_type='salida' to find the right warehouse
           const movRes = await client.query(`
             SELECT warehouse_id FROM stock_movements
             WHERE reference_type = 'remito' AND reference_id = $1 AND product_id = $2
-              AND movement_type = 'salida'
+              AND movement_type::text = 'sale'
             ORDER BY created_at DESC LIMIT 1
           `, [remitoId, item.product_id]);
           const originalWarehouseId = movRes.rows[0]?.warehouse_id;
@@ -784,14 +785,13 @@ export class RemitosService {
             await client.query(`
               INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
                 movement_type, reference_type, reference_id, notes, created_by)
-              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'entrada', 'anulacion_remito', $5, 'Anulacion remito', $6)
+              VALUES (gen_random_uuid(), $1, $2, $3, $4, 'return_customer', 'anulacion_remito', $5, 'Anulacion remito', $6)
             `, [companyId, item.product_id, originalWarehouseId, qty, remitoId, userId]);
             await client.query(
-              'UPDATE stock SET quantity = COALESCE(quantity, 0) + $1 WHERE product_id = $2 AND warehouse_id = $3',
+              'UPDATE stock SET quantity = COALESCE(quantity, 0) + $1, quantity_num = COALESCE(quantity_num, 0) + $1 WHERE product_id = $2 AND warehouse_id = $3',
               [qty, item.product_id, originalWarehouseId]
             );
           } else {
-            // BUG S8 #6: log warning if stock cannot be returned (no original movement found)
             console.warn(`[anularRemito] No original warehouse found for product ${item.product_id} in remito ${remitoId} — stock NOT returned`);
           }
         }
@@ -831,6 +831,10 @@ export class RemitosService {
           }
         }
       }
+
+      // PR7-T11: desvincular el remito del pedido borrando las entradas de remito_orders.
+      // El remito queda como fila historica (status='anulado') pero no sigue "linkeado" al pedido.
+      await client.query(`DELETE FROM remito_orders WHERE remito_id = $1`, [remitoId]);
 
       await client.query('COMMIT');
       return { id: remitoId, status: 'anulado' };

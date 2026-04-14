@@ -183,7 +183,7 @@ describe('E2E Flow 2: Manual item with stock control', () => {
 
     // Should have stock_movements insert with salida
     const stockMov = executedQueries.find(q =>
-      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'salida'")
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'sale'")
     );
     expect(stockMov).toBeDefined();
     expect(stockMov!.params).toContain(-3); // negative qty for salida
@@ -349,7 +349,7 @@ describe('E2E Flow 3: Anular remito', () => {
 
     // Stock movement ENTRADA (return)
     const stockRet = executedQueries.find(q =>
-      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'entrada'")
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'return_customer'")
     );
     expect(stockRet).toBeDefined();
     expect(stockRet!.params).toContain(5); // positive qty

@@ -132,7 +132,7 @@ describe('Seccion 3 BUG #3: anularRemito usa warehouse original', () => {
     expect(warehouseQuery).toBeDefined();
 
     // Verifica que el INSERT entrada usa wh-ORIGINAL (no wh-1 default)
-    const insertMov = queries.find(q => q.sql.includes("'entrada'") && q.params?.includes('wh-ORIGINAL'));
+    const insertMov = queries.find(q => q.sql.includes("'return_customer'") && q.params?.includes('wh-ORIGINAL'));
     expect(insertMov).toBeDefined();
 
     // Verifica que el UPDATE stock usa wh-ORIGINAL

@@ -136,7 +136,7 @@ describe('Seccion 8 BUG #4: Recalculate excluye anulados', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// BUG #5: stock_movement filtra movement_type='salida'
+// BUG #5: stock_movement filtra movement_type='sale'
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Seccion 8 BUG #5: stock_movement lookup filtra salida', () => {
@@ -155,7 +155,7 @@ describe('Seccion 8 BUG #5: stock_movement lookup filtra salida', () => {
 
     const movLookup = executed.find(q => q.sql.includes('FROM stock_movements'));
     expect(movLookup).toBeDefined();
-    expect(movLookup!.sql).toContain("movement_type = 'salida'");
+    expect(movLookup!.sql).toContain("movement_type::text = 'sale'");
   });
 });
 
@@ -208,7 +208,7 @@ describe('Seccion 8 BUG #9: items mixtos devuelven stock', () => {
     expect(revert).toBeDefined();
     // AND should have stock entrada movement
     const stockEntrada = executed.find(q =>
-      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'entrada'")
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'return_customer'")
     );
     expect(stockEntrada).toBeDefined();
   });

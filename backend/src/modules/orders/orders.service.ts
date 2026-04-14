@@ -981,6 +981,7 @@ export class OrdersService {
           )) FROM remito_items ri2 WHERE ri2.remito_id = r.id), '[]'::json) as items
         FROM remitos r
         WHERE r.id IN (SELECT id FROM matched_remitos)
+          AND (r.status IS NULL OR r.status != 'anulado')
         ORDER BY r.date DESC NULLS LAST
       `, [companyId, orderId]);
       const rows = result.rows || [];
