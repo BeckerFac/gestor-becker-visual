@@ -4,6 +4,7 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 import { getRows, getFirstRow } from '../../lib/db-utils';
+import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape';
 
 export class QuotesService {
   private migrationsRun = false;
@@ -438,21 +439,9 @@ export class QuotesService {
     }
   }
 
-  private escapeHtml(str: string): string {
-    // Prevent double-escaping: first unescape any existing HTML entities
-    let clean = String(str || '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-    // Then escape properly
-    return clean
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  private escapeHtml(str: unknown): string {
+    // HIGH-4: delegate to shared helper in src/lib/html-escape.ts
+    return sharedEscapeHtml(str);
   }
 
   private buildQuoteHtml(company: any, quote: any, template: string = 'clasico', bannerUrl?: string): string {

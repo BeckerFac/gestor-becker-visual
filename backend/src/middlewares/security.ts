@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { env, isProduction } from '../config/env';
 import { AuthRequest } from './auth';
+import { validatePasswordStrength } from '../utils/password';
 
 // ============================================================
 // Request Sanitization Middleware
@@ -238,29 +239,12 @@ export interface PasswordValidationResult {
   errors: string[];
 }
 
+// Delegates to the shared password strength helper so all call sites
+// (auth.register, auth.resetPassword, users.createUser, users.resetPassword,
+// invitations.acceptInvitation) inherit the same rules, including the
+// common-password blacklist added for HIGH-3.
 export function validatePasswordComplexity(password: string): PasswordValidationResult {
-  const errors: string[] = [];
-
-  if (password.length < 8) {
-    errors.push('La contrasena debe tener al menos 8 caracteres');
-  }
-  if (password.length > 128) {
-    errors.push('La contrasena no puede tener mas de 128 caracteres');
-  }
-  if (!/[A-Z]/.test(password)) {
-    errors.push('La contrasena debe contener al menos una letra mayuscula');
-  }
-  if (!/[a-z]/.test(password)) {
-    errors.push('La contrasena debe contener al menos una letra minuscula');
-  }
-  if (!/[0-9]/.test(password)) {
-    errors.push('La contrasena debe contener al menos un numero');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
+  return validatePasswordStrength(password || '');
 }
 
 // ============================================================

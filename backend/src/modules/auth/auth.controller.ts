@@ -170,10 +170,13 @@ export class AuthController {
   async logout(req: AuthRequest, res: Response) {
     try {
       const userId = req.user?.id;
+      const accessJti = req.user?.jti;
       const refreshToken = req.body?.refreshToken;
 
       if (userId) {
-        await authService.logout(userId, refreshToken);
+        // CRIT-03: pass the access token's jti so the session row is marked
+        // revoked and any subsequent request presenting the same token is 401.
+        await authService.logout(userId, refreshToken, accessJti);
       }
 
       res.json({ message: 'Logout successful' });

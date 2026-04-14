@@ -93,7 +93,13 @@ export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   user_id: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   refresh_token: varchar('refresh_token', { length: 500 }).notNull(),
+  // CRIT-03: jti claim of the access token tied to this session.
+  // Allows the auth middleware to revoke access tokens server-side.
+  access_token_jti: uuid('access_token_jti'),
   expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+  // CRIT-03: when set, the session is revoked (logout). Middleware rejects tokens
+  // whose jti matches a revoked row.
+  revoked_at: timestamp('revoked_at', { withTimezone: true }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

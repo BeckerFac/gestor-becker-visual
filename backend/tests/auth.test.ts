@@ -251,6 +251,114 @@ describe('AuthService', () => {
     })
   })
 
+  describe('CRIT-03: session revocation via jti', () => {
+    it('login creates a session row with access_token_jti', async () => {
+      const { db } = await import('../src/config/db')
+
+      vi.mocked(db.query.users.findFirst).mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'test@test.com',
+        password_hash: 'hashed_password',
+        name: 'Test User',
+        role: 'admin',
+        company_id: 'company-1',
+        active: true,
+      } as any)
+      mockCompare.mockResolvedValueOnce(true)
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      } as any)
+      vi.mocked(db.query.companies.findFirst).mockResolvedValueOnce({
+        id: 'company-1', name: 'Test Company', cuit: '20123456789',
+      } as any)
+
+      // Capture the values passed to db.insert for sessions
+      const insertValues = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(db.insert).mockReturnValueOnce({ values: insertValues } as any)
+
+      // storeSession -> DELETE expired sessions
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      // is_superadmin check
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ is_superadmin: false }] })
+
+      const result = await authService.login('test@test.com', 'Test1234')
+
+      expect(result.accessToken).toBeDefined()
+      // Session insert must carry the jti from the access token
+      expect(insertValues).toHaveBeenCalledTimes(1)
+      const sessionRow = insertValues.mock.calls[0][0]
+      expect(sessionRow.user_id).toBe('user-1')
+      expect(sessionRow.access_token_jti).toBeDefined()
+      expect(typeof sessionRow.access_token_jti).toBe('string')
+      expect(sessionRow.access_token_jti.length).toBeGreaterThan(10)
+    })
+
+    it('logout marks session revoked by jti', async () => {
+      const { db } = await import('../src/config/db')
+
+      // db.delete chain for refresh-token cleanup
+      vi.mocked(db.delete).mockReturnValueOnce({
+        where: vi.fn().mockResolvedValue(undefined),
+      } as any)
+
+      // UPDATE sessions SET revoked_at
+      mockDbExecute.mockResolvedValueOnce({ rowCount: 1, rows: [] })
+
+      await authService.logout('user-1', 'refresh-token', 'jti-to-revoke')
+
+      // The UPDATE sql call should have been issued (db.execute with jti)
+      expect(mockDbExecute).toHaveBeenCalled()
+      const calls = mockDbExecute.mock.calls
+      const updateCall = calls.find(c => {
+        const arg = c[0]
+        // sql template mock returns { strings, values }
+        return arg && Array.isArray(arg.values) && arg.values.includes('jti-to-revoke')
+      })
+      expect(updateCall).toBeTruthy()
+    })
+
+    it('logout is idempotent when no jti/refresh token is provided', async () => {
+      // Should not throw, should not touch the DB beyond no-op
+      await expect(authService.logout('user-1')).resolves.toBeUndefined()
+    })
+
+    it('cleanupExpiredSessions deletes rows older than 30 days', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rowCount: 7, rows: [] })
+      const deleted = await authService.cleanupExpiredSessions()
+      expect(deleted).toBe(7)
+      expect(mockDbExecute).toHaveBeenCalled()
+    })
+
+    it('generateTokens issues access tokens carrying a jti claim', async () => {
+      // Use the public login path to exercise generateTokens, and decode.
+      const jwt = (await import('jsonwebtoken')).default
+      const { db } = await import('../src/config/db')
+
+      vi.mocked(db.query.users.findFirst).mockResolvedValueOnce({
+        id: 'user-2', email: 'jti@test.com', password_hash: 'h',
+        name: 'Jti User', role: 'admin', company_id: 'company-1', active: true,
+      } as any)
+      mockCompare.mockResolvedValueOnce(true)
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      } as any)
+      vi.mocked(db.query.companies.findFirst).mockResolvedValueOnce({
+        id: 'company-1', name: 'Co', cuit: '20123456789',
+      } as any)
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockResolvedValue(undefined),
+      } as any)
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ is_superadmin: false }] })
+
+      const result = await authService.login('jti@test.com', 'Test1234')
+      const payload: any = jwt.decode(result.accessToken)
+      expect(payload).toBeTruthy()
+      expect(payload.jti).toBeDefined()
+      expect(typeof payload.jti).toBe('string')
+    })
+  })
+
   describe('customerLogin', () => {
     it('authenticates a customer with valid access code', async () => {
       mockDbExecute.mockResolvedValueOnce({

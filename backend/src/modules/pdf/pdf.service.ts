@@ -3,6 +3,7 @@ import { db } from '../../config/db'
 import { invoices, invoice_items, customers, products } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { ApiError } from '../../middlewares/errorHandler'
+import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape'
 
 const INVOICE_TYPE_MAP: Record<string, number> = {
   'A': 1, 'B': 6, 'C': 11,
@@ -110,15 +111,11 @@ export class PdfService {
     return cuit
   }
 
-  // Escape HTML to prevent XSS/injection in generated PDFs
-  private escapeHtml(str: string | null | undefined): string {
-    if (!str) return ''
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
+  // Escape HTML to prevent XSS/injection in generated PDFs.
+  // Delegates to the shared helper (src/lib/html-escape.ts) so all
+  // PDF templates share a single, audited implementation.
+  private escapeHtml(str: unknown): string {
+    return sharedEscapeHtml(str)
   }
 
   private generateInvoiceHtml(data: any): string {
@@ -302,8 +299,8 @@ export class PdfService {
       <div class="info-row"><span class="info-label">Fecha de Vto. para el pago:</span> <span class="info-value">${invoiceDate}</span></div>
     </div>
     <div class="info-bar-right">
-      ${company.companyPhone ? `<div class="info-row"><span class="info-label">Teléfono:</span> <span class="info-value">${company.companyPhone}</span></div>` : ''}
-      ${company.companyEmail ? `<div class="info-row"><span class="info-label">Email:</span> <span class="info-value">${company.companyEmail}</span></div>` : ''}
+      ${company.companyPhone ? `<div class="info-row"><span class="info-label">Teléfono:</span> <span class="info-value">${esc(company.companyPhone)}</span></div>` : ''}
+      ${company.companyEmail ? `<div class="info-row"><span class="info-label">Email:</span> <span class="info-value">${esc(company.companyEmail)}</span></div>` : ''}
     </div>
   </div>
 

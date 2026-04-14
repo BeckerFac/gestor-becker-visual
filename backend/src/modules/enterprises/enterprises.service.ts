@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { generateAccessCode, ACCESS_CODE_MIN_LENGTH } from '../../utils/access-code';
 
 export class EnterprisesService {
   private tablesEnsured = false;
@@ -165,8 +166,19 @@ export class EnterprisesService {
 
       // Handle access_code update separately (can be set to null to revoke)
       if (data.access_code !== undefined) {
+        // HIGH-6: if the client sends an explicit code instead of null, enforce
+        // a minimum length so we don't downgrade to predictable values. If the
+        // client wants a fresh strong code they should pass null and call the
+        // regenerate flow (or we generate server-side).
+        let nextCode = data.access_code;
+        if (nextCode !== null) {
+          if (typeof nextCode !== 'string' || nextCode.length < ACCESS_CODE_MIN_LENGTH) {
+            // Auto-upgrade: ignore weak client-provided code and generate a strong one.
+            nextCode = generateAccessCode();
+          }
+        }
         await db.execute(sql`
-          UPDATE enterprises SET access_code = ${data.access_code}, updated_at = NOW()
+          UPDATE enterprises SET access_code = ${nextCode}, updated_at = NOW()
           WHERE id = ${enterpriseId} AND company_id = ${companyId}
         `);
       }

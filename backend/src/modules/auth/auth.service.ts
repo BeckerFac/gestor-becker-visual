@@ -11,6 +11,7 @@ import { FULL_ACCESS_ROLES } from '../../shared/permissions.constants';
 import { auditService } from '../audit/audit.service';
 import { billingService } from '../billing/billing.service';
 import { emailService } from '../email/email.service';
+import { warnIfLegacyAccessCode } from '../../utils/access-code';
 
 export class AuthService {
   async getUserPermissions(userId: string): Promise<Record<string, string[]> | null> {
@@ -114,8 +115,8 @@ export class AuthService {
       // Generate tokens (user can use app immediately; email verification is tracked)
       const tokens = this.generateTokens(user[0].id, email, company[0].id, user[0].role!);
 
-      // Store refresh token in sessions table
-      await this.storeSession(user[0].id, tokens.refreshToken);
+      // Store refresh token + access jti in sessions table (CRIT-03)
+      await this.storeSession(user[0].id, tokens.refreshToken, tokens.accessJti);
 
       // Send verification email (non-blocking, non-fatal)
       emailService.sendVerificationEmail(email, name, verificationToken).catch(err => {
@@ -178,8 +179,8 @@ export class AuthService {
       // Generate tokens
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
 
-      // Store refresh token in sessions table
-      await this.storeSession(user.id, tokens.refreshToken);
+      // Store refresh token + access jti in sessions table (CRIT-03)
+      await this.storeSession(user.id, tokens.refreshToken, tokens.accessJti);
 
       // Load permissions for non-full-access users
       const permissions = FULL_ACCESS_ROLES.includes(user.role as any) ? null : await this.getUserPermissions(user.id);
@@ -281,9 +282,9 @@ export class AuthService {
 
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
 
-      // Rotate: delete old session, store new refresh token
+      // Rotate: delete old session, store new refresh token + access jti
       await db.delete(sessions).where(eq(sessions.refresh_token, refreshToken));
-      await this.storeSession(user.id, tokens.refreshToken);
+      await this.storeSession(user.id, tokens.refreshToken, tokens.accessJti);
 
       // Load permissions for non-full-access users
       const permissions = FULL_ACCESS_ROLES.includes(user.role as any) ? null : await this.getUserPermissions(user.id);
@@ -379,6 +380,10 @@ export class AuthService {
 
       const enterprise = rows[0];
 
+      // HIGH-6: warn on legacy short access codes so we can track rotation.
+      // New codes (generated via utils/access-code) are >= 12 chars.
+      warnIfLegacyAccessCode(accessCode, { enterpriseId: enterprise.id, companyId: enterprise.company_id });
+
       const accessToken = jwt.sign(
         { id: enterprise.id, role: 'customer', company_id: enterprise.company_id, enterprise_id: enterprise.id },
         env.JWT_SECRET,
@@ -423,7 +428,7 @@ export class AuthService {
     );
   }
 
-  private async storeSession(userId: string, refreshToken: string) {
+  private async storeSession(userId: string, refreshToken: string, accessJti?: string) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days matching JWT_REFRESH_EXPIRATION
 
@@ -435,16 +440,40 @@ export class AuthService {
     await db.insert(sessions).values({
       user_id: userId,
       refresh_token: refreshToken,
+      // CRIT-03: ties the access token's jti to this session row for revocation
+      access_token_jti: accessJti ?? null,
       expires_at: expiresAt,
-    });
+    } as any);
   }
 
-  async logout(userId: string, refreshToken: string) {
+  async logout(userId: string, refreshToken?: string, accessJti?: string) {
+    // CRIT-03: mark the session row for this access token as revoked,
+    // so any future request presenting the same access token is rejected.
+    if (accessJti) {
+      await db.execute(sql`
+        UPDATE sessions
+        SET revoked_at = NOW()
+        WHERE user_id = ${userId} AND access_token_jti = ${accessJti}
+      `);
+    }
+    // Also drop the refresh token row if present (existing behaviour)
     if (refreshToken) {
       await db.delete(sessions).where(
         and(eq(sessions.user_id, userId), eq(sessions.refresh_token, refreshToken))
       );
     }
+  }
+
+  /**
+   * CRIT-03: Permanently delete sessions whose access-token lifetime ended
+   * more than 30 days ago. Safe to run on startup and/or from a cron.
+   */
+  async cleanupExpiredSessions(): Promise<number> {
+    const result: any = await db.execute(sql`
+      DELETE FROM sessions
+      WHERE expires_at < NOW() - INTERVAL '30 days'
+    `);
+    return result?.rowCount ?? 0;
   }
 
   async logoutAll(userId: string) {
@@ -581,8 +610,12 @@ export class AuthService {
   }
 
   private generateTokens(userId: string, email: string, companyId: string, role: string) {
+    // CRIT-03: embed a jti (UUID v4) in the access token. The middleware looks
+    // up this jti in the sessions table to verify the token has not been revoked.
+    const accessJti = crypto.randomUUID();
+
     const accessToken = jwt.sign(
-      { id: userId, email, company_id: companyId, role },
+      { id: userId, email, company_id: companyId, role, jti: accessJti },
       env.JWT_SECRET,
       { expiresIn: env.JWT_EXPIRATION, algorithm: 'HS256' } as any
     );
@@ -596,6 +629,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
+      accessJti,
       expiresIn: env.JWT_EXPIRATION,
     };
   }

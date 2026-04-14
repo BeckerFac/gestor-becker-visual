@@ -4,6 +4,8 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import puppeteer from 'puppeteer';
 import { getRows, getFirstRow } from '../../lib/db-utils';
+import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape';
+import { validateBase64Upload } from '../../lib/upload-validation';
 
 export class RemitosService {
   private tablesEnsured = false;
@@ -857,17 +859,13 @@ export class RemitosService {
   async uploadSignedPdf(companyId: string, remitoId: string, base64Data: string) {
     await this.ensureTables();
     try {
-      // BUG S7 #4: validate magic bytes (defense-in-depth, controller also checks)
-      const decoded = Buffer.from(String(base64Data || '').replace(/^data:application\/pdf;base64,/, ''), 'base64');
-      if (decoded.length === 0) throw new ApiError(400, 'PDF vacio');
-      // C6: hardening — bajar limite a 2MB porque guardamos base64 en una
-      // columna TEXT (bloat severo en DB con 5MB). Proximo PR: mover a storage.
-      if (decoded.length > 2 * 1024 * 1024) {
-        throw new ApiError(400, 'El PDF firmado no puede superar 2MB (limite temporal hasta migracion a storage externo)');
-      }
-      if (decoded.toString('ascii', 0, 5) !== '%PDF-') {
-        throw new ApiError(400, 'El archivo no es un PDF valido (magic bytes)');
-      }
+      // HIGH-5: centralized base64 validation (magic bytes + size).
+      // C6: 2MB cap because the PDF is stored inline in a TEXT column;
+      // migration to external storage is tracked separately.
+      validateBase64Upload(String(base64Data || ''), {
+        maxSize: 2 * 1024 * 1024,
+        allowedMimes: ['application/pdf'],
+      });
 
       const result = await db.execute(sql`
         SELECT id, status FROM remitos WHERE id = ${remitoId} AND company_id = ${companyId}
@@ -950,15 +948,9 @@ export class RemitosService {
     }
   }
 
-  /** BUG S7 #1: HTML escape to prevent XSS/SSRF via user-supplied fields */
+  /** BUG S7 #1 / HIGH-4: delegate to shared helper in src/lib/html-escape.ts */
   private escapeHtml(value: any): string {
-    if (value === null || value === undefined) return '';
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    return sharedEscapeHtml(value);
   }
 
   private buildRemitoHtml(company: any, remito: any, tipo?: string): string {

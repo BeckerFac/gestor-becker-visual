@@ -37,6 +37,27 @@ export async function initDb() {
 
 async function runAutoMigrations() {
   try {
+    // CRIT-03: sessions table may pre-exist (created by drizzle push). Make sure
+    // the new columns needed for access-token revocation exist.
+    await pool.query(`
+      ALTER TABLE IF EXISTS sessions
+        ADD COLUMN IF NOT EXISTS access_token_jti UUID
+    `);
+    await pool.query(`
+      ALTER TABLE IF EXISTS sessions
+        ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP WITH TIME ZONE
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_access_token_jti
+        ON sessions(access_token_jti) WHERE access_token_jti IS NOT NULL
+    `);
+    // One-time cleanup: delete rows whose access-token lifetime is long past.
+    // Kept short to avoid impacting startup time on large tables.
+    await pool.query(`
+      DELETE FROM sessions
+      WHERE expires_at < NOW() - INTERVAL '30 days'
+    `).catch(() => { /* non-fatal */ });
+
     // Create core tables that are not in drizzle schema but used by services
     await pool.query(`
       CREATE TABLE IF NOT EXISTS enterprises (

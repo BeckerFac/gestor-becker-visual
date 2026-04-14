@@ -116,13 +116,13 @@ describe('Seccion 7 BUG #4: uploadSignedPdf valida magic bytes', () => {
     mockDbExecute.mockImplementation(async () => ({ rows: [{ id: 'r1', status: 'pendiente' }] }));
     const service = await makeService();
     await expect(service.uploadSignedPdf('comp-1', 'r1', notPdfBase64))
-      .rejects.toThrow(/magic bytes|PDF valido/);
+      .rejects.toThrow(/magic bytes|PDF valido|Unknown file type/);
   });
 
   it('rechaza base64 vacio', async () => {
     const service = await makeService();
     await expect(service.uploadSignedPdf('comp-1', 'r1', ''))
-      .rejects.toThrow(/vacio/);
+      .rejects.toThrow(/vacio|Invalid base64/);
   });
 
   it('rechaza PDF > 2MB (C6: limite reducido por bloat en DB)', async () => {

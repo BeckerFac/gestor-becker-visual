@@ -1,4 +1,6 @@
 import { Response } from 'express';
+import { sql } from 'drizzle-orm';
+import { db } from '../../config/db';
 import { AuthRequest } from '../../middlewares/auth';
 import { portalService } from './portal.service';
 import { quotesService } from '../quotes/quotes.service';
@@ -144,12 +146,20 @@ export class PortalController {
     try {
       const enterpriseId = (req.user as any)?.enterprise_id;
       const companyId = req.user!.company_id;
-      if (!enterpriseId) throw new ApiError(403, 'Access denied');
+      if (!enterpriseId) throw new ApiError(404, 'Quote not found');
 
-      // Verify quote belongs to this enterprise before generating PDF
-      const quote = await quotesService.getQuote(companyId, req.params.id);
-      if ((quote as any).enterprise_id !== enterpriseId) {
-        throw new ApiError(403, 'Access denied: quote does not belong to this enterprise');
+      // Verify quote belongs to this enterprise AND company before generating PDF.
+      // Returning 404 (not 403) on mismatch avoids leaking existence of quotes
+      // from other customers.
+      const ownership = await db.execute(sql`
+        SELECT id FROM quotes
+        WHERE id = ${req.params.id}
+          AND company_id = ${companyId}
+          AND enterprise_id = ${enterpriseId}
+      `);
+      const ownershipRows = (ownership as any).rows || ownership || [];
+      if (ownershipRows.length === 0) {
+        throw new ApiError(404, 'Quote not found');
       }
 
       const pdf = await quotesService.generateQuotePdf(companyId, req.params.id);

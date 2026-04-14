@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { quotesService } from './quotes.service';
 import { ApiError } from '../../middlewares/errorHandler';
+import { validateBase64Upload } from '../../lib/upload-validation';
 
 export class QuotesController {
   async getQuotes(req: AuthRequest, res: Response) {
@@ -49,20 +50,15 @@ export class QuotesController {
   // --- Banner management ---
 
   async uploadBanner(req: AuthRequest, res: Response) {
-    const { base64, mime_type } = req.body;
+    const { base64 } = req.body;
     if (!base64) throw new ApiError(400, 'base64 field is required');
 
-    // Validate mime type
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
-    if (mime_type && !allowedTypes.includes(mime_type)) {
-      throw new ApiError(400, 'Solo se permiten imagenes PNG o JPEG');
-    }
-
-    // Validate size (base64 is ~33% larger than binary, so 2MB binary = ~2.7MB base64)
-    const sizeBytes = Buffer.from(base64, 'base64').length;
-    if (sizeBytes > 2 * 1024 * 1024) {
-      throw new ApiError(400, 'La imagen no puede superar 2MB');
-    }
+    // HIGH-5: validate magic bytes (never trust client-supplied mime_type).
+    // Limit to 2MB because the banner is stored inline in the companies row.
+    validateBase64Upload(base64, {
+      maxSize: 2 * 1024 * 1024,
+      allowedMimes: ['image/png', 'image/jpeg'],
+    });
 
     const data = await quotesService.uploadBanner(req.user!.company_id, base64);
     res.json(data);

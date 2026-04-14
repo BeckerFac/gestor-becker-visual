@@ -121,15 +121,31 @@ app.use(helmet({
   frameguard: { action: 'deny' },
 }));
 
-// CORS configuration - never wildcard in production
-const corsOrigin = process.env.CORS_ORIGIN;
-if (!corsOrigin && isProduction) {
-  console.error('SECURITY WARNING: CORS_ORIGIN not set in production - this is a critical misconfiguration');
+// CORS configuration - never wildcard with credentials
+// Whitelist is read from CORS_ALLOWED_ORIGINS (comma separated) or CORS_ORIGIN (legacy).
+// Default includes prod frontend, Render backend and local dev ports.
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://gobecker.com.ar',
+  'https://www.gobecker.com.ar',
+  'https://gestor-becker-backend.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+const corsEnvRaw = process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || '';
+const allowedOrigins = corsEnvRaw
+  ? corsEnvRaw.split(',').map(o => o.trim()).filter(Boolean)
+  : DEFAULT_ALLOWED_ORIGINS;
+if (!corsEnvRaw && isProduction) {
+  console.warn('[CORS] CORS_ALLOWED_ORIGINS not set — using built-in defaults:', allowedOrigins.join(', '));
 }
 app.use(cors({
-  origin: corsOrigin
-    ? corsOrigin.split(',').map(o => o.trim())
-    : ['http://localhost:5173', 'http://localhost:3000'],
+  origin: (origin, cb) => {
+    // Allow same-origin / non-browser clients (curl, server-to-server) — no Origin header
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    console.warn('[CORS] Rejected origin:', origin);
+    return cb(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],

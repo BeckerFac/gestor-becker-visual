@@ -318,7 +318,8 @@ describe('PR5: uploadSignedPdf 2MB limit', () => {
       'utf-8'
     );
     expect(src).toMatch(/2 \* 1024 \* 1024/);
-    expect(src).toMatch(/no puede superar 2MB/);
+    // HIGH-5 refactor: validation centralized in validateBase64Upload helper.
+    expect(src).toMatch(/validateBase64Upload/);
   });
 });
 

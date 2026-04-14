@@ -2,19 +2,76 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+/**
+ * Require an env var to be set and non-empty.
+ * Throws at import time if missing (fail-fast).
+ */
+export function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v || v.trim() === '') {
+    throw new Error(
+      `Missing required env var: ${name}. Set it in Render dashboard > Environment (or your local .env).`
+    );
+  }
+  return v;
+}
+
+/**
+ * Require a secret env var with minimum length and entropy checks.
+ * - In NODE_ENV=test, allows 16 chars (to keep legacy test fixtures working).
+ * - In all other envs, requires >= minLength (default 32) chars.
+ * - Rejects low-entropy secrets (all same char, known defaults).
+ */
+export function requireSecret(name: string, minLength = 32): string {
+  const v = requireEnv(name);
+  const testMode = process.env.NODE_ENV === 'test';
+  const effectiveMin = testMode ? 16 : minLength;
+
+  // Reject known-default/placeholder values FIRST (before length) so callers
+  // get the most informative error message regardless of length.
+  const KNOWN_DEFAULTS = new Set([
+    'secret',
+    'changeme',
+    'change-me',
+    'default',
+    'default-secret',
+    'test',
+    'password',
+    'tokensecret',
+  ]);
+  if (KNOWN_DEFAULTS.has(v.toLowerCase())) {
+    throw new Error(
+      `${name} is a well-known default value. Use a random string: openssl rand -base64 48`
+    );
+  }
+
+  if (v.length < effectiveMin) {
+    throw new Error(
+      `${name} must be at least ${effectiveMin} characters long (current: ${v.length}). Generate one with: openssl rand -base64 48`
+    );
+  }
+
+  // Reject single-character repeats (e.g. "xxxxxxxx...")
+  if (/^(.)\1+$/.test(v)) {
+    throw new Error(
+      `${name} has low entropy (all identical characters). Use a random string: openssl rand -base64 48`
+    );
+  }
+
+  return v;
+}
+
 export const env = {
   // Server
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '3000', 10),
 
-  // Database — NO fallback: must be explicitly set, validated at startup.
-  // Previous fallback to hardcoded dev creds was a security hazard
-  // (misconfigured deploy could silently connect to local DB).
-  DATABASE_URL: process.env.DATABASE_URL || '',
+  // Database — NO fallback: must be explicitly set.
+  DATABASE_URL: requireEnv('DATABASE_URL'),
 
-  // JWT - secure defaults (15m access, 7d refresh)
-  JWT_SECRET: process.env.JWT_SECRET || '',
-  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || '',
+  // JWT — fail-fast: no predictable fallbacks. Must be >= 32 chars (>=16 in tests).
+  JWT_SECRET: requireSecret('JWT_SECRET'),
+  JWT_REFRESH_SECRET: requireSecret('JWT_REFRESH_SECRET'),
   JWT_EXPIRATION: process.env.JWT_EXPIRATION || '15m',
   JWT_REFRESH_EXPIRATION: process.env.JWT_REFRESH_EXPIRATION || '7d',
 
@@ -75,36 +132,21 @@ export const env = {
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isProduction = env.NODE_ENV === 'production';
 
-// Validate critical secrets on import.
-// In NODE_ENV !== 'test', validation failure is FATAL (throws / exits).
-// Tests with mocked DB/JWT bypass this via NODE_ENV=test.
+// Kept for backwards compat (index.ts calls it). Now that critical secrets
+// are validated at import time via requireSecret(), this only performs the
+// remaining "soft" checks (CORS_ORIGIN in prod, ENCRYPTION_KEY warning).
 export function validateSecrets(): boolean {
   const errors: string[] = [];
 
-  if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
-    errors.push('JWT_SECRET must be set and at least 32 characters');
-  }
-  if (!env.JWT_REFRESH_SECRET || env.JWT_REFRESH_SECRET.length < 32) {
-    errors.push('JWT_REFRESH_SECRET must be set and at least 32 characters');
-  }
-  if (!env.DATABASE_URL) {
-    errors.push('DATABASE_URL must be set (no default, no fallback)');
-  }
-  if (env.DATABASE_URL && env.DATABASE_URL.includes('gestor_password_dev')) {
-    errors.push('DATABASE_URL still contains the old dev fallback string — set a real DATABASE_URL');
-  }
-
-  // Warn about weak secrets in production
   if (isProduction) {
-    if (env.JWT_SECRET.includes('test') || env.JWT_SECRET.includes('secret')) {
-      errors.push('JWT_SECRET appears to be a test/default value - use a strong random secret in production');
-    }
     if (!process.env.CORS_ORIGIN) {
       errors.push('CORS_ORIGIN must be set in production');
     }
     if (!env.ENCRYPTION_KEY) {
-      // Warning, not fatal - encryption is optional but recommended
-      console.warn('SECURITY WARNING: ENCRYPTION_KEY not set in production. Sensitive fields will be stored in plaintext.');
+      // Warning, not fatal - encryption is optional but recommended.
+      console.warn(
+        'SECURITY WARNING: ENCRYPTION_KEY not set in production. Sensitive fields will be stored in plaintext.'
+      );
     }
   }
 

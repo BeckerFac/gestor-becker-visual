@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { remitosService } from './remitos.service';
-import { ApiError } from '../../middlewares/errorHandler';
+import { validateBase64Upload } from '../../lib/upload-validation';
 
 export class RemitosController {
   async getRemitos(req: AuthRequest, res: Response) {
@@ -83,15 +83,12 @@ export class RemitosController {
     const { base64 } = req.body;
     if (!base64) return res.status(400).json({ message: 'base64 field is required' });
 
-    // Validate base64 is actually a PDF
-    const decoded = Buffer.from(base64.replace(/^data:application\/pdf;base64,/, ''), 'base64');
-    if (decoded.length > 5 * 1024 * 1024) {
-      throw new ApiError(400, 'El archivo no puede superar 5MB');
-    }
-    const header = decoded.toString('ascii', 0, 5);
-    if (!header.startsWith('%PDF')) {
-      throw new ApiError(400, 'El archivo debe ser un PDF valido');
-    }
+    // HIGH-5: centralized validation (magic bytes + size). Service
+    // re-validates with a stricter 2MB cap as defense-in-depth.
+    validateBase64Upload(base64, {
+      maxSize: 5 * 1024 * 1024,
+      allowedMimes: ['application/pdf'],
+    });
 
     const data = await remitosService.uploadSignedPdf(req.user!.company_id, req.params.id, base64);
     res.json(data);

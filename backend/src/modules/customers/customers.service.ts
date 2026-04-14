@@ -3,11 +3,7 @@ import { customers } from '../../db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
-import crypto from 'crypto';
-
-function generateAccessCode(): string {
-  return crypto.randomBytes(8).toString('hex'); // 16 char hex string
-}
+import { generateAccessCode } from '../../utils/access-code';
 
 export class CustomersService {
   private migrated = false;
