@@ -57,7 +57,54 @@ export async function initDb() {
   }
 }
 
+/**
+ * PR7-T21: Critical migrations that MUST run before the big runAutoMigrations
+ * try block. These are columns referenced by services in SELECT/WHERE clauses;
+ * if any are missing, listing endpoints crash with "column does not exist".
+ *
+ * runAutoMigrations wraps everything in a single try/catch, so if an earlier
+ * statement throws, nothing after it runs. This function bypasses that: each
+ * ALTER is independently tryMig'd and runs before the big block.
+ */
+export async function runCriticalMigrations() {
+  console.log('[critical-migrations] starting');
+  const criticalAlters: Array<[string, string]> = [
+    // retenciones — columns referenced by getPagos JOIN and getRetenciones query
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS date TIMESTAMP WITH TIME ZONE DEFAULT NOW()', 'retenciones.date'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS pago_id UUID', 'retenciones.pago_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS cobro_id UUID', 'retenciones.cobro_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID', 'retenciones.invoice_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID', 'retenciones.purchase_invoice_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS enterprise_id UUID', 'retenciones.enterprise_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS company_id UUID', 'retenciones.company_id'],
+    [`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'practicada'`, 'retenciones.direction'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)', 'retenciones.jurisdiction'],
+    [`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activa'`, 'retenciones.status'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMP WITH TIME ZONE', 'retenciones.anulled_at'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_by UUID', 'retenciones.anulled_by'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_reason TEXT', 'retenciones.anulled_reason'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS period VARCHAR(7)', 'retenciones.period'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_number VARCHAR(50)', 'retenciones.certificate_number'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT', 'retenciones.certificate_file'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS regime VARCHAR(100)', 'retenciones.regime'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0', 'retenciones.base_amount'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0', 'retenciones.rate'],
+    // backfill: date from created_at for existing rows
+    ['UPDATE retenciones SET date = created_at WHERE date IS NULL AND created_at IS NOT NULL', 'retenciones.date backfill'],
+  ];
+  for (const [sql, label] of criticalAlters) {
+    await tryMig(sql, `critical: ${label}`);
+  }
+  console.log('[critical-migrations] completed');
+}
+
 async function runAutoMigrations() {
+  // PR7-T21: run critical ALTERs first, outside the big try block, so a
+  // failure elsewhere never leaves required columns missing.
+  await runCriticalMigrations().catch((e) => {
+    console.error('[critical-migrations] unexpected error:', e?.message || e);
+  });
+
   try {
     // CRIT-03: sessions table may pre-exist (created by drizzle push). Make sure
     // the new columns needed for access-token revocation exist.
