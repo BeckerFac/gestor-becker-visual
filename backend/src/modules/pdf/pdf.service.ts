@@ -2062,8 +2062,7 @@ ${methodsRows}
     <div class="header-right" style="padding-left: 50px;">
       <div class="comprobante-tipo">PEDIDO DE VENTA</div>
       <div class="comprobante-nro">N° ${orderNumberStr}</div>
-      <div class="header-row"><span class="header-label">Fecha de Emisión:</span> <span class="header-value">${esc(todayStr)}</span></div>
-      <div class="header-row"><span class="header-label">Fecha de Creación:</span> <span class="header-value">${esc(createdStr)}</span></div>
+      <div class="header-row"><span class="header-label">Fecha de Emisión:</span> <span class="header-value">${esc(createdStr)}</span></div>
       <div class="header-row"><span class="header-label">Entrega Estimada:</span> <span class="header-value">${esc(deliveryStr)}</span></div>
       <div class="header-row"><span class="header-label">Prioridad:</span> <span class="header-value">${esc(priorityStr)}</span></div>
     </div>
