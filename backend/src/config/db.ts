@@ -23,6 +23,28 @@ pool.on('error', (err) => {
 
 export const db = drizzle(pool, { schema });
 
+/**
+ * Migration helper: runs a single DDL statement and LOGS any error instead of
+ * silently swallowing it. Returns true on success, false on failure.
+ *
+ * Rationale (PR7-T20 postmortem): previous code wrapped every ALTER TABLE in
+ * `try { ... } catch (_) {}` / `.catch(() => {})`. When a migration failed in
+ * production (e.g. FK constraint, type mismatch), the error vanished and the
+ * column was never created, causing downstream 500s with no trace.
+ *
+ * Non-fatal by design: startup must not be blocked by a single bad DDL, but
+ * the failure MUST be visible in logs so ops can react.
+ */
+export async function tryMig(sql: string, label: string): Promise<boolean> {
+  try {
+    await pool.query(sql);
+    return true;
+  } catch (e: any) {
+    console.error(`[MIGRATION FAIL] ${label}: ${e?.message || e}`);
+    return false;
+  }
+}
+
 export async function initDb() {
   try {
     await pool.query('SELECT 1');
@@ -1281,42 +1303,48 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_period ON retenciones(company_id, period)`);
 
     // -- Retenciones: soporte sufridas + vinculacion a cobros/facturas --
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'practicada'`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id) ON DELETE SET NULL`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`); } catch (_) {}
-    await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`).catch(() => {});
+    // PR7-T20 postmortem: migrations logged via tryMig so any DDL failure is
+    // visible instead of silently corrupting schema.
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'practicada'`, 'retenciones.direction');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id) ON DELETE SET NULL`, 'retenciones.cobro_id');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`, 'retenciones.purchase_invoice_id');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`, 'retenciones.invoice_id');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`, 'retenciones.certificate_file');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`, 'retenciones.jurisdiction');
 
     // -- Retenciones: soft-delete + audit (H6) --
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activa'`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMP WITH TIME ZONE`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_by UUID`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_reason TEXT`); } catch (_) {}
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activa'`, 'retenciones.status');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMP WITH TIME ZONE`, 'retenciones.anulled_at');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_by UUID`, 'retenciones.anulled_by');
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_reason TEXT`, 'retenciones.anulled_reason');
 
     // -- Retenciones: unique certificate_number per (company, type, period, jurisdiction) (H3) --
-    try {
-      await pool.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_retenciones_certificate
+    await tryMig(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_retenciones_certificate
         ON retenciones(company_id, type, period, COALESCE(jurisdiction, ''), certificate_number)
-        WHERE certificate_number IS NOT NULL AND certificate_number != ''
-      `);
-    } catch (_) {}
+        WHERE certificate_number IS NOT NULL AND certificate_number != ''`,
+      'retenciones.uq_certificate'
+    );
 
     // -- Padron: jurisdiction support for IIBB per-provincia padrones --
-    try { await pool.query(`ALTER TABLE padron_retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`); } catch (_) {}
+    await tryMig(`ALTER TABLE padron_retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`, 'padron_retenciones.jurisdiction');
 
     // ===== RETENCIONES ESPERADAS on invoices (expected withholdings by client) =====
-    await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS retenciones_esperadas JSONB DEFAULT '[]'::jsonb`);
+    await tryMig(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS retenciones_esperadas JSONB DEFAULT '[]'::jsonb`, 'invoices.retenciones_esperadas');
 
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_cobro ON retenciones(cobro_id) WHERE cobro_id IS NOT NULL`); } catch (_) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_direction ON retenciones(direction)`); } catch (_) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_invoice ON retenciones(invoice_id) WHERE invoice_id IS NOT NULL`); } catch (_) {}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_retenciones_pi ON retenciones(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL`); } catch (_) {}
+    await tryMig(`CREATE INDEX IF NOT EXISTS idx_retenciones_cobro ON retenciones(cobro_id) WHERE cobro_id IS NOT NULL`, 'idx_retenciones_cobro');
+    await tryMig(`CREATE INDEX IF NOT EXISTS idx_retenciones_direction ON retenciones(direction)`, 'idx_retenciones_direction');
+    await tryMig(`CREATE INDEX IF NOT EXISTS idx_retenciones_invoice ON retenciones(invoice_id) WHERE invoice_id IS NOT NULL`, 'idx_retenciones_invoice');
+    await tryMig(`CREATE INDEX IF NOT EXISTS idx_retenciones_pi ON retenciones(purchase_invoice_id) WHERE purchase_invoice_id IS NOT NULL`, 'idx_retenciones_pi');
 
     // -- total_amount en cobros y pagos (amount + retenciones; NULL = backward compat) --
-    try { await pool.query(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`); } catch (_) {}
-    try { await pool.query(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`); } catch (_) {}
+    await tryMig(`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`, 'cobros.total_amount');
+    await tryMig(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12,2)`, 'pagos.total_amount');
+
+    // -- Purchase invoices: credit-note flag (PR7-T20 missing migration) --
+    // Smoke detected missing column; service code doesn't reference it yet
+    // but expected schema requires it so credit-note support can ship.
+    await tryMig(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS is_credit_note BOOLEAN DEFAULT false`, 'purchase_invoices.is_credit_note');
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS padron_retenciones (
@@ -1558,7 +1586,9 @@ async function runAutoMigrations() {
       'ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS metadata JSONB',
     ];
     for (const m of colMigrations) {
-      try { await pool.query(m); } catch (_) {}
+      // Derive a short label from the DDL for log triage.
+      const label = m.replace(/\s+/g, ' ').slice(0, 80);
+      await tryMig(m, `colMigrations: ${label}`);
     }
 
     // PR4-T5: composite indexes (company_id, created_at) y (company_id, status)

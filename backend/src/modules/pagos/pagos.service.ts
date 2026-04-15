@@ -1,4 +1,4 @@
-import { db, pool } from '../../config/db';
+import { db, pool, tryMig } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -57,19 +57,19 @@ export class PagosService {
       `);
 
       // PR7-T20/Bug C1: parity with cobros soft-delete (anulado) audit trail.
-      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`).catch(() => {});
-      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMPTZ`).catch(() => {});
-      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_by UUID REFERENCES users(id)`).catch(() => {});
-      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_reason TEXT`).catch(() => {});
-      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pagos_company_status ON pagos(company_id, status)`).catch(() => {});
+      await tryMig(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`, 'pagos.status');
+      await tryMig(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMPTZ`, 'pagos.anulled_at');
+      await tryMig(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_by UUID REFERENCES users(id)`, 'pagos.anulled_by');
+      await tryMig(`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_reason TEXT`, 'pagos.anulled_reason');
+      await tryMig(`CREATE INDEX IF NOT EXISTS idx_pagos_company_status ON pagos(company_id, status)`, 'idx_pagos_company_status');
 
       // FLOW 46/Bug A: cheques outgoing support.
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'recibido'`).catch(() => {});
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS pago_id UUID REFERENCES pagos(id) ON DELETE SET NULL`).catch(() => {});
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id) ON DELETE SET NULL`).catch(() => {});
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'recibido'`, 'cheques.direction (pagos.ensureTables)');
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS pago_id UUID REFERENCES pagos(id) ON DELETE SET NULL`, 'cheques.pago_id');
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id) ON DELETE SET NULL`, 'cheques.enterprise_id');
 
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS pago_payment_methods (
+      await tryMig(
+        `CREATE TABLE IF NOT EXISTS pago_payment_methods (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE CASCADE,
           method VARCHAR(50) NOT NULL,
@@ -78,8 +78,9 @@ export class PagosService {
           reference VARCHAR(255),
           cheque_data JSONB,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        )
-      `).catch(() => {});
+        )`,
+        'pago_payment_methods table'
+      );
 
       this.tablesEnsured = true;
     } catch (error) {

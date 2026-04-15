@@ -4,6 +4,30 @@ import { adminService, BLOCK_REASON_CATEGORIES, BlockReasonCategory } from './ad
 import { ApiError } from '../../middlewares/errorHandler';
 import { getSecurityDashboard } from '../../lib/security-monitor';
 import { activityService } from '../activity/activity.service';
+import { pool } from '../../config/db';
+
+/**
+ * PR7-T20 postmortem: expected schema snapshot used by the /schema-check
+ * diagnostic endpoint. When production 500s are suspected to be caused by a
+ * silently-failed migration, this endpoint diffs the live DB against this
+ * list and returns the missing columns per table.
+ */
+const EXPECTED_SCHEMA: Record<string, string[]> = {
+  retenciones: [
+    'direction', 'jurisdiction', 'anulled_at', 'anulled_by', 'anulled_reason',
+    'purchase_invoice_id', 'cobro_id', 'invoice_id', 'status',
+  ],
+  pagos: [
+    'anulled_at', 'anulled_by', 'anulled_reason', 'total_amount', 'status',
+    'business_unit_id',
+  ],
+  cheques: ['direction', 'issuer_type', 'drawer_cuit'],
+  purchase_invoices: [
+    'is_credit_note', 'related_invoice_id', 'status', 'cancellation_reason',
+    'cancelled_at', 'cancelled_by',
+  ],
+  purchases: ['business_unit_id'],
+};
 
 export class AdminController {
   async getAllCompanies(req: AuthRequest, res: Response) {
@@ -327,6 +351,41 @@ export class AdminController {
         return res.status(error.statusCode).json({ error: error.message });
       }
       res.status(500).json({ error: 'Error al obtener dashboard de seguridad' });
+    }
+  }
+
+  /**
+   * Schema diagnostic: returns per-table list of expected columns that are
+   * currently MISSING from the live database. Used to diagnose production
+   * 500s caused by silently-failed ALTER TABLE migrations (PR7-T20).
+   *
+   * Route is mounted under /api/admin which already enforces superadmin.
+   */
+  async getSchemaCheck(_req: AuthRequest, res: Response) {
+    try {
+      const report: Record<string, { expected: string[]; present: string[]; missing: string[] }> = {};
+      let anyMissing = false;
+
+      for (const [table, expectedCols] of Object.entries(EXPECTED_SCHEMA)) {
+        const result = await pool.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1`,
+          [table],
+        );
+        const present = (result.rows || []).map((r: any) => r.column_name as string);
+        const missing = expectedCols.filter((c) => !present.includes(c));
+        if (missing.length > 0) anyMissing = true;
+        report[table] = { expected: expectedCols, present, missing };
+      }
+
+      res.json({
+        ok: !anyMissing,
+        tables: report,
+        checked_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('[ADMIN schema-check] error:', error);
+      res.status(500).json({ error: 'Error al verificar esquema de base de datos' });
     }
   }
 }

@@ -82,6 +82,9 @@ vi.mock('../../src/config/db', () => ({
       release: (...args: any[]) => mockClientRelease(...args),
     })),
   },
+  // PR7-T20 postmortem helper — in tests, default to silent no-op so migration
+  // calls in service.ensureMigrations() don't consume mockDbExecute queues.
+  tryMig: vi.fn(async (_sql: string, _label: string) => true),
 }))
 
 // Mock uuid to return deterministic values

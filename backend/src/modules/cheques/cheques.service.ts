@@ -1,4 +1,4 @@
-import { db, pool } from '../../config/db';
+import { db, pool, tryMig } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -59,17 +59,17 @@ export class ChequesService {
   async ensureMigrations() {
     if (this.migrationsRun) return;
     try {
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cheque_type VARCHAR(50) DEFAULT 'comun'`).catch(() => {});
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS drawer_cuit VARCHAR(20)`).catch(() => {});
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`).catch(() => {});
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cheque_type VARCHAR(50) DEFAULT 'comun'`, 'cheques.cheque_type');
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS drawer_cuit VARCHAR(20)`, 'cheques.drawer_cuit');
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`, 'cheques.cobro_id');
       // Outgoing (emitido) lifecycle support
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'recibido'`).catch(() => {});
-      await db.execute(sql`UPDATE cheques SET direction = 'recibido' WHERE direction IS NULL`).catch(() => {});
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'recibido'`, 'cheques.direction');
+      await tryMig(`UPDATE cheques SET direction = 'recibido' WHERE direction IS NULL`, 'cheques.direction backfill');
       // issuer_type: 'propio' (we issued it, for emitido) | 'tercero' (customer issued, for recibido)
-      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS issuer_type VARCHAR(10)`).catch(() => {});
-      await db.execute(sql`UPDATE cheques SET issuer_type = CASE WHEN direction = 'emitido' THEN 'propio' ELSE 'tercero' END WHERE issuer_type IS NULL`).catch(() => {});
+      await tryMig(`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS issuer_type VARCHAR(10)`, 'cheques.issuer_type');
+      await tryMig(`UPDATE cheques SET issuer_type = CASE WHEN direction = 'emitido' THEN 'propio' ELSE 'tercero' END WHERE issuer_type IS NULL`, 'cheques.issuer_type backfill');
       // Unique (company_id, bank, number, direction) — excluding anulado so reissues are allowed
-      await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_cheques_bank_number_dir ON cheques(company_id, bank, number, direction) WHERE status != 'anulado'`).catch(() => {});
+      await tryMig(`CREATE UNIQUE INDEX IF NOT EXISTS uq_cheques_bank_number_dir ON cheques(company_id, bank, number, direction) WHERE status != 'anulado'`, 'uq_cheques_bank_number_dir');
       this.migrationsRun = true;
     } catch (error) {
       console.error('Cheques migrations error:', error);

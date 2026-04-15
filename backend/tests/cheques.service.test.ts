@@ -11,16 +11,11 @@ describe('ChequesService', () => {
     service = new ChequesService()
   })
 
-  function mockMigrations() {
-    mockDbVoid() // ALTER TABLE cheque_type
-    mockDbVoid() // ALTER TABLE drawer_cuit
-    mockDbVoid() // ALTER TABLE cobro_id
-    mockDbVoid() // ALTER TABLE direction
-    mockDbVoid() // UPDATE direction default
-    mockDbVoid() // ALTER TABLE issuer_type
-    mockDbVoid() // UPDATE issuer_type default
-    mockDbVoid() // CREATE UNIQUE INDEX
-  }
+  // PR7-T20 postmortem: cheques.ensureMigrations() now uses the tryMig helper
+  // (mocked in tests/helpers/setup.ts as a no-op) instead of db.execute, so
+  // migration calls no longer consume queued mockDbExecute responses. This
+  // function is kept as a no-op for source-diff minimization at call sites.
+  function mockMigrations() { /* no-op — tryMig is mocked globally */ }
 
   describe('createCheque', () => {
     it('creates cheque with new fields (cheque_type, drawer_cuit)', async () => {

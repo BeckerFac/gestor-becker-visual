@@ -41,3 +41,6 @@ adminRouter.get('/logs/stats', (req, res) => adminController.getLogStats(req as 
 
 // Security monitoring dashboard
 adminRouter.get('/security', (req, res) => adminController.getSecurityDashboard(req as any, res));
+
+// PR7-T20: schema diagnostic — lists missing columns per expected table.
+adminRouter.get('/schema-check', (req, res) => adminController.getSchemaCheck(req as any, res));
