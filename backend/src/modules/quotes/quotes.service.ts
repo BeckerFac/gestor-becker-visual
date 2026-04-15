@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -15,6 +15,8 @@ export class QuotesService {
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id)`).catch(e => console.warn('Migration:', e.message));
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_number INTEGER DEFAULT 0`).catch(e => console.warn('Migration:', e.message));
       await db.execute(sql`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS custom_company_name TEXT`).catch(e => console.warn('Migration:', e.message));
+      // Bug B safety net: prevent duplicate orders from the same accepted quote at the DB level
+      await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_quote_id_unique ON orders(quote_id) WHERE quote_id IS NOT NULL`).catch(e => console.warn('Migration idx_orders_quote_id_unique:', e.message));
       // Fix existing quotes with quote_number = 0 or NULL - assign sequential numbers by company
       await db.execute(sql`
         WITH numbered AS (
@@ -132,42 +134,70 @@ export class QuotesService {
   }
 
   async updateQuoteStatus(companyId: string, quoteId: string, newStatus: string) {
+    const validStatuses = ['draft', 'sent', 'accepted', 'rejected'];
+    if (!validStatuses.includes(newStatus)) {
+      throw new ApiError(400, 'Invalid status');
+    }
+
+    // Bug A: wrap status update + order creation in a single transaction so
+    // a failure inside convertQuoteToOrder rolls back the quote status update.
+    // Bug B: SELECT ... FOR UPDATE locks the row; idempotent short-circuit if
+    // the quote is already in the target status (returns the existing order).
+    const client = await pool.connect();
+    let order: any = null;
+    let alreadyInState = false;
     try {
-      const validStatuses = ['draft', 'sent', 'accepted', 'rejected'];
-      if (!validStatuses.includes(newStatus)) {
-        throw new ApiError(400, 'Invalid status');
+      await client.query('BEGIN');
+
+      const lockResult = await client.query(
+        `SELECT id, status FROM quotes WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+        [quoteId, companyId]
+      );
+      if (lockResult.rows.length === 0) {
+        throw new ApiError(404, 'Quote not found');
       }
+      const currentQuote = lockResult.rows[0];
 
-      // Verify quote belongs to company
-      const result = await db.execute(sql`
-        SELECT id, status FROM quotes WHERE id = ${quoteId} AND company_id = ${companyId}
-      `);
-      const rows = getRows(result);
-      if (rows.length === 0) throw new ApiError(404, 'Quote not found');
-
-      await db.execute(sql`
-        UPDATE quotes SET status = ${newStatus}, updated_at = NOW() WHERE id = ${quoteId}
-      `);
-
-      let order = null;
-      if (newStatus === 'accepted') {
-        order = await this.convertQuoteToOrder(companyId, quoteId);
-      } else if (newStatus === 'rejected') {
-        // Delete any order created from this quote
-        const orderResult = await db.execute(sql`
-          SELECT id FROM orders WHERE quote_id = ${quoteId} AND company_id = ${companyId}
-        `);
-        const orderRows = getRows(orderResult);
-        if (orderRows.length > 0) {
-          const orderId = orderRows[0].id;
-          await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
-          await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
-          await db.execute(sql`UPDATE cheques SET order_id = NULL WHERE order_id = ${orderId}`);
-          await db.execute(sql`DELETE FROM orders WHERE id = ${orderId}`);
+      if (currentQuote.status === newStatus) {
+        // Idempotent: do not re-run side effects. For 'accepted', return the existing order.
+        alreadyInState = true;
+        if (newStatus === 'accepted') {
+          const existingOrder = await client.query(
+            `SELECT id, order_number FROM orders WHERE quote_id = $1 AND company_id = $2 LIMIT 1`,
+            [quoteId, companyId]
+          );
+          order = existingOrder.rows[0] || null;
         }
-      }
+        await client.query('COMMIT');
+      } else {
+        await client.query(
+          `UPDATE quotes SET status = $1, updated_at = NOW() WHERE id = $2`,
+          [newStatus, quoteId]
+        );
 
-      // CRM Pipeline sync: quote status changes
+        if (newStatus === 'accepted') {
+          order = await this.convertQuoteToOrderInTx(client, companyId, quoteId);
+        } else if (newStatus === 'rejected') {
+          // Bug A fix: do NOT cascade-delete orders. Preserve any existing order
+          // (could be from a prior accept) and let the user handle it explicitly.
+          // The previous destructive DELETE path could lose payment history,
+          // cheques links, and audit trails on a simple status flip.
+          console.log(`[quotes] Quote ${quoteId} rejected; preserving any existing order.`);
+        }
+
+        await client.query('COMMIT');
+      }
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      if (e instanceof ApiError) throw e;
+      console.error('updateQuoteStatus error:', e);
+      throw new ApiError(500, 'Failed to update quote status');
+    }
+    client.release();
+
+    // CRM Pipeline sync: quote status changes (only when status actually changed)
+    if (!alreadyInState) {
       try {
         if (newStatus === 'accepted') {
           // Resolve enterprise_id for the quote
@@ -199,17 +229,26 @@ export class QuotesService {
           }
         }
       } catch (e) { console.error('CRM sync error (quote_status):', e); }
-
-      return { quote_id: quoteId, status: newStatus, order };
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to update quote status');
     }
+
+    return { quote_id: quoteId, status: newStatus, order, already: alreadyInState };
   }
 
-  private async convertQuoteToOrder(companyId: string, quoteId: string) {
-    const quote = await this.getQuote(companyId, quoteId);
-    const items = quote.items || [];
+  private async convertQuoteToOrderInTx(client: any, companyId: string, quoteId: string) {
+    // Transactional version. Uses the provided pg client so the work is rolled
+    // back atomically with updateQuoteStatus on any failure.
+    const quoteRes = await client.query(
+      `SELECT q.* FROM quotes q WHERE q.id = $1 AND q.company_id = $2`,
+      [quoteId, companyId]
+    );
+    if (quoteRes.rows.length === 0) throw new ApiError(404, 'Quote not found');
+    const quote: any = quoteRes.rows[0];
+
+    const itemsRes = await client.query(
+      `SELECT * FROM quote_items WHERE quote_id = $1 ORDER BY created_at ASC`,
+      [quoteId]
+    );
+    const items = itemsRes.rows || [];
 
     // PR3-T1: guardrail — no se puede aceptar una cotizacion sin items
     if (items.length === 0) {
@@ -220,12 +259,12 @@ export class QuotesService {
       throw new ApiError(400, 'No se puede aceptar una cotizacion con total $0 o invalido.');
     }
 
-    // Generate order_number
-    const numResult = await db.execute(sql`
-      SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = ${companyId}
-    `);
-    const numRows = getRows(numResult);
-    const orderNumber = parseInt(numRows[0]?.next_number || '1');
+    // Generate order_number (within the same transaction so concurrent accepts serialize)
+    const numResult = await client.query(
+      `SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = $1`,
+      [companyId]
+    );
+    const orderNumber = parseInt(numResult.rows[0]?.next_number || '1');
 
     const orderId = uuid();
     const totalAmount = parseFloat(quote.total_amount || '0');
@@ -233,36 +272,80 @@ export class QuotesService {
     // Resolve enterprise_id
     let enterpriseId = quote.enterprise_id || null;
     if (!enterpriseId && quote.customer_id) {
-      const custResult = await db.execute(sql`SELECT enterprise_id FROM customers WHERE id = ${quote.customer_id}`);
-      const custRows = getRows(custResult);
-      if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
+      const custResult = await client.query(
+        `SELECT enterprise_id FROM customers WHERE id = $1`,
+        [quote.customer_id]
+      );
+      if (custResult.rows[0]?.enterprise_id) enterpriseId = custResult.rows[0].enterprise_id;
     }
 
-    await db.execute(sql`
-      INSERT INTO orders (id, company_id, customer_id, enterprise_id, order_number, title, status, priority, quantity, unit_price, total_amount, vat_rate, payment_status, quote_id, notes, created_by)
-      VALUES (${orderId}, ${companyId}, ${quote.customer_id || null}, ${enterpriseId}, ${orderNumber}, ${quote.title || 'Pedido desde cotización'}, 'pendiente', 'normal', ${1}, ${totalAmount.toString()}, ${totalAmount.toString()}, ${'21'}, 'pendiente', ${quoteId}, ${quote.notes || null}, ${quote.created_by || null})
-    `);
+    await client.query(
+      `INSERT INTO orders (id, company_id, customer_id, enterprise_id, order_number, title, status, priority, quantity, unit_price, total_amount, vat_rate, payment_status, quote_id, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', 'normal', $7, $8, $9, $10, 'pendiente', $11, $12, $13)`,
+      [orderId, companyId, quote.customer_id || null, enterpriseId, orderNumber,
+       quote.title || 'Pedido desde cotización', 1,
+       totalAmount.toString(), totalAmount.toString(), '21',
+       quoteId, quote.notes || null, quote.created_by || null]
+    );
 
     // Copy items
     for (const item of items) {
-      await db.execute(sql`
-        INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal)
-        VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price?.toString() || '0'}, ${'0'}, ${item.subtotal?.toString() || '0'})
-      `);
+      await client.query(
+        `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [uuid(), orderId, item.product_id || null, item.product_name, item.description || null,
+         item.quantity, item.unit_price?.toString() || '0', '0', item.subtotal?.toString() || '0']
+      );
     }
 
     // Record initial status
-    await db.execute(sql`
-      INSERT INTO order_status_history (id, order_id, new_status, notes, changed_by)
-      VALUES (${uuid()}, ${orderId}, 'pendiente', ${'Creado desde cotización #' + (quote.quote_number || '')}, ${quote.created_by || null})
-    `);
+    await client.query(
+      `INSERT INTO order_status_history (id, order_id, new_status, notes, changed_by)
+       VALUES ($1, $2, 'pendiente', $3, $4)`,
+      [uuid(), orderId, 'Creado desde cotización #' + (quote.quote_number || ''), quote.created_by || null]
+    );
 
     return { id: orderId, order_number: orderNumber };
+  }
+
+  // Bug C: validate that referenced entities (enterprise, customer, products) belong
+  // to the caller's company. Without this, a crafted payload with foreign IDs
+  // could create cross-tenant data bleed.
+  private async validateTenantRefs(companyId: string, data: any) {
+    if (data.enterprise_id) {
+      const ent = await db.execute(sql`SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}`);
+      if (getRows(ent).length === 0) {
+        throw new ApiError(400, 'Empresa no encontrada en tu cuenta');
+      }
+    }
+    if (data.customer_id) {
+      const cust = await db.execute(sql`SELECT id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}`);
+      if (getRows(cust).length === 0) {
+        throw new ApiError(400, 'Cliente no encontrado en tu cuenta');
+      }
+    }
+    if (Array.isArray(data.items)) {
+      const productIds: string[] = data.items
+        .map((i: any) => i?.product_id)
+        .filter((pid: any) => typeof pid === 'string' && pid.length > 0);
+      if (productIds.length > 0) {
+        const prods = await db.execute(sql`
+          SELECT id FROM products WHERE id = ANY(${productIds}::uuid[]) AND company_id = ${companyId}
+        `);
+        const found = new Set(getRows(prods).map((r: any) => r.id));
+        for (const pid of productIds) {
+          if (!found.has(pid)) {
+            throw new ApiError(400, `Producto ${pid} no encontrado en tu cuenta`);
+          }
+        }
+      }
+    }
   }
 
   async createQuote(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
     try {
+      await this.validateTenantRefs(companyId, data);
       const quoteId = uuid();
 
       let subtotal = 0;
@@ -329,7 +412,11 @@ export class QuotesService {
 
   async updateQuote(companyId: string, quoteId: string, data: any) {
     await this.ensureMigrations();
+    const client = await pool.connect();
     try {
+      // Bug C: validate tenant refs before doing any work
+      await this.validateTenantRefs(companyId, data);
+
       // Verify quote belongs to company
       const existing = await this.getQuote(companyId, quoteId);
       if (!existing) throw new ApiError(404, 'Quote not found');
@@ -342,17 +429,28 @@ export class QuotesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
-      // Recalculate totals from items
-      let subtotal = 0;
-      let vatAmount = 0;
-      const newItems = data.items || [];
-      for (const item of newItems) {
-        const itemSub = Number(item.unit_price) * Number(item.quantity);
-        const itemVat = itemSub * (Number(item.vat_rate || 21) / 100);
-        subtotal += itemSub;
-        vatAmount += itemVat;
+      // Bug D: only recalc totals from items when items were actually provided.
+      // Otherwise preserve the existing aggregates so a partial PATCH (e.g. { notes })
+      // does not zero them out.
+      const itemsProvided = Array.isArray(data.items);
+      let subtotal: number;
+      let vatAmount: number;
+      let totalAmount: number;
+      if (itemsProvided) {
+        subtotal = 0;
+        vatAmount = 0;
+        for (const item of data.items) {
+          const itemSub = Number(item.unit_price) * Number(item.quantity);
+          const itemVat = itemSub * (Number(item.vat_rate || 21) / 100);
+          subtotal += itemSub;
+          vatAmount += itemVat;
+        }
+        totalAmount = subtotal + vatAmount;
+      } else {
+        subtotal = parseFloat(existing.subtotal || '0');
+        vatAmount = parseFloat(existing.vat_amount || '0');
+        totalAmount = parseFloat(existing.total_amount || '0');
       }
-      const totalAmount = subtotal + vatAmount;
 
       // Calculate valid_until from validity_days if provided
       let validUntil = data.valid_until || existing.valid_until || null;
@@ -362,37 +460,62 @@ export class QuotesService {
         validUntil = d.toISOString().split('T')[0];
       }
 
-      // Update quote record
-      await db.execute(sql`
-        UPDATE quotes SET
-          customer_id = ${data.customer_id || existing.customer_id || null},
-          enterprise_id = ${enterpriseId},
-          title = ${data.title || existing.title || 'Cotizacion'},
-          valid_until = ${validUntil},
-          subtotal = ${subtotal.toString()},
-          vat_amount = ${vatAmount.toString()},
-          total_amount = ${totalAmount.toString()},
-          notes = ${data.notes !== undefined ? data.notes : existing.notes},
-          custom_company_name = ${data.custom_company_name !== undefined ? (data.custom_company_name || null) : existing.custom_company_name || null},
-          updated_at = NOW()
-        WHERE id = ${quoteId} AND company_id = ${companyId}
-      `);
+      // Bug D: wrap UPDATE + items DELETE/INSERT in a transaction so a mid-loop
+      // failure does not leave a half-populated quote.
+      await client.query('BEGIN');
 
-      // Replace items: delete old, insert new
-      await db.execute(sql`DELETE FROM quote_items WHERE quote_id = ${quoteId}`);
-      for (const item of newItems) {
-        const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
-        await db.execute(sql`
-          INSERT INTO quote_items (id, quote_id, product_id, product_name, description, quantity, unit_price, vat_rate, subtotal)
-          VALUES (${uuid()}, ${quoteId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.vat_rate || 21).toString()}, ${itemSubtotal.toString()})
-        `);
+      await client.query(
+        `UPDATE quotes SET
+            customer_id = $1,
+            enterprise_id = $2,
+            title = $3,
+            valid_until = $4,
+            subtotal = $5,
+            vat_amount = $6,
+            total_amount = $7,
+            notes = $8,
+            custom_company_name = $9,
+            updated_at = NOW()
+          WHERE id = $10 AND company_id = $11`,
+        [
+          data.customer_id || existing.customer_id || null,
+          enterpriseId,
+          data.title || existing.title || 'Cotizacion',
+          validUntil,
+          subtotal.toString(),
+          vatAmount.toString(),
+          totalAmount.toString(),
+          data.notes !== undefined ? data.notes : existing.notes,
+          data.custom_company_name !== undefined ? (data.custom_company_name || null) : existing.custom_company_name || null,
+          quoteId,
+          companyId,
+        ]
+      );
+
+      // Bug D: only touch items when explicitly provided. An empty array means
+      // "intentionally clear all items"; undefined means "leave them alone".
+      if (itemsProvided) {
+        await client.query(`DELETE FROM quote_items WHERE quote_id = $1`, [quoteId]);
+        for (const item of data.items) {
+          const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+          await client.query(
+            `INSERT INTO quote_items (id, quote_id, product_id, product_name, description, quantity, unit_price, vat_rate, subtotal)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [uuid(), quoteId, item.product_id || null, item.product_name, item.description || null,
+             item.quantity, item.unit_price.toString(), (item.vat_rate || 21).toString(), itemSubtotal.toString()]
+          );
+        }
       }
 
+      await client.query('COMMIT');
       return { id: quoteId, total_amount: totalAmount };
     } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
       console.error('Update quote error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update quote');
+    } finally {
+      client.release();
     }
   }
 

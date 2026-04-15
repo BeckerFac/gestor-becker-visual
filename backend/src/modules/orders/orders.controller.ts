@@ -48,7 +48,17 @@ export class OrdersController {
   }
 
   async deleteOrder(req: AuthRequest, res: Response) {
-    const data = await ordersService.deleteOrder(req.user!.company_id, req.params.id);
+    // mode: 'hard' (default, backward-compat) | 'soft' (preserva historia para auditoria fiscal).
+    // El query string tiene prioridad sobre el body para que un DELETE simple pueda usar ?mode=soft.
+    const rawMode = (req.query.mode ?? req.body?.mode) as string | undefined;
+    const mode: 'hard' | 'soft' = rawMode === 'soft' ? 'soft' : 'hard';
+    const reason = (req.body?.reason as string | undefined) || undefined;
+    const data = await ordersService.deleteOrder(
+      req.user!.company_id,
+      req.params.id,
+      req.user!.id,
+      { mode, reason }
+    );
     res.json(data);
   }
 

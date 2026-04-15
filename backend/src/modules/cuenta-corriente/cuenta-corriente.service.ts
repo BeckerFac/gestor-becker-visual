@@ -39,11 +39,25 @@ export class CuentaCorrienteService {
         ? sql` AND (co.status IS NULL OR co.status != 'anulado')`
         : sql``;
 
+      // PR7-T16 mirror: detectar pagos.status — mismo patron defensivo que cobros.
+      let pagosStatusExists = true;
+      try {
+        await db.execute(sql`SELECT status FROM pagos LIMIT 1`);
+      } catch {
+        pagosStatusExists = false;
+        console.warn('[cuenta-corriente] pagos.status column missing — anulado filter disabled');
+      }
+      const pagosAnuladoFilterPa = pagosStatusExists
+        ? sql` AND (pa.status IS NULL OR pa.status != 'anulado')`
+        : sql``;
+
       const result = await db.execute(sql`
         SELECT
           e.id, e.name, e.cuit, e.status,
 
           -- Ventas: facturas no canceladas
+          -- NCs excluded from calculations. This is the PR7-T13 semantic: NCs never
+          -- add to revenue nor reduce cobros applied. NCs-as-credit is a separate feature (TODO).
           COALESCE((
             SELECT SUM(CAST(i.total_amount AS decimal))
             FROM invoices i
@@ -51,11 +65,14 @@ export class CuentaCorrienteService {
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.status != 'cancelled'
+              AND i.invoice_type::text NOT LIKE 'NC%'
               ${buFilter}
           ), 0) as total_ventas,
 
           -- Cobros aplicados (via tabla intermedia)
           -- PR7-T5/T16: excluir cobros anulados si la columna status existe.
+          -- NCs excluded: si la application apunta a una NC, NO se cuenta como cobro aplicado.
+          -- Mantiene consistencia con total_ventas (que tampoco las cuenta).
           COALESCE((
             SELECT SUM(CAST(cia.amount_applied AS decimal))
             FROM cobro_invoice_applications cia
@@ -64,6 +81,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.invoice_type::text NOT LIKE 'NC%'
               ${cobrosAnuladoFilter}
               ${buFilter}
           ), 0) as total_cobros_aplicados,
@@ -96,12 +114,16 @@ export class CuentaCorrienteService {
           ), 0) as total_compras,
 
           -- Pagos aplicados (via tabla intermedia)
+          -- Excluir pagos anulados (defensive, mismo patron que cobros).
           COALESCE((
             SELECT SUM(CAST(pia.amount_applied AS decimal))
             FROM pago_invoice_applications pia
             JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+            JOIN pagos pa ON pia.pago_id = pa.id
             WHERE pi.company_id = ${companyId}
               AND pi.enterprise_id = e.id
+              AND pi.status NOT IN ('cancelled', 'cancelado')
+              ${pagosAnuladoFilterPa}
               ${buFilter}
           ), 0) as total_pagos_aplicados,
 
@@ -118,6 +140,7 @@ export class CuentaCorrienteService {
             WHERE pa.company_id = ${companyId}
               AND pa.enterprise_id = e.id
               AND pa.pending_status = 'pending_invoice'
+              ${pagosAnuladoFilterPa}
               ${buFilter}
           ), 0) as total_adelantos_pagos,
 
@@ -252,6 +275,16 @@ export class CuentaCorrienteService {
       if (entCheck.rows.length === 0) throw new ApiError(404, 'Enterprise not found');
       const enterprise = entCheck.rows[0];
 
+      // PR7-T16 mirror: detectar columnas status defensivamente.
+      let cobrosStatusExists = true;
+      try { await pool.query('SELECT status FROM cobros LIMIT 1'); }
+      catch { cobrosStatusExists = false; }
+      let pagosStatusExists = true;
+      try { await pool.query('SELECT status FROM pagos LIMIT 1'); }
+      catch { pagosStatusExists = false; }
+      const cobrosAnuladoFilterC = cobrosStatusExists ? ` AND (c.status IS NULL OR c.status != 'anulado')` : '';
+      const pagosAnuladoFilterP = pagosStatusExists ? ` AND (p.status IS NULL OR p.status != 'anulado')` : '';
+
       // Build dynamic filters with numbered params
       // $1 = enterpriseId, $2 = companyId (used in ALL UNION subqueries)
       const params: (string | undefined)[] = [enterpriseId, companyId];
@@ -284,6 +317,7 @@ export class CuentaCorrienteService {
             i.id as reference_id
           FROM invoices i
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -298,6 +332,7 @@ export class CuentaCorrienteService {
             c.id
           FROM cobros c
           WHERE c.enterprise_id = $1 AND c.company_id = $2
+            ${cobrosAnuladoFilterC}
             ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
 
           UNION ALL
@@ -312,6 +347,7 @@ export class CuentaCorrienteService {
             pi.id
           FROM purchase_invoices pi
           WHERE pi.enterprise_id = $1 AND pi.company_id = $2
+            AND pi.status NOT IN ('cancelled', 'cancelado')
             ${buFilter.replace('business_unit_id', 'pi.business_unit_id')}
 
           UNION ALL
@@ -326,6 +362,7 @@ export class CuentaCorrienteService {
             p.id
           FROM pagos p
           WHERE p.enterprise_id = $1 AND p.company_id = $2
+            ${pagosAnuladoFilterP}
             ${buFilter.replace('business_unit_id', 'p.business_unit_id')}
 
           UNION ALL
@@ -340,6 +377,34 @@ export class CuentaCorrienteService {
             aa.id
           FROM account_adjustments aa
           WHERE aa.enterprise_id = $1 AND aa.company_id = $2
+
+          UNION ALL
+
+          -- Retenciones sufridas: el cliente nos retuvo, reduce lo que nos debe (haber)
+          SELECT
+            COALESCE(r.date, r.created_at) as fecha,
+            'retencion_sufrida' as tipo,
+            COALESCE(r.certificate_number, CAST(r.id AS text)) as nro_comprobante,
+            0::decimal as debe,
+            CAST(COALESCE(r.amount, 0) AS decimal) as haber,
+            'Retencion sufrida ' || COALESCE(UPPER(r.type), '') as descripcion,
+            r.id as reference_id
+          FROM retenciones r
+          WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'sufrida'
+
+          UNION ALL
+
+          -- Retenciones practicadas: nosotros retuvimos al proveedor, reduce lo que le debemos (debe)
+          SELECT
+            COALESCE(r.date, r.created_at) as fecha,
+            'retencion_practicada' as tipo,
+            COALESCE(r.certificate_number, CAST(r.id AS text)) as nro_comprobante,
+            CAST(COALESCE(r.amount, 0) AS decimal) as debe,
+            0::decimal as haber,
+            'Retencion practicada ' || COALESCE(UPPER(r.type), '') as descripcion,
+            r.id as reference_id
+          FROM retenciones r
+          WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'practicada'
         ) movimientos
         WHERE true ${dateFilter}
         ORDER BY fecha ASC, tipo ASC
@@ -393,7 +458,16 @@ export class CuentaCorrienteService {
       const company = ((compCheck as any).rows || [])[0];
       if (!company) throw new ApiError(404, 'Company not found');
 
+      // PR7-T16 mirror: detectar pagos.status defensivamente.
+      let pagosStatusExistsPdf = true;
+      try { await db.execute(sql`SELECT status FROM pagos LIMIT 1`); }
+      catch { pagosStatusExistsPdf = false; }
+      const pagosAnuladoFilterPdf = pagosStatusExistsPdf
+        ? sql` AND (pa.status IS NULL OR pa.status != 'anulado')`
+        : sql``;
+
       // Facturas de venta
+      // NCs excluded from calculations (PR7-T13 semantic, NCs-as-credit es feature aparte).
       let allInvoices: any = { rows: [] };
       try {
         allInvoices = await db.execute(sql`
@@ -405,6 +479,7 @@ export class CuentaCorrienteService {
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
             AND i.status != 'cancelled'
+            AND i.invoice_type::text NOT LIKE 'NC%'
         `);
       } catch (e) { console.error('PDF: invoices query failed', (e as any)?.message); }
 
@@ -417,8 +492,10 @@ export class CuentaCorrienteService {
             CAST(COALESCE(cia.amount_applied, 0) AS decimal) as monto
           FROM cobro_invoice_applications cia
           JOIN cobros co ON cia.cobro_id = co.id
+          JOIN invoices i ON cia.invoice_id = i.id
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
             AND (co.status IS NULL OR co.status != 'anulado')
+            AND i.invoice_type::text NOT LIKE 'NC%'
         `);
       } catch (e) { console.error('PDF: cobros query failed', (e as any)?.message); }
 
@@ -499,7 +576,10 @@ export class CuentaCorrienteService {
             CAST(COALESCE(pia.amount_applied, 0) AS decimal) as monto
           FROM pago_invoice_applications pia
           JOIN pagos pa ON pia.pago_id = pa.id
+          JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
+            AND pi.status NOT IN ('cancelled', 'cancelado')
+            ${pagosAnuladoFilterPdf}
         `);
       } catch (e) { console.error('PDF: pagos query failed', (e as any)?.message); }
 

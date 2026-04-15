@@ -4,9 +4,11 @@ import { captureException } from '../config/sentry';
 import logger from '../config/logger';
 
 export class ApiError extends Error {
-  constructor(public statusCode: number, message: string) {
+  public details?: any;
+  constructor(public statusCode: number, message: string, details?: any) {
     super(message);
     this.name = 'ApiError';
+    this.details = details;
   }
 }
 
@@ -43,6 +45,7 @@ export const errorHandler = (err: Error, req: Request, res: Response, _next: Nex
     return res.status(err.statusCode).json({
       error: err.message,
       requestId,
+      ...(err.details !== undefined ? { details: err.details } : {}),
     });
   }
 

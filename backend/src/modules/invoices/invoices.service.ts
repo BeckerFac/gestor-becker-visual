@@ -709,8 +709,59 @@ export class InvoicesService {
         await db.execute(sql`UPDATE invoices SET fch_vto_pago = ${data.fch_vto_pago}, updated_at = NOW() WHERE id = ${invoiceId}`);
       }
 
+      // PR7-T18 (update path): mirror createInvoice over-invoice defensive check.
+      // BUG: updateDraftInvoice previously skipped this, allowing an attacker to
+      // create an empty draft and PATCH items exceeding order availability.
+      // Key difference vs createInvoice: EXCLUDE the current invoice from the
+      // already-invoiced sum, since its old items are about to be replaced.
+      // Also accumulate per order_item_id to prevent split-bypass in the same request.
+      if (data.items && Array.isArray(data.items)) {
+        const qtyByOrderItem = new Map<string, { qty: number; name: string }>();
+        for (const item of data.items) {
+          if (!item.order_item_id) continue;
+          const q = parseFloat(item.quantity) || 0;
+          const prev = qtyByOrderItem.get(item.order_item_id);
+          qtyByOrderItem.set(item.order_item_id, {
+            qty: (prev?.qty || 0) + q,
+            name: prev?.name || item.product_name || 'Item',
+          });
+        }
+        for (const [orderItemId, agg] of qtyByOrderItem.entries()) {
+          const checkResult = await db.execute(sql`
+            SELECT
+              CAST(oi.quantity AS decimal) as total_qty,
+              COALESCE((
+                SELECT SUM(CAST(ii.quantity AS decimal))
+                FROM invoice_items ii
+                JOIN invoices i ON ii.invoice_id = i.id
+                WHERE ii.order_item_id = ${orderItemId}
+                  AND i.id != ${invoiceId}
+                  AND i.status != 'cancelled'
+                  AND i.invoice_type::text NOT LIKE 'NC%'
+                  AND i.company_id = ${companyId}
+              ), 0) as invoiced_elsewhere
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            WHERE oi.id = ${orderItemId} AND o.company_id = ${companyId}
+          `);
+          const check = ((checkResult as any).rows || [])[0];
+          if (!check) {
+            throw new ApiError(400, `Item de pedido ${orderItemId} no existe o pertenece a otra empresa`);
+          }
+          const available = parseFloat(check.total_qty) - parseFloat(check.invoiced_elsewhere);
+          if (agg.qty > available + 0.01) {
+            throw new ApiError(
+              400,
+              `${agg.name}: solo quedan ${available.toFixed(2)} unidades disponibles para facturar (pediste ${agg.qty}). Ya existen otras facturas que cubren la diferencia.`
+            );
+          }
+        }
+      }
+
       // Update items if provided
       if (data.items && Array.isArray(data.items)) {
+        // Atomic replace: BEGIN -> DELETE old items -> INSERT new items -> COMMIT
+        await db.execute(sql`BEGIN`);
         // Delete existing items
         await db.delete(invoice_items).where(eq(invoice_items.invoice_id, invoiceId));
 
@@ -754,10 +805,13 @@ export class InvoicesService {
             updated_at: new Date(),
           })
           .where(eq(invoices.id, invoiceId));
+
+        await db.execute(sql`COMMIT`);
       }
 
       return await this.getInvoice(companyId, invoiceId);
     } catch (error) {
+      try { await db.execute(sql`ROLLBACK`); } catch { /* not in tx */ }
       if (error instanceof ApiError) throw error;
       console.error('Update draft invoice error:', error);
       throw new ApiError(500, 'Error al actualizar borrador');

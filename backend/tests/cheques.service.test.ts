@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, mockClientQuery, resetMocks } from './helpers/setup'
 
 import { ChequesService } from '../src/modules/cheques/cheques.service'
 
@@ -90,6 +90,14 @@ describe('ChequesService', () => {
 
       const result = await service.updateChequeStatus('company-1', 'cheque-1', 'a_cobrar')
       expect(result.status).toBe('a_cobrar')
+    })
+
+    it('SECURITY: blocks direct transition endosado -> a_cobrar (only deletePago can revert)', async () => {
+      mockDbRows([{ id: 'cheque-1', status: 'endosado' }])
+
+      await expect(
+        service.updateChequeStatus('company-1', 'cheque-1', 'a_cobrar')
+      ).rejects.toThrow('No se puede cambiar de "endosado" a "a_cobrar"')
     })
 
     it('throws error on invalid transition: cobrado -> endosado', async () => {
@@ -288,6 +296,125 @@ describe('ChequesService', () => {
           issue_date: '2025-01-01', due_date: '2025-02-01',
         })
       ).rejects.toThrow('Solo se pueden editar cheques pendientes')
+    })
+  })
+
+  describe('endorseCheque (double-spending guard)', () => {
+    // Helper: queue client.query responses in order
+    function queueClient(responses: Array<{ rows?: any[]; rowCount?: number }>) {
+      for (const r of responses) {
+        mockClientQuery.mockResolvedValueOnce({ rows: r.rows || [], rowCount: r.rowCount ?? (r.rows?.length || 0) })
+      }
+    }
+
+    it('endoses a cheque in a_cobrar successfully (locked path)', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: null }] }, // SELECT FOR UPDATE
+        { rows: [{ id: 'ent-1' }] }, // SELECT enterprise
+        { rowCount: 1 }, // INSERT pago
+        { rowCount: 1 }, // UPDATE cheque
+        { rowCount: 1 }, // INSERT history
+        { rows: [] }, // COMMIT
+      ])
+
+      const result = await service.endorseCheque('company-1', 'user-1', 'ch-1', {
+        enterprise_id: 'ent-1',
+        amount: 50000,
+      })
+
+      expect(result.cheque_status).toBe('endosado')
+      expect(result.amount_paid).toBe(50000)
+      // Verify FOR UPDATE lock was used
+      const lockCall = mockClientQuery.mock.calls.find((c: any[]) => typeof c[0] === 'string' && c[0].includes('FOR UPDATE'))
+      expect(lockCall).toBeDefined()
+      // Verify BEGIN/COMMIT
+      const sqls = mockClientQuery.mock.calls.map((c: any[]) => c[0])
+      expect(sqls).toContain('BEGIN')
+      expect(sqls).toContain('COMMIT')
+    })
+
+    it('rejects endoso when cheque not in a_cobrar (already endorsed)', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'endosado', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: 'pago-existing' }] }, // SELECT FOR UPDATE
+        { rows: [] }, // ROLLBACK
+      ])
+
+      await expect(
+        service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      ).rejects.toThrow(/no disponible para endosar/)
+    })
+
+    it('rejects endoso when endorsed_pago_id already set (defense in depth)', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: 'pago-existing' }] },
+        { rows: [] }, // ROLLBACK
+      ])
+
+      await expect(
+        service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      ).rejects.toThrow(/ya endosado/)
+    })
+
+    it('rejects when UPDATE cheques affects 0 rows (race lost)', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: null }] },
+        { rows: [{ id: 'ent-1' }] },
+        { rowCount: 1 }, // INSERT pago
+        { rowCount: 0 }, // UPDATE cheque -> 0 rows (lost the race somehow)
+        { rows: [] }, // ROLLBACK
+      ])
+
+      await expect(
+        service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      ).rejects.toThrow(/ya fue endosado/)
+    })
+
+    it('rejects when amount > cheque amount', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '10000', number: '12345', business_unit_id: null, endorsed_pago_id: null }] },
+        { rows: [] }, // ROLLBACK
+      ])
+
+      await expect(
+        service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      ).rejects.toThrow(/insuficiente/)
+    })
+
+    it('SECURITY: serial endorseCheque calls — second call sees endosado and rejects', async () => {
+      mockMigrations()
+      // First call: full success path
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: null }] },
+        { rows: [{ id: 'ent-1' }] },
+        { rowCount: 1 }, // INSERT pago
+        { rowCount: 1 }, // UPDATE cheque
+        { rowCount: 1 }, // INSERT history
+        { rows: [] }, // COMMIT
+      ])
+      // Second call: lock now sees status='endosado'
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'endosado', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: '00000000-0000-0000-0000-000000000001' }] },
+        { rows: [] }, // ROLLBACK
+      ])
+
+      const r1 = await service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      expect(r1.cheque_status).toBe('endosado')
+
+      await expect(
+        service.endorseCheque('company-1', 'user-2', 'ch-1', { enterprise_id: 'ent-2', amount: 50000 })
+      ).rejects.toThrow(/no disponible para endosar/)
     })
   })
 })

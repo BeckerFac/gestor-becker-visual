@@ -361,27 +361,62 @@ export class CobroApplicationsService {
    */
   async recalculateInvoicePaymentStatus(invoiceId: string) {
     try {
-      // PR7-T5: excluir applications de cobros anulados del calculo.
+      // Bug fix: incluir retenciones sufridas + epsilon de 1 centavo en el calculo.
+      // Antes: solo sumaba cobro_invoice_applications.amount_applied, dejando
+      // facturas como "parcial" para siempre (ej. $100k cash + $21k retencion
+      // sobre factura $121k). Ahora suma cash + retenciones (no anuladas).
+      //
+      // Las retenciones se vinculan a la factura por dos caminos:
+      //   1. Directo: retenciones.invoice_id = invoiceId
+      //   2. Via cobro: retenciones.cobro_id -> cobro_invoice_applications.invoice_id
+      //      (solo si invoice_id IS NULL, para evitar doble-conteo con el path 1)
+      //
+      // PR7-T5: cobros anulados (c.status='anulado') quedan excluidos de ambos paths.
       const result = await db.execute(sql`
         SELECT
           CAST(i.total_amount AS decimal) as total,
-          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
+          COALESCE((
+            SELECT SUM(CAST(cia.amount_applied AS decimal))
+            FROM cobro_invoice_applications cia
+            JOIN cobros c ON c.id = cia.cobro_id
+            WHERE cia.invoice_id = i.id
+              AND (c.status IS NULL OR c.status != 'anulado')
+          ), 0) as applied_cash,
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM retenciones r
+            LEFT JOIN cobros c2 ON c2.id = r.cobro_id
+            WHERE r.invoice_id = i.id
+              AND r.direction = 'sufrida'
+              AND (c2.status IS NULL OR c2.status != 'anulado')
+          ), 0) as retenciones_total,
+          COALESCE((
+            SELECT SUM(CAST(r2.amount AS decimal))
+            FROM retenciones r2
+            JOIN cobros c3 ON c3.id = r2.cobro_id
+            JOIN cobro_invoice_applications cia2 ON cia2.cobro_id = c3.id
+            WHERE cia2.invoice_id = i.id
+              AND r2.direction = 'sufrida'
+              AND r2.invoice_id IS NULL
+              AND (c3.status IS NULL OR c3.status != 'anulado')
+          ), 0) as retenciones_via_cobro
         FROM invoices i
-        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
-        LEFT JOIN cobros c ON cia.cobro_id = c.id
         WHERE i.id = ${invoiceId}
-          AND (c.status IS NULL OR c.status != 'anulado')
-        GROUP BY i.id, i.total_amount
       `);
       const row = ((result as any).rows || [])[0];
       if (!row) return;
 
-      const total = parseFloat(row.total);
-      const applied = parseFloat(row.applied);
+      const total = parseFloat(row.total || '0');
+      const applied =
+        parseFloat(row.applied_cash || '0') +
+        parseFloat(row.retenciones_total || '0') +
+        parseFloat(row.retenciones_via_cobro || '0');
 
+      // Epsilon de 1 centavo para tolerar redondeo de DECIMAL/float.
+      const EPSILON = 0.01;
       let status = 'pendiente';
-      if (applied >= total && total > 0) status = 'pagado';
-      else if (applied > 0) status = 'parcial';
+      if (total > 0 && applied + EPSILON >= total) status = 'pagado';
+      else if (applied > EPSILON) status = 'parcial';
 
       await db.execute(sql`
         UPDATE invoices SET payment_status = ${status} WHERE id = ${invoiceId}

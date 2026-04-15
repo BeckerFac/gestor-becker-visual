@@ -4,6 +4,7 @@ import { invoices, invoice_items, customers, products } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { ApiError } from '../../middlewares/errorHandler'
 import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape'
+import { generateQrPngDataUrl } from '../../lib/qr-afip'
 
 const INVOICE_TYPE_MAP: Record<string, number> = {
   'A': 1, 'B': 6, 'C': 11,
@@ -77,10 +78,23 @@ export class PdfService {
           })
         : null
 
+      // Pre-compute AFIP QR as a local PNG data URL (no third-party HTTP).
+      // invoice.qr_code already contains the AFIP-spec URL produced by
+      // afip.service.ts -> generateQrData (RG AFIP 4291).
+      let qrDataUrl = ''
+      if (invoice.qr_code) {
+        try {
+          qrDataUrl = await generateQrPngDataUrl(invoice.qr_code)
+        } catch (e) {
+          console.error('[pdf.service] AFIP QR generation failed:', e)
+          // Don't break PDF generation; emit without QR (incident logged).
+        }
+      }
+
       // Generate HTML — bifurcate between fiscal and internal voucher
       const html = invoice.fiscal_type === 'interno'
         ? this.generateInternalVoucherHtml({ invoice, items, customer, company: input })
-        : this.generateInvoiceHtml({ invoice, items, customer, company: input })
+        : this.generateInvoiceHtml({ invoice, items, customer, company: input, qrDataUrl })
 
       // Convert to PDF using Puppeteer
       if (!this.browser) {
@@ -119,7 +133,7 @@ export class PdfService {
   }
 
   private generateInvoiceHtml(data: any): string {
-    const { invoice, items, customer, company } = data
+    const { invoice, items, customer, company, qrDataUrl } = data
 
     // Escape all user-controlled strings to prevent HTML injection in PDFs
     const esc = this.escapeHtml.bind(this)
@@ -383,10 +397,9 @@ export class PdfService {
       <div class="cae-number">${invoice.cae}</div>
       <div class="cae-exp">Fecha de Vto. de CAE: ${caeExpiry}</div>
     </div>
-    ${invoice.qr_code ? `
+    ${qrDataUrl ? `
     <div>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(invoice.qr_code)}"
-           alt="QR AFIP" width="100" height="100" />
+      <img src="${qrDataUrl}" alt="QR AFIP" width="100" height="100" />
     </div>
     ` : ''}
   </div>

@@ -813,19 +813,50 @@ export class OrdersService {
     }
   }
 
-  async deleteOrder(companyId: string, orderId: string) {
+  /**
+   * deleteOrder — guardrails de integridad fiscal.
+   *
+   * Rechaza (409 Conflict) si el pedido tiene:
+   *   - facturas AUTORIZADAS (CAE) via FK legacy `invoices.order_id` o N:N `invoice_orders`
+   *   - cobros aplicados (cobro_invoice_applications) sobre cualquiera de esas facturas
+   *   - remitos no anulados via FK legacy o N:N `remito_orders`
+   *
+   * Permite borrar:
+   *   - Si solo hay facturas DRAFT (sin CAE): se cascade-borran junto al pedido.
+   *   - Si no hay deps: hard-delete completo.
+   *
+   * Modos:
+   *   - mode='hard' (default, backward-compat): DELETE fisico de orders, items, history.
+   *   - mode='soft': UPDATE orders.status='cancelado' preservando historia para auditoria.
+   *
+   * Toda la operacion va dentro de una transaccion BEGIN/COMMIT/ROLLBACK.
+   */
+  async deleteOrder(
+    companyId: string,
+    orderId: string,
+    userId?: string,
+    opts: { mode?: 'hard' | 'soft'; reason?: string } = {}
+  ) {
+    const mode = opts.mode === 'soft' ? 'soft' : 'hard';
     try {
+      // Pedido existe?
       const orderResult = await db.execute(sql`
         SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
       `);
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Pedido no encontrado');
 
-      // PR3-T2: guardrails explicitos antes de borrar
-      // La FK de remito_orders es ON DELETE RESTRICT — intentar borrar sin
-      // chequear devolvia error 500 generico. Ahora devuelve 409 con mensaje.
+      // ============================================================
+      // CHECK 1 — Remitos (legacy FK + N:N remito_orders).
+      // ============================================================
       const remitosCheck = await db.execute(sql`
-        SELECT COUNT(*)::int as cnt FROM remito_orders WHERE order_id = ${orderId}
+        SELECT COUNT(*)::int as cnt FROM remitos r
+        WHERE r.company_id = ${companyId}
+          AND (
+            r.order_id = ${orderId}
+            OR r.id IN (SELECT remito_id FROM remito_orders WHERE order_id = ${orderId})
+          )
+          AND (r.status IS NULL OR r.status != 'anulado')
       `);
       const remitoCount = Number(((remitosCheck as any).rows || [])[0]?.cnt || 0);
       if (remitoCount > 0) {
@@ -834,28 +865,152 @@ export class OrdersService {
           `No se puede eliminar el pedido: tiene ${remitoCount} remito(s) asociado(s). Anula los remitos primero.`
         );
       }
-      // Tambien chequear facturas no-canceladas
+
+      // ============================================================
+      // CHECK 2 — Facturas (legacy FK + N:N invoice_orders).
+      // Diferenciar AUTORIZADAS (con CAE) de DRAFTS.
+      // ============================================================
       const invCheck = await db.execute(sql`
-        SELECT COUNT(*)::int as cnt FROM invoices
-        WHERE order_id = ${orderId} AND company_id = ${companyId}
-          AND status NOT IN ('cancelled')
+        WITH linked_invoices AS (
+          SELECT DISTINCT i.id, i.invoice_number, i.invoice_type, i.status, i.cae, i.fiscal_type
+          FROM invoices i
+          WHERE i.company_id = ${companyId}
+            AND (
+              i.order_id = ${orderId}
+              OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+            )
+            AND i.status != 'cancelled'
+        )
+        SELECT
+          COUNT(*) FILTER (WHERE cae IS NOT NULL AND cae != '' OR status IN ('authorized','emitido'))::int as authorized_count,
+          COUNT(*) FILTER (WHERE (cae IS NULL OR cae = '') AND status = 'draft')::int as draft_count,
+          COALESCE(json_agg(json_build_object('id', id, 'number', invoice_number, 'type', invoice_type, 'status', status) ORDER BY invoice_number)
+            FILTER (WHERE id IS NOT NULL), '[]'::json) as details
+        FROM linked_invoices
       `);
-      const invCount = Number(((invCheck as any).rows || [])[0]?.cnt || 0);
-      if (invCount > 0) {
+      const invRow = ((invCheck as any).rows || [])[0] || {};
+      const authorizedCount = Number(invRow.authorized_count || 0);
+      const draftCount = Number(invRow.draft_count || 0);
+      const invDetails = invRow.details || [];
+
+      if (authorizedCount > 0) {
+        const authDetails = (Array.isArray(invDetails) ? invDetails : [])
+          .filter((d: any) => (d.status === 'authorized' || d.status === 'emitido'));
         throw new ApiError(
           409,
-          `No se puede eliminar el pedido: tiene ${invCount} factura(s) asociada(s). Cancela las facturas primero.`
+          `No se puede eliminar: el pedido tiene ${authorizedCount} factura(s) autorizada(s) con CAE. Emita Nota de Credito antes de intentar anular.`,
+          { authorized_invoices: authDetails }
         );
       }
 
-      await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
-      await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
-      await db.execute(sql`UPDATE cheques SET order_id = NULL WHERE order_id = ${orderId}`);
-      await db.execute(sql`DELETE FROM orders WHERE id = ${orderId} AND company_id = ${companyId}`);
+      // ============================================================
+      // CHECK 3 — Cobros aplicados a cualquier factura del pedido.
+      // ============================================================
+      const cobrosCheck = await db.execute(sql`
+        SELECT COUNT(*)::int as cnt
+        FROM cobro_invoice_applications cia
+        JOIN invoices inv ON inv.id = cia.invoice_id
+        JOIN cobros c ON c.id = cia.cobro_id
+        WHERE inv.company_id = ${companyId}
+          AND (
+            inv.order_id = ${orderId}
+            OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+          )
+          AND (c.status IS NULL OR c.status != 'anulado')
+      `);
+      const cobroCount = Number(((cobrosCheck as any).rows || [])[0]?.cnt || 0);
+      if (cobroCount > 0) {
+        throw new ApiError(
+          409,
+          `No se puede eliminar el pedido: tiene ${cobroCount} cobro(s) aplicado(s). Anula los cobros primero.`
+        );
+      }
 
-      return { id: orderId, deleted: true };
+      // ============================================================
+      // SOFT MODE — Marcar como cancelado, preservar todo.
+      // ============================================================
+      if (mode === 'soft') {
+        // Asegurar columnas de auditoria de cancelacion (idempotente).
+        await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE`).catch(() => {});
+        await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by UUID`).catch(() => {});
+        await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`).catch(() => {});
+
+        await db.execute(sql`BEGIN`);
+        try {
+          await db.execute(sql`
+            UPDATE orders
+            SET status = 'cancelado',
+                cancelled_at = NOW(),
+                cancelled_by = ${userId || null},
+                cancellation_reason = ${opts.reason || null},
+                updated_at = NOW()
+            WHERE id = ${orderId} AND company_id = ${companyId}
+          `);
+          await db.execute(sql`COMMIT`);
+        } catch (e) {
+          await db.execute(sql`ROLLBACK`).catch(() => {});
+          throw e;
+        }
+        return { id: orderId, cancelled: true, mode: 'soft' as const };
+      }
+
+      // ============================================================
+      // HARD MODE — Borrado fisico completo, dentro de transaccion.
+      // ============================================================
+      await db.execute(sql`BEGIN`);
+      try {
+        // Borrar drafts vinculados (no fiscales) si los hay.
+        if (draftCount > 0) {
+          // Items de facturas draft vinculadas via legacy o N:N.
+          await db.execute(sql`
+            DELETE FROM invoice_items
+            WHERE invoice_id IN (
+              SELECT i.id FROM invoices i
+              WHERE i.company_id = ${companyId}
+                AND (
+                  i.order_id = ${orderId}
+                  OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+                )
+                AND (i.cae IS NULL OR i.cae = '') AND i.status = 'draft'
+            )
+          `);
+          // Filas de N:N invoice_orders.
+          await db.execute(sql`
+            DELETE FROM invoice_orders
+            WHERE order_id = ${orderId}
+              AND invoice_id IN (
+                SELECT id FROM invoices
+                WHERE company_id = ${companyId}
+                  AND (cae IS NULL OR cae = '') AND status = 'draft'
+              )
+          `);
+          // Las facturas draft propias.
+          await db.execute(sql`
+            DELETE FROM invoices
+            WHERE company_id = ${companyId}
+              AND (
+                order_id = ${orderId}
+                OR id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+              )
+              AND (cae IS NULL OR cae = '') AND status = 'draft'
+          `);
+        }
+
+        await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
+        await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
+        await db.execute(sql`UPDATE cheques SET order_id = NULL WHERE order_id = ${orderId}`);
+        await db.execute(sql`DELETE FROM orders WHERE id = ${orderId} AND company_id = ${companyId}`);
+
+        await db.execute(sql`COMMIT`);
+      } catch (e) {
+        await db.execute(sql`ROLLBACK`).catch(() => {});
+        throw e;
+      }
+
+      return { id: orderId, deleted: true, mode: 'hard' as const };
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      console.error('Delete order error:', error);
       throw new ApiError(500, 'Failed to delete order');
     }
   }

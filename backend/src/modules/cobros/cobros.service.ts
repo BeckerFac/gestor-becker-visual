@@ -241,6 +241,22 @@ export class CobrosService {
     // B.1.4: summaryMethod for the cobro header
     const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
 
+    // Bug B fix: validar bank_id (top-level + por payment method) pertenezca a la company.
+    // Previene IDOR donde un user de otra company referencia un banco ajeno.
+    const bankIdsToCheck = new Set<string>();
+    if (data.bank_id) bankIdsToCheck.add(data.bank_id);
+    for (const pm of paymentMethods) {
+      if (pm.bank_id) bankIdsToCheck.add(pm.bank_id);
+    }
+    for (const bankId of bankIdsToCheck) {
+      const bankCheck = await db.execute(sql`
+        SELECT id FROM banks WHERE id = ${bankId} AND company_id = ${companyId}
+      `);
+      if (((bankCheck as any).rows || []).length === 0) {
+        throw new ApiError(400, `Banco ${bankId} no pertenece a esta empresa`);
+      }
+    }
+
     // Integridad financiera: si viene invoice_id legacy directo, validar que no este pagada.
     if (data.invoice_id) {
       const invCheck = await db.execute(sql`
@@ -344,16 +360,26 @@ export class CobrosService {
         }
       }
 
-      // B.1.5: Create cheques for each payment method that is cheque
+      // B.1.5: Create cheques for each payment method that is cheque.
+      // Bug A fix: usar las columnas reales de la tabla cheques (number, bank, drawer,
+      // drawer_cuit, cheque_type, due_date) en vez de los nombres legacy inexistentes
+      // (cheque_number, bank_name, issuer_name, issuer_cuit, payment_date, tipo).
+      // Mirror del INSERT correcto en receipts.service.ts:280.
       for (const pm of paymentMethods) {
         if (pm.method === 'cheque' && pm.cheque_data) {
+          const cd = pm.cheque_data;
           await db.execute(sql`
-            INSERT INTO cheques (company_id, enterprise_id, cobro_id, cheque_number, bank_name,
-              amount, issue_date, payment_date, issuer_name, issuer_cuit, status, tipo, business_unit_id)
-            VALUES (${companyId}, ${data.enterprise_id}, ${cobroId}, ${pm.cheque_data.number},
-              ${pm.cheque_data.bank}, ${pm.amount}, ${pm.cheque_data.issue_date},
-              ${pm.cheque_data.due_date}, ${pm.cheque_data.drawer}, ${pm.cheque_data.drawer_cuit || null},
-              'a_cobrar', ${pm.cheque_data.cheque_type || 'comun'}, ${data.business_unit_id || null})
+            INSERT INTO cheques (
+              id, company_id, number, bank, drawer, drawer_cuit, cheque_type,
+              amount, issue_date, due_date, status, cobro_id, business_unit_id, created_by
+            )
+            VALUES (
+              ${uuid()}, ${companyId}, ${cd.number}, ${cd.bank}, ${cd.drawer},
+              ${cd.drawer_cuit || null}, ${cd.cheque_type || 'comun'},
+              ${pm.amount.toString()},
+              ${new Date(cd.issue_date)}, ${new Date(cd.due_date)},
+              'a_cobrar', ${cobroId}, ${data.business_unit_id || null}, ${userId}
+            )
           `);
         }
       }
@@ -372,27 +398,91 @@ export class CobrosService {
           }
         }
 
-        // Integridad financiera: bloquear cobros sobre facturas ya 100% pagadas.
-        for (const invoiceId of invoiceTotals.keys()) {
+        // Bug B fix: validar cada factura DENTRO de la transaccion con FOR UPDATE.
+        // Esto previene la race condition donde dos cobros concurrentes pagaban
+        // la misma factura dos veces. Tambien valida tenant, status, NC, balance.
+        const NC_TYPES = ['NC_A', 'NC_B', 'NC_C', 'NC_E'];
+        for (const [invoiceId, applyAmount] of invoiceTotals.entries()) {
           const invCheck = await db.execute(sql`
-            SELECT invoice_number, invoice_type, payment_status
-            FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
+            SELECT id, enterprise_id, business_unit_id, status, payment_status,
+                   invoice_type, invoice_number, total_amount, currency
+            FROM invoices
+            WHERE id = ${invoiceId} AND company_id = ${companyId}
+            FOR UPDATE
           `);
           const invRow = ((invCheck as any).rows || [])[0];
-          if (invRow && invRow.payment_status === 'pagado') {
+          if (!invRow) {
+            throw new ApiError(404, `Factura ${invoiceId} no encontrada`);
+          }
+
+          // V1: invoice not cancelled
+          if (invRow.status === 'cancelled') {
+            throw new ApiError(400, `No se puede vincular cobro a factura cancelada (${invRow.invoice_number})`);
+          }
+
+          // V2: not a credit note
+          if (invRow.invoice_type && NC_TYPES.includes(invRow.invoice_type)) {
+            throw new ApiError(400, `No se pueden aplicar cobros a Notas de Credito (${invRow.invoice_type} ${invRow.invoice_number})`);
+          }
+
+          // V3: same enterprise (tenant + IDOR)
+          if (data.enterprise_id && invRow.enterprise_id && invRow.enterprise_id !== data.enterprise_id) {
+            throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otro cliente`);
+          }
+
+          // V4: same business unit
+          if (data.business_unit_id && invRow.business_unit_id && invRow.business_unit_id !== data.business_unit_id) {
+            throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otra razon social`);
+          }
+
+          // V5: not already fully paid
+          if (invRow.payment_status === 'pagado') {
             throw new ApiError(
               400,
               `La factura ${invRow.invoice_type} ${invRow.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
             );
           }
+
+          // V6: do not exceed remaining balance.
+          // remaining = total - sum(applied de cobros NO anulados) - sum(retenciones sufridas NO anuladas)
+          const balanceRes = await db.execute(sql`
+            SELECT
+              CAST(${invRow.total_amount} AS decimal) as total,
+              COALESCE((
+                SELECT SUM(CAST(cia.amount_applied AS decimal))
+                FROM cobro_invoice_applications cia
+                JOIN cobros c ON c.id = cia.cobro_id
+                WHERE cia.invoice_id = ${invoiceId}
+                  AND (c.status IS NULL OR c.status != 'anulado')
+              ), 0) as applied_cash,
+              COALESCE((
+                SELECT SUM(CAST(r.amount AS decimal))
+                FROM retenciones r
+                LEFT JOIN cobros c2 ON c2.id = r.cobro_id
+                WHERE r.invoice_id = ${invoiceId}
+                  AND r.direction = 'sufrida'
+                  AND (c2.status IS NULL OR c2.status != 'anulado')
+              ), 0) as retenciones_total
+          `);
+          const balRow = ((balanceRes as any).rows || [])[0];
+          const totalInv = parseFloat(balRow?.total || '0');
+          const alreadyApplied = parseFloat(balRow?.applied_cash || '0') + parseFloat(balRow?.retenciones_total || '0');
+          const remaining = totalInv - alreadyApplied;
+          if (applyAmount > remaining + 0.01) {
+            throw new ApiError(
+              400,
+              `La factura ${invRow.invoice_number} solo tiene $${remaining.toFixed(2)} pendiente. Estas intentando aplicar $${applyAmount.toFixed(2)}.`
+            );
+          }
         }
 
-        // Create invoice-level applications from totals + cascade to orders
+        // Create invoice-level applications from totals + cascade to orders.
+        // Bug B fix: removido ON CONFLICT DO NOTHING — silenciaba re-bindings.
+        // Las validaciones de arriba previenen duplicados legitimos.
         for (const [invoiceId, totalAmount] of invoiceTotals.entries()) {
           await db.execute(sql`
             INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
             VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${totalAmount.toString()}, ${userId})
-            ON CONFLICT (cobro_id, invoice_id) DO NOTHING
           `);
           // Cascade: recalculate invoice → then order
           await this.recalculateInvoicePaymentStatus(invoiceId);
@@ -587,28 +677,58 @@ export class CobrosService {
 
   private async recalculateInvoicePaymentStatus(invoiceId: string) {
     try {
-      // PR7-T5: JOIN con cobros para excluir aplicaciones de cobros anulados.
-      // Antes: LEFT JOIN cobro_invoice_applications sumaba TODO, incluso anulados.
-      // Ahora: solo cuenta cobros con status='activo' o NULL (legacy).
+      // Bug C fix: incluir retenciones sufridas en el calculo de "applied".
+      // Antes: solo sumaba cobro_invoice_applications.amount_applied y dejaba
+      // facturas como "parcial" para siempre (ej. $100k cash + $21k retencion en
+      // factura $121k). Ahora suma cash + retenciones (no anuladas).
+      //
+      // Las retenciones se vinculan a la factura por dos caminos:
+      //   1. Directo: retenciones.invoice_id = invoiceId
+      //   2. Via cobro: retenciones.cobro_id -> cobro_invoice_applications.invoice_id
+      // Hacemos UNION para cubrir ambos casos sin doble-contar.
+      //
+      // PR7-T5: cobros anulados (c.status='anulado') quedan excluidos.
       const result = await db.execute(sql`
         SELECT
           CAST(i.total_amount AS decimal) as total,
-          COALESCE(SUM(CAST(cia.amount_applied AS decimal)), 0) as applied
+          COALESCE((
+            SELECT SUM(CAST(cia.amount_applied AS decimal))
+            FROM cobro_invoice_applications cia
+            JOIN cobros c ON c.id = cia.cobro_id
+            WHERE cia.invoice_id = i.id
+              AND (c.status IS NULL OR c.status != 'anulado')
+          ), 0) as applied_cash,
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM (
+              SELECT DISTINCT r1.id, r1.amount
+              FROM retenciones r1
+              LEFT JOIN cobros c2 ON c2.id = r1.cobro_id
+              WHERE r1.direction = 'sufrida'
+                AND (c2.status IS NULL OR c2.status != 'anulado')
+                AND (
+                  r1.invoice_id = i.id
+                  OR r1.cobro_id IN (
+                    SELECT cia2.cobro_id FROM cobro_invoice_applications cia2
+                    WHERE cia2.invoice_id = i.id
+                  )
+                )
+            ) r
+          ), 0) as retenciones_total
         FROM invoices i
-        LEFT JOIN cobro_invoice_applications cia ON cia.invoice_id = i.id
-        LEFT JOIN cobros c ON cia.cobro_id = c.id
         WHERE i.id = ${invoiceId}
-          AND (c.status IS NULL OR c.status != 'anulado')
-        GROUP BY i.id, i.total_amount
       `);
       const row = ((result as any).rows || [])[0];
       if (!row) return;
 
       const total = parseFloat(row.total);
-      const applied = parseFloat(row.applied);
+      const appliedCash = parseFloat(row.applied_cash || '0');
+      const retencionesTotal = parseFloat(row.retenciones_total || '0');
+      const applied = appliedCash + retencionesTotal;
 
+      // Epsilon de 1 centavo para evitar bugs de float (0.01 tolerance).
       let status = 'pendiente';
-      if (applied >= total && total > 0) status = 'pagado';
+      if (total > 0 && applied + 0.01 >= total) status = 'pagado';
       else if (applied > 0) status = 'parcial';
 
       await db.execute(sql`

@@ -3,6 +3,9 @@ import { vi } from 'vitest'
 // Mock database - all tests run without real DB
 export const mockDbExecute = vi.fn()
 export const mockPoolQuery = vi.fn()
+// Mock client returned by pool.connect() — supports BEGIN/COMMIT/ROLLBACK/SELECT FOR UPDATE.
+export const mockClientQuery = vi.fn()
+export const mockClientRelease = vi.fn()
 
 // Mock drizzle query builder chains
 const mockFindFirst = vi.fn()
@@ -74,7 +77,10 @@ vi.mock('../../src/config/db', () => ({
   },
   pool: {
     query: (...args: any[]) => mockPoolQuery(...args),
-    connect: vi.fn(),
+    connect: vi.fn(async () => ({
+      query: (...args: any[]) => mockClientQuery(...args),
+      release: (...args: any[]) => mockClientRelease(...args),
+    })),
   },
 }))
 
@@ -180,9 +186,11 @@ vi.mock('../../src/db/schema', () => ({
 vi.mock('../../src/middlewares/errorHandler', () => ({
   ApiError: class ApiError extends Error {
     statusCode: number
-    constructor(statusCode: number, message: string) {
+    details?: any
+    constructor(statusCode: number, message: string, details?: any) {
       super(message)
       this.statusCode = statusCode
+      this.details = details
       this.name = 'ApiError'
     }
   },
@@ -227,6 +235,8 @@ export function mockDbVoid() {
 export function resetMocks() {
   mockDbExecute.mockReset()
   mockPoolQuery.mockReset()
+  mockClientQuery.mockReset()
+  mockClientRelease.mockReset()
   uuidCounter = 0
 }
 

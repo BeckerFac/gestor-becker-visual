@@ -260,6 +260,92 @@ describe('InvoicesService', () => {
         service.updateDraftInvoice('company-1', 'nonexistent', {})
       ).rejects.toThrow('Factura no encontrada')
     })
+
+    // PR7-T18 (update path): over-invoice defensive check
+    it('blocks update that would exceed order_item availability (other invoices)', async () => {
+      for (let i = 0; i < 33; i++) mockDbVoid() // migrations
+      mockDbRows([{ id: 'inv-1', status: 'draft' }]) // status check
+      // SELECT availability: total=10, invoiced_elsewhere=4 => available=6
+      mockDbRows([{ total_qty: '10', invoiced_elsewhere: '4' }])
+
+      await expect(
+        service.updateDraftInvoice('company-1', 'inv-1', {
+          items: [
+            { order_item_id: 'oi-1', product_name: 'Widget', unit_price: 100, quantity: 7, vat_rate: 21 },
+          ],
+        })
+      ).rejects.toThrow(/solo quedan 6\.00 unidades disponibles/)
+    })
+
+    it('allows update at exact boundary (available == requesting)', async () => {
+      for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbRows([{ id: 'inv-1', status: 'draft' }])
+      // total=10, invoiced_elsewhere=4 => available=6, requesting=6 OK
+      mockDbRows([{ total_qty: '10', invoiced_elsewhere: '4' }])
+      mockDbVoid() // BEGIN
+      mockDbVoid() // UPDATE invoice_items SET order_item_id (one item)
+      mockDbVoid() // COMMIT
+      // getInvoice: main + items
+      mockDbRows([{ id: 'inv-1', status: 'draft' }])
+      mockDbRows([])
+
+      const result = await service.updateDraftInvoice('company-1', 'inv-1', {
+        items: [
+          { order_item_id: 'oi-1', product_name: 'Widget', unit_price: 100, quantity: 6, vat_rate: 21 },
+        ],
+      })
+      expect(result).toBeDefined()
+    })
+
+    it('excludes current invoice from availability sum (own old items dont count)', async () => {
+      for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbRows([{ id: 'inv-1', status: 'draft' }])
+      // The SQL excludes i.id != invoiceId. Mock returns the value as-if its
+      // contribution was already excluded. total=10, elsewhere=0 => available=10
+      mockDbRows([{ total_qty: '10', invoiced_elsewhere: '0' }])
+      mockDbVoid() // BEGIN
+      mockDbVoid() // UPDATE order_item_id
+      mockDbVoid() // COMMIT
+      mockDbRows([{ id: 'inv-1' }])
+      mockDbRows([])
+
+      const result = await service.updateDraftInvoice('company-1', 'inv-1', {
+        items: [
+          { order_item_id: 'oi-1', product_name: 'Widget', unit_price: 100, quantity: 10, vat_rate: 21 },
+        ],
+      })
+      expect(result).toBeDefined()
+    })
+
+    it('blocks duplicate order_item_id summing over availability (split-bypass)', async () => {
+      for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbRows([{ id: 'inv-1', status: 'draft' }])
+      // total=10, elsewhere=4 => available=6. Two items of qty 4 each = 8 > 6.
+      mockDbRows([{ total_qty: '10', invoiced_elsewhere: '4' }])
+
+      await expect(
+        service.updateDraftInvoice('company-1', 'inv-1', {
+          items: [
+            { order_item_id: 'oi-1', product_name: 'Widget', unit_price: 100, quantity: 4, vat_rate: 21 },
+            { order_item_id: 'oi-1', product_name: 'Widget', unit_price: 100, quantity: 4, vat_rate: 21 },
+          ],
+        })
+      ).rejects.toThrow(/solo quedan 6\.00 unidades disponibles.*pediste 8/)
+    })
+
+    it('throws when order_item belongs to another company', async () => {
+      for (let i = 0; i < 33; i++) mockDbVoid()
+      mockDbRows([{ id: 'inv-1', status: 'draft' }])
+      mockDbEmpty() // SELECT returns no row -> tenant violation
+
+      await expect(
+        service.updateDraftInvoice('company-1', 'inv-1', {
+          items: [
+            { order_item_id: 'oi-foreign', product_name: 'X', unit_price: 1, quantity: 1, vat_rate: 21 },
+          ],
+        })
+      ).rejects.toThrow(/no existe o pertenece a otra empresa/)
+    })
   })
 
   describe('deleteDraftInvoice', () => {

@@ -119,6 +119,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
         `);
@@ -145,6 +146,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${prev.dateFrom}::date
             AND invoice_date::date <= ${prev.dateTo}::date
         `);
@@ -171,6 +173,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
           GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
@@ -197,6 +200,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${prev.dateFrom}::date
             AND invoice_date::date <= ${prev.dateTo}::date
           GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
@@ -224,6 +228,7 @@ export class BusinessService {
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
           GROUP BY ii.product_name
@@ -252,6 +257,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
           GROUP BY EXTRACT(DOW FROM invoice_date)
@@ -314,6 +320,7 @@ export class BusinessService {
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
           GROUP BY ii.product_name, ii.product_id
@@ -361,6 +368,7 @@ export class BusinessService {
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND i.invoice_date::date >= ${prev.dateFrom}::date
             AND i.invoice_date::date <= ${prev.dateTo}::date
         `);
@@ -423,6 +431,7 @@ export class BusinessService {
           LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
             AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
@@ -453,6 +462,7 @@ export class BusinessService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            AND invoice_type::text NOT LIKE 'NC%'
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
         `);
@@ -476,6 +486,7 @@ export class BusinessService {
           FROM invoices i
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
             AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
@@ -498,6 +509,7 @@ export class BusinessService {
             FROM invoices
             WHERE company_id = ${companyId}
               AND status = 'authorized'
+              AND invoice_type::text NOT LIKE 'NC%'
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
@@ -524,6 +536,7 @@ export class BusinessService {
             FROM invoices
             WHERE company_id = ${companyId}
               AND status = 'authorized'
+              AND invoice_type::text NOT LIKE 'NC%'
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
@@ -560,6 +573,7 @@ export class BusinessService {
             FROM invoices i
             WHERE i.company_id = ${companyId}
               AND i.status = 'authorized'
+              AND i.invoice_type::text NOT LIKE 'NC%'
               AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
             GROUP BY COALESCE(i.enterprise_id::text, i.customer_id::text), i.enterprise_id, i.customer_id
             HAVING MAX(i.invoice_date)::date < (CURRENT_DATE - INTERVAL '30 days')
@@ -642,6 +656,7 @@ export class BusinessService {
           FROM invoices i
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
             )
@@ -699,6 +714,7 @@ export class BusinessService {
           JOIN invoices i ON p.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND p.payment_date::date >= ${dates.dateFrom}::date
             AND p.payment_date::date <= ${dates.dateTo}::date
         `);
@@ -719,6 +735,7 @@ export class BusinessService {
           JOIN invoices i ON p.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND p.payment_date::date >= ${prev.dateFrom}::date
             AND p.payment_date::date <= ${prev.dateTo}::date
         `);
@@ -779,6 +796,7 @@ export class BusinessService {
           LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            AND i.invoice_type::text NOT LIKE 'NC%'
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
             )

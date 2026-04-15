@@ -270,6 +270,106 @@ describe('CobroApplicationsService', () => {
     })
   })
 
+  describe('recalculateInvoicePaymentStatus', () => {
+    // Helper: capture all UPDATE invoices SET payment_status calls
+    function setupRecalcMock(row: any) {
+      const captured: { status?: string; sqlContainsRetenciones: boolean; sqlContainsAnuladoFilter: boolean } = {
+        sqlContainsRetenciones: false,
+        sqlContainsAnuladoFilter: false,
+      }
+      mockDbExecute.mockImplementation((...args: any[]) => {
+        const tpl = args[0]
+        const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
+        if (sqlStr.includes('FROM invoices i') && sqlStr.includes('applied_cash')) {
+          captured.sqlContainsRetenciones = sqlStr.includes('retenciones') && sqlStr.includes("direction = 'sufrida'")
+          captured.sqlContainsAnuladoFilter = sqlStr.includes("status != 'anulado'")
+          return Promise.resolve({ rows: [row] })
+        }
+        if (sqlStr.includes('UPDATE invoices SET payment_status')) {
+          // The status value is in tpl.values[0]
+          captured.status = (tpl?.values || [])[0]
+          return Promise.resolve({ rows: [] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+      return captured
+    }
+
+    it('marca pagado: invoice 100k + cobro 100k', async () => {
+      const captured = setupRecalcMock({
+        total: '100000',
+        applied_cash: '100000',
+        retenciones_total: '0',
+        retenciones_via_cobro: '0',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pagado')
+      expect(captured.sqlContainsRetenciones).toBe(true)
+      expect(captured.sqlContainsAnuladoFilter).toBe(true)
+    })
+
+    it('marca pagado: invoice 121k + cobro 100k + retencion sufrida 21k con invoice_id', async () => {
+      const captured = setupRecalcMock({
+        total: '121000',
+        applied_cash: '100000',
+        retenciones_total: '21000',
+        retenciones_via_cobro: '0',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('marca pagado: invoice 121k + cobro 100k + retencion sufrida 21k via cobro_id (sin invoice_id)', async () => {
+      const captured = setupRecalcMock({
+        total: '121000',
+        applied_cash: '100000',
+        retenciones_total: '0',
+        retenciones_via_cobro: '21000',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('marca pagado con epsilon: invoice 100k + applied 99999.995', async () => {
+      const captured = setupRecalcMock({
+        total: '100000',
+        applied_cash: '99999.995',
+        retenciones_total: '0',
+        retenciones_via_cobro: '0',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('cobro anulado: el SQL filtra status != anulado del applied_cash', async () => {
+      // Simulamos que la subquery ya excluyo el cobro anulado y devolvio 0 cash.
+      const captured = setupRecalcMock({
+        total: '100000',
+        applied_cash: '0',
+        retenciones_total: '0',
+        retenciones_via_cobro: '0',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pendiente')
+      expect(captured.sqlContainsAnuladoFilter).toBe(true)
+    })
+
+    it('cobro anulado con retencion: ambas subqueries de retenciones excluyen status anulado', async () => {
+      const captured = setupRecalcMock({
+        total: '121000',
+        applied_cash: '0',
+        retenciones_total: '0',
+        retenciones_via_cobro: '0',
+      })
+      await service.recalculateInvoicePaymentStatus(invoiceId)
+      expect(captured.status).toBe('pendiente')
+      // Verificar que el SQL contiene los filtros de anulado en las 3 subqueries
+      // (applied_cash, retenciones_total, retenciones_via_cobro)
+      expect(captured.sqlContainsAnuladoFilter).toBe(true)
+      expect(captured.sqlContainsRetenciones).toBe(true)
+    })
+  })
+
   describe('getCobroUnallocatedBalance', () => {
     it('calculates correct unallocated balance', async () => {
       mockDbRows([{ total: '10000', allocated: '3500' }])

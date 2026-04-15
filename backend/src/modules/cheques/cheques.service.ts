@@ -1,11 +1,15 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 
+// SECURITY: 'endosado' MUST NOT transition directly to 'a_cobrar'.
+// Reverting an endoso requires deleting the associated pago (see pagos.service.deletePago),
+// which is the only legitimate path. Direct manual revert would allow double-spending
+// the same cheque to two suppliers.
 const VALID_TRANSITIONS: Record<string, string[]> = {
   a_cobrar: ['endosado', 'depositado', 'cobrado', 'rechazado'],
-  endosado: ['cobrado', 'rechazado', 'a_cobrar'],
+  endosado: ['cobrado', 'rechazado'],
   depositado: ['cobrado', 'rechazado', 'a_cobrar'],
   rechazado: ['a_cobrar'],
   cobrado: ['a_cobrar'],
@@ -308,101 +312,148 @@ export class ChequesService {
   }) {
     await this.ensureMigrations();
 
-    // Get cheque
-    const chequeResult = await db.execute(sql`
-      SELECT * FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
-    `);
-    const cheque = ((chequeResult as any).rows || [])[0];
-    if (!cheque) throw new ApiError(404, 'Cheque no encontrado');
-
-    // V1: Must be 'a_cobrar'
-    if (cheque.status !== 'a_cobrar') {
-      throw new ApiError(400, 'Solo se pueden endosar cheques en estado "a cobrar"');
-    }
-
-    // V2: Amount must be <= cheque amount
-    const chequeAmount = parseFloat(cheque.amount);
-    if (data.amount > chequeAmount) {
-      throw new ApiError(400, `Cheque ($${chequeAmount.toFixed(2)}) insuficiente para pago ($${data.amount.toFixed(2)})`);
-    }
-
-    if (data.amount <= 0) {
-      throw new ApiError(400, 'El monto a pagar debe ser mayor a 0');
-    }
-
-    // V3: Verify enterprise
-    const entCheck = await db.execute(sql`
-      SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}
-    `);
-    if (((entCheck as any).rows || []).length === 0) {
-      throw new ApiError(400, 'Proveedor no valido');
-    }
-
-    // Accounting entry for endorsement (cheque leaves our portfolio)
+    // SECURITY (FLOW 35 / double-spending fix):
+    // Wrap the entire endoso in a single transaction with SELECT ... FOR UPDATE
+    // on the cheque row. Without the row lock, two concurrent requests can both
+    // observe status='a_cobrar', both insert pagos, and both try to mark the
+    // cheque endosado — the same cheque ends up paying two different suppliers.
+    const client = await pool.connect();
     try {
-      const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
-      await accountingEntriesService.createEntryForChequeTransition({
-        id: chequeId,
-        company_id: companyId,
-        amount: data.amount || chequeAmount,
-        old_status: 'a_cobrar',
-        new_status: 'endosado',
-      });
-    } catch (accErr) { console.warn('Accounting entry skipped (endorse):', (accErr as Error).message); }
+      await client.query('BEGIN');
 
-    // CREATE pago
-    const pagoId = uuid();
-    const pendingStatus = data.purchase_invoice_id ? null : 'pending_invoice';
-    await db.execute(sql`
-      INSERT INTO pagos (id, company_id, enterprise_id, amount, payment_method, payment_date, notes, business_unit_id, pending_status, cheque_id, created_by)
-      VALUES (${pagoId}, ${companyId}, ${data.enterprise_id}, ${data.amount.toString()}, 'cheque_endosado', NOW(), ${data.notes || `Endoso cheque #${cheque.number}`}, ${cheque.business_unit_id || null}, ${pendingStatus}, ${chequeId}, ${userId})
-    `);
+      // Lock the cheque row for the duration of the transaction.
+      const lockResult = await client.query(
+        `SELECT id, company_id, status, amount, number, business_unit_id, endorsed_pago_id
+         FROM cheques
+         WHERE id = $1 AND company_id = $2
+         FOR UPDATE`,
+        [chequeId, companyId]
+      );
+      const cheque = (lockResult.rows || [])[0];
+      if (!cheque) throw new ApiError(404, 'Cheque no encontrado');
 
-    // Link pago to purchase invoice if provided
-    if (data.purchase_invoice_id) {
-      try {
-        const { pagoApplicationsService } = await import('../pago-applications/pago-applications.service');
-        await pagoApplicationsService.linkPagoToPurchaseInvoice(
-          companyId, userId, pagoId, data.purchase_invoice_id, data.amount
-        );
-      } catch (err) {
-        console.warn('Error linking pago to purchase invoice during endorsement:', err);
+      // V1: Must be 'a_cobrar' (re-checked INSIDE the lock)
+      if (cheque.status !== 'a_cobrar') {
+        throw new ApiError(409, `Cheque no disponible para endosar (estado actual: ${cheque.status})`);
       }
+      // Defense in depth: if endorsed_pago_id is already set, reject regardless of status.
+      if (cheque.endorsed_pago_id != null) {
+        throw new ApiError(409, 'Cheque ya endosado a otro pago');
+      }
+
+      // V2: Amount must be <= cheque amount
+      const chequeAmount = parseFloat(cheque.amount);
+      if (data.amount > chequeAmount) {
+        throw new ApiError(400, `Cheque ($${chequeAmount.toFixed(2)}) insuficiente para pago ($${data.amount.toFixed(2)})`);
+      }
+
+      if (data.amount <= 0) {
+        throw new ApiError(400, 'El monto a pagar debe ser mayor a 0');
+      }
+
+      // V3: Verify enterprise (still scoped to company)
+      const entCheck = await client.query(
+        `SELECT id FROM enterprises WHERE id = $1 AND company_id = $2`,
+        [data.enterprise_id, companyId]
+      );
+      if ((entCheck.rows || []).length === 0) {
+        throw new ApiError(400, 'Proveedor no valido');
+      }
+
+      // CREATE pago (inside transaction)
+      const pagoId = uuid();
+      const pendingStatus = data.purchase_invoice_id ? null : 'pending_invoice';
+      const pagoNotes = data.notes || `Endoso cheque #${cheque.number}`;
+      await client.query(
+        `INSERT INTO pagos (id, company_id, enterprise_id, amount, payment_method, payment_date, notes, business_unit_id, pending_status, cheque_id, created_by)
+         VALUES ($1, $2, $3, $4, 'cheque_endosado', NOW(), $5, $6, $7, $8, $9)`,
+        [pagoId, companyId, data.enterprise_id, data.amount.toString(), pagoNotes, cheque.business_unit_id || null, pendingStatus, chequeId, userId]
+      );
+
+      // UPDATE cheque status to 'endosado' — guarded by status='a_cobrar'
+      // so even if the lock were somehow bypassed, the WHERE clause prevents
+      // double assignment.
+      const updateResult = await client.query(
+        `UPDATE cheques SET
+           status = 'endosado',
+           endorsed_to_enterprise_id = $1,
+           endorsed_pago_id = $2,
+           endorsed_at = NOW()
+         WHERE id = $3 AND status = 'a_cobrar' AND endorsed_pago_id IS NULL`,
+        [data.enterprise_id, pagoId, chequeId]
+      );
+      if (updateResult.rowCount === 0) {
+        throw new ApiError(409, 'Cheque ya fue endosado por otra operacion');
+      }
+
+      // Record history
+      await client.query(
+        `INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
+         VALUES ($1, 'a_cobrar', 'endosado', $2, $3)`,
+        [chequeId, `Endosado a proveedor por $${data.amount.toFixed(2)}`, userId]
+      );
+
+      // Handle excess: cheque amount > pago amount
+      const excess = chequeAmount - data.amount;
+      if (excess > 0.01) {
+        await client.query(
+          `INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by)
+           VALUES ($1, $2, $3, $4, 'credit', $5)`,
+          [
+            companyId,
+            data.enterprise_id,
+            (-excess).toString(),
+            `Exceso por endoso de cheque #${cheque.number} ($${chequeAmount.toFixed(2)} cheque - $${data.amount.toFixed(2)} pago)`,
+            userId,
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // Side effects AFTER commit (best-effort, do not affect double-spending guarantee).
+      // Link pago to purchase invoice if provided
+      if (data.purchase_invoice_id) {
+        try {
+          const { pagoApplicationsService } = await import('../pago-applications/pago-applications.service');
+          await pagoApplicationsService.linkPagoToPurchaseInvoice(
+            companyId, userId, pagoId, data.purchase_invoice_id, data.amount
+          );
+        } catch (err) {
+          console.warn('Error linking pago to purchase invoice during endorsement:', err);
+        }
+      }
+
+      // Accounting entry for endorsement.
+      // TODO: createEntryForChequeTransition uses the global db handle, so it
+      // commits in its own connection. Acceptable here because the cheque/pago
+      // rows are already committed atomically above; if accounting fails the
+      // cheque is still correctly endosado and we only lose the journal entry.
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        await accountingEntriesService.createEntryForChequeTransition({
+          id: chequeId,
+          company_id: companyId,
+          amount: data.amount || chequeAmount,
+          old_status: 'a_cobrar',
+          new_status: 'endosado',
+        });
+      } catch (accErr) { console.warn('Accounting entry skipped (endorse):', (accErr as Error).message); }
+
+      return {
+        pago_id: pagoId,
+        cheque_id: chequeId,
+        endorsed_to: data.enterprise_id,
+        amount_paid: data.amount,
+        excess,
+        cheque_status: 'endosado',
+      };
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw e;
+    } finally {
+      client.release();
     }
-
-    // UPDATE cheque status to 'endosado'
-    await db.execute(sql`
-      UPDATE cheques SET
-        status = 'endosado',
-        endorsed_to_enterprise_id = ${data.enterprise_id},
-        endorsed_pago_id = ${pagoId},
-        endorsed_at = NOW()
-      WHERE id = ${chequeId}
-    `);
-
-    // Record history
-    await db.execute(sql`
-      INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
-      VALUES (${chequeId}, 'a_cobrar', 'endosado', ${`Endosado a proveedor por $${data.amount.toFixed(2)}`}, ${userId})
-    `);
-
-    // Handle excess: cheque amount > pago amount
-    const excess = chequeAmount - data.amount;
-    if (excess > 0.01) {
-      await db.execute(sql`
-        INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by)
-        VALUES (${companyId}, ${data.enterprise_id}, ${(-excess).toString()}, ${`Exceso por endoso de cheque #${cheque.number} ($${chequeAmount.toFixed(2)} cheque - $${data.amount.toFixed(2)} pago)`}, 'credit', ${userId})
-      `);
-    }
-
-    return {
-      pago_id: pagoId,
-      cheque_id: chequeId,
-      endorsed_to: data.enterprise_id,
-      amount_paid: data.amount,
-      excess,
-      cheque_status: 'endosado',
-    };
   }
 
   /**
