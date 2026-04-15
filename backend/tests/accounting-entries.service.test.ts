@@ -246,17 +246,20 @@ describe('AccountingEntriesService', () => {
       expect(result.id).toBe('entry-1')
     })
 
-    it('should create entry for pago with IIBB + Ganancias retentions (main entry only)', async () => {
-      // The current implementation creates the main entry with Proveedores/Caja
-      // Retentions are in the data but the main pago entry uses full amount
+    it('should create entry for pago with IIBB + Ganancias retentions (folded into main entry)', async () => {
+      // PR7-T20 (C5): retenciones practicadas are credited as "Retenciones a
+      // Depositar" liability lines within the main pago entry. Total debt
+      // reduction = amount + retenciones = 8500 + 1000 + 500 = 10000.
+      // Lines: D Proveedores, C Caja, C Ret IIBB, C Ret Ganancias (4 lines)
       mockAccountingEnabled()
-      mockCreateEntryFlow(2)
+      mockCreateEntryFlow(4)
 
       const result = await service.createEntryForPago({
         id: 'pago-2',
         company_id: 'company-1',
         date: '2025-06-15',
         amount: 8500,
+        total_amount: 10000,
         payment_method: 'transferencia',
         retenciones: [
           { type: 'iibb', amount: 1000 },

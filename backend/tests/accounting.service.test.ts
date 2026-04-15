@@ -270,7 +270,11 @@ describe('AccountingService', () => {
       const result = await service.getLibroIVACompras(COMPANY, '2025-06-01', '2025-06-30')
 
       expect(result.rows).toEqual([])
-      expect(result.totals).toEqual({ neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0 })
+      expect(result.totals).toEqual({
+        neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0,
+        // PR7-T20 (C3): ARS-equivalent totals for currency-aware reporting
+        neto_gravado_ars: 0, iva_ars: 0, otros_tributos_ars: 0, total_ars: 0,
+      })
     })
 
     it('handles NULL subtotal (derives from total - vat)', async () => {

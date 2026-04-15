@@ -20,5 +20,7 @@ purchaseInvoicesRouter.post('/', authorize('purchases', 'create'), (req, res) =>
   purchaseInvoicesController.create(req as any, res));
 purchaseInvoicesRouter.patch('/:id', authorize('purchases', 'edit'), (req, res) =>
   purchaseInvoicesController.update(req as any, res));
+purchaseInvoicesRouter.post('/:id/cancel', authorize('purchases', 'delete'), (req, res) =>
+  purchaseInvoicesController.cancel(req as any, res));
 purchaseInvoicesRouter.delete('/:id', authorize('purchases', 'delete'), (req, res) =>
   purchaseInvoicesController.remove(req as any, res));

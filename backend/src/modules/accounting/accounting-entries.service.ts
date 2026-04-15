@@ -67,10 +67,15 @@ interface PagoData {
   company_id: string;
   date?: string;
   amount: number | string;
+  /**
+   * Total gross amount (cash + retenciones practicadas). Defaults to `amount`
+   * when not provided (backward compatibility with legacy callers).
+   */
+  total_amount?: number | string;
   payment_method?: string;
   bank_id?: string;
   pending_status?: string | null;
-  retenciones?: Array<{ type: string; amount: number }>;
+  retenciones?: Array<{ type: string; amount: number; jurisdiction?: string | null }>;
   skip_accounting?: boolean;
   currency?: string;
   exchange_rate?: number | string;
@@ -85,6 +90,7 @@ interface PurchaseInvoiceData {
   total: number | string;
   subtotal?: number | string;
   vat_amount?: number | string;
+  invoice_type?: string;
   items?: Array<{ quantity: number; unit_price: number; vat_rate: number }>;
 }
 
@@ -114,6 +120,8 @@ export const ACCOUNTS = {
   CHEQUES_DEPOSITADOS: '1.5.2',
   // Pasivo
   PROVEEDORES: '2.1.1',
+  // Cheques emitidos propios (pasivo - a pagar en banco)
+  CHEQUES_EMITIDOS: '2.1.2',
   IVA_DF_21: '2.2.1',
   IVA_DF_105: '2.2.2',
   IVA_DF_27: '2.2.3',
@@ -161,13 +169,27 @@ const IVA_CF_MAP: Record<number, string> = {
   2.5: ACCOUNTS.IVA_CF_25,
 };
 
-// Retencion type -> account code mapping for pagos
+// Retencion type -> liability account code mapping for pagos (retenciones practicadas)
 const RET_MAP: Record<string, string> = {
   'iibb': ACCOUNTS.RET_IIBB_DEPOSITAR,
   'ganancias': ACCOUNTS.RET_GANANCIAS_DEPOSITAR,
   'iva': ACCOUNTS.RET_IVA_DEPOSITAR,
   'suss': ACCOUNTS.RET_SUSS_DEPOSITAR,
 };
+
+/**
+ * Resolve the liability account for a retencion practicada.
+ * Jurisdiction is accepted for future per-jurisdiction splits (CABA/PBA/etc.)
+ * but currently maps to the single RET_IIBB_DEPOSITAR bucket — callers can
+ * pass jurisdiction without breaking the chart-of-accounts contract.
+ */
+export function getRetentionLiabilityAccount(
+  type: string,
+  _jurisdiction?: string | null,
+): string | null {
+  const key = (type || '').toLowerCase();
+  return RET_MAP[key] || null;
+}
 
 export class AccountingEntriesService {
   /**
@@ -360,16 +382,73 @@ export class AccountingEntriesService {
 
   /**
    * Auto journal entry when a pago (payment) is created.
-   * D: Proveedores (monto)
-   * C: Caja/Bancos (monto)
+   *
+   * D: Proveedores (total = cash + retenciones practicadas)
+   * C: Caja/Bancos/Cheques Emitidos (cash portion effectively paid)
+   * C: Retenciones a Depositar (per retention type, liability to AFIP/ARBA)
+   *
+   * For payment_method='cheque' (own cheque issued), the credit goes to the
+   * CHEQUES_EMITIDOS liability instead of Caja — the bank account is only
+   * debited when the cheque is actually cashed (see createEntryForChequeTransition
+   * emitido -> cobrado).
    */
   async createEntryForPago(pago: PagoData): Promise<any> {
     if (!await isAccountingEnabled(pago.company_id)) return null;
     // Skip accounting for cheque endorsements (handled by createEntryForChequeTransition)
     if (pago.payment_method === 'cheque_endosado' || pago.skip_accounting) return null;
 
-    const amount = Number(pago.amount);
+    const amount = Number(pago.amount); // cash-out portion (post retenciones)
+    const retenciones = Array.isArray(pago.retenciones) ? pago.retenciones : [];
+    const totalRetenciones = retenciones.reduce((s, r) => s + Number(r.amount || 0), 0);
+    // Gross debt reduction = cash + retenciones. Prefer explicit total_amount when
+    // provided, otherwise derive it from amount + retenciones (backward compatible).
+    const totalAmount = pago.total_amount != null
+      ? Number(pago.total_amount)
+      : Math.round((amount + totalRetenciones) * 100) / 100;
+
     const date = pago.date || new Date().toISOString().split('T')[0];
+
+    // Cash-side credit account: cheque propio -> CHEQUES_EMITIDOS (liability),
+    // otherwise Caja/Bancos.
+    const isOwnCheque = pago.payment_method === 'cheque';
+    const cashAccountCode = isOwnCheque ? ACCOUNTS.CHEQUES_EMITIDOS : ACCOUNTS.CAJA;
+    const cashAccountLabel = isOwnCheque ? 'Cheques Emitidos' : 'Caja y Bancos';
+
+    const r = (n: number) => Math.round(n * 100) / 100;
+
+    const lines: JournalLine[] = [
+      { accountCode: ACCOUNTS.PROVEEDORES, debit: r(totalAmount), credit: 0, description: 'Proveedores' },
+    ];
+
+    if (amount > 0) {
+      lines.push({ accountCode: cashAccountCode, debit: 0, credit: r(amount), description: cashAccountLabel });
+    }
+
+    // Retenciones practicadas: credit each retention type to its liability account.
+    // Total of credits = cash + retenciones = totalAmount, matching the debit.
+    for (const ret of retenciones) {
+      const retAmount = Number(ret.amount || 0);
+      if (retAmount <= 0) continue;
+      const liability = getRetentionLiabilityAccount(ret.type, (ret as any).jurisdiction);
+      if (!liability) {
+        // Unknown retention type: fall back to generic IIBB bucket to keep the
+        // entry balanced rather than silently dropping a line.
+        lines.push({
+          accountCode: ACCOUNTS.RET_IIBB_DEPOSITAR,
+          debit: 0,
+          credit: r(retAmount),
+          description: `Retencion ${ret.type} a depositar`,
+        });
+        continue;
+      }
+      const jur = (ret as any).jurisdiction ? ` ${(ret as any).jurisdiction}` : '';
+      lines.push({
+        accountCode: liability,
+        debit: 0,
+        credit: r(retAmount),
+        description: `Retencion ${ret.type}${jur} a depositar`,
+      });
+    }
 
     const mainEntry = await this.createEntry({
       companyId: pago.company_id,
@@ -378,10 +457,7 @@ export class AccountingEntriesService {
       referenceType: 'pago',
       referenceId: pago.id,
       isAuto: true,
-      lines: [
-        { accountCode: ACCOUNTS.PROVEEDORES, debit: amount, credit: 0, description: 'Proveedores' },
-        { accountCode: ACCOUNTS.CAJA, debit: 0, credit: amount, description: 'Caja y Bancos' },
-      ],
+      lines,
     });
 
     // Exchange rate difference entry
@@ -393,7 +469,7 @@ export class AccountingEntriesService {
       exchangeRate: pago.exchange_rate,
       originalExchangeRate: pago.original_exchange_rate,
       amountForeign: pago.amount_foreign,
-      bankAccountCode: ACCOUNTS.CAJA,
+      bankAccountCode: cashAccountCode,
     });
 
     return mainEntry;
@@ -519,33 +595,129 @@ export class AccountingEntriesService {
 
   /**
    * Auto journal entry when a purchase invoice is created.
-   * D: Compras/Gastos (neto)
-   * D: IVA Credito Fiscal (IVA)
-   * C: Proveedores (total)
+   *
+   * Factura de compra:  D: CMV/Gastos + IVA CF (por alicuota)   C: Proveedores
+   * NC de compra:       D: Proveedores                          C: CMV + IVA CF (reversa)
+   *
+   * When `items` are provided, VAT is broken down per item's actual vat_rate
+   * (21%, 10.5%, 27%, 2.5%, 5%, or 0/exento). Falls back to the aggregate
+   * vat_amount at 21% when items are missing (legacy callers).
    */
   async createEntryForPurchaseInvoice(pi: PurchaseInvoiceData): Promise<any> {
     if (!await isAccountingEnabled(pi.company_id)) return null;
     const total = Number(pi.total);
-    const vat = Number(pi.vat_amount || 0);
-    const neto = pi.subtotal ? Number(pi.subtotal) : total - vat;
     const date = pi.date || new Date().toISOString().split('T')[0];
+    const invoiceType = pi.invoice_type || '';
+    const isNC = invoiceType.startsWith('NC_') || invoiceType.startsWith('NC');
 
-    const lines: JournalLine[] = [
-      { accountCode: ACCOUNTS.CMV, debit: neto, credit: 0, description: 'Compras / Gastos' },
-    ];
+    // Build VAT breakdown grouped by rate
+    const vatByRate = new Map<number, number>();
+    let neto: number;
 
-    if (vat > 0) {
-      lines.push({ accountCode: ACCOUNTS.IVA_CF_21, debit: vat, credit: 0, description: 'IVA Credito Fiscal' });
+    if (pi.items && pi.items.length > 0) {
+      neto = 0;
+      for (const item of pi.items) {
+        const lineNeto = Number(item.quantity || 0) * Number(item.unit_price || 0);
+        neto += lineNeto;
+        const rate = Number(item.vat_rate ?? 21);
+        if (rate > 0) {
+          const lineVat = lineNeto * (rate / 100);
+          vatByRate.set(rate, (vatByRate.get(rate) || 0) + lineVat);
+        }
+      }
+    } else {
+      // Fallback: single global vat_amount at default 21%
+      const vat = Number(pi.vat_amount || 0);
+      neto = pi.subtotal ? Number(pi.subtotal) : total - vat;
+      if (vat > 0) {
+        vatByRate.set(21, vat);
+      }
     }
 
-    lines.push({ accountCode: ACCOUNTS.PROVEEDORES, debit: 0, credit: total, description: 'Proveedores' });
+    const r = (n: number) => Math.round(n * 100) / 100;
+    const lines: JournalLine[] = [];
+
+    if (isNC) {
+      // NC de compra: reversa del asiento original
+      // D: Proveedores    C: CMV + IVA CF
+      lines.push({ accountCode: ACCOUNTS.PROVEEDORES, debit: r(total), credit: 0, description: 'Proveedores (NC)' });
+      lines.push({ accountCode: ACCOUNTS.CMV, debit: 0, credit: r(neto), description: 'Compras / Gastos (NC)' });
+      for (const [rate, vatAmount] of vatByRate) {
+        const ivaAccount = IVA_CF_MAP[rate] || ACCOUNTS.IVA_CF_21;
+        lines.push({ accountCode: ivaAccount, debit: 0, credit: r(vatAmount), description: `IVA CF ${rate}% (NC)` });
+      }
+    } else {
+      // Factura normal: D: CMV + IVA CF (por alicuota)    C: Proveedores
+      lines.push({ accountCode: ACCOUNTS.CMV, debit: r(neto), credit: 0, description: 'Compras / Gastos' });
+      for (const [rate, vatAmount] of vatByRate) {
+        const ivaAccount = IVA_CF_MAP[rate] || ACCOUNTS.IVA_CF_21;
+        lines.push({ accountCode: ivaAccount, debit: r(vatAmount), credit: 0, description: `IVA CF ${rate}%` });
+      }
+      lines.push({ accountCode: ACCOUNTS.PROVEEDORES, debit: 0, credit: r(total), description: 'Proveedores' });
+    }
+
+    const descriptionPrefix = isNC ? 'Nota de Credito de compra' : 'Factura de compra';
 
     return this.createEntry({
       companyId: pi.company_id,
       date,
-      description: `Factura de compra`,
+      description: descriptionPrefix,
       referenceType: 'purchase_invoice',
       referenceId: pi.id,
+      isAuto: true,
+      lines,
+    });
+  }
+
+  /**
+   * Create a standalone journal entry for a retencion (practicada or sufrida).
+   * For retenciones embedded in a pago, use createEntryForPago which folds them
+   * into the main entry. This helper is for standalone certificates.
+   *
+   * Practicada (we withhold from a supplier payment):
+   *   D: Proveedores    C: Retenciones a Depositar
+   * Sufrida (customer withholds from our cobro):
+   *   D: Retenciones a Recuperar   C: Deudores por Ventas
+   */
+  async createEntryForRetencion(data: {
+    id: string;
+    company_id: string;
+    date?: string;
+    type: string;
+    amount: number | string;
+    direction: 'practicada' | 'sufrida';
+    jurisdiction?: string | null;
+  }): Promise<any> {
+    if (!await isAccountingEnabled(data.company_id)) return null;
+    const amount = Number(data.amount || 0);
+    if (amount <= 0) return null;
+    const date = data.date || new Date().toISOString().split('T')[0];
+
+    const lines: JournalLine[] = [];
+    const typeKey = (data.type || '').toLowerCase();
+
+    if (data.direction === 'practicada') {
+      const liability = getRetentionLiabilityAccount(typeKey, data.jurisdiction);
+      if (!liability) return null;
+      lines.push({ accountCode: ACCOUNTS.PROVEEDORES, debit: amount, credit: 0, description: `Retencion ${typeKey} practicada` });
+      lines.push({ accountCode: liability, debit: 0, credit: amount, description: `Retencion ${typeKey} a depositar` });
+    } else {
+      const asset = ({
+        iibb: ACCOUNTS.RET_IIBB_SUFRIDA,
+        ganancias: ACCOUNTS.RET_GANANCIAS_SUFRIDA,
+        iva: ACCOUNTS.RET_IVA_SUFRIDA,
+      } as Record<string, string>)[typeKey];
+      if (!asset) return null;
+      lines.push({ accountCode: asset, debit: amount, credit: 0, description: `Retencion ${typeKey} sufrida` });
+      lines.push({ accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: 0, credit: amount, description: 'Deudores por Ventas' });
+    }
+
+    return this.createEntry({
+      companyId: data.company_id,
+      date,
+      description: `Retencion ${typeKey} ${data.direction}`,
+      referenceType: 'retencion',
+      referenceId: data.id,
       isAuto: true,
       lines,
     });
@@ -784,7 +956,18 @@ export class AccountingEntriesService {
 
   /**
    * Auto journal entry for cheque status transitions.
-   * Handles: depositado, cobrado, endosado, rechazado, a_cobrar (reverse).
+   *
+   * Direction='recibido' (tercero, cheques en cartera / depositados):
+   *   - depositado, cobrado, endosado, rechazado, a_cobrar (reverse)
+   *
+   * Direction='emitido' (propio, cheques a pagar):
+   *   - The pago already posted "D: Proveedores / C: Cheques Emitidos".
+   *   - entregado: no-op (the pago entry is the moment of entrega).
+   *   - cobrado: bank debited by supplier cashing it
+   *       D: Cheques Emitidos   C: Banco/Caja
+   *   - rechazado: reverse the original pago debt leg
+   *       D: Cheques Emitidos   C: Proveedores
+   *   - anulado (before being cashed): reverse Cheques Emitidos back to Proveedores
    */
   async createEntryForChequeTransition(data: {
     id: string;
@@ -792,6 +975,7 @@ export class AccountingEntriesService {
     amount: number | string;
     old_status: string;
     new_status: string;
+    direction?: string;
     bank_id?: string;
     date?: string;
   }): Promise<void> {
@@ -801,6 +985,72 @@ export class AccountingEntriesService {
 
     let lines: Array<{accountCode: string; debit: number; credit: number; desc: string}> = [];
 
+    // ── EMITIDO direction (own cheques, propios) ─────────────────────────────
+    if (data.direction === 'emitido') {
+      const bankCode = data.bank_id
+        ? await this.ensureBankAccount(data.company_id, data.bank_id)
+        : ACCOUNTS.CAJA;
+
+      switch (data.new_status) {
+        case 'entregado':
+          // No accounting change: the pago entry already posted
+          // "D: Proveedores / C: Cheques Emitidos" at issuance.
+          return;
+
+        case 'cobrado':
+          // Supplier cashed the cheque: bank is debited, liability released.
+          lines = [
+            { accountCode: ACCOUNTS.CHEQUES_EMITIDOS, debit: amount, credit: 0, desc: 'Cheque emitido cobrado por proveedor' },
+            { accountCode: bankCode, debit: 0, credit: amount, desc: 'Banco: salida por cheque propio' },
+          ];
+          break;
+
+        case 'rechazado':
+          // Cheque bounced: reverse the liability, recreate provider debt.
+          lines = [
+            { accountCode: ACCOUNTS.CHEQUES_EMITIDOS, debit: amount, credit: 0, desc: 'Cheque emitido rechazado' },
+            { accountCode: ACCOUNTS.PROVEEDORES, debit: 0, credit: amount, desc: 'Recrea deuda con proveedor' },
+          ];
+          break;
+
+        case 'anulado':
+          // Anulacion antes de entrega/cobro: reverse Cheques Emitidos -> Proveedores.
+          lines = [
+            { accountCode: ACCOUNTS.CHEQUES_EMITIDOS, debit: amount, credit: 0, desc: 'Cheque emitido anulado' },
+            { accountCode: ACCOUNTS.PROVEEDORES, debit: 0, credit: amount, desc: 'Recrea deuda con proveedor' },
+          ];
+          break;
+
+        default:
+          return;
+      }
+
+      // Resolve + insert (shared path with recibido below)
+      const resolvedLinesE = [];
+      for (const line of lines) {
+        const accountId = await this.getAccountId(data.company_id, line.accountCode);
+        if (!accountId) return;
+        resolvedLinesE.push({ ...line, accountId });
+      }
+
+      const entryResultE = await db.execute(sql`
+        INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
+        VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque emitido ' + data.new_status}, ${'cheque_emitido_' + data.new_status}, ${data.id}, true)
+        RETURNING id
+      `);
+      const entryIdE = ((entryResultE as any).rows || [])[0]?.id;
+      if (!entryIdE) return;
+
+      for (const line of resolvedLinesE) {
+        await db.execute(sql`
+          INSERT INTO journal_entry_lines (entry_id, account_id, debit, credit, description)
+          VALUES (${entryIdE}, ${line.accountId}, ${line.debit}, ${line.credit}, ${line.desc})
+        `);
+      }
+      return;
+    }
+
+    // ── RECIBIDO direction (tercero) ─────────────────────────────────────────
     switch (data.new_status) {
       case 'depositado':
         // D: Cheques Depositados / C: Cheques en Cartera

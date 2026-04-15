@@ -42,6 +42,17 @@ export class PurchaseInvoicesController {
     res.json(data);
   }
 
+  async cancel(req: AuthRequest, res: Response) {
+    const reason = (req.body?.reason || req.body?.cancellation_reason || '') as string;
+    const data = await purchaseInvoicesService.cancelPurchaseInvoice(
+      req.user!.company_id,
+      req.params.id,
+      req.user!.id,
+      reason,
+    );
+    res.json(data);
+  }
+
   async getPaymentBalance(req: AuthRequest, res: Response) {
     const data = await purchaseInvoicesService.getPaymentBalance(req.user!.company_id, req.params.id);
     res.json(data);

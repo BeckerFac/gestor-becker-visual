@@ -18,7 +18,14 @@ export class PagosController {
   }
 
   async deletePago(req: AuthRequest, res: Response) {
-    const data = await pagosService.deletePago(req.user!.company_id, req.params.id);
+    const reason = (req.body && typeof req.body.reason === 'string') ? req.body.reason : 'Eliminado via DELETE endpoint';
+    const data = await pagosService.deletePago(req.user!.company_id, req.params.id, req.user!.id, reason);
+    res.json(data);
+  }
+
+  async anularPago(req: AuthRequest, res: Response) {
+    const reason = req.body?.reason as string | undefined;
+    const data = await pagosService.anularPago(req.user!.company_id, req.params.id, req.user!.id, reason || '');
     res.json(data);
   }
 

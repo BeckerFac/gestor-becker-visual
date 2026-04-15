@@ -38,7 +38,7 @@ export class PurchasesController {
   }
 
   async deletePurchase(req: AuthRequest, res: Response) {
-    const data = await purchasesService.deletePurchase(req.user!.company_id, req.params.id);
+    const data = await purchasesService.deletePurchase(req.user!.company_id, req.params.id, req.user!.id);
     res.json(data);
   }
 }

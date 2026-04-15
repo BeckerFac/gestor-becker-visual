@@ -919,6 +919,21 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_purchase ON purchase_invoices(purchase_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_payment_status ON purchase_invoices(company_id, payment_status)`);
 
+    // ===== PURCHASE INVOICES: cancellation + NC support (C5, C7) =====
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS cancelled_by UUID`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS related_invoice_id UUID REFERENCES purchase_invoices(id) ON DELETE SET NULL`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_pi_related_invoice ON purchase_invoices(related_invoice_id)`); } catch (_) {}
+    // C1: DB-level uniqueness guard for active invoices (duplicate detection safety net).
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_purchase_invoices_unique
+        ON purchase_invoices(company_id, enterprise_id, invoice_type, COALESCE(punto_venta, ''), invoice_number)
+        WHERE status NOT IN ('cancelled', 'cancelado')
+      `);
+    } catch (_) {}
+
     // ===== COBRO ↔ INVOICE APPLICATIONS (N:N) =====
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cobro_invoice_applications (
@@ -1062,6 +1077,10 @@ async function runAutoMigrations() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_pii_purchase_invoice ON purchase_invoice_items(purchase_invoice_id)`);
     // Add purchase_item_id FK for linking to specific purchase items
     await pool.query(`ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS purchase_item_id UUID`);
+    // C6: extra columns used by getAvailablePurchaseItemsForInvoicing / createPurchaseInvoice items
+    try { await pool.query(`ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS vat_rate DECIMAL(5,2) DEFAULT 21`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE purchase_invoice_items ADD COLUMN IF NOT EXISTS product_id UUID`); } catch (_) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_pii_purchase_item ON purchase_invoice_items(purchase_item_id)`); } catch (_) {}
 
     // ===== COBRO INVOICE ITEM APPLICATIONS (item-level trazabilidad) =====
     await pool.query(`
@@ -1268,6 +1287,24 @@ async function runAutoMigrations() {
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`); } catch (_) {}
     try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`); } catch (_) {}
     await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`).catch(() => {});
+
+    // -- Retenciones: soft-delete + audit (H6) --
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activa'`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMP WITH TIME ZONE`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_by UUID`); } catch (_) {}
+    try { await pool.query(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS anulled_reason TEXT`); } catch (_) {}
+
+    // -- Retenciones: unique certificate_number per (company, type, period, jurisdiction) (H3) --
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_retenciones_certificate
+        ON retenciones(company_id, type, period, COALESCE(jurisdiction, ''), certificate_number)
+        WHERE certificate_number IS NOT NULL AND certificate_number != ''
+      `);
+    } catch (_) {}
+
+    // -- Padron: jurisdiction support for IIBB per-provincia padrones --
+    try { await pool.query(`ALTER TABLE padron_retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`); } catch (_) {}
 
     // ===== RETENCIONES ESPERADAS on invoices (expected withholdings by client) =====
     await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS retenciones_esperadas JSONB DEFAULT '[]'::jsonb`);

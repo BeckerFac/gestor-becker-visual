@@ -7,13 +7,51 @@ import { v4 as uuid } from 'uuid';
 // Reverting an endoso requires deleting the associated pago (see pagos.service.deletePago),
 // which is the only legitimate path. Direct manual revert would allow double-spending
 // the same cheque to two suppliers.
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  a_cobrar: ['endosado', 'depositado', 'cobrado', 'rechazado'],
+//
+// State machine per direction:
+//
+//   RECIBIDO (third-party -> us):
+//     a_cobrar ──┬─> depositado ──> cobrado
+//                │                └─> rechazado ──> anulado
+//                ├─> endosado  (terminal; reverted only via deletePago)
+//                └─> anulado
+//     (legacy: depositado->a_cobrar, rechazado->a_cobrar, cobrado->a_cobrar retained
+//      for backwards compat with pre-direction corrections)
+//
+//   EMITIDO (us -> third-party):
+//     emitido ──┬─> entregado ──> cobrado
+//               │               └─> rechazado ──> anulado
+//               └─> anulado
+//
+const VALID_TRANSITIONS_RECIBIDO: Record<string, string[]> = {
+  a_cobrar: ['endosado', 'depositado', 'cobrado', 'rechazado', 'anulado'],
   endosado: ['cobrado', 'rechazado'],
   depositado: ['cobrado', 'rechazado', 'a_cobrar'],
-  rechazado: ['a_cobrar'],
+  rechazado: ['a_cobrar', 'anulado'],
   cobrado: ['a_cobrar'],
+  anulado: [],
 };
+
+const VALID_TRANSITIONS_EMITIDO: Record<string, string[]> = {
+  emitido: ['entregado', 'anulado'],
+  entregado: ['cobrado', 'rechazado'],
+  cobrado: [],
+  rechazado: ['anulado'],
+  anulado: [],
+};
+
+function getValidTransitions(direction: string): Record<string, string[]> {
+  return direction === 'emitido' ? VALID_TRANSITIONS_EMITIDO : VALID_TRANSITIONS_RECIBIDO;
+}
+
+const VALID_STATUSES = [
+  // recibido
+  'a_cobrar', 'endosado', 'depositado', 'cobrado', 'rechazado',
+  // emitido
+  'emitido', 'entregado',
+  // shared terminal
+  'anulado',
+];
 
 export class ChequesService {
   private migrationsRun = false;
@@ -24,18 +62,29 @@ export class ChequesService {
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cheque_type VARCHAR(50) DEFAULT 'comun'`).catch(() => {});
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS drawer_cuit VARCHAR(20)`).catch(() => {});
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS cobro_id UUID REFERENCES cobros(id)`).catch(() => {});
+      // Outgoing (emitido) lifecycle support
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'recibido'`).catch(() => {});
+      await db.execute(sql`UPDATE cheques SET direction = 'recibido' WHERE direction IS NULL`).catch(() => {});
+      // issuer_type: 'propio' (we issued it, for emitido) | 'tercero' (customer issued, for recibido)
+      await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS issuer_type VARCHAR(10)`).catch(() => {});
+      await db.execute(sql`UPDATE cheques SET issuer_type = CASE WHEN direction = 'emitido' THEN 'propio' ELSE 'tercero' END WHERE issuer_type IS NULL`).catch(() => {});
+      // Unique (company_id, bank, number, direction) — excluding anulado so reissues are allowed
+      await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_cheques_bank_number_dir ON cheques(company_id, bank, number, direction) WHERE status != 'anulado'`).catch(() => {});
       this.migrationsRun = true;
     } catch (error) {
       console.error('Cheques migrations error:', error);
     }
   }
 
-  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string; business_unit_id?: string } = {}) {
+  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string; business_unit_id?: string; direction?: 'recibido' | 'emitido' } = {}) {
     await this.ensureMigrations();
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
       if (filters.business_unit_id) {
         whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
+      }
+      if (filters.direction) {
+        whereClause = sql`${whereClause} AND c.direction = ${filters.direction}`;
       }
       if (filters.status && filters.status !== 'todos') {
         whereClause = sql`${whereClause} AND c.status = ${filters.status}`;
@@ -71,6 +120,20 @@ export class ChequesService {
   async createCheque(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
 
+    // H5: due_date must be >= issue_date (post-dated cheques)
+    if (data.issue_date && data.due_date) {
+      if (new Date(data.due_date) < new Date(data.issue_date)) {
+        throw new ApiError(400, 'Fecha de vencimiento no puede ser anterior a fecha de emision');
+      }
+    }
+
+    // Direction + initial status derivation.
+    //  - recibido (default): status = 'a_cobrar', issuer_type = 'tercero'
+    //  - emitido:            status = 'emitido',  issuer_type = 'propio'
+    const direction: 'recibido' | 'emitido' = data.direction === 'emitido' ? 'emitido' : 'recibido';
+    const initialStatus = direction === 'emitido' ? 'emitido' : 'a_cobrar';
+    const issuerType = direction === 'emitido' ? 'propio' : 'tercero';
+
     // Auto-assign default business_unit_id if not provided
     if (!data.business_unit_id) {
       try {
@@ -83,32 +146,39 @@ export class ChequesService {
     try {
       const chequeId = uuid();
       await db.execute(sql`
-        INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, customer_id, order_id, notes, business_unit_id, created_by)
-        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, 'a_cobrar', ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
+        INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, direction, issuer_type, customer_id, order_id, notes, business_unit_id, created_by)
+        VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, ${initialStatus}, ${direction}, ${issuerType}, ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
       `);
-      return { id: chequeId, status: 'a_cobrar' };
+      return { id: chequeId, status: initialStatus, direction };
     } catch (error) {
+      if (error instanceof ApiError) throw error;
       console.error('Create cheque error:', error);
+      // Unique violation on (company_id, bank, number, direction)
+      const msg = (error as any)?.message || '';
+      if (msg.includes('uq_cheques_bank_number_dir') || msg.includes('duplicate key')) {
+        throw new ApiError(409, 'Ya existe un cheque con ese numero, banco y direccion');
+      }
       throw new ApiError(500, 'Failed to create cheque');
     }
   }
 
   async updateChequeStatus(companyId: string, chequeId: string, newStatus: string, userId?: string, notes?: string) {
     try {
-      const validStatuses = ['a_cobrar', 'endosado', 'depositado', 'cobrado', 'rechazado'];
-      if (!validStatuses.includes(newStatus)) {
+      if (!VALID_STATUSES.includes(newStatus)) {
         throw new ApiError(400, 'Estado invalido');
       }
 
       const result = await db.execute(sql`
-        SELECT id, status, amount, bank_id FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
+        SELECT id, status, amount, bank_id, direction FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Cheque not found');
 
       const cheque = rows[0];
       const currentStatus = cheque.status;
-      const allowedTransitions = VALID_TRANSITIONS[currentStatus] || [];
+      const direction = cheque.direction || 'recibido';
+      const transitions = getValidTransitions(direction);
+      const allowedTransitions = transitions[currentStatus] || [];
       if (!allowedTransitions.includes(newStatus)) {
         throw new ApiError(400, `No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
       }
@@ -137,7 +207,7 @@ export class ChequesService {
         `);
       }
 
-      // Accounting entry for cheque transition
+      // Accounting entry for cheque transition (direction-aware; see FIX-J)
       try {
         const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
         await accountingEntriesService.createEntryForChequeTransition({
@@ -147,8 +217,9 @@ export class ChequesService {
           old_status: currentStatus,
           new_status: newStatus,
           bank_id: cheque.bank_id || undefined,
+          direction, // NEW: accounting service switches debit/credit sides by direction
           date: new Date().toISOString(),
-        });
+        } as any);
       } catch (accErr) { console.warn('Accounting entry skipped (cheque):', (accErr as Error).message); }
 
       return { id: chequeId, status: newStatus };
@@ -160,12 +231,27 @@ export class ChequesService {
 
   async updateCheque(companyId: string, chequeId: string, data: any) {
     try {
+      // H5: due_date must be >= issue_date
+      if (data.issue_date && data.due_date) {
+        if (new Date(data.due_date) < new Date(data.issue_date)) {
+          throw new ApiError(400, 'Fecha de vencimiento no puede ser anterior a fecha de emision');
+        }
+      }
+
       const result = await db.execute(sql`
-        SELECT id, status FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
+        SELECT id, status, direction FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Cheque not found');
-      if (rows[0].status !== 'a_cobrar') {
+      const row = rows[0];
+      const direction = row.direction || 'recibido';
+      // Editable only in the initial "unused" state per direction:
+      //   recibido -> a_cobrar
+      //   emitido  -> emitido
+      const editable =
+        (direction === 'recibido' && row.status === 'a_cobrar') ||
+        (direction === 'emitido' && row.status === 'emitido');
+      if (!editable) {
         throw new ApiError(400, 'Solo se pueden editar cheques pendientes');
       }
 
@@ -195,12 +281,27 @@ export class ChequesService {
   async deleteCheque(companyId: string, chequeId: string) {
     try {
       const result = await db.execute(sql`
-        SELECT id, status FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
+        SELECT id, status, direction, pago_id, cobro_id FROM cheques WHERE id = ${chequeId} AND company_id = ${companyId}
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Cheque not found');
-      if (rows[0].status !== 'a_cobrar') {
-        throw new ApiError(400, 'Solo se pueden eliminar cheques pendientes');
+      const row = rows[0];
+      const direction = row.direction || 'recibido';
+
+      // Allow delete only while not yet "locked" in a financial transition:
+      //   recibido -> only 'a_cobrar' (unused incoming)
+      //   emitido  -> only 'emitido'  (undelivered outgoing)
+      const deletable =
+        (direction === 'recibido' && row.status === 'a_cobrar') ||
+        (direction === 'emitido' && row.status === 'emitido');
+
+      if (!deletable) {
+        throw new ApiError(409, `No se puede eliminar cheque en estado ${row.status}. Use anular en su lugar.`);
+      }
+
+      // If already linked to a pago/cobro, require unlinking by deleting parent first.
+      if (row.pago_id || row.cobro_id) {
+        throw new ApiError(409, 'Cheque esta vinculado a pago/cobro. Elimine el pago/cobro primero.');
       }
 
       await db.execute(sql`
@@ -261,6 +362,33 @@ export class ChequesService {
     try {
       const result = await db.execute(sql`
         SELECT
+          -- RECIBIDOS
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'a_cobrar'   THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_total_a_cobrar,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'cobrado'    THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_total_cobrado,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'endosado'   THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_total_endosado,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'depositado' THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_total_depositado,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'rechazado'  THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_total_rechazado,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'a_cobrar')   as r_count_a_cobrar,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'cobrado')    as r_count_cobrado,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'endosado')   as r_count_endosado,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'depositado') as r_count_depositado,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'rechazado')  as r_count_rechazado,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'a_cobrar' AND due_date::date < NOW()::date) as r_vencidos_count,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'a_cobrar' AND due_date::date < NOW()::date THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_vencidos_amount,
+          COUNT(*) FILTER (WHERE direction = 'recibido' AND status = 'a_cobrar' AND due_date::date BETWEEN NOW()::date AND (NOW()::date + 7)) as r_vencen_semana_count,
+          COALESCE(SUM(CASE WHEN direction = 'recibido' AND status = 'a_cobrar' AND due_date::date BETWEEN NOW()::date AND (NOW()::date + 7) THEN CAST(amount AS decimal) ELSE 0 END), 0) as r_vencen_semana_amount,
+          -- EMITIDOS
+          COALESCE(SUM(CASE WHEN direction = 'emitido' AND status = 'emitido'   THEN CAST(amount AS decimal) ELSE 0 END), 0) as e_total_emitido,
+          COALESCE(SUM(CASE WHEN direction = 'emitido' AND status = 'entregado' THEN CAST(amount AS decimal) ELSE 0 END), 0) as e_total_entregado,
+          COALESCE(SUM(CASE WHEN direction = 'emitido' AND status = 'cobrado'   THEN CAST(amount AS decimal) ELSE 0 END), 0) as e_total_cobrado,
+          COALESCE(SUM(CASE WHEN direction = 'emitido' AND status = 'rechazado' THEN CAST(amount AS decimal) ELSE 0 END), 0) as e_total_rechazado,
+          COUNT(*) FILTER (WHERE direction = 'emitido' AND status = 'emitido')   as e_count_emitido,
+          COUNT(*) FILTER (WHERE direction = 'emitido' AND status = 'entregado') as e_count_entregado,
+          COUNT(*) FILTER (WHERE direction = 'emitido' AND status = 'cobrado')   as e_count_cobrado,
+          COUNT(*) FILTER (WHERE direction = 'emitido' AND status = 'rechazado') as e_count_rechazado,
+          COUNT(*) FILTER (WHERE direction = 'emitido' AND status = 'entregado' AND due_date::date BETWEEN NOW()::date AND (NOW()::date + 7)) as e_vencen_semana_count,
+          COALESCE(SUM(CASE WHEN direction = 'emitido' AND status = 'entregado' AND due_date::date BETWEEN NOW()::date AND (NOW()::date + 7) THEN CAST(amount AS decimal) ELSE 0 END), 0) as e_vencen_semana_amount,
+          -- LEGACY flat keys (direction-agnostic; kept for backwards compat)
           COALESCE(SUM(CASE WHEN status = 'a_cobrar' THEN CAST(amount AS decimal) ELSE 0 END), 0) as total_a_cobrar,
           COALESCE(SUM(CASE WHEN status = 'cobrado' THEN CAST(amount AS decimal) ELSE 0 END), 0) as total_cobrado,
           COALESCE(SUM(CASE WHEN status = 'endosado' THEN CAST(amount AS decimal) ELSE 0 END), 0) as total_endosado,
@@ -281,6 +409,35 @@ export class ChequesService {
       const rows = (result as any).rows || result || [];
       const row = rows[0] || {};
       return {
+        recibidos: {
+          total_a_cobrar: parseFloat(row.r_total_a_cobrar || '0'),
+          total_cobrado: parseFloat(row.r_total_cobrado || '0'),
+          total_endosado: parseFloat(row.r_total_endosado || '0'),
+          total_depositado: parseFloat(row.r_total_depositado || '0'),
+          total_rechazado: parseFloat(row.r_total_rechazado || '0'),
+          count_a_cobrar: parseInt(row.r_count_a_cobrar || '0'),
+          count_cobrado: parseInt(row.r_count_cobrado || '0'),
+          count_endosado: parseInt(row.r_count_endosado || '0'),
+          count_depositado: parseInt(row.r_count_depositado || '0'),
+          count_rechazado: parseInt(row.r_count_rechazado || '0'),
+          vencidos_count: parseInt(row.r_vencidos_count || '0'),
+          vencidos_amount: parseFloat(row.r_vencidos_amount || '0'),
+          vencen_semana_count: parseInt(row.r_vencen_semana_count || '0'),
+          vencen_semana_amount: parseFloat(row.r_vencen_semana_amount || '0'),
+        },
+        emitidos: {
+          total_emitido: parseFloat(row.e_total_emitido || '0'),
+          total_entregado: parseFloat(row.e_total_entregado || '0'),
+          total_cobrado: parseFloat(row.e_total_cobrado || '0'),
+          total_rechazado: parseFloat(row.e_total_rechazado || '0'),
+          count_emitido: parseInt(row.e_count_emitido || '0'),
+          count_entregado: parseInt(row.e_count_entregado || '0'),
+          count_cobrado: parseInt(row.e_count_cobrado || '0'),
+          count_rechazado: parseInt(row.e_count_rechazado || '0'),
+          vencen_semana_count: parseInt(row.e_vencen_semana_count || '0'),
+          vencen_semana_amount: parseFloat(row.e_vencen_semana_amount || '0'),
+        },
+        // Legacy flat keys (backwards compat)
         total_a_cobrar: parseFloat(row.total_a_cobrar || '0'),
         total_cobrado: parseFloat(row.total_cobrado || '0'),
         total_endosado: parseFloat(row.total_endosado || '0'),
@@ -323,7 +480,7 @@ export class ChequesService {
 
       // Lock the cheque row for the duration of the transaction.
       const lockResult = await client.query(
-        `SELECT id, company_id, status, amount, number, business_unit_id, endorsed_pago_id
+        `SELECT id, company_id, status, amount, number, business_unit_id, endorsed_pago_id, direction
          FROM cheques
          WHERE id = $1 AND company_id = $2
          FOR UPDATE`,
@@ -331,6 +488,11 @@ export class ChequesService {
       );
       const cheque = (lockResult.rows || [])[0];
       if (!cheque) throw new ApiError(404, 'Cheque no encontrado');
+
+      // H2: Only recibido cheques can be endorsed (can't re-spend your own issue).
+      if ((cheque.direction || 'recibido') !== 'recibido') {
+        throw new ApiError(400, 'Solo se pueden endosar cheques recibidos de terceros');
+      }
 
       // V1: Must be 'a_cobrar' (re-checked INSIDE the lock)
       if (cheque.status !== 'a_cobrar') {
@@ -437,7 +599,8 @@ export class ChequesService {
           amount: data.amount || chequeAmount,
           old_status: 'a_cobrar',
           new_status: 'endosado',
-        });
+          direction: 'recibido',
+        } as any);
       } catch (accErr) { console.warn('Accounting entry skipped (endorse):', (accErr as Error).message); }
 
       return {
@@ -457,10 +620,12 @@ export class ChequesService {
   }
 
   /**
-   * Get cheques available for endorsement (status = 'a_cobrar').
+   * Get cheques available for endorsement (direction='recibido', status='a_cobrar').
+   * Filters out emitido cheques to prevent re-spending our own issue (H2).
    */
   async getChequesForEndorsement(companyId: string, businessUnitId?: string) {
-    let whereClause = sql`c.company_id = ${companyId} AND c.status = 'a_cobrar'`;
+    await this.ensureMigrations();
+    let whereClause = sql`c.company_id = ${companyId} AND c.status = 'a_cobrar' AND c.direction = 'recibido'`;
     if (businessUnitId) {
       whereClause = sql`${whereClause} AND c.business_unit_id = ${businessUnitId}`;
     }

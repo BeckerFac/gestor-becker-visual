@@ -19,6 +19,16 @@ export interface InvoicePdfInput {
   companyProvince?: string
   companyPhone?: string
   companyEmail?: string
+  companyId?: string
+  businessUnitId?: string
+}
+
+// Row returned by SELECT * from a tenant-scoped table. We assert company_id
+// matches and, when provided, business_unit_id matches too.
+export interface TenantRow {
+  company_id?: string | null
+  business_unit_id?: string | null
+  [key: string]: any
 }
 
 export class PdfService {
@@ -66,6 +76,11 @@ export class PdfService {
         throw new ApiError(404, 'Invoice not found')
       }
 
+      // BU guard: verify row belongs to the caller's tenant (and BU if provided).
+      if (input.companyId) {
+        this.assertBelongsToTenant(invoice, input.companyId, input.businessUnitId, 'Factura')
+      }
+
       // Get invoice items
       const items = await db.query.invoice_items.findMany({
         where: eq(invoice_items.invoice_id, input.invoiceId),
@@ -92,9 +107,19 @@ export class PdfService {
       }
 
       // Generate HTML — bifurcate between fiscal and internal voucher
-      const html = invoice.fiscal_type === 'interno'
+      let html = invoice.fiscal_type === 'interno'
         ? this.generateInternalVoucherHtml({ invoice, items, customer, company: input })
         : this.generateInvoiceHtml({ invoice, items, customer, company: input, qrDataUrl })
+
+      // Anulado watermark (soft-delete aware)
+      if (this.isAnulado(invoice)) {
+        const anulledByName = await this.resolveUserName(invoice.anulled_by)
+        html = this.renderAnuladoWatermark(html, {
+          anulled_at: invoice.anulled_at,
+          anulled_by_name: anulledByName,
+          anulled_reason: invoice.anulled_reason,
+        })
+      }
 
       // Convert to PDF using Puppeteer
       if (!this.browser) {
@@ -130,6 +155,138 @@ export class PdfService {
   // PDF templates share a single, audited implementation.
   private escapeHtml(str: unknown): string {
     return sharedEscapeHtml(str)
+  }
+
+  /**
+   * BU guard. Enforces tenant isolation on any row loaded from DB.
+   * - companyId MUST match the row's company_id (IDOR defense).
+   * - if businessUnitId provided, row's business_unit_id MUST match (scoped reads).
+   * Throws 403 ApiError on any mismatch.
+   */
+  private assertBelongsToTenant(
+    row: TenantRow | null | undefined,
+    companyId: string,
+    businessUnitId?: string | null,
+    label: string = 'documento'
+  ): void {
+    if (!row) {
+      throw new ApiError(404, `${label} no encontrado`)
+    }
+    if (!row.company_id || row.company_id !== companyId) {
+      throw new ApiError(403, `Acceso denegado: ${label} de otra empresa`)
+    }
+    if (businessUnitId && row.business_unit_id && row.business_unit_id !== businessUnitId) {
+      throw new ApiError(403, `Acceso denegado: ${label} de otra unidad de negocio`)
+    }
+  }
+
+  /**
+   * Fetch retenciones for a pago, respecting soft-delete.
+   * Only returns rows with anulled_at IS NULL.
+   * direction filter: 'practicada' for pagos (we withheld), 'sufrida' for cobros.
+   */
+  private async fetchPagoRetenciones(pagoId: string): Promise<any[]> {
+    const r = await db.execute(sql`
+      SELECT * FROM retenciones
+      WHERE pago_id = ${pagoId}
+        AND direction = 'practicada'
+        AND anulled_at IS NULL
+      ORDER BY created_at ASC
+    `)
+    return ((r as any).rows || [])
+  }
+
+  /**
+   * Fetch payment_methods[] for a pago from the normalized side-table.
+   * Returns array; if empty, caller should fall back to legacy single column.
+   */
+  private async fetchPagoPaymentMethods(pagoId: string): Promise<any[]> {
+    try {
+      const r = await db.execute(sql`
+        SELECT ppm.*, b.bank_name as bank_name
+        FROM pago_payment_methods ppm
+        LEFT JOIN banks b ON ppm.bank_id = b.id
+        WHERE ppm.pago_id = ${pagoId}
+        ORDER BY ppm.created_at ASC NULLS LAST
+      `)
+      return ((r as any).rows || [])
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Resolve a user id to a display name for the anulado footer.
+   */
+  private async resolveUserName(userId: string | null | undefined): Promise<string> {
+    if (!userId) return '-'
+    try {
+      const r = await db.execute(sql`
+        SELECT COALESCE(name, email, id::text) as display FROM users WHERE id = ${userId}
+      `)
+      const rows = (r as any).rows || []
+      return rows[0]?.display || '-'
+    } catch {
+      return '-'
+    }
+  }
+
+  /**
+   * Detect if a row is anulado (soft-deleted / voided).
+   */
+  private isAnulado(row: any): boolean {
+    if (!row) return false
+    return Boolean(row.anulled_at) || row.status === 'anulado'
+  }
+
+  /**
+   * Wrap generated HTML with a diagonal ANULADO watermark + footer with audit data.
+   * meta.anulled_at / meta.anulled_by_name / meta.anulled_reason are expected.
+   * Inputs are escaped before injection (XSS defense).
+   */
+  private renderAnuladoWatermark(
+    innerHtml: string,
+    meta: { anulled_at?: string | null; anulled_by_name?: string | null; anulled_reason?: string | null }
+  ): string {
+    const esc = this.escapeHtml.bind(this)
+    const when = meta.anulled_at ? new Date(meta.anulled_at).toLocaleString('es-AR') : '-'
+    const who = esc(meta.anulled_by_name || '-')
+    const why = esc(meta.anulled_reason || '-')
+
+    // Inject a fixed-position watermark and a footer into the existing document
+    // by appending right before </body>. If </body> is missing, append at the end.
+    const watermarkBlock = `
+<style>
+  .anulado-watermark {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 9999;
+  }
+  .anulado-watermark span {
+    font-family: Arial, sans-serif; font-size: 140px; font-weight: 900;
+    color: rgba(220, 38, 38, 0.28); letter-spacing: 12px;
+    transform: rotate(-30deg); border: 12px solid rgba(220, 38, 38, 0.28);
+    padding: 20px 60px; text-transform: uppercase;
+  }
+  .anulado-footer {
+    margin-top: 24px; padding: 12px 16px;
+    border: 2px solid #dc2626; background: #fef2f2; color: #991b1b;
+    font-family: Arial, sans-serif; font-size: 11px;
+  }
+  .anulado-footer strong { color: #7f1d1d; }
+</style>
+<div class="anulado-watermark" aria-hidden="true"><span>ANULADO</span></div>
+<div class="anulado-footer">
+  <div><strong>DOCUMENTO ANULADO</strong></div>
+  <div>Fecha de anulacion: ${esc(when)}</div>
+  <div>Anulado por: ${who}</div>
+  <div>Motivo: ${why}</div>
+</div>
+`
+    if (innerHtml.includes('</body>')) {
+      return innerHtml.replace('</body>', `${watermarkBlock}</body>`)
+    }
+    return innerHtml + watermarkBlock
   }
 
   private generateInvoiceHtml(data: any): string {
@@ -829,7 +986,7 @@ export class PdfService {
 </html>`;
   }
 
-  async generateReceiptPdf(cobroId: string, companyId: string): Promise<Buffer> {
+  async generateReceiptPdf(cobroId: string, companyId: string, businessUnitId?: string): Promise<Buffer> {
     try {
       await this.initialize()
 
@@ -841,12 +998,11 @@ export class PdfService {
         FROM cobros c
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
         LEFT JOIN companies comp ON c.company_id = comp.id
-        WHERE c.id = ${cobroId} AND c.company_id = ${companyId}
+        WHERE c.id = ${cobroId}
       `)
       const cobro = ((cobroResult as any).rows || [])[0]
-      if (!cobro) {
-        throw new ApiError(404, 'Cobro not found')
-      }
+      // BU guard (also enforces companyId match -> IDOR defense)
+      this.assertBelongsToTenant(cobro, companyId, businessUnitId, 'Cobro')
 
       // 2. Query payment methods
       const pmResult = await db.execute(sql`
@@ -857,9 +1013,13 @@ export class PdfService {
       `)
       const paymentMethods = (pmResult as any).rows || []
 
-      // 3. Query retenciones
+      // 3. Query retenciones sufridas (soft-delete aware)
       const retResult = await db.execute(sql`
-        SELECT * FROM retenciones WHERE cobro_id = ${cobroId}
+        SELECT * FROM retenciones
+        WHERE cobro_id = ${cobroId}
+          AND direction = 'sufrida'
+          AND anulled_at IS NULL
+        ORDER BY created_at ASC
       `)
       const retenciones = (retResult as any).rows || []
 
@@ -878,7 +1038,17 @@ export class PdfService {
       const linkedInvoices = (invResult as any).rows || []
 
       // 5. Generate HTML
-      const html = this.generateReceiptHtml({ cobro, paymentMethods, retenciones, linkedInvoices })
+      let html = this.generateReceiptHtml({ cobro, paymentMethods, retenciones, linkedInvoices })
+
+      // Anulado watermark
+      if (this.isAnulado(cobro)) {
+        const anulledByName = await this.resolveUserName(cobro.anulled_by)
+        html = this.renderAnuladoWatermark(html, {
+          anulled_at: cobro.anulled_at,
+          anulled_by_name: anulledByName,
+          anulled_reason: cobro.anulled_reason,
+        })
+      }
 
       // 6. Render PDF with Puppeteer
       if (!this.browser) {
@@ -1143,7 +1313,7 @@ ${invRows}
 </html>`
   }
 
-  async generatePaymentPdf(pagoId: string, companyId: string): Promise<Buffer> {
+  async generatePaymentPdf(pagoId: string, companyId: string, businessUnitId?: string): Promise<Buffer> {
     try {
       await this.initialize()
 
@@ -1157,20 +1327,27 @@ ${invRows}
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
         LEFT JOIN companies comp ON p.company_id = comp.id
         LEFT JOIN banks b ON p.bank_id = b.id
-        WHERE p.id = ${pagoId} AND p.company_id = ${companyId}
+        WHERE p.id = ${pagoId}
       `)
       const pago = ((pagoResult as any).rows || [])[0]
-      if (!pago) {
-        throw new ApiError(404, 'Pago not found')
+      // BU guard (also enforces companyId -> IDOR defense)
+      this.assertBelongsToTenant(pago, companyId, businessUnitId, 'Pago')
+
+      // 2. Multi-method payment_methods[] (JSONB side table) with legacy fallback
+      let paymentMethods = await this.fetchPagoPaymentMethods(pagoId)
+      if (paymentMethods.length === 0 && pago.payment_method) {
+        paymentMethods = [{
+          method: pago.payment_method,
+          amount: pago.amount,
+          bank_name: pago.bank_name,
+          reference: pago.reference,
+        }]
       }
 
-      // 2. Query retenciones practicadas
-      const retResult = await db.execute(sql`
-        SELECT * FROM retenciones WHERE pago_id = ${pagoId} AND direction = 'practicada'
-      `)
-      const retenciones = (retResult as any).rows || []
+      // 3. Retenciones practicadas (soft-delete aware, via helper)
+      const retenciones = await this.fetchPagoRetenciones(pagoId)
 
-      // 3. Query linked purchase invoices
+      // 4. Query linked purchase invoices
       const invResult = await db.execute(sql`
         SELECT pia.amount_applied, pi.invoice_number, pi.invoice_type::text, pi.total_amount,
           CAST(pi.total_amount AS decimal) - COALESCE(
@@ -1184,8 +1361,18 @@ ${invRows}
       `)
       const linkedInvoices = (invResult as any).rows || []
 
-      // 4. Generate HTML
-      const html = this.generatePaymentHtml({ pago, retenciones, linkedInvoices })
+      // 5. Generate HTML
+      let html = this.generatePaymentHtml({ pago, paymentMethods, retenciones, linkedInvoices })
+
+      // Anulado watermark
+      if (this.isAnulado(pago)) {
+        const anulledByName = await this.resolveUserName(pago.anulled_by)
+        html = this.renderAnuladoWatermark(html, {
+          anulled_at: pago.anulled_at,
+          anulled_by_name: anulledByName,
+          anulled_reason: pago.anulled_reason,
+        })
+      }
 
       // 5. Render PDF with Puppeteer
       if (!this.browser) {
@@ -1213,10 +1400,12 @@ ${invRows}
 
   private generatePaymentHtml(data: {
     pago: any
+    paymentMethods?: any[]
     retenciones: any[]
     linkedInvoices: any[]
   }): string {
     const { pago, retenciones, linkedInvoices } = data
+    const paymentMethods: any[] = Array.isArray(data.paymentMethods) ? data.paymentMethods : []
     const esc = this.escapeHtml.bind(this)
 
     const paymentNumber = String(pago.id?.slice(-8) || '0').padStart(8, '0')
@@ -1225,18 +1414,50 @@ ${invRows}
     const companyCuit = this.formatCuit(pago.company_cuit || '')
     const enterpriseCuit = this.formatCuit(pago.enterprise_cuit || '')
 
+    // Totals: bruto - retenciones practicadas = neto a pagar
     const totalRetenciones = retenciones.reduce(
       (sum: number, r: any) => sum + parseFloat(r.amount || '0'), 0
     )
-    const totalPago = parseFloat(pago.total_amount || pago.amount || '0')
+    const bruto = parseFloat(pago.total_amount || pago.amount || '0')
+    const netoAPagar = bruto - totalRetenciones
 
     const methodLabels: Record<string, string> = {
       'efectivo': 'Efectivo',
       'transferencia': 'Transferencia',
       'cheque': 'Cheque',
+      'echeq': 'E-Cheq',
       'mercado_pago': 'Mercado Pago',
       'tarjeta': 'Tarjeta',
+      'cash': 'Efectivo',
+      'transfer': 'Transferencia',
+      'check': 'Cheque',
     }
+
+    // Multi-method rows (fallback to single legacy method if paymentMethods is empty)
+    const effectiveMethods = paymentMethods.length > 0
+      ? paymentMethods
+      : [{
+          method: pago.payment_method,
+          amount: pago.amount,
+          bank_name: pago.bank_name,
+          reference: pago.reference,
+        }]
+
+    const methodsRows = effectiveMethods.map((pm: any) => {
+      const methodLabel = methodLabels[pm.method] || pm.method || '-'
+      const amount = parseFloat(pm.amount || '0')
+      // Detail: bank + check# / reference (never raw interpolation of DB strings)
+      const detailParts: string[] = []
+      if (pm.bank_name) detailParts.push(esc(pm.bank_name))
+      if (pm.check_number) detailParts.push('Cheque #' + esc(pm.check_number))
+      if (pm.reference) detailParts.push('Ref: ' + esc(pm.reference))
+      const detail = detailParts.length > 0 ? detailParts.join(' / ') : '-'
+      return `        <tr>
+          <td>${esc(methodLabel)}</td>
+          <td class="right">$ ${amount.toFixed(2)}</td>
+          <td>${detail}</td>
+        </tr>`
+    }).join('\n')
 
     return `<!DOCTYPE html>
 <html>
@@ -1363,25 +1584,19 @@ ${invRows}
     </div>
   </div>
 
-  <!-- FORMA DE PAGO -->
+  <!-- FORMAS DE PAGO (multi-method) -->
   <div class="section" style="padding: 0;">
-    <div class="section-title" style="padding: 10px 16px 4px;">Forma de Pago</div>
+    <div class="section-title" style="padding: 10px 16px 4px;">Formas de Pago</div>
     <table>
       <thead>
         <tr>
-          <th class="left" style="width: 25%;">Metodo</th>
-          <th class="left" style="width: 25%;">Banco</th>
-          <th class="left" style="width: 30%;">Referencia</th>
-          <th class="right" style="width: 20%;">Monto</th>
+          <th class="left" style="width: 30%;">Metodo</th>
+          <th class="right" style="width: 25%;">Monto</th>
+          <th class="left" style="width: 45%;">Detalle</th>
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>${esc(methodLabels[pago.payment_method] || pago.payment_method || '-')}</td>
-          <td>${esc(pago.bank_name || '-')}</td>
-          <td>${esc(pago.reference || '-')}</td>
-          <td class="right">$ ${parseFloat(pago.amount || '0').toFixed(2)}</td>
-        </tr>
+${methodsRows}
       </tbody>
     </table>
   </div>
@@ -1393,21 +1608,23 @@ ${invRows}
     <table>
       <thead>
         <tr>
-          <th class="left" style="width: 15%;">Tipo</th>
-          <th class="left" style="width: 15%;">Regimen</th>
-          <th class="left" style="width: 15%;">Jurisdiccion</th>
-          <th class="left" style="width: 15%;">N° Cert.</th>
+          <th class="left" style="width: 12%;">Tipo</th>
+          <th class="left" style="width: 14%;">Regimen</th>
+          <th class="left" style="width: 14%;">Jurisdiccion</th>
+          <th class="left" style="width: 14%;">N° Cert.</th>
+          <th class="right" style="width: 16%;">Base AFIP</th>
           <th style="width: 10%;">Tasa</th>
-          <th class="right" style="width: 15%;">Importe</th>
+          <th class="right" style="width: 20%;">Importe</th>
         </tr>
       </thead>
       <tbody>
         ${retenciones.map((r: any) => `
         <tr>
-          <td>${esc((r.type || '').toUpperCase())}</td>
+          <td>${esc((r.type || '').toString().toUpperCase())}</td>
           <td>${esc(r.regime || '-')}</td>
           <td>${esc(r.jurisdiction || '-')}</td>
           <td>${esc(r.certificate_number || '-')}</td>
+          <td class="right">$ ${parseFloat(r.base_amount || '0').toFixed(2)}</td>
           <td class="center">${r.rate ? parseFloat(r.rate).toFixed(1) + '%' : '-'}</td>
           <td class="right">$ ${parseFloat(r.amount || '0').toFixed(2)}</td>
         </tr>`).join('')}
@@ -1442,34 +1659,177 @@ ${invRows}
   </div>
   ` : ''}
 
-  <!-- TOTALES -->
+  <!-- TOTALES: Bruto - Retenciones = Neto a Pagar -->
   <div class="totals-box">
     <div class="totals-row">
-      <span class="totals-label">Importe Neto:</span>
-      <span class="totals-amount">$ ${parseFloat(pago.amount || '0').toFixed(2)}</span>
+      <span class="totals-label">Importe Bruto:</span>
+      <span class="totals-amount">$ ${bruto.toFixed(2)}</span>
     </div>
     ${retenciones.length > 0 ? `
     <div class="totals-row">
-      <span class="totals-label">Total Retenciones:</span>
+      <span class="totals-label">(-) Retenciones practicadas:</span>
       <span class="totals-amount">$ ${totalRetenciones.toFixed(2)}</span>
     </div>
     ` : ''}
     <div class="totals-row grand">
-      <span class="totals-label">TOTAL ORDEN DE PAGO:</span>
-      <span class="totals-amount">$ ${totalPago.toFixed(2)}</span>
+      <span class="totals-label">NETO A PAGAR:</span>
+      <span class="totals-amount">$ ${netoAPagar.toFixed(2)}</span>
     </div>
   </div>
 
   <!-- OBSERVACIONES -->
+  ${pago.notes ? `
   <div class="observations">
     <div class="obs-title">Observaciones</div>
-    ${esc(pago.notes || '')}
+    ${esc(pago.notes)}
   </div>
+  ` : ''}
 
   <div class="footer">
     Orden de pago generada el ${new Date().toLocaleDateString('es-AR')} - Documento no fiscal
   </div>
 
+</body>
+</html>`
+  }
+
+  /**
+   * Cheque PDF — supports both directions ('recibido' | 'emitido').
+   * Renders direction, issuer_type, drawer, drawer_cuit, due_date and the
+   * full transition history (cheque_transitions table).
+   * BU guard: enforces company_id and optional business_unit_id.
+   */
+  async generateChequePdf(chequeId: string, companyId: string, businessUnitId?: string): Promise<Buffer> {
+    try {
+      await this.initialize()
+
+      const r = await db.execute(sql`SELECT * FROM cheques WHERE id = ${chequeId}`)
+      const cheque = ((r as any).rows || [])[0]
+      this.assertBelongsToTenant(cheque, companyId, businessUnitId, 'Cheque')
+
+      // Transition history (optional table — fallback to empty on error)
+      let transitions: any[] = []
+      try {
+        const tr = await db.execute(sql`
+          SELECT * FROM cheque_transitions
+          WHERE cheque_id = ${chequeId}
+          ORDER BY created_at ASC
+        `)
+        transitions = (tr as any).rows || []
+      } catch {
+        transitions = []
+      }
+
+      let html = this.generateChequeHtml({ cheque, transitions })
+
+      if (this.isAnulado(cheque)) {
+        const anulledByName = await this.resolveUserName(cheque.anulled_by)
+        html = this.renderAnuladoWatermark(html, {
+          anulled_at: cheque.anulled_at,
+          anulled_by_name: anulledByName,
+          anulled_reason: cheque.anulled_reason,
+        })
+      }
+
+      if (!this.browser) throw new Error('Browser not initialized')
+      const page = await this.browser.newPage()
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const pdf = await page.pdf({
+        format: 'A4',
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
+      })
+      await page.close()
+      return pdf
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(500, `Cheque PDF generation failed: ${(error as Error).message}`)
+    }
+  }
+
+  private generateChequeHtml(data: { cheque: any; transitions: any[] }): string {
+    const { cheque, transitions } = data
+    const esc = this.escapeHtml.bind(this)
+
+    const issueDate = cheque.issue_date ? new Date(cheque.issue_date).toLocaleDateString('es-AR') : '-'
+    const dueDate = cheque.due_date ? new Date(cheque.due_date).toLocaleDateString('es-AR') : '-'
+    const amount = parseFloat(cheque.amount || '0').toFixed(2)
+    const direction = cheque.direction === 'emitido' ? 'EMITIDO' : 'RECIBIDO'
+    const issuerType = cheque.issuer_type === 'propio' ? 'Propio' : 'Tercero'
+
+    const transitionRows = transitions.map((t: any) => {
+      const when = t.created_at ? new Date(t.created_at).toLocaleString('es-AR') : '-'
+      return `<tr>
+        <td>${esc(when)}</td>
+        <td>${esc(t.from_status || '-')}</td>
+        <td>${esc(t.to_status || '-')}</td>
+        <td>${esc(t.reason || '-')}</td>
+      </tr>`
+    }).join('')
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Cheque ${esc(cheque.number || '')}</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 12px; }
+    .header { background: #1a1a2e; color: #fff; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 22px; letter-spacing: 2px; }
+    .badge { background: #fff; color: #1a1a2e; padding: 4px 12px; font-weight: bold; border-radius: 4px; }
+    .section { border: 1px solid #ccc; padding: 12px 16px; margin: 10px 0; }
+    .row { display: flex; margin-bottom: 4px; }
+    .label { min-width: 160px; color: #666; font-size: 11px; }
+    .value { font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+    th { background: #f0f0f0; font-size: 10px; text-transform: uppercase; }
+    .amount { font-size: 24px; font-weight: bold; color: #047857; text-align: right; padding: 12px 16px; border: 2px solid #047857; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>CHEQUE ${direction}</h1>
+    <div class="badge">N&deg; ${esc(cheque.number || '-')}</div>
+  </div>
+
+  <div class="section">
+    <div class="row"><span class="label">Direccion:</span><span class="value">${esc(direction)}</span></div>
+    <div class="row"><span class="label">Tipo emisor:</span><span class="value">${esc(issuerType)}</span></div>
+    <div class="row"><span class="label">Banco:</span><span class="value">${esc(cheque.bank || '-')}</span></div>
+    <div class="row"><span class="label">Librador:</span><span class="value">${esc(cheque.drawer || '-')}</span></div>
+    <div class="row"><span class="label">CUIT librador:</span><span class="value">${esc(cheque.drawer_cuit || '-')}</span></div>
+    <div class="row"><span class="label">Fecha emision:</span><span class="value">${esc(issueDate)}</span></div>
+    <div class="row"><span class="label">Fecha vencimiento:</span><span class="value">${esc(dueDate)}</span></div>
+    <div class="row"><span class="label">Estado actual:</span><span class="value">${esc(cheque.status || '-')}</span></div>
+  </div>
+
+  <div class="amount">$ ${amount}</div>
+
+  ${transitions.length > 0 ? `
+  <div class="section">
+    <div style="font-weight: bold; margin-bottom: 6px;">Historial de transiciones</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>De</th>
+          <th>A</th>
+          <th>Motivo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${transitionRows}
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  <div style="margin-top: 16px; font-size: 10px; color: #888; text-align: center;">
+    Documento no fiscal - Generado el ${new Date().toLocaleDateString('es-AR')}
+  </div>
 </body>
 </html>`
   }

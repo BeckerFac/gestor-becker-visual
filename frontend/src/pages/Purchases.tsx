@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -12,11 +12,30 @@ import { DateRangeFilter } from '@/components/shared/DateRangeFilter'
 import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
+import { PeriodSelector } from '@/components/shared/PeriodSelector'
+import { MultiSelectFilter } from '@/components/shared/MultiSelectFilter'
+import { ContextMenuBase, type ContextMenuItem } from '@/components/ui/ContextMenuBase'
+import { useContextMenu } from '@/hooks/useContextMenu'
+import { useBusinessUnitStore } from '@/stores/businessUnitStore'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toLocalYMD } from '@/utils/dates'
 import { api } from '@/services/api'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
+
+// ----- Types -----
+
+interface PurchaseItem {
+  id?: string
+  product_id?: string | null
+  product_name: string
+  description: string
+  quantity: number | string
+  unit_price: number | string
+  vat_rate: number | string
+  subtotal?: number | string
+  add_to_stock?: boolean
+}
 
 interface Purchase {
   id: string
@@ -25,6 +44,8 @@ interface Purchase {
   enterprise_name: string | null
   enterprise_cuit: string | null
   enterprise_id: string | null
+  business_unit_id: string | null
+  business_unit_name?: string | null
   item_count: number
   items?: PurchaseItem[]
   subtotal: string | null
@@ -37,6 +58,8 @@ interface Purchase {
   invoice_type: string | null
   invoice_number: string | null
   invoice_cae: string | null
+  invoice_status?: string
+  invoiced_amount?: string
   notes: string | null
   enterprise_tags?: { id: string; name: string; color: string }[]
   status: string
@@ -46,19 +69,14 @@ interface Purchase {
 
 interface Enterprise { id: string; name: string; cuit: string | null }
 interface Bank { id: string; bank_name: string }
-
-interface PurchaseItem {
-  id?: string
-  product_id?: string
-  product_name: string
-  description: string
-  quantity: number | string
-  unit_price: number | string
-  subtotal?: number | string
-  add_to_stock?: boolean
+interface ProductOption {
+  id: string
+  name: string
+  sku: string
+  pricing?: { cost: string; final_price: string; vat_rate?: string }
 }
 
-interface ProductOption { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string } }
+// ----- Constants -----
 
 const PAYMENT_METHODS = [
   { value: '', label: 'Sin especificar' },
@@ -69,178 +87,104 @@ const PAYMENT_METHODS = [
   { value: 'tarjeta', label: 'Tarjeta' },
 ]
 
-const STATUS_OPTIONS = [
-  { value: 'activa', label: 'Activa', color: 'bg-blue-100 text-blue-800' },
-  { value: 'recibida', label: 'Recibida', color: 'bg-green-100 text-green-800' },
-  { value: 'cancelada', label: 'Cancelada', color: 'bg-red-100 text-red-800' },
+const VAT_RATE_OPTIONS = [
+  { value: 0, label: '0%' },
+  { value: 10.5, label: '10.5%' },
+  { value: 21, label: '21%' },
+  { value: 27, label: '27%' },
 ]
 
-// Inline component for purchase invoices within expanded purchase detail
-const PurchaseInvoicesSection: React.FC<{ purchaseId: string; enterpriseId: string }> = ({ purchaseId, enterpriseId }) => {
-  const [invoices, setInvoices] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [piForm, setPiForm] = useState({
-    invoice_type: 'A', punto_venta: '', invoice_number: '',
-    invoice_date: new Date().toISOString().split('T')[0],
-    cae: '', subtotal: '', vat_amount: '', total_amount: '', notes: '',
-  })
+// Logical status used for the badges/filters (derived from backend fields).
+const LOGICAL_STATUS_OPTIONS = [
+  { value: 'pendiente', label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
+  { value: 'recibida', label: 'Recibida', color: 'bg-green-100 text-green-800' },
+  { value: 'parcial', label: 'Parcial', color: 'bg-blue-100 text-blue-800' },
+  { value: 'anulada', label: 'Anulada', color: 'bg-red-100 text-red-800' },
+]
 
-  const loadInvoices = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await api.getPurchaseInvoicesByPurchase(purchaseId)
-      setInvoices(data || [])
-    } catch { setInvoices([]) }
-    finally { setLoading(false) }
-  }, [purchaseId])
-
-  useEffect(() => { loadInvoices() }, [loadInvoices])
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!piForm.invoice_number || !piForm.total_amount) {
-      toast.error('Numero de factura y monto total son requeridos')
-      return
-    }
-    setSaving(true)
-    try {
-      const buId = localStorage.getItem('gestia_active_business_unit_id') || undefined
-      await api.createPurchaseInvoice({
-        business_unit_id: buId,
-        enterprise_id: enterpriseId,
-        purchase_id: purchaseId,
-        invoice_type: piForm.invoice_type,
-        punto_venta: piForm.punto_venta || undefined,
-        invoice_number: piForm.invoice_number,
-        invoice_date: piForm.invoice_date,
-        cae: piForm.cae || undefined,
-        // C3: parseFloat(undefined) = NaN, y NaN || 0 = 0 pero parseFloat('') = NaN, y NaN || 0 = 0 tambien,
-        // PERO parseFloat('$100') = NaN y el propio `|| 0` lo rescata. El issue real es line 120 donde
-        // total_amount va sin fallback: si piForm.total_amount es '', parseFloat('') = NaN -> envia NaN al backend.
-        subtotal: (() => { const n = parseFloat(piForm.subtotal); return Number.isFinite(n) ? n : 0 })(),
-        vat_amount: (() => { const n = parseFloat(piForm.vat_amount); return Number.isFinite(n) ? n : 0 })(),
-        total_amount: (() => { const n = parseFloat(piForm.total_amount); return Number.isFinite(n) ? n : 0 })(),
-        notes: piForm.notes || undefined,
-      })
-      toast.success('Factura de compra registrada')
-      setShowForm(false)
-      setPiForm({ invoice_type: 'A', punto_venta: '', invoice_number: '', invoice_date: new Date().toISOString().split('T')[0], cae: '', subtotal: '', vat_amount: '', total_amount: '', notes: '' })
-      loadInvoices()
-    } catch (err: any) {
-      toast.error(err.message || 'Error al crear factura de compra')
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-gray-500 uppercase">Facturas de Compra</p>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-        >
-          {showForm ? 'Cancelar' : '+ Cargar factura'}
-        </button>
-      </div>
-
-      {loading && <p className="text-xs text-gray-400">Cargando...</p>}
-
-      {invoices.length > 0 && (
-        <div className="space-y-1 mb-2">
-          {invoices.map((pi: any) => (
-            <div key={pi.id} className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded px-2 py-1 text-xs">
-              <span className="font-mono font-semibold text-purple-800 dark:text-purple-300">
-                {pi.invoice_type} {pi.punto_venta ? `${pi.punto_venta}-` : ''}{pi.invoice_number}
-              </span>
-              <span className="text-gray-600 dark:text-gray-400">{formatDate(pi.invoice_date)}</span>
-              <span className="font-medium">{formatCurrency(pi.total_amount)}</span>
-              <span className={`rounded-full px-1.5 py-0.5 font-medium ${
-                pi.payment_status === 'pagado' ? 'bg-green-100 text-green-800' :
-                pi.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-red-100 text-red-800'
-              }`}>
-                {pi.payment_status === 'pagado' ? 'Pagado' : pi.payment_status === 'parcial' ? 'Parcial' : 'Pendiente'}
-              </span>
-              {pi.remaining_balance && parseFloat(pi.remaining_balance) > 0 && (
-                <span className="text-red-600 text-xs">Resta: {formatCurrency(pi.remaining_balance)}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {invoices.length === 0 && !loading && !showForm && (
-        <p className="text-xs text-gray-400 italic mb-2">Sin facturas de compra registradas</p>
-      )}
-
-      {showForm && (
-        <form onSubmit={handleCreate} className="space-y-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2">
-          <div className="grid grid-cols-3 gap-2">
-            <select className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={piForm.invoice_type} onChange={e => setPiForm({ ...piForm, invoice_type: e.target.value })}>
-              <option value="A">Tipo A</option>
-              <option value="B">Tipo B</option>
-              <option value="C">Tipo C</option>
-            </select>
-            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Pto Vta" value={piForm.punto_venta} onChange={e => setPiForm({ ...piForm, punto_venta: e.target.value })} />
-            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="N° Factura *" value={piForm.invoice_number} onChange={e => setPiForm({ ...piForm, invoice_number: e.target.value })} required />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <input type="date" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" value={piForm.invoice_date} onChange={e => setPiForm({ ...piForm, invoice_date: e.target.value })} />
-            <input className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="CAE" value={piForm.cae} onChange={e => setPiForm({ ...piForm, cae: e.target.value })} />
-            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Total *" value={piForm.total_amount} onChange={e => setPiForm({ ...piForm, total_amount: e.target.value })} required />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="Subtotal" value={piForm.subtotal} onChange={e => setPiForm({ ...piForm, subtotal: e.target.value })} />
-            <input type="number" step="0.01" className="px-2 py-1 border rounded text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="IVA" value={piForm.vat_amount} onChange={e => setPiForm({ ...piForm, vat_amount: e.target.value })} />
-          </div>
-          <button type="submit" disabled={saving} className="w-full text-xs font-medium px-2 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
-            {saving ? 'Guardando...' : 'Registrar factura de compra'}
-          </button>
-        </form>
-      )}
-    </div>
-  )
+const deriveLogicalStatus = (p: Purchase): 'pendiente' | 'recibida' | 'parcial' | 'anulada' => {
+  if ((p.status || '').toLowerCase() === 'cancelada' || (p.status || '').toLowerCase() === 'anulada') return 'anulada'
+  if (p.invoice_status === 'parcial') return 'parcial'
+  if (p.stock_added) return 'recibida'
+  return 'pendiente'
 }
+
+const emptyItem = (): PurchaseItem => ({
+  product_id: '',
+  product_name: '',
+  description: '',
+  quantity: 1,
+  unit_price: 0,
+  vat_rate: 21,
+  add_to_stock: true,
+})
+
+// ----- Component -----
 
 export const Purchases: React.FC = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [banks, setBanks] = useState<Bank[]>([])
   const [availableProducts, setAvailableProducts] = useState<ProductOption[]>([])
+  const businessUnits = useBusinessUnitStore(s => s.units)
+  const businessUnitsLoaded = useBusinessUnitStore(s => s.loaded)
+
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filterEnterprise, setFilterEnterprise] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null)
   const [expandedDetail, setExpandedDetail] = useState<Purchase | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [addingToInventory, setAddingToInventory] = useState<string | null>(null)
 
+  // Filters
+  const [filterEnterprise, setFilterEnterprise] = useState<string[]>([])
+  const [filterStatus, setFilterStatus] = useState<string[]>([])
+  const [filterBU, setFilterBU] = useState<string[]>([])
+  const [search, setSearch] = useState('')
+  const searchRef = useRef(search)
+  searchRef.current = search
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [summaryPeriod, setSummaryPeriod] = useState('mes')
+
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+
+  // Modals / actions
+  const [anularTarget, setAnularTarget] = useState<Purchase | null>(null)
+  const [anularReason, setAnularReason] = useState('')
+  const [anulando, setAnulando] = useState(false)
+  const [receivingId, setReceivingId] = useState<string | null>(null)
+
+  // Context menu
+  const contextMenu = useContextMenu<Purchase>()
+
+  // Form state
   const [form, setForm] = useState({
-    enterprise_id: '', date: new Date().toISOString().split('T')[0],
-    payment_method: '', bank_id: '', notes: '',
-    invoice_type: '', invoice_number: '', invoice_cae: '',
-    vat_rate: '21',
+    enterprise_id: '',
+    business_unit_id: '',
+    date: toLocalYMD(new Date()),
+    payment_method: '',
+    bank_id: '',
+    notes: '',
+    invoice_type: '',
+    invoice_number: '',
+    invoice_cae: '',
     add_to_inventory: true,
   })
-  const [items, setItems] = useState<PurchaseItem[]>([
-    { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true },
-  ])
+  const [items, setItems] = useState<PurchaseItem[]>([emptyItem()])
 
-  const loadData = async () => {
+  // ----- Load data -----
+
+  const loadData = useCallback(async () => {
     try {
       setLoading(true)
       const [purchRes, entRes, bankRes, prodRes] = await Promise.all([
-        api.getPurchases(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
+        api.getPurchases({
+          enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
+          business_unit_id: filterBU.length === 1 ? filterBU[0] : undefined,
+        }).catch((err: any) => {
           setError(`Error cargando compras: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return []
         }),
@@ -257,37 +201,125 @@ export const Purchases: React.FC = () => {
     } finally {
       setLoading(false)
     }
+  }, [filterEnterprise, filterBU])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  // Lazy-load business units if not loaded yet
+  useEffect(() => {
+    if (!businessUnitsLoaded) {
+      api.getBusinessUnits()
+        .then((data: any[]) => useBusinessUnitStore.getState().setUnits(data || []))
+        .catch(() => useBusinessUnitStore.getState().setUnits([]))
+    }
+  }, [businessUnitsLoaded])
+
+  // ----- Form helpers (per-item totals & VAT breakdown) -----
+
+  const itemSubtotal = (it: PurchaseItem) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)
+
+  const totals = useMemo(() => {
+    let neto = 0
+    const vatByRate: Record<number, number> = {}
+    let vatTotal = 0
+    for (const it of items) {
+      const sub = itemSubtotal(it)
+      neto += sub
+      const rate = Number(it.vat_rate) || 0
+      const vat = sub * rate / 100
+      vatByRate[rate] = (vatByRate[rate] || 0) + vat
+      vatTotal += vat
+    }
+    return {
+      neto: Math.round(neto * 100) / 100,
+      vatByRate,
+      vatTotal: Math.round(vatTotal * 100) / 100,
+      total: Math.round((neto + vatTotal) * 100) / 100,
+    }
+  }, [items])
+
+  const addItem = () => setItems(prev => [...prev, emptyItem()])
+  const removeItem = (idx: number) => setItems(prev => prev.length === 1 ? prev : prev.filter((_, i) => i !== idx))
+  const updateItem = (idx: number, field: keyof PurchaseItem, value: any) => {
+    setItems(prev => {
+      const next = [...prev]
+      next[idx] = { ...next[idx], [field]: value }
+      return next
+    })
   }
 
-  useEffect(() => { loadData() }, [filterEnterprise])
+  const handleProductSelect = (idx: number, productId: string) => {
+    const prod = availableProducts.find(p => p.id === productId)
+    setItems(prev => {
+      const next = [...prev]
+      if (prod) {
+        next[idx] = {
+          ...next[idx],
+          product_id: productId,
+          product_name: prod.name,
+          unit_price: parseFloat(prod.pricing?.cost || '0') || 0,
+          vat_rate: parseFloat(prod.pricing?.vat_rate || '21') || 21,
+        }
+      } else {
+        next[idx] = { ...next[idx], product_id: productId }
+      }
+      return next
+    })
+  }
 
-  const calcSubtotal = () => items.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
-  const calcVat = () => calcSubtotal() * (Number(form.vat_rate) / 100)
-  const calcTotal = () => calcSubtotal() + calcVat()
+  // ----- Form open/close -----
+
+  const resetForm = () => {
+    setForm({
+      enterprise_id: '',
+      business_unit_id: '',
+      date: toLocalYMD(new Date()),
+      payment_method: '',
+      bank_id: '',
+      notes: '',
+      invoice_type: '',
+      invoice_number: '',
+      invoice_cae: '',
+      add_to_inventory: true,
+    })
+    setItems([emptyItem()])
+    setEditingId(null)
+  }
+
+  const openCreate = () => {
+    resetForm()
+    setShowForm(true)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    resetForm()
+  }
 
   const handleEdit = async (purchase: Purchase) => {
     try {
       const detail = await api.getPurchase(purchase.id)
       setForm({
         enterprise_id: detail.enterprise_id || '',
-        date: detail.date ? detail.date.split('T')[0] : '',
+        business_unit_id: detail.business_unit_id || '',
+        date: detail.date ? toLocalYMD(new Date(detail.date)) : toLocalYMD(new Date()),
         payment_method: detail.payment_method || '',
         bank_id: detail.bank_id || '',
         notes: detail.notes || '',
         invoice_type: detail.invoice_type || '',
         invoice_number: detail.invoice_number || '',
         invoice_cae: detail.invoice_cae || '',
-        vat_rate: '21',
-        add_to_inventory: true,
+        add_to_inventory: false,
       })
-      setItems(detail.items?.map((i: any) => ({
+      setItems((detail.items || []).map((i: any) => ({
         product_id: i.product_id || '',
         product_name: i.product_name || '',
         description: i.description || '',
         quantity: i.quantity?.toString() || '1',
         unit_price: i.unit_price?.toString() || '0',
-        add_to_stock: true,
-      })) || [{ product_id: '', product_name: '', description: '', quantity: '1', unit_price: '0', add_to_stock: true }])
+        vat_rate: parseFloat(i.vat_rate?.toString() || '21') || 21,
+        add_to_stock: false,
+      })) || [emptyItem()])
       setEditingId(purchase.id)
       setShowForm(true)
     } catch (e: any) {
@@ -295,15 +327,53 @@ export const Purchases: React.FC = () => {
     }
   }
 
+  const handleDuplicate = async (purchase: Purchase) => {
+    try {
+      const detail = await api.getPurchase(purchase.id)
+      setForm({
+        enterprise_id: detail.enterprise_id || '',
+        business_unit_id: detail.business_unit_id || '',
+        date: toLocalYMD(new Date()),
+        payment_method: detail.payment_method || '',
+        bank_id: detail.bank_id || '',
+        notes: detail.notes || '',
+        invoice_type: '',
+        invoice_number: '',
+        invoice_cae: '',
+        add_to_inventory: true,
+      })
+      setItems((detail.items || []).map((i: any) => ({
+        product_id: i.product_id || '',
+        product_name: i.product_name || '',
+        description: i.description || '',
+        quantity: i.quantity?.toString() || '1',
+        unit_price: i.unit_price?.toString() || '0',
+        vat_rate: parseFloat(i.vat_rate?.toString() || '21') || 21,
+        add_to_stock: true,
+      })) || [emptyItem()])
+      setEditingId(null)
+      setShowForm(true)
+      toast.success(`Compra #${String(purchase.purchase_number || 0).padStart(4, '0')} duplicada — revisa y guarda`)
+    } catch (e: any) {
+      toast.error('Error al duplicar: ' + e.message)
+    }
+  }
+
+  // ----- Submit -----
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const validItems = items.filter(i => i.product_name.trim())
-    if (validItems.length === 0) { setError('Agregá al menos un item'); return }
+    const validItems = items.filter(i => (i.product_name || '').trim())
+    if (validItems.length === 0) {
+      setError('Agrega al menos un item con nombre')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       const payload = {
         enterprise_id: form.enterprise_id || null,
+        business_unit_id: form.business_unit_id || null,
         date: form.date || null,
         payment_method: form.payment_method || null,
         bank_id: form.bank_id || null,
@@ -311,121 +381,187 @@ export const Purchases: React.FC = () => {
         invoice_type: form.invoice_type || null,
         invoice_number: form.invoice_number || null,
         invoice_cae: form.invoice_cae || null,
-        subtotal: calcSubtotal(),
-        vat_amount: calcVat(),
-        total_amount: calcTotal(),
         add_to_inventory: form.add_to_inventory,
         items: validItems.map(i => ({
-          ...i,
           product_id: i.product_id && i.product_id !== 'custom' ? i.product_id : null,
+          product_name: i.product_name,
+          description: i.description || null,
+          quantity: Number(i.quantity) || 0,
+          unit_price: Number(i.unit_price) || 0,
+          vat_rate: Number(i.vat_rate) || 0,
           add_to_stock: i.add_to_stock !== false,
         })),
       }
-      let result: any = null
+      let result: any
       if (editingId) {
         result = await api.updatePurchase(editingId, payload)
+        toast.success('Compra actualizada')
       } else {
         result = await api.createPurchase(payload)
+        toast.success('Compra registrada')
       }
-      toast.success(editingId ? 'Compra actualizada' : 'Compra registrada')
       if (form.add_to_inventory && result?.stock_updated) {
         toast.success('Stock actualizado automaticamente')
       } else if (form.add_to_inventory && result?.stock_error) {
         toast.error(result.stock_error)
       }
-      setShowForm(false)
-      setEditingId(null)
-      setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: true })
-      setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }])
+      closeForm()
       await loadData()
     } catch (e: any) {
-      toast.error(e.message)
+      const msg = e?.response?.data?.error || e.message || 'Error al guardar compra'
+      toast.error(msg)
+      setError(msg)
     } finally {
       setSaving(false)
     }
   }
 
-  const handleDelete = (p: Purchase) => {
-    setDeleteTarget(p)
+  // ----- Anular (delete) -----
+
+  const openAnular = (p: Purchase) => {
+    setAnularTarget(p)
+    setAnularReason('')
   }
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return
-    setDeleting(true)
-    try {
-      await api.deletePurchase(deleteTarget.id)
-      toast.success('Compra eliminada correctamente')
-      await loadData()
-    } catch (e: any) {
-      toast.error(e.message)
-    } finally {
-      setDeleting(false)
-      setDeleteTarget(null)
-    }
-  }
-
-  const handlePaymentStatusChange = async (purchaseId: string, status: string) => {
-    try {
-      await api.updatePurchasePaymentStatus(purchaseId, status)
-      await loadData()
-    } catch (e: any) {
-      setError(e.message)
-    }
-  }
-
-  const handleAddToInventory = async (purchase: Purchase) => {
-    if (purchase.stock_added) {
-      toast.error('El stock de esta compra ya fue agregado al inventario')
+  const confirmAnular = async () => {
+    if (!anularTarget) return
+    if (!anularReason.trim()) {
+      toast.error('El motivo es requerido')
       return
     }
-
+    setAnulando(true)
     try {
-      setAddingToInventory(purchase.id)
-      let purchaseItems: { product_id: string; quantity: number }[]
+      // Reason sent in body for forward-compat. Backend currently ignores but accepts.
+      await (api as any).deletePurchase(anularTarget.id, { reason: anularReason.trim() })
+      toast.success('Compra anulada — movimientos de stock revertidos')
+      setAnularTarget(null)
+      setAnularReason('')
+      await loadData()
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e.message || 'Error al anular'
+      toast.error(msg)
+    } finally {
+      setAnulando(false)
+    }
+  }
 
+  // ----- Recibir (mark as received + apply stock) -----
+
+  const handleRecibir = async (purchase: Purchase) => {
+    if (purchase.stock_added) {
+      toast.error('Esta compra ya fue recibida (stock aplicado)')
+      return
+    }
+    try {
+      setReceivingId(purchase.id)
+      let detail = purchase
       if (!purchase.items || purchase.items.length === 0) {
-        const detail = await api.getPurchase(purchase.id)
-        purchaseItems = (detail.items || []).map((i: any) => ({
-          product_id: i.product_id || i.id || '',
-          quantity: parseFloat(i.quantity || '0'),
-        })).filter((i: any) => i.product_id && i.quantity > 0)
-      } else {
-        purchaseItems = purchase.items.map(i => ({
-          product_id: (i as any).product_id || '',
-          quantity: parseFloat(String(i.quantity || '0')),
-        })).filter(i => i.product_id && i.quantity > 0)
+        detail = await api.getPurchase(purchase.id)
       }
+      const stockItems = (detail.items || [])
+        .map((i: any) => ({
+          product_id: i.product_id || '',
+          quantity: parseFloat(String(i.quantity || '0')),
+        }))
+        .filter((i: any) => i.product_id && i.quantity > 0)
 
-      if (purchaseItems.length === 0) {
-        toast.error('No hay items con productos asociados en esta compra')
+      if (stockItems.length === 0) {
+        toast.error('No hay items con productos asociados — nada para recibir')
         return
       }
 
-      await api.addStockFromPurchase(purchase.id, purchaseItems)
-      toast.success('Stock agregado al inventario desde la compra')
+      await api.addStockFromPurchase(purchase.id, stockItems)
+      toast.success('Compra recibida — stock actualizado')
       await loadData()
-      // Reload expanded detail if this purchase is expanded
-      if (expandedPurchase === purchase.id) {
-        const detail = await api.getPurchase(purchase.id)
-        setExpandedDetail(detail)
-      }
     } catch (e: any) {
-      const msg = e?.response?.data?.error || e.message || 'Error al agregar stock'
+      const msg = e?.response?.data?.error || e.message || 'Error al recibir compra'
       toast.error(msg)
     } finally {
-      setAddingToInventory(null)
+      setReceivingId(null)
     }
   }
 
-  const addItem = () => setItems([...items, { product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }])
-  const removeItem = (idx: number) => { if (items.length > 1) setItems(items.filter((_, i) => i !== idx)) }
-  const updateItem = (idx: number, field: keyof PurchaseItem, value: any) => {
-    const newItems = [...items]
-    newItems[idx] = { ...newItems[idx], [field]: value }
-    setItems(newItems)
+  // ----- Filters / pagination / KPIs -----
+
+  useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterStatus, filterBU, dateFrom, dateTo, search, pageSize])
+
+  const filteredPurchases = useMemo(() => {
+    let result = purchases
+    if (dateFrom) result = result.filter(p => toLocalYMD(p.date) >= dateFrom)
+    if (dateTo) result = result.filter(p => toLocalYMD(p.date) <= dateTo)
+    if (filterEnterprise.length > 0) result = result.filter(p => p.enterprise_id && filterEnterprise.includes(p.enterprise_id))
+    if (filterBU.length > 0) result = result.filter(p => p.business_unit_id && filterBU.includes(p.business_unit_id))
+    if (filterStatus.length > 0) result = result.filter(p => filterStatus.includes(deriveLogicalStatus(p)))
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      result = result.filter(p =>
+        String(p.purchase_number || '').includes(q) ||
+        (p.enterprise_name || '').toLowerCase().includes(q) ||
+        (p.notes || '').toLowerCase().includes(q) ||
+        (p.invoice_number || '').toLowerCase().includes(q) ||
+        (p.items || []).some(it => (it.product_name || '').toLowerCase().includes(q))
+      )
+    }
+    return result
+  }, [purchases, dateFrom, dateTo, filterEnterprise, filterBU, filterStatus, search])
+
+  // KPIs scoped to current month (rolling) regardless of date filter
+  const kpis = useMemo(() => {
+    const now = new Date()
+    const monthStart = toLocalYMD(new Date(now.getFullYear(), now.getMonth(), 1))
+    const monthEnd = toLocalYMD(now)
+    const inMonth = purchases.filter(p => {
+      const d = toLocalYMD(p.date)
+      return d >= monthStart && d <= monthEnd
+    })
+    const compradoMes = inMonth
+      .filter(p => deriveLogicalStatus(p) !== 'anulada')
+      .reduce((sum, p) => sum + parseFloat(p.total_amount || '0'), 0)
+    const cantidadCompras = inMonth.filter(p => deriveLogicalStatus(p) !== 'anulada').length
+    const pendienteRecibir = purchases.filter(p => deriveLogicalStatus(p) === 'pendiente').length
+    const anuladasMes = inMonth.filter(p => deriveLogicalStatus(p) === 'anulada').length
+    return { compradoMes, cantidadCompras, pendienteRecibir, anuladasMes }
+  }, [purchases])
+
+  const totalPages = Math.ceil(filteredPurchases.length / pageSize)
+  const paginatedPurchases = filteredPurchases.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+  const isFiltered = filterEnterprise.length > 0 || filterStatus.length > 0 || filterBU.length > 0 || !!dateFrom || !!dateTo || !!search
+
+  const csvColumns = [
+    { key: 'purchase_number', label: 'N° Compra' },
+    { key: 'date', label: 'Fecha', type: 'date' as const },
+    { key: 'enterprise_name', label: 'Proveedor' },
+    { key: 'business_unit_name', label: 'BU' },
+    { key: 'item_count', label: 'Items', type: 'number' as const },
+    { key: 'total_amount', label: 'Total', type: 'currency' as const },
+    { key: 'status', label: 'Estado' },
+    { key: 'payment_method', label: 'Metodo de Pago' },
+  ]
+
+  const clearFilters = () => {
+    setFilterEnterprise([])
+    setFilterStatus([])
+    setFilterBU([])
+    setDateFrom('')
+    setDateTo('')
+    setSearch('')
   }
 
   const showBankSelector = form.payment_method === 'transferencia' || form.payment_method === 'cheque'
+
+  // Stock impact preview lines
+  const stockImpactLines = useMemo(() => {
+    if (!form.add_to_inventory) return []
+    return items
+      .filter(i => i.product_id && i.product_id !== 'custom' && i.add_to_stock !== false && Number(i.quantity) > 0)
+      .map(i => {
+        const prod = availableProducts.find(p => p.id === i.product_id)
+        return `${prod?.name || i.product_name}: +${Number(i.quantity)} unid.`
+      })
+  }, [items, form.add_to_inventory, availableProducts])
+
+  // ----- Row expansion -----
 
   const toggleExpand = async (purchaseId: string) => {
     if (expandedPurchase === purchaseId) {
@@ -442,38 +578,7 @@ export const Purchases: React.FC = () => {
     }
   }
 
-  useEffect(() => { setCurrentPage(1) }, [filterEnterprise, dateFrom, dateTo, pageSize])
-
-  const filteredPurchases = useMemo(() => {
-    let result = purchases
-    if (dateFrom) result = result.filter(p => toLocalYMD(p.date) >= dateFrom)
-    if (dateTo) result = result.filter(p => toLocalYMD(p.date) <= dateTo)
-    return result
-  }, [purchases, dateFrom, dateTo])
-
-  const totalCompras = filteredPurchases.reduce((sum, p) => sum + parseFloat(p.total_amount || '0'), 0)
-  const pendientes = filteredPurchases.filter(p => p.payment_status === 'pendiente').length
-  const pagadas = filteredPurchases.filter(p => p.payment_status === 'pagado').length
-  const totalPages = Math.ceil(filteredPurchases.length / pageSize)
-  const paginatedPurchases = filteredPurchases.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-
-  const isFiltered = !!filterEnterprise || !!dateFrom || !!dateTo
-
-  const csvColumns = [
-    { key: 'purchase_number', label: 'N° Compra' },
-    { key: 'date', label: 'Fecha', type: 'date' as const },
-    { key: 'enterprise_name', label: 'Empresa' },
-    { key: 'item_count', label: 'Items', type: 'number' as const },
-    { key: 'total_amount', label: 'Total', type: 'currency' as const },
-    { key: 'payment_status', label: 'Estado Pago' },
-    { key: 'payment_method', label: 'Metodo de Pago' },
-  ]
-
-  const clearFilters = () => {
-    setFilterEnterprise('')
-    setDateFrom('')
-    setDateTo('')
-  }
+  // ----- Render -----
 
   return (
     <div className="space-y-6">
@@ -486,7 +591,7 @@ export const Purchases: React.FC = () => {
           <ExportCSVButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <ExportExcelButton data={filteredPurchases} columns={csvColumns} filename="compras" />
           <PermissionGate module="purchases" action="create">
-            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setShowForm(!showForm); if (showForm) { setEditingId(null); setForm({ enterprise_id: '', date: new Date().toISOString().split('T')[0], payment_method: '', bank_id: '', notes: '', invoice_type: '', invoice_number: '', invoice_cae: '', vat_rate: '21', add_to_inventory: true }); setItems([{ product_id: '', product_name: '', description: '', quantity: 1, unit_price: 0, add_to_stock: true }]) } }}>
+            <Button variant={showForm ? 'danger' : 'primary'} onClick={() => showForm ? closeForm() : openCreate()}>
               {showForm ? 'Cancelar' : '+ Nueva Compra'}
             </Button>
           </PermissionGate>
@@ -495,56 +600,102 @@ export const Purchases: React.FC = () => {
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
-          {error}<button onClick={() => setError(null)} className="ml-2 font-bold">×</button>
+          {error}<button onClick={() => setError(null)} className="ml-2 font-bold" aria-label="Cerrar error">x</button>
         </div>
       )}
 
-      {/* Summary Cards */}
+      {/* Period selector */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-500">Periodo:</span>
+        <PeriodSelector selected={summaryPeriod} onChange={p => {
+          setSummaryPeriod(p.value)
+          setDateFrom(p.dateFrom)
+          setDateTo(p.dateTo)
+        }} />
+      </div>
+
+      {/* KPI cards (always reflect current month) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="border border-orange-200 bg-orange-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-orange-700">Total Compras</p>
-            <p className="text-xl font-bold text-orange-800">{formatCurrency(totalCompras)}</p>
+        <Card className="border border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/40">
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-orange-700 dark:text-orange-400 truncate">Comprado mes</p>
+            <p className="text-lg md:text-xl font-bold text-orange-800 dark:text-orange-300 truncate">{formatCurrency(kpis.compradoMes)}</p>
           </CardContent>
         </Card>
-        <Card className="border border-yellow-200 bg-yellow-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-yellow-700">Pago Pendiente</p>
-            <p className="text-xl font-bold text-yellow-800">{pendientes}</p>
+        <Card className="border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40">
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-blue-700 dark:text-blue-400 truncate">Cantidad compras</p>
+            <p className="text-lg md:text-xl font-bold text-blue-800 dark:text-blue-300 truncate">{kpis.cantidadCompras}</p>
           </CardContent>
         </Card>
-        <Card className="border border-green-200 bg-green-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-green-700">Pagadas</p>
-            <p className="text-xl font-bold text-green-800">{pagadas}</p>
+        <Card className="border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/40">
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-yellow-700 dark:text-yellow-400 truncate">Pendiente recibir</p>
+            <p className="text-lg md:text-xl font-bold text-yellow-800 dark:text-yellow-300 truncate">{kpis.pendienteRecibir}</p>
           </CardContent>
         </Card>
-        <Card className="border border-blue-200 bg-blue-50">
-          <CardContent className="pt-3 pb-2">
-            <p className="text-xs text-blue-700">Empresas</p>
-            <p className="text-xl font-bold text-blue-800">{new Set(purchases.map(p => p.enterprise_id).filter(Boolean)).size}</p>
+        <Card className="border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40">
+          <CardContent className="pt-3 pb-2 overflow-hidden">
+            <p className="text-xs text-red-700 dark:text-red-400 truncate">Anuladas mes</p>
+            <p className="text-lg md:text-xl font-bold text-red-800 dark:text-red-300 truncate">{kpis.anuladasMes}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filter */}
+      {/* Filters */}
       <Card>
         <CardContent className="pt-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <MultiSelectFilter
+              label="Proveedor"
+              options={enterprises.map(e => ({ value: e.id, label: e.name }))}
+              selected={filterEnterprise}
+              onChange={setFilterEnterprise}
+              placeholder="Todos"
+            />
+            <MultiSelectFilter
+              label="Estado"
+              options={LOGICAL_STATUS_OPTIONS.map(s => ({ value: s.value, label: s.label }))}
+              selected={filterStatus}
+              onChange={setFilterStatus}
+              placeholder="Todos"
+            />
+            <MultiSelectFilter
+              label="Razon social"
+              options={businessUnits.map(b => ({ value: b.id, label: b.name }))}
+              selected={filterBU}
+              onChange={setFilterBU}
+              placeholder="Todas"
+            />
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500">Empresa / Proveedor</label>
-              <select className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100" value={filterEnterprise} onChange={e => setFilterEnterprise(e.target.value)}>
-                <option value="">Todas las empresas</option>
-                {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
-              </select>
+              <label className="text-xs font-medium text-gray-500">Buscar</label>
+              <input
+                className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                placeholder="N°, proveedor, producto..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
             </div>
-            <div className="col-span-2 md:col-span-2">
-              <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onDateFromChange={setDateFrom} onDateToChange={setDateTo} onClear={() => { setDateFrom(''); setDateTo('') }} />
+            <div className="md:col-span-2">
+              <DateRangeFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onDateFromChange={setDateFrom}
+                onDateToChange={setDateTo}
+                onClear={() => { setDateFrom(''); setDateTo('') }}
+                label="Fecha"
+              />
             </div>
           </div>
+          {isFiltered && (
+            <div className="mt-2 flex justify-end">
+              <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline">Limpiar filtros</button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {/* ----- Form ----- */}
       {showForm && (
         <Card className="animate-fadeIn">
           <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Compra' : 'Nueva Compra'}</h3></CardHeader>
@@ -552,15 +703,22 @@ export const Purchases: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Empresa / Proveedor</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Proveedor</label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.enterprise_id} onChange={e => setForm({ ...form, enterprise_id: e.target.value })}>
                     <option value="">Seleccionar...</option>
-                    {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name} {ent.cuit ? `(${ent.cuit})` : ''}</option>)}
+                    {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}{ent.cuit ? ` (${ent.cuit})` : ''}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Razon social<HelpTip text="Razon social emisora de la compra. Si solo tenes una, se asigna automaticamente." /></label>
+                  <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.business_unit_id} onChange={e => setForm({ ...form, business_unit_id: e.target.value })}>
+                    <option value="">Por defecto</option>
+                    {businessUnits.filter(b => b.active).map(b => <option key={b.id} value={b.id}>{b.name}{b.is_fiscal ? ' (Fiscal)' : ''}</option>)}
                   </select>
                 </div>
                 <DateInput label="Fecha" value={form.date} onChange={val => setForm({ ...form, date: val })} />
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Método de Pago</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Metodo de Pago</label>
                   <select className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100" value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value, bank_id: '' })}>
                     {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
@@ -576,7 +734,7 @@ export const Purchases: React.FC = () => {
                 )}
               </div>
 
-              {/* Optional Invoice */}
+              {/* Optional invoice metadata */}
               <div className="border-t pt-4">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Factura recibida (opcional)</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -599,65 +757,70 @@ export const Purchases: React.FC = () => {
               </div>
 
               {/* Items */}
-              <div className="border-t pt-4">
-                <div className="flex justify-between items-center mb-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Items de la compra</p>
-                  <button type="button" onClick={addItem} className="text-blue-600 text-sm hover:underline">+ Agregar item</button>
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Items de la Compra</h4>
+                  <button type="button" onClick={addItem} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+                    + Agregar Item
+                  </button>
                 </div>
                 <div className="space-y-2">
                   {items.map((item, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-4">
-                        <div className="flex flex-col gap-1">
+                    <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                      <div className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-12 md:col-span-3">
+                          <label className="text-xs font-medium text-gray-500">Producto</label>
                           <select
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                            className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                             value={item.product_id || ''}
-                            onChange={e => {
-                              const pid = e.target.value
-                              const prod = availableProducts.find(p => p.id === pid)
-                              if (prod) {
-                                const newItems = [...items]
-                                newItems[idx] = {
-                                  ...newItems[idx],
-                                  product_id: pid,
-                                  product_name: prod.name,
-                                  unit_price: parseFloat(prod.pricing?.cost || '0'),
-                                }
-                                setItems(newItems)
-                              } else {
-                                updateItem(idx, 'product_id', pid)
-                              }
-                            }}
+                            onChange={e => handleProductSelect(idx, e.target.value)}
                           >
                             <option value="">Seleccionar producto...</option>
                             {availableProducts.map(p => <option key={p.id} value={p.id}>{p.sku} - {p.name}</option>)}
                             <option value="custom">Producto manual...</option>
                           </select>
                           {(!item.product_id || item.product_id === 'custom') && (
-                            <Input placeholder="Nombre del producto" value={item.product_name} onChange={e => updateItem(idx, 'product_name', e.target.value)} />
+                            <Input className="mt-1" placeholder="Nombre del producto" value={item.product_name} onChange={e => updateItem(idx, 'product_name', e.target.value)} />
                           )}
                         </div>
-                      </div>
-                      <div className="col-span-3">
-                        <Input placeholder="Descripcion" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
-                      </div>
-                      <div className="col-span-2">
-                        <Input type="number" placeholder="Cant." value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} />
-                      </div>
-                      <div className="col-span-2">
-                        <Input type="number" placeholder="Precio unit." value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', e.target.value)} />
-                      </div>
-                      <div className="col-span-1">
-                        {items.length > 1 && (
-                          <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-lg px-2">x</button>
-                        )}
+                        <div className="col-span-12 md:col-span-3">
+                          <label className="text-xs font-medium text-gray-500">Descripcion</label>
+                          <Input placeholder="Descripcion" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} />
+                        </div>
+                        <div className="col-span-4 md:col-span-1">
+                          <label className="text-xs font-medium text-gray-500">Cant.</label>
+                          <Input type="number" step="0.01" placeholder="1" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} />
+                        </div>
+                        <div className="col-span-4 md:col-span-2">
+                          <label className="text-xs font-medium text-gray-500">P. Unit.</label>
+                          <Input type="number" step="0.01" placeholder="0" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', e.target.value)} />
+                        </div>
+                        <div className="col-span-3 md:col-span-1">
+                          <label className="text-xs font-medium text-gray-500">IVA</label>
+                          <select
+                            className="w-full px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                            value={Number(item.vat_rate)}
+                            onChange={e => updateItem(idx, 'vat_rate', parseFloat(e.target.value))}
+                          >
+                            {VAT_RATE_OPTIONS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-9 md:col-span-1 text-right">
+                          <label className="text-xs font-medium text-gray-500">Sub.</label>
+                          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{formatCurrency(itemSubtotal(item))}</p>
+                        </div>
+                        <div className="col-span-1 flex items-end justify-end">
+                          {items.length > 1 && (
+                            <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 text-lg px-2" aria-label="Eliminar item">x</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Inventory option */}
+              {/* Inventory toggle + stock impact preview */}
               <div className="border-t pt-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -667,65 +830,46 @@ export const Purchases: React.FC = () => {
                     className="rounded border-gray-300"
                   />
                   <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
-                    {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}<HelpTip text="Si esta activo, los items de esta compra se suman automaticamente al stock." />
+                    {editingId ? 'Ajustar inventario con los cambios' : 'Sumar al inventario automaticamente'}
+                    <HelpTip text="Si esta activo, los items con producto asociado incrementan stock al guardar." />
                   </span>
                 </label>
-                {form.add_to_inventory && items.some(i => i.product_id && i.product_id !== 'custom') && (
-                  <div className="mt-2 ml-6 space-y-1">
-                    <p className="text-xs text-gray-500 mb-1">
-                      {editingId
-                        ? 'Se ajustara el stock segun las diferencias de cantidad para los items marcados:'
-                        : 'Se sumara stock para los items marcados (solo productos con control de stock):'}
+
+                {form.add_to_inventory && stockImpactLines.length > 0 && (
+                  <div className="mt-2 ml-6 p-2 rounded bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
+                    <p className="text-xs font-semibold text-green-800 dark:text-green-300 mb-1">
+                      Esta compra incrementara stock en:
                     </p>
-                    {items.map((item, idx) => {
-                      if (!item.product_id || item.product_id === 'custom') return null
-                      const prod = availableProducts.find(p => p.id === item.product_id)
-                      return (
-                        <label key={idx} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={item.add_to_stock !== false}
-                            onChange={e => updateItem(idx, 'add_to_stock', e.target.checked)}
-                            className="rounded border-gray-300"
-                          />
-                          <span className="text-xs text-gray-600 dark:text-gray-400">
-                            {prod?.name || item.product_name} - {item.quantity} unid.
-                          </span>
-                        </label>
-                      )
-                    })}
+                    <ul className="text-xs text-green-700 dark:text-green-400 space-y-0.5">
+                      {stockImpactLines.map((line, i) => <li key={i}>• {line}</li>)}
+                    </ul>
                   </div>
                 )}
               </div>
 
-              {/* Totals */}
-              <div className="border-t pt-4 flex justify-between items-center">
-                <div className="flex gap-4 items-center">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-sm text-gray-600 dark:text-gray-400">IVA %</label>
-                    <input
-                      type="number" step="0.01" placeholder="21"
-                      list="purchase-vat-rate-list"
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-24 bg-white dark:bg-gray-700 dark:text-gray-100"
-                      value={form.vat_rate}
-                      onChange={e => setForm({ ...form, vat_rate: e.target.value })}
-                    />
-                    <datalist id="purchase-vat-rate-list">
-                      <option value="0">0%</option>
-                      <option value="10.5">10.5%</option>
-                      <option value="21">21%</option>
-                      <option value="27">27%</option>
-                    </datalist>
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                    <div>Subtotal: <strong>{formatCurrency(calcSubtotal())}</strong></div>
-                    <div>IVA: <strong>{formatCurrency(calcVat())}</strong></div>
-                    <div className="text-lg text-green-700 font-bold">Total: {formatCurrency(calcTotal())}</div>
-                  </div>
+              {/* Totals + actions */}
+              <div className="border-t pt-4 flex flex-col md:flex-row justify-between gap-4">
+                <div className="text-sm text-gray-600 dark:text-gray-400 space-y-0.5">
+                  <div>Neto: <strong>{formatCurrency(totals.neto)}</strong></div>
+                  {Object.entries(totals.vatByRate)
+                    .filter(([, v]) => Math.abs(v) > 0.001)
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([rate, v]) => (
+                      <div key={rate}>IVA {rate}%: <strong>{formatCurrency(v)}</strong></div>
+                    ))}
+                  <div className="text-lg text-green-700 dark:text-green-400 font-bold">Total: {formatCurrency(totals.total)}</div>
                 </div>
-                <div className="flex gap-2">
-                  <textarea className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm resize-y w-64 bg-white dark:bg-gray-700 dark:text-gray-100" rows={2} placeholder="Notas..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-                  <Button type="submit" variant="success" loading={saving}>{editingId ? 'Guardar Cambios' : 'Crear Compra'}</Button>
+                <div className="flex flex-col gap-2 md:items-end">
+                  <textarea
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm resize-y w-full md:w-72 bg-white dark:bg-gray-700 dark:text-gray-100"
+                    rows={2}
+                    placeholder="Notas..."
+                    value={form.notes}
+                    onChange={e => setForm({ ...form, notes: e.target.value })}
+                  />
+                  <Button type="submit" variant="success" loading={saving}>
+                    {editingId ? 'Guardar Cambios' : 'Crear Compra'}
+                  </Button>
                 </div>
               </div>
             </form>
@@ -733,16 +877,16 @@ export const Purchases: React.FC = () => {
         </Card>
       )}
 
-      {/* Purchases Table with expandable rows */}
+      {/* ----- Table ----- */}
       {loading ? (
-        <Card><CardContent><SkeletonTable rows={5} cols={5} /></CardContent></Card>
+        <Card><CardContent><SkeletonTable rows={5} cols={7} /></CardContent></Card>
       ) : filteredPurchases.length === 0 ? (
         <Card><CardContent>
           <EmptyState
             title={isFiltered ? 'No hay compras con estos filtros' : 'No hay compras registradas'}
-            description={isFiltered ? 'Proba ajustando los filtros de busqueda' : 'Registra la primera compra para empezar'}
+            description={isFiltered ? 'Probá ajustando los filtros de busqueda' : 'Registra la primera compra para empezar'}
             actionLabel={isFiltered ? 'Limpiar filtros' : '+ Nueva Compra'}
-            onAction={isFiltered ? clearFilters : () => setShowForm(true)}
+            onAction={isFiltered ? clearFilters : openCreate}
           />
         </CardContent></Card>
       ) : (
@@ -753,248 +897,171 @@ export const Purchases: React.FC = () => {
                 <tr className="bg-gray-50 dark:bg-gray-700 text-left text-sm font-medium text-gray-500 dark:text-gray-300">
                   <th className="px-4 py-3">N°</th>
                   <th className="px-4 py-3">Fecha</th>
-                  <th className="px-4 py-3">Empresa</th>
-                  <th className="px-4 py-3">Items</th>
+                  <th className="px-4 py-3">Proveedor</th>
+                  <th className="px-4 py-3">BU</th>
+                  <th className="px-4 py-3 text-center">Items</th>
                   <th className="px-4 py-3 text-right">Total</th>
-                  <th className="px-4 py-3 text-center">Facturado</th>
-                  <th className="px-4 py-3 text-center">Pago</th>
-                  <th className="px-4 py-3 text-center">Estado / Acciones</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {paginatedPurchases.map(purchase => (
-                  <React.Fragment key={purchase.id}>
-                    <tr
-                      className={`hover:bg-gray-50 cursor-pointer transition-colors ${expandedPurchase === purchase.id ? 'bg-orange-50 border-b-0' : 'border-b'}`}
-                      onClick={() => toggleExpand(purchase.id)}
-                    >
-                      <td className="px-4 py-3">
-                        <span className="font-mono font-bold text-orange-700">#{String(purchase.purchase_number || 0).padStart(4, '0')}</span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(purchase.date)}</td>
-                      <td className="px-4 py-3">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{purchase.enterprise_name || '-'}</p>
-                          {purchase.enterprise_cuit && <p className="text-xs text-gray-500">{purchase.enterprise_cuit}</p>}
-                          <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm px-1.5 py-0.5 rounded bg-orange-50 text-orange-600">{purchase.item_count} item{Number(purchase.item_count) !== 1 ? 's' : ''}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-bold text-red-700">{formatCurrency(parseFloat(purchase.total_amount || '0'))}</span>
-                      </td>
-                      {/* Facturado */}
-                      <td className="px-4 py-2 text-center">
-                        {(() => {
-                          const invStatus = (purchase as any).invoice_status || 'sin_facturar'
-                          const invoicedAmt = parseFloat((purchase as any).invoiced_amount || '0')
-                          const totalAmt = parseFloat(purchase.total_amount || '0')
-                          if (invStatus === 'facturado') return <span className="text-xs font-medium rounded-full px-2 py-1 bg-green-100 text-green-800">Completo</span>
-                          if (invStatus === 'parcial') return (
-                            <div>
-                              <span className="text-xs font-medium rounded-full px-2 py-1 bg-yellow-100 text-yellow-800">Parcial</span>
-                              <p className="text-[10px] text-gray-400 mt-0.5">{formatCurrency(invoicedAmt)} / {formatCurrency(totalAmt)}</p>
-                            </div>
-                          )
-                          return <span className="text-xs font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600">Sin facturar</span>
-                        })()}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        <select
-                          className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer appearance-none text-center ${
-                            purchase.payment_status === 'pagado'
-                              ? 'bg-green-100 text-green-800'
-                              : purchase.payment_status === 'parcial'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                          value={purchase.payment_status}
-                          onChange={e => { e.stopPropagation(); handlePaymentStatusChange(purchase.id, e.target.value) }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <option value="pendiente">Pendiente</option>
-                          <option value="parcial">Parcial</option>
-                          <option value="pagado">Pagado</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {purchase.invoice_type && (
-                            <span className="text-xs font-mono bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                              Fc {purchase.invoice_type}
-                            </span>
-                          )}
-                          <PermissionGate module="purchases" action="edit">
-                            <button
-                              onClick={e => { e.stopPropagation(); handleEdit(purchase) }}
-                              className="text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors mr-1"
-                              title="Editar compra"
-                            >
-                              Editar
-                            </button>
-                          </PermissionGate>
-                          <PermissionGate module="purchases" action="delete">
-                            <button
-                              onClick={e => { e.stopPropagation(); handleDelete(purchase) }}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
-                              title="Eliminar compra"
-                            >
-                              ×
-                            </button>
-                          </PermissionGate>
-                          <span className="text-gray-400 text-xs">{expandedPurchase === purchase.id ? '▲' : '▼'}</span>
-                        </div>
-                      </td>
-                    </tr>
+                {paginatedPurchases.map(purchase => {
+                  const logical = deriveLogicalStatus(purchase)
+                  const statusOpt = LOGICAL_STATUS_OPTIONS.find(s => s.value === logical)!
+                  const isAnulada = logical === 'anulada'
+                  const rowBase = expandedPurchase === purchase.id
+                    ? 'bg-orange-50 dark:bg-orange-900/20 border-b-0'
+                    : 'border-b dark:border-gray-700'
+                  const rowStyle = isAnulada
+                    ? `${rowBase} bg-red-50 dark:bg-red-900/20 line-through text-gray-500`
+                    : rowBase
+                  return (
+                    <React.Fragment key={purchase.id}>
+                      <tr
+                        className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${rowStyle}`}
+                        onClick={() => toggleExpand(purchase.id)}
+                        onContextMenu={(e) => contextMenu.openMenu(e, purchase)}
+                      >
+                        <td className="px-4 py-3">
+                          <span className="font-mono font-bold text-orange-700 dark:text-orange-400">
+                            #{String(purchase.purchase_number || 0).padStart(4, '0')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(purchase.date)}</td>
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{purchase.enterprise_name || '-'}</p>
+                            {purchase.enterprise_cuit && <p className="text-xs text-gray-500">{purchase.enterprise_cuit}</p>}
+                            <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+                          {purchase.business_unit_name || businessUnits.find(b => b.id === purchase.business_unit_id)?.name || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="text-sm px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300">
+                            {purchase.item_count} item{Number(purchase.item_count) !== 1 ? 's' : ''}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`font-bold ${isAnulada ? 'text-gray-500' : 'text-red-700 dark:text-red-400'}`}>
+                            {formatCurrency(parseFloat(purchase.total_amount || '0'))}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${statusOpt.color}`}>
+                            {statusOpt.label}
+                          </span>
+                        </td>
+                      </tr>
 
-                    {/* Expanded detail row */}
-                    {expandedPurchase === purchase.id && (
-                      <tr>
-                        <td colSpan={7} className="px-0 py-0 border-b-2 border-orange-300">
-                          <div className="mx-3 my-3 bg-orange-50 border border-orange-200 rounded-lg shadow-sm overflow-hidden animate-slideDown">
-                            <div className="border-l-4 border-orange-500 px-4 py-4">
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                {/* Column 1: Items */}
-                                <div className="space-y-2">
-                                  <h4 className="text-sm font-semibold text-orange-800 border-b border-orange-200 pb-1">Items de la Compra</h4>
-                                  {expandedDetail?.items && expandedDetail.items.length > 0 ? (
-                                    <div className="space-y-1.5">
-                                      {expandedDetail.items.map((item: any, idx: number) => (
-                                        <div key={idx} className="bg-white rounded px-2 py-1.5 border border-orange-100">
-                                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.product_name}</p>
-                                          {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
-                                          <div className="flex gap-3 text-xs text-gray-600 dark:text-gray-400 mt-0.5">
-                                            <span>Cant: {item.quantity}</span>
-                                            <span>P/U: {formatCurrency(parseFloat(item.unit_price || '0'))}</span>
-                                            <span className="font-medium text-gray-800 dark:text-gray-200">Sub: {formatCurrency(parseFloat(item.subtotal || '0'))}</span>
+                      {/* Expanded detail */}
+                      {expandedPurchase === purchase.id && (
+                        <tr>
+                          <td colSpan={7} className="px-0 py-0 border-b-2 border-orange-300">
+                            <div className="mx-3 my-3 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg shadow-sm overflow-hidden">
+                              <div className="border-l-4 border-orange-500 px-4 py-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  <div className="space-y-2">
+                                    <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-300 border-b border-orange-200 pb-1">Items</h4>
+                                    {expandedDetail?.items && expandedDetail.items.length > 0 ? (
+                                      <div className="space-y-1.5">
+                                        {expandedDetail.items.map((item: any, idx: number) => (
+                                          <div key={idx} className="bg-white dark:bg-gray-800 rounded px-2 py-1.5 border border-orange-100 dark:border-orange-900/40">
+                                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.product_name}</p>
+                                            {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
+                                            <div className="flex gap-3 text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                                              <span>Cant: {item.quantity}</span>
+                                              <span>P/U: {formatCurrency(parseFloat(item.unit_price || '0'))}</span>
+                                              <span>IVA: {parseFloat(item.vat_rate || '21')}%</span>
+                                              <span className="font-medium text-gray-800 dark:text-gray-200">Sub: {formatCurrency(parseFloat(item.subtotal || '0'))}</span>
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-gray-400">{purchase.item_count} item(s) - cargando...</p>
-                                  )}
-                                  <div className="grid grid-cols-2 gap-2 pt-1">
-                                    <div>
-                                      <p className="text-xs text-gray-500">Subtotal</p>
-                                      <p className="text-sm font-medium">{formatCurrency(parseFloat(purchase.subtotal || '0'))}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-gray-500">IVA</p>
-                                      <p className="text-sm font-medium">{formatCurrency(parseFloat(purchase.vat_amount || '0'))}</p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Column 2: Empresa & Notas */}
-                                <div className="space-y-2">
-                                  <h4 className="text-sm font-semibold text-orange-800 border-b border-orange-200 pb-1">Proveedor y Detalles</h4>
-                                  <div>
-                                    <p className="text-xs text-gray-500">Empresa</p>
-                                    <p className="text-sm text-gray-800 dark:text-gray-200 font-medium">{purchase.enterprise_name || 'Sin empresa'}</p>
-                                    {purchase.enterprise_cuit && <p className="text-xs text-gray-500 font-mono">{purchase.enterprise_cuit}</p>}
-                                    <TagBadges tags={purchase.enterprise_tags || []} size="sm" />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-gray-500">Fecha</p>
-                                    <p className="text-sm text-gray-800 dark:text-gray-200">{formatDate(purchase.date)}</p>
-                                  </div>
-                                  {purchase.notes && (
-                                    <div>
-                                      <p className="text-xs text-gray-500">Notas</p>
-                                      <p className="text-sm text-gray-700 dark:text-gray-300 bg-yellow-50 px-2 py-1 rounded">{purchase.notes}</p>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Column 3: Payment & Invoice */}
-                                <div className="space-y-2">
-                                  <h4 className="text-sm font-semibold text-orange-800 border-b border-orange-200 pb-1">Facturación y Pago</h4>
-                                  <div>
-                                    <p className="text-xs text-gray-500">Método de Pago</p>
-                                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                                      {PAYMENT_METHODS.find(m => m.value === purchase.payment_method)?.label || 'Sin especificar'}
-                                    </p>
-                                  </div>
-                                  {purchase.bank_name && (
-                                    <div>
-                                      <p className="text-xs text-gray-500">Banco</p>
-                                      <p className="text-sm text-gray-800 dark:text-gray-200">{purchase.bank_name}</p>
-                                    </div>
-                                  )}
-                                  {purchase.invoice_type ? (
-                                    <div className="space-y-1.5">
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-gray-400">{purchase.item_count} item(s) — cargando...</p>
+                                    )}
+                                    <div className="grid grid-cols-2 gap-2 pt-1">
                                       <div>
-                                        <p className="text-xs text-gray-500">Comprobante AFIP</p>
-                                        <span className="font-mono text-sm font-semibold text-purple-800 bg-purple-50 border border-purple-200 px-2 py-1 rounded inline-block mt-0.5">
+                                        <p className="text-xs text-gray-500">Subtotal</p>
+                                        <p className="text-sm font-medium">{formatCurrency(parseFloat(purchase.subtotal || '0'))}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-gray-500">IVA</p>
+                                        <p className="text-sm font-medium">{formatCurrency(parseFloat(purchase.vat_amount || '0'))}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-300 border-b border-orange-200 pb-1">Proveedor y Detalles</h4>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Proveedor</p>
+                                      <p className="text-sm font-medium">{purchase.enterprise_name || 'Sin proveedor'}</p>
+                                      {purchase.enterprise_cuit && <p className="text-xs text-gray-500 font-mono">{purchase.enterprise_cuit}</p>}
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Razon social</p>
+                                      <p className="text-sm">{purchase.business_unit_name || businessUnits.find(b => b.id === purchase.business_unit_id)?.name || '-'}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Fecha</p>
+                                      <p className="text-sm">{formatDate(purchase.date)}</p>
+                                    </div>
+                                    {purchase.notes && (
+                                      <div>
+                                        <p className="text-xs text-gray-500">Notas</p>
+                                        <p className="text-sm bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded">{purchase.notes}</p>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-300 border-b border-orange-200 pb-1">Estado y Stock</h4>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Estado</p>
+                                      <span className={`text-xs font-medium rounded-full px-2 py-1 inline-block ${statusOpt.color}`}>{statusOpt.label}</span>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-500">Pago</p>
+                                      <p className="text-sm">{PAYMENT_METHODS.find(m => m.value === purchase.payment_method)?.label || 'Sin especificar'}</p>
+                                    </div>
+                                    {purchase.invoice_type && (
+                                      <div>
+                                        <p className="text-xs text-gray-500">Comprobante</p>
+                                        <span className="font-mono text-sm font-semibold text-purple-800 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 px-2 py-1 rounded inline-block mt-0.5">
                                           {purchase.invoice_type} {purchase.invoice_number || ''}
                                         </span>
                                       </div>
-                                      {purchase.invoice_cae && (
-                                        <div>
-                                          <p className="text-xs text-gray-500">CAE</p>
-                                          <p className="font-mono text-xs text-gray-600 dark:text-gray-400 bg-gray-100 px-2 py-0.5 rounded inline-block">{purchase.invoice_cae}</p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <p className="text-xs text-gray-500">Comprobante AFIP</p>
-                                      <p className="text-sm text-gray-400 italic">Sin factura registrada</p>
-                                    </div>
-                                  )}
-                                  <div>
-                                    <p className="text-xs text-gray-500">Estado de Pago</p>
-                                    <select
-                                      className={`text-xs font-medium rounded-full px-2 py-1 border-0 cursor-pointer ${
-                                        purchase.payment_status === 'pagado' ? 'bg-green-100 text-green-800'
-                                        : purchase.payment_status === 'parcial' ? 'bg-yellow-100 text-yellow-800'
-                                        : 'bg-red-100 text-red-800'
-                                      }`}
-                                      value={purchase.payment_status}
-                                      onChange={e => handlePaymentStatusChange(purchase.id, e.target.value)}
-                                    >
-                                      <option value="pendiente">Pendiente</option>
-                                      <option value="parcial">Parcial</option>
-                                      <option value="pagado">Pagado</option>
-                                    </select>
-                                  </div>
-                                  {/* Purchase Invoices section */}
-                                  <div className="pt-2 border-t border-orange-200">
-                                    <PurchaseInvoicesSection purchaseId={purchase.id} enterpriseId={purchase.enterprise_id || ''} />
-                                  </div>
-
-                                  <div className="pt-2 border-t border-orange-200">
-                                    <PermissionGate module="inventory" action="create">
-                                      {purchase.stock_added ? (
-                                        <div className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-center">
-                                          Agregado al inventario ✓
-                                        </div>
-                                      ) : (
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); handleAddToInventory(purchase) }}
-                                          disabled={addingToInventory === purchase.id}
-                                          className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                                        >
-                                          {addingToInventory === purchase.id ? 'Agregando...' : 'Agregar al inventario'}
-                                        </button>
-                                      )}
-                                      <p className="text-xs text-gray-400 mt-1">
-                                        {purchase.stock_added ? 'El stock ya fue sumado desde esta compra' : 'Suma stock de los productos que controlan inventario'}
-                                      </p>
-                                    </PermissionGate>
+                                    )}
+                                    {!isAnulada && (
+                                      <PermissionGate module="inventory" action="create">
+                                        {purchase.stock_added ? (
+                                          <div className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-center">
+                                            Recibida — stock aplicado
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleRecibir(purchase) }}
+                                            disabled={receivingId === purchase.id}
+                                            className="w-full text-sm font-medium px-3 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                                          >
+                                            {receivingId === purchase.id ? 'Recibiendo...' : 'Marcar como recibida'}
+                                          </button>
+                                        )}
+                                      </PermissionGate>
+                                    )}
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -1009,16 +1076,115 @@ export const Purchases: React.FC = () => {
         </Card>
       )}
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        title="Eliminar Compra"
-        message={`¿Eliminar compra #${String(deleteTarget?.purchase_number || 0).padStart(4, '0')}?`}
-        confirmLabel="Eliminar"
-        variant="danger"
-        loading={deleting}
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
+      {/* ----- Anular Modal ----- */}
+      {anularTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-5 space-y-4">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              Anular compra #{String(anularTarget.purchase_number || 0).padStart(4, '0')}
+            </h3>
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 px-3 py-2 rounded text-sm text-yellow-800 dark:text-yellow-300">
+              <strong>Atencion:</strong> Se revertirán los movimientos de stock asociados a esta compra. Esta accion no se puede deshacer.
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Motivo de anulacion <span className="text-red-500">*</span></label>
+              <textarea
+                className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                rows={3}
+                placeholder="Ej: Mercaderia no recibida, error de carga..."
+                value={anularReason}
+                onChange={e => setAnularReason(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setAnularTarget(null); setAnularReason('') }}
+                disabled={anulando}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmAnular}
+                disabled={anulando || !anularReason.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {anulando ? 'Anulando...' : 'Anular compra'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----- Context menu ----- */}
+      {contextMenu.menu && (() => {
+        const purchase = contextMenu.menu.item
+        const logical = deriveLogicalStatus(purchase)
+        const isAnulada = logical === 'anulada'
+        const items: ContextMenuItem[] = []
+
+        items.push({
+          id: 'ver',
+          label: 'Ver detalle',
+          onClick: () => toggleExpand(purchase.id),
+        })
+
+        if (!isAnulada) {
+          items.push({
+            id: 'editar',
+            label: 'Editar',
+            onClick: () => handleEdit(purchase),
+          })
+        }
+
+        items.push({
+          id: 'duplicar',
+          label: 'Duplicar',
+          onClick: () => handleDuplicate(purchase),
+        })
+
+        if (!isAnulada && !purchase.stock_added) {
+          items.push({ id: 'sep1', label: '', separator: true })
+          items.push({
+            id: 'recibir',
+            label: 'Marcar como recibida',
+            onClick: () => handleRecibir(purchase),
+          })
+        }
+
+        items.push({ id: 'sep2', label: '', separator: true })
+
+        items.push({
+          id: 'imprimir',
+          label: 'Imprimir / PDF',
+          onClick: () => window.print(),
+        })
+
+        if (!isAnulada) {
+          items.push({ id: 'sep3', label: '', separator: true })
+          items.push({
+            id: 'anular',
+            label: 'Anular compra',
+            danger: true,
+            onClick: () => openAnular(purchase),
+          })
+        }
+
+        return (
+          <ContextMenuBase
+            x={contextMenu.menu.x}
+            y={contextMenu.menu.y}
+            header={{
+              title: `#${String(purchase.purchase_number || 0).padStart(4, '0')} - ${purchase.enterprise_name || 'Sin proveedor'}`,
+              subtitle: formatCurrency(parseFloat(purchase.total_amount || '0')),
+            }}
+            items={items}
+            onClose={contextMenu.closeMenu}
+          />
+        )
+      })()}
     </div>
   )
 }
+
+export default Purchases

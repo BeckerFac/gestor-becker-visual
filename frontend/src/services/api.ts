@@ -338,6 +338,30 @@ export const api = {
     const { data } = await client.delete(`/purchase-invoices/${id}`)
     return data
   },
+  // PR7-T20 Wave 2: Soft-cancel with reason (POST /:id/cancel)
+  cancelPurchaseInvoice: async (id: string, reason: string) => {
+    const { data } = await client.post(`/purchase-invoices/${id}/cancel`, { reason })
+    return data
+  },
+  // PR7-T20 Wave 2: Create Nota de Credito (NC) linked to an authorized PI
+  createPurchaseInvoiceNC: async (payload: {
+    related_invoice_id: string
+    enterprise_id: string
+    invoice_type: 'NC_A' | 'NC_B' | 'NC_C'
+    punto_venta?: string
+    invoice_number: string
+    invoice_date: string
+    subtotal: number
+    vat_amount: number
+    total_amount: number
+    notes?: string
+    business_unit_id?: string
+    cae?: string
+    items?: any[]
+  }) => {
+    const { data } = await client.post('/purchase-invoices', { ...payload, is_credit_note: true })
+    return data
+  },
   getPurchaseInvoiceBalance: async (id: string) => {
     const { data } = await client.get(`/purchase-invoices/${id}/balance`)
     return data
@@ -736,8 +760,9 @@ export const api = {
     const { data } = await client.put(`/purchases/${id}/payment-status`, { payment_status })
     return data
   },
-  deletePurchase: async (id: string) => {
-    const { data } = await client.delete(`/purchases/${id}`)
+  deletePurchase: async (id: string, body?: { reason?: string }) => {
+    // Reason is sent via request body for forward-compat (backend currently ignores it).
+    const { data } = await client.delete(`/purchases/${id}`, body ? { data: body } : undefined)
     return data
   },
 
@@ -1044,8 +1069,8 @@ export const api = {
     const { data } = await client.post('/pagos', pagoData)
     return data
   },
-  deletePago: async (id: string) => {
-    const { data } = await client.delete(`/pagos/${id}`)
+  deletePago: async (id: string, reason?: string) => {
+    const { data } = await client.delete(`/pagos/${id}`, { data: { reason } })
     return data
   },
   getPagoPdf: async (pagoId: string): Promise<Blob> => {
@@ -1087,6 +1112,11 @@ export const api = {
     const { data } = await client.get(`/retenciones/calculate?enterprise_id=${enterpriseId}&amount=${amount}`)
     return data
   },
+  // H8: preview single retention before creating it (rate, amount, below_minimum)
+  previewRetencion: async (params: { type: string; base_amount: number; jurisdiction?: string; cuit?: string; date?: string }) => {
+    const { data } = await client.post('/retenciones/calculate', params)
+    return data
+  },
   createRetencion: async (retencionData: any) => {
     const { data } = await client.post('/retenciones', retencionData)
     return data
@@ -1095,8 +1125,8 @@ export const api = {
     const { data } = await client.post('/retenciones/import-padron', { source, csv_data: csvData })
     return data
   },
-  deleteRetencion: async (id: string) => {
-    const { data } = await client.delete(`/retenciones/${id}`)
+  deleteRetencion: async (id: string, reason?: string) => {
+    const { data } = await client.delete(`/retenciones/${id}`, { data: reason ? { reason } : undefined })
     return data
   },
 
@@ -1240,12 +1270,13 @@ export const api = {
   },
 
   // Cheques
-  getCheques: async (filters?: { status?: string; search?: string; due_from?: string; due_to?: string }) => {
+  getCheques: async (filters?: { status?: string; search?: string; due_from?: string; due_to?: string; direction?: 'recibido' | 'emitido' }) => {
     const params = new URLSearchParams()
     if (filters?.status) params.append('status', filters.status)
     if (filters?.search) params.append('search', filters.search)
     if (filters?.due_from) params.append('due_from', filters.due_from)
     if (filters?.due_to) params.append('due_to', filters.due_to)
+    if (filters?.direction) params.append('direction', filters.direction)
     const { data } = await client.get(`/cheques?${params}`)
     return data
   },

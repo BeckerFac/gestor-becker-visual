@@ -22,11 +22,16 @@ export class PagoApplicationsService {
 
     // Get pago
     const pagoResult = await db.execute(sql`
-      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status
+      SELECT id, company_id, enterprise_id, business_unit_id, amount, pending_status, status
       FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}
     `);
     const pago = ((pagoResult as any).rows || [])[0];
     if (!pago) throw new ApiError(404, 'Pago no encontrado');
+
+    // V0: pago not anulado
+    if (pago.status === 'anulado') {
+      throw new ApiError(409, 'No se puede vincular un pago anulado');
+    }
 
     // Get purchase invoice
     const piResult = await db.execute(sql`
@@ -35,6 +40,11 @@ export class PagoApplicationsService {
     `);
     const pi = ((piResult as any).rows || [])[0];
     if (!pi) throw new ApiError(404, 'Factura de compra no encontrada');
+
+    // V0b: purchase invoice not anulado
+    if (pi.status === 'anulado' || pi.status === 'anulada') {
+      throw new ApiError(409, 'No se puede vincular pago a factura de compra anulada');
+    }
 
     // V1: Same business unit
     if (pago.business_unit_id && pi.business_unit_id && pago.business_unit_id !== pi.business_unit_id) {
@@ -163,56 +173,141 @@ export class PagoApplicationsService {
     return (result as any).rows || [];
   }
 
+  /**
+   * Remaining balance on a purchase invoice.
+   * Includes retenciones practicadas via 3 paths:
+   *   1) retenciones.purchase_invoice_id direct (preferred)
+   *   2) retenciones.pago_id → pago_invoice_applications → purchase_invoice_id
+   *      (only when retenciones.purchase_invoice_id IS NULL to avoid double counting)
+   * Excludes anulado pagos in both paths.
+   * Uses decimal arithmetic in SQL + epsilon-safe comparisons upstream.
+   * TODO: unify with pagos.service.ts recalculatePurchaseInvoiceStatus in a later PR.
+   */
   async getPurchaseInvoiceRemainingBalance(purchaseInvoiceId: string): Promise<number> {
     const result = await db.execute(sql`
       SELECT
         CAST(pi.total_amount AS decimal) as total,
-        COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as applied
+        COALESCE((
+          SELECT SUM(CAST(pia.amount_applied AS decimal))
+          FROM pago_invoice_applications pia
+          LEFT JOIN pagos p ON p.id = pia.pago_id
+          WHERE pia.purchase_invoice_id = pi.id
+            AND (p.status IS NULL OR p.status != 'anulado')
+        ), 0) as applied_cash,
+        COALESCE((
+          SELECT SUM(CAST(r.amount AS decimal))
+          FROM retenciones r
+          LEFT JOIN pagos p2 ON p2.id = r.pago_id
+          WHERE r.purchase_invoice_id = pi.id
+            AND r.direction = 'practicada'
+            AND (p2.status IS NULL OR p2.status != 'anulado')
+        ), 0) as retenciones_total,
+        COALESCE((
+          SELECT SUM(CAST(r2.amount AS decimal))
+          FROM retenciones r2
+          JOIN pagos p3 ON p3.id = r2.pago_id
+          JOIN pago_invoice_applications pia2 ON pia2.pago_id = p3.id
+          WHERE pia2.purchase_invoice_id = pi.id
+            AND r2.direction = 'practicada'
+            AND r2.purchase_invoice_id IS NULL
+            AND (p3.status IS NULL OR p3.status != 'anulado')
+        ), 0) as retenciones_via_pago
       FROM purchase_invoices pi
-      LEFT JOIN pago_invoice_applications pia ON pia.purchase_invoice_id = pi.id
       WHERE pi.id = ${purchaseInvoiceId}
-      GROUP BY pi.id, pi.total_amount
     `);
     const row = ((result as any).rows || [])[0];
     if (!row) return 0;
-    return parseFloat(row.total) - parseFloat(row.applied);
+    const total = parseFloat(row.total || '0');
+    const applied =
+      parseFloat(row.applied_cash || '0') +
+      parseFloat(row.retenciones_total || '0') +
+      parseFloat(row.retenciones_via_pago || '0');
+    return total - applied;
   }
 
+  /**
+   * Unallocated cash in a pago.
+   * IMPORTANT: uses pagos.amount (raw cash), NOT pagos.total_amount.
+   * Since PR7-T19, pagos.total_amount = cash + retenciones practicadas.
+   * Retenciones are NOT unallocatable cash — they are already tied to specific
+   * invoices (or to the pago as a whole). Treating total_amount as the pool would
+   * let a user over-allocate by the retention portion.
+   */
   async getPagoUnallocatedBalance(pagoId: string): Promise<number> {
     const result = await db.execute(sql`
       SELECT
-        CAST(COALESCE(p.total_amount, p.amount) AS decimal) as total,
+        CAST(p.amount AS decimal) as pago_cash,
         COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as allocated
       FROM pagos p
       LEFT JOIN pago_invoice_applications pia ON pia.pago_id = p.id
       WHERE p.id = ${pagoId}
-      GROUP BY p.id, p.total_amount, p.amount
+      GROUP BY p.id, p.amount
     `);
     const row = ((result as any).rows || [])[0];
     if (!row) return 0;
-    return parseFloat(row.total) - parseFloat(row.allocated);
+    return parseFloat(row.pago_cash || '0') - parseFloat(row.allocated || '0');
   }
 
+  /**
+   * Recalculate purchase_invoices.payment_status after linking/unlinking a pago.
+   *
+   * Bug: previously only summed pago_invoice_applications.amount_applied, missing
+   * retenciones practicadas. A PI of 121k paid with 100k cash + 21k retencion stayed
+   * 'parcial' forever when this code path ran (POST /pago-applications).
+   *
+   * Fix: mirror pagos.service.ts recalculatePurchaseInvoiceStatus (FIX-03) and extend
+   * it with a second retencion path (via pago_id) for legacy/mis-linked retenciones.
+   * Also use an epsilon-safe comparison to survive decimal/float drift
+   * (e.g. applied=99999.99999 vs total=100000 → pagado).
+   *
+   * TODO: consolidate this with pagos.service.ts version in a follow-up PR.
+   */
   async recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId: string) {
     try {
       const result = await db.execute(sql`
         SELECT
           CAST(pi.total_amount AS decimal) as total,
-          COALESCE(SUM(CAST(pia.amount_applied AS decimal)), 0) as applied
+          COALESCE((
+            SELECT SUM(CAST(pia.amount_applied AS decimal))
+            FROM pago_invoice_applications pia
+            LEFT JOIN pagos p ON p.id = pia.pago_id
+            WHERE pia.purchase_invoice_id = pi.id
+              AND (p.status IS NULL OR p.status != 'anulado')
+          ), 0) as applied_cash,
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM retenciones r
+            LEFT JOIN pagos p2 ON p2.id = r.pago_id
+            WHERE r.purchase_invoice_id = pi.id
+              AND r.direction = 'practicada'
+              AND (p2.status IS NULL OR p2.status != 'anulado')
+          ), 0) as retenciones_total,
+          COALESCE((
+            SELECT SUM(CAST(r2.amount AS decimal))
+            FROM retenciones r2
+            JOIN pagos p3 ON p3.id = r2.pago_id
+            JOIN pago_invoice_applications pia2 ON pia2.pago_id = p3.id
+            WHERE pia2.purchase_invoice_id = pi.id
+              AND r2.direction = 'practicada'
+              AND r2.purchase_invoice_id IS NULL
+              AND (p3.status IS NULL OR p3.status != 'anulado')
+          ), 0) as retenciones_via_pago
         FROM purchase_invoices pi
-        LEFT JOIN pago_invoice_applications pia ON pia.purchase_invoice_id = pi.id
         WHERE pi.id = ${purchaseInvoiceId}
-        GROUP BY pi.id, pi.total_amount
       `);
       const row = ((result as any).rows || [])[0];
       if (!row) return;
 
-      const total = parseFloat(row.total);
-      const applied = parseFloat(row.applied);
+      const total = parseFloat(row.total || '0');
+      const applied =
+        parseFloat(row.applied_cash || '0') +
+        parseFloat(row.retenciones_total || '0') +
+        parseFloat(row.retenciones_via_pago || '0');
 
+      const EPSILON = 0.01;
       let status = 'pendiente';
-      if (applied >= total && total > 0) status = 'pagado';
-      else if (applied > 0) status = 'parcial';
+      if (total > 0 && applied + EPSILON >= total) status = 'pagado';
+      else if (applied > EPSILON) status = 'parcial';
 
       await db.execute(sql`
         UPDATE purchase_invoices SET payment_status = ${status} WHERE id = ${purchaseInvoiceId}

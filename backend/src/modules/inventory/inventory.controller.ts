@@ -32,11 +32,13 @@ export class InventoryController {
   }
 
   async getStockMovements(req: AuthRequest, res: Response) {
-    const { skip = '0', limit = '50', product_id = '' } = req.query;
+    const { skip = '0', limit = '50', product_id = '', date_from = '', date_to = '' } = req.query;
     const data = await inventoryService.getStockMovements(req.user!.company_id, {
       skip: parseInt(skip as string, 10),
       limit: parseInt(limit as string, 10),
       product_id: product_id as string,
+      date_from: date_from as string,
+      date_to: date_to as string,
     });
     res.json(data);
   }

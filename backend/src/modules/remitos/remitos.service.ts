@@ -564,16 +564,35 @@ export class RemitosService {
         data.delivery_address || null, data.receiver_name || null, data.transport || null,
         tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null, userId]);
 
-      // 6. Create items + update qty_delivered + deduct stock for manual items
+      // 6. Create items + update qty_delivered + deduct stock
       // orderIdsSet was already populated above from lockResult (no N+1 query)
       for (const item of validItems) {
         const itemId = uuid();
         const qty = Number(item.quantity);
+
+        // PR7-T11 FIX: for order-linked items, resolve product_id from the order_item
+        // BEFORE inserting the remito_item so that:
+        //   (a) stock is correctly decremented when the underlying product controls_stock
+        //   (b) anularRemito's stock revert (which filters by remito_items.product_id)
+        //       picks up the reversal automatically.
+        // If the caller passed product_id explicitly, we still verify it matches the order_item.
+        let resolvedProductId: string | null = item.product_id || null;
+        if (item.order_item_id) {
+          const oiRes = await client.query(
+            'SELECT product_id FROM order_items WHERE id = $1',
+            [item.order_item_id]
+          );
+          const oiProductId = oiRes.rows[0]?.product_id || null;
+          // Prefer the order_item's product_id as source of truth. If caller passed
+          // a different product_id, trust the order_item (prevents spoofing).
+          resolvedProductId = oiProductId;
+        }
+
         await client.query(`
           INSERT INTO remito_items (id, remito_id, product_id, product_name, description, quantity, unit,
             unit_price, vat_rate, order_item_id)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        `, [itemId, remitoId, item.product_id || null, item.product_name,
+        `, [itemId, remitoId, resolvedProductId, item.product_name,
           item.description || null, qty, item.unit || 'unidades',
           item.unit_price || null, item.vat_rate || 21,
           item.order_item_id || null]);
@@ -584,6 +603,79 @@ export class RemitosService {
             'UPDATE order_items SET qty_delivered = COALESCE(qty_delivered, 0) + $1 WHERE id = $2',
             [qty, item.order_item_id]
           );
+
+          // PR7-T11 FIX: ALSO decrement stock when the order_item's product controls stock.
+          // Previously this branch only updated qty_delivered, leaving physical stock
+          // untouched — catastrophic for real inventory management.
+          if (resolvedProductId) {
+            const prodCheck = await client.query(
+              'SELECT id, controls_stock FROM products WHERE id = $1 AND company_id = $2',
+              [resolvedProductId, companyId]
+            );
+            if (prodCheck.rows.length === 0) {
+              // Product soft-deleted between order creation and remito: log + skip stock.
+              // qty_delivered update still applies.
+              console.warn(
+                `[createRemito] Product ${resolvedProductId} for order_item ${item.order_item_id} ` +
+                `not found in company ${companyId} — stock NOT decremented`
+              );
+            } else {
+              const controlsStock = prodCheck.rows[0].controls_stock === true
+                || prodCheck.rows[0].controls_stock === 't'
+                || prodCheck.rows[0].controls_stock === 'true';
+
+              if (controlsStock) {
+                // Default warehouse (consistent with manual branch resolver).
+                const whRes = await client.query(
+                  'SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1',
+                  [companyId]
+                );
+                const warehouseId = whRes.rows[0]?.id;
+                if (!warehouseId) {
+                  throw new ApiError(400, 'No hay almacenes configurados. No se puede descontar stock');
+                }
+
+                // FOR UPDATE lock to serialize concurrent remitos on the same product.
+                const stockRes = await client.query(
+                  'SELECT quantity FROM stock WHERE product_id = $1 AND warehouse_id = $2 FOR UPDATE',
+                  [resolvedProductId, warehouseId]
+                );
+                const currentQty = stockRes.rows.length > 0
+                  ? parseFloat(stockRes.rows[0].quantity || '0')
+                  : 0;
+
+                if (currentQty < qty) {
+                  throw new ApiError(
+                    400,
+                    `Stock insuficiente para "${item.product_name}". Disponible: ${currentQty}, solicitado: ${qty}`
+                  );
+                }
+
+                await client.query(`
+                  INSERT INTO stock_movements (id, company_id, product_id, warehouse_id, quantity,
+                    movement_type, reference_type, reference_id, notes, created_by)
+                  VALUES (gen_random_uuid(), $1, $2, $3, $4, 'sale', 'remito', $5, $6, $7)
+                `, [companyId, resolvedProductId, warehouseId, -qty, remitoId,
+                    `Remito item from order_item ${item.order_item_id}`, userId]);
+
+                if (stockRes.rows.length > 0) {
+                  // Double-write quantity AND quantity_num (PR7-T17 Phase 3 convention).
+                  await client.query(
+                    'UPDATE stock SET quantity = COALESCE(quantity, 0) - $1, quantity_num = COALESCE(quantity_num, 0) - $1 WHERE product_id = $2 AND warehouse_id = $3',
+                    [qty, resolvedProductId, warehouseId]
+                  );
+                } else {
+                  // Fallback: create stock row (matches manual-branch behavior).
+                  await client.query(`
+                    INSERT INTO stock (id, company_id, product_id, warehouse_id, quantity, quantity_num)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $4)
+                  `, [companyId, resolvedProductId, warehouseId, -qty]);
+                }
+              }
+            }
+          }
+          // If resolvedProductId is null (ad-hoc item in order with no product_id),
+          // skip stock logic — only qty_delivered is updated.
         } else if (item.product_id) {
           // Manual item with product: deduct stock if controls_stock
           // BUG #5: validate product EXISTS

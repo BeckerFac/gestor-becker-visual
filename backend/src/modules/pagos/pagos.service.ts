@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -19,6 +19,19 @@ interface PaymentMethodInput {
     cheque_type?: string;
   };
 }
+
+interface RetencionInput {
+  type: string;
+  regime?: string | null;
+  rate: number | string;
+  base_amount: number | string;
+  amount: number | string;
+  certificate_number?: string | null;
+  jurisdiction?: 'caba' | 'pba' | 'otra' | null;
+  purchase_invoice_id?: string | null;
+}
+
+const VALID_RET_TYPES = ['iibb', 'ganancias', 'iva', 'suss'];
 
 export class PagosService {
   private tablesEnsured = false;
@@ -42,15 +55,19 @@ export class PagosService {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
       `);
-      // FLOW 46/Bug C support: add status for soft-delete style anulado handling.
-      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`).catch(() => {});
 
-      // FLOW 46/Bug A: cheques outgoing support — add direction, pago_id, enterprise_id columns.
+      // PR7-T20/Bug C1: parity with cobros soft-delete (anulado) audit trail.
+      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`).catch(() => {});
+      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_at TIMESTAMPTZ`).catch(() => {});
+      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_by UUID REFERENCES users(id)`).catch(() => {});
+      await db.execute(sql`ALTER TABLE pagos ADD COLUMN IF NOT EXISTS anulled_reason TEXT`).catch(() => {});
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pagos_company_status ON pagos(company_id, status)`).catch(() => {});
+
+      // FLOW 46/Bug A: cheques outgoing support.
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'recibido'`).catch(() => {});
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS pago_id UUID REFERENCES pagos(id) ON DELETE SET NULL`).catch(() => {});
       await db.execute(sql`ALTER TABLE cheques ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id) ON DELETE SET NULL`).catch(() => {});
 
-      // FLOW 46/Bug A: pago_payment_methods (mirrors receipt_payment_methods for cobros)
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS pago_payment_methods (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -88,7 +105,6 @@ export class PagosService {
           e.cuit as enterprise_cuit,
           pu.purchase_number,
           b.bank_name,
-          -- Linked purchase invoices
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', pia.id,
@@ -106,7 +122,7 @@ export class PagosService {
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number))
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number,'purchase_invoice_id',ret.purchase_invoice_id))
             FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
@@ -118,6 +134,44 @@ export class PagosService {
       return (result as any).rows || result || [];
     } catch (error) {
       throw new ApiError(500, 'Failed to get pagos');
+    }
+  }
+
+  /**
+   * Validate a retencion payload structurally (no DB access).
+   * Bug C5 fix: explicit retenciones sent via createPago must pass the same
+   * bounds/jurisdiction/amount checks that retencionesService.createRetention
+   * enforces. Previously the bulk INSERT path bypassed them entirely.
+   */
+  private validateRetentionStructure(ret: RetencionInput): void {
+    if (!ret || !ret.type || !VALID_RET_TYPES.includes(ret.type)) {
+      throw new ApiError(400, `Tipo de retencion invalido. Tipos validos: ${VALID_RET_TYPES.join(', ')}`);
+    }
+    const rate = Number(ret.rate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      throw new ApiError(400, 'Alicuota de retencion invalida (debe estar entre 0 y 100)');
+    }
+    const base = Number(ret.base_amount);
+    if (!Number.isFinite(base) || base <= 0) {
+      throw new ApiError(400, 'Monto base de retencion invalido');
+    }
+    const amount = Number(ret.amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new ApiError(400, 'Monto de retencion invalido');
+    }
+    const expected = base * rate / 100;
+    const tolerance = Math.max(0.01, expected * 0.01);
+    if (Math.abs(amount - expected) > tolerance) {
+      throw new ApiError(
+        400,
+        `Monto de retencion inconsistente. Esperado ~${expected.toFixed(2)}, recibido ${amount.toFixed(2)}`
+      );
+    }
+    if (ret.type === 'iibb' && !ret.jurisdiction) {
+      throw new ApiError(400, 'Retenciones IIBB requieren jurisdiccion (caba, pba, otra)');
+    }
+    if (ret.jurisdiction && !['caba', 'pba', 'otra'].includes(ret.jurisdiction)) {
+      throw new ApiError(400, `Jurisdiccion invalida: ${ret.jurisdiction}`);
     }
   }
 
@@ -133,9 +187,6 @@ export class PagosService {
       } catch { /* no business units yet */ }
     }
 
-    // PR7-T5: cheque NO requiere bank_id top-level — los cheques guardan el banco como
-    // string en cheque_data.bank (igual que cobros). Solo transferencia top-level necesita bank_id UUID.
-    // Si hay payment_methods array, cada metodo valida su propio bank_id/cheque_data.
     if (
       data.payment_method === 'transferencia' &&
       !data.bank_id &&
@@ -144,7 +195,7 @@ export class PagosService {
       throw new ApiError(400, 'Se requiere seleccionar un banco para transferencia');
     }
 
-    // FLOW 46 / Bug A: Parse payment_methods array with backward compat to top-level fields.
+    // Parse payment methods (pure, no DB).
     const paymentMethods: PaymentMethodInput[] = Array.isArray(data.payment_methods) && data.payment_methods.length > 0
       ? data.payment_methods.map((pm: any) => ({
           method: pm.method,
@@ -161,11 +212,8 @@ export class PagosService {
           cheque_data: data.cheque_data,
         }];
 
-    // FLOW 46 / Bug A: validate each payment method individually.
     for (const pm of paymentMethods) {
-      if (!pm.method) {
-        throw new ApiError(400, 'Cada metodo de pago requiere un campo "method"');
-      }
+      if (!pm.method) throw new ApiError(400, 'Cada metodo de pago requiere un campo "method"');
       if (!Number.isFinite(pm.amount) || pm.amount <= 0) {
         throw new ApiError(400, `Monto invalido para metodo ${pm.method}`);
       }
@@ -185,29 +233,93 @@ export class PagosService {
     }
 
     const pmTotal = paymentMethods.reduce((s, pm) => s + pm.amount, 0);
-    // The pago amount is the SUM of payment methods (overrides legacy data.amount when array used).
     const pagoAmount = Array.isArray(data.payment_methods) && data.payment_methods.length > 0
       ? pmTotal
       : parseFloat(data.amount?.toString() || '0');
-
     const summaryMethod = paymentMethods.length === 1 ? paymentMethods[0].method : 'mixto';
 
-    const pagoId = uuid();
-    // Determine pending_status based on whether purchase_invoice_items are provided
+    // Collect purchase invoice items
     const hasInvoiceItems = data.purchase_invoice_items && Array.isArray(data.purchase_invoice_items) && data.purchase_invoice_items.length > 0;
     const pendingStatus = hasInvoiceItems ? null : 'pending_invoice';
 
-    // Explicit retentions from user take priority over auto-calculation
-    const hasExplicitRetenciones = data.retenciones && Array.isArray(data.retenciones) && data.retenciones.length > 0;
-    const totalRetenciones = hasExplicitRetenciones
-      ? data.retenciones.reduce((sum: number, r: any) => sum + parseFloat(r.amount || 0), 0)
-      : 0;
-    // total_amount = net amount (what leaves bank) + retentions (what gets withheld)
-    // This represents the total amount that cancels against invoices
+    type PiTotalEntry = { amount: number };
+    const piTotals = new Map<string, PiTotalEntry>();
+    if (hasInvoiceItems) {
+      for (const item of data.purchase_invoice_items) {
+        if (!item.purchase_invoice_id) continue;
+        const amt = parseFloat(item.amount || '0');
+        if (!Number.isFinite(amt) || amt <= 0) continue;
+        const current = piTotals.get(item.purchase_invoice_id)?.amount || 0;
+        piTotals.set(item.purchase_invoice_id, { amount: current + amt });
+      }
+    }
+
+    // Bug C3/C5: validate explicit retenciones BEFORE any DB work and assign
+    // purchase_invoice_id per retencion. If user did not specify a target
+    // invoice, fall back to the unique invoice being paid; otherwise require
+    // the caller to be explicit (avoids silent misallocation).
+    const hasExplicitRetenciones = Array.isArray(data.retenciones) && data.retenciones.length > 0;
+    const uniquePiId = piTotals.size === 1 ? Array.from(piTotals.keys())[0] : null;
+    const resolvedRetenciones: Array<RetencionInput & { purchase_invoice_id: string | null }> = [];
+    if (hasExplicitRetenciones) {
+      for (const ret of data.retenciones as RetencionInput[]) {
+        this.validateRetentionStructure(ret);
+        const piId = ret.purchase_invoice_id || uniquePiId;
+        // piId may legitimately be null if the pago is not linked to any invoice
+        // yet (pending_invoice path). In that case the retencion will be linked
+        // only to the pago and contribute to invoice status later when applied.
+        resolvedRetenciones.push({ ...ret, purchase_invoice_id: piId || null });
+      }
+      if (hasInvoiceItems && piTotals.size > 1) {
+        // Any retencion missing an explicit purchase_invoice_id when paying
+        // multiple invoices is ambiguous.
+        for (const ret of resolvedRetenciones) {
+          if (!ret.purchase_invoice_id) {
+            throw new ApiError(
+              400,
+              'Con multiples facturas de compra, cada retencion debe especificar purchase_invoice_id'
+            );
+          }
+        }
+      }
+    }
+
+    // Bug C4: compute auto-retenciones BEFORE opening the transaction, so the
+    // whole persistence path is atomic. calculateRetentionsForPago is a pure
+    // read (padron lookup), safe to run outside the tx.
+    const autoRetenciones: Array<RetencionInput & { purchase_invoice_id: string | null }> = [];
+    if (!hasExplicitRetenciones && data.enterprise_id) {
+      try {
+        const calculated = await retencionesService.calculateRetentionsForPago(
+          companyId, data.enterprise_id, pagoAmount
+        );
+        for (const r of calculated) {
+          autoRetenciones.push({
+            type: r.type,
+            regime: r.regime,
+            base_amount: pagoAmount,
+            rate: r.rate,
+            amount: r.amount,
+            purchase_invoice_id: uniquePiId,
+            // Auto-calc does not populate jurisdiction; skip the IIBB
+            // jurisdiction requirement for auto-retenciones (padron lookup
+            // already scoped the applicability) by NOT running
+            // validateRetentionStructure on them. Padron rate is trusted.
+          });
+        }
+      } catch (retError) {
+        console.warn('Auto-retention calculation warning:', retError);
+      }
+    }
+
+    const effectiveRetenciones = hasExplicitRetenciones ? resolvedRetenciones : autoRetenciones;
+    const totalRetenciones = effectiveRetenciones.reduce(
+      (sum, r) => sum + (Number(r.amount) || 0), 0
+    );
     const totalAmount = pagoAmount + totalRetenciones;
 
-    // FLOW 46 / Bug B: IDOR + integrity validations BEFORE entering the transaction.
-    // 1) enterprise_id (supplier) must belong to the user's company.
+    // Sanity check IDOR on enterprise/bank BEFORE opening the transaction
+    // (pure ownership check, cheap and non-racy).
     if (data.enterprise_id) {
       const entCheck = await db.execute(sql`
         SELECT id FROM enterprises WHERE id = ${data.enterprise_id} AND company_id = ${companyId}
@@ -216,7 +328,6 @@ export class PagosService {
         throw new ApiError(400, 'Empresa proveedora invalida o no pertenece a tu compania');
       }
     }
-    // 2) bank_id (top-level + each pm.bank_id) must belong to the user's company.
     const bankIdsToCheck = new Set<string>();
     if (data.bank_id) bankIdsToCheck.add(data.bank_id);
     for (const pm of paymentMethods) if (pm.bank_id) bankIdsToCheck.add(pm.bank_id);
@@ -229,219 +340,213 @@ export class PagosService {
       }
     }
 
-    // 3) For each purchase_invoice_item: validate ownership, status, enterprise, BU, and remaining balance.
-    type PiTotalEntry = { amount: number };
-    const piTotals = new Map<string, PiTotalEntry>();
-    if (hasInvoiceItems) {
-      for (const item of data.purchase_invoice_items) {
-        if (!item.purchase_invoice_id) continue;
-        const amt = parseFloat(item.amount || '0');
-        if (!Number.isFinite(amt) || amt <= 0) continue;
-        const current = piTotals.get(item.purchase_invoice_id)?.amount || 0;
-        piTotals.set(item.purchase_invoice_id, { amount: current + amt });
+    const pagoId = uuid();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Bug C2: LOCK each purchase invoice and re-read its state + already
+      // applied totals INSIDE the transaction. This closes the TOCTOU window:
+      // two concurrent pagos can't both see $2k remaining and each apply $2k.
+      if (hasInvoiceItems) {
+        for (const [piId, entry] of piTotals.entries()) {
+          const lockRes = await client.query(
+            `SELECT id, company_id, enterprise_id, business_unit_id, status,
+                    CAST(total_amount AS decimal) AS total
+             FROM purchase_invoices
+             WHERE id = $1 AND company_id = $2
+             FOR UPDATE`,
+            [piId, companyId]
+          );
+          const pi = (lockRes.rows || [])[0];
+          if (!pi) throw new ApiError(404, 'Factura de compra no encontrada o no pertenece a tu compania');
+          if (pi.status === 'cancelled' || pi.status === 'cancelado') {
+            throw new ApiError(400, 'No se puede pagar una factura de compra cancelada');
+          }
+          if (data.enterprise_id && pi.enterprise_id && data.enterprise_id !== pi.enterprise_id) {
+            throw new ApiError(400, 'La factura de compra pertenece a otro proveedor');
+          }
+          if (data.business_unit_id && pi.business_unit_id && data.business_unit_id !== pi.business_unit_id) {
+            throw new ApiError(400, 'La factura de compra pertenece a otra razon social');
+          }
+
+          // Re-read current applied + retenciones under the row lock. Note we
+          // do NOT need FOR UPDATE on pago_invoice_applications/retenciones
+          // because the purchase_invoices row lock serialises any other
+          // createPago touching the same invoice (they all lock the same pi
+          // row first), and deletions/anulados also go through anularPago
+          // which UPDATEs the pago row (not this invoice row) — we accept
+          // that anulado may race with a fresh pago, but anulado only
+          // RELEASES balance, it cannot cause overpayment.
+          const balRes = await client.query(
+            `SELECT
+               COALESCE((
+                 SELECT SUM(CAST(pia.amount_applied AS decimal))
+                 FROM pago_invoice_applications pia
+                 LEFT JOIN pagos p ON p.id = pia.pago_id
+                 WHERE pia.purchase_invoice_id = $1
+                   AND (p.status IS NULL OR p.status != 'anulado')
+               ), 0) as applied,
+               COALESCE((
+                 SELECT SUM(CAST(r.amount AS decimal))
+                 FROM retenciones r
+                 LEFT JOIN pagos p2 ON p2.id = r.pago_id
+                 WHERE r.purchase_invoice_id = $1
+                   AND r.direction = 'practicada'
+                   AND (p2.status IS NULL OR p2.status != 'anulado')
+               ), 0) as retenciones_total`,
+            [piId]
+          );
+          const balRow = balRes.rows[0];
+          const piTotal = parseFloat(pi.total);
+          const piApplied = parseFloat(balRow.applied) + parseFloat(balRow.retenciones_total);
+          const remaining = piTotal - piApplied;
+
+          // The amount this pago contributes to this invoice = cash applied +
+          // retenciones practicadas that target this same invoice.
+          const retForThisPi = effectiveRetenciones
+            .filter(r => r.purchase_invoice_id === piId)
+            .reduce((s, r) => s + Number(r.amount || 0), 0);
+          const contribution = entry.amount + retForThisPi;
+
+          if (contribution > remaining + 0.01) {
+            throw new ApiError(
+              400,
+              `El monto $${contribution.toFixed(2)} excede el saldo pendiente $${remaining.toFixed(2)} de la factura de compra`
+            );
+          }
+        }
       }
 
-      for (const [piId, entry] of piTotals.entries()) {
-        const piCheck = await db.execute(sql`
-          SELECT id, company_id, enterprise_id, business_unit_id, status, total_amount
-          FROM purchase_invoices
-          WHERE id = ${piId} AND company_id = ${companyId}
-        `);
-        const pi = ((piCheck as any).rows || [])[0];
-        if (!pi) throw new ApiError(404, 'Factura de compra no encontrada o no pertenece a tu compania');
-        if (pi.status === 'cancelled' || pi.status === 'cancelado') {
-          throw new ApiError(400, 'No se puede pagar una factura de compra cancelada');
-        }
-        if (data.enterprise_id && pi.enterprise_id && data.enterprise_id !== pi.enterprise_id) {
-          throw new ApiError(400, 'La factura de compra pertenece a otro proveedor');
-        }
-        if (data.business_unit_id && pi.business_unit_id && data.business_unit_id !== pi.business_unit_id) {
-          throw new ApiError(400, 'La factura de compra pertenece a otra razon social');
-        }
+      const pagoCurrency = data.currency || 'ARS';
+      const pagoExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
 
-        // Remaining balance — count only applications from non-anulado pagos.
-        const balResult = await db.execute(sql`
-          SELECT
-            CAST(pi.total_amount AS decimal) as total,
-            COALESCE((
-              SELECT SUM(CAST(pia.amount_applied AS decimal))
-              FROM pago_invoice_applications pia
-              LEFT JOIN pagos p ON p.id = pia.pago_id
-              WHERE pia.purchase_invoice_id = pi.id
-                AND (p.status IS NULL OR p.status != 'anulado')
-            ), 0) as applied,
-            COALESCE((
-              SELECT SUM(CAST(r.amount AS decimal))
-              FROM retenciones r
-              LEFT JOIN pagos p2 ON p2.id = r.pago_id
-              WHERE r.purchase_invoice_id = pi.id
-                AND r.direction = 'practicada'
-                AND (p2.status IS NULL OR p2.status != 'anulado')
-            ), 0) as retenciones_total
-          FROM purchase_invoices pi WHERE pi.id = ${piId}
-        `);
-        const balRow = ((balResult as any).rows || [])[0];
-        if (!balRow) throw new ApiError(404, 'Factura de compra no encontrada');
-        const piTotal = parseFloat(balRow.total);
-        const piApplied = parseFloat(balRow.applied) + parseFloat(balRow.retenciones_total);
-        const remaining = piTotal - piApplied;
-        if (entry.amount > remaining + 0.01) {
-          throw new ApiError(
-            400,
-            `El monto $${entry.amount.toFixed(2)} excede el saldo pendiente $${remaining.toFixed(2)} de la factura de compra`
+      await client.query(
+        `INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, total_amount,
+                             payment_method, bank_id, reference, payment_date, notes,
+                             business_unit_id, pending_status, created_by, currency, exchange_rate, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'activo')`,
+        [
+          pagoId, companyId, data.enterprise_id || null, data.purchase_id || null,
+          pagoAmount.toString(), totalAmount.toString(), summaryMethod,
+          data.bank_id || null, data.reference || null,
+          data.payment_date || new Date().toISOString(), data.notes || null,
+          data.business_unit_id || null, pendingStatus, userId, pagoCurrency, pagoExchangeRate,
+        ]
+      );
+
+      // Persist each payment method
+      for (const pm of paymentMethods) {
+        await client.query(
+          `INSERT INTO pago_payment_methods (id, pago_id, method, amount, bank_id, reference, cheque_data)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [
+            uuid(), pagoId, pm.method, pm.amount.toString(),
+            pm.bank_id || null, pm.reference || null,
+            pm.cheque_data ? JSON.stringify(pm.cheque_data) : null,
+          ]
+        );
+        if (pm.method === 'cheque' && pm.cheque_data) {
+          await client.query(
+            `INSERT INTO cheques (
+               id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount,
+               issue_date, due_date, status, direction, pago_id, enterprise_id,
+               business_unit_id, created_by
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'emitido','emitido',$11,$12,$13,$14)`,
+            [
+              uuid(), companyId, pm.cheque_data.number, pm.cheque_data.bank,
+              pm.cheque_data.drawer, pm.cheque_data.drawer_cuit || null,
+              pm.cheque_data.cheque_type || 'propio', pm.amount.toString(),
+              new Date(pm.cheque_data.issue_date), new Date(pm.cheque_data.due_date),
+              pagoId, data.enterprise_id || null, data.business_unit_id || null, userId,
+            ]
           );
         }
       }
+
+      // Bug C3: write purchase_invoice_id on every retencion so that
+      // recalculatePurchaseInvoiceStatus actually counts it.
+      const pagoDate = data.payment_date || new Date().toISOString();
+      const period = pagoDate.substring(0, 7);
+      for (const ret of effectiveRetenciones) {
+        await client.query(
+          `INSERT INTO retenciones (
+             id, company_id, type, regime, enterprise_id, pago_id, purchase_invoice_id,
+             base_amount, rate, amount, certificate_number, date, period, created_by,
+             direction, jurisdiction
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'practicada',$15)`,
+          [
+            uuid(), companyId, ret.type, ret.regime || null,
+            data.enterprise_id || null, pagoId, ret.purchase_invoice_id || null,
+            Number(ret.base_amount).toString(), Number(ret.rate).toString(), Number(ret.amount).toString(),
+            ret.certificate_number || null, pagoDate, period, userId,
+            ret.jurisdiction || null,
+          ]
+        );
+      }
+
+      // Link pago to purchase invoices (N:N).
+      if (hasInvoiceItems) {
+        for (const [piId, entry] of piTotals.entries()) {
+          try {
+            await client.query(
+              `INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
+               VALUES ($1,$2,$3,$4,$5)`,
+              [uuid(), pagoId, piId, entry.amount.toString(), userId]
+            );
+          } catch (err: any) {
+            if (err && /duplicate|unique/i.test(err.message || '')) {
+              throw new ApiError(409, 'Este pago ya esta vinculado a esta factura de compra');
+            }
+            throw err;
+          }
+          await this.recalculatePurchaseInvoiceStatusInTx(client, piId);
+          await this.recalculatePurchaseStatusFromInvoicesInTx(client, piId);
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (txError) {
+      try { await client.query('ROLLBACK'); } catch { /* best effort */ }
+      client.release();
+      if (txError instanceof ApiError) throw txError;
+      console.error('Create pago tx error:', txError);
+      throw new ApiError(500, 'Failed to create pago');
+    }
+    client.release();
+
+    // Accounting entry AFTER the money movement is persisted. A failure here
+    // is logged but does not roll back the pago (matches cobros behavior).
+    try {
+      const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+      const retenciones = effectiveRetenciones.map(r => ({
+        type: r.type,
+        amount: Number(r.amount || 0),
+        jurisdiction: (r as any).jurisdiction || null,
+      }));
+      await accountingEntriesService.createEntryForPago({
+        id: pagoId,
+        company_id: companyId,
+        date: data.payment_date || new Date().toISOString(),
+        amount: pagoAmount.toString(),
+        total_amount: totalAmount.toString(),
+        payment_method: summaryMethod,
+        bank_id: data.bank_id,
+        pending_status: pendingStatus,
+        retenciones,
+      });
+    } catch (accErr) {
+      console.warn('Accounting entry skipped (pago):', (accErr as Error).message);
     }
 
+    // Read-back the created row.
     try {
-      // Transaction: all inserts succeed or all rollback
-      await db.execute(sql`BEGIN`);
-      try {
-        const pagoCurrency = data.currency || 'ARS';
-        const pagoExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
-
-        await db.execute(sql`
-          INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, business_unit_id, pending_status, created_by, currency, exchange_rate)
-          VALUES (${pagoId}, ${companyId}, ${data.enterprise_id || null}, ${data.purchase_id || null}, ${pagoAmount.toString()}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${userId}, ${pagoCurrency}, ${pagoExchangeRate})
-        `);
-
-        // FLOW 46 / Bug A: persist each payment method into pago_payment_methods.
-        for (const pm of paymentMethods) {
-          await db.execute(sql`
-            INSERT INTO pago_payment_methods (id, pago_id, method, amount, bank_id, reference, cheque_data)
-            VALUES (${uuid()}, ${pagoId}, ${pm.method}, ${pm.amount.toString()}, ${pm.bank_id || null}, ${pm.reference || null},
-                    ${pm.cheque_data ? JSON.stringify(pm.cheque_data) : null}::jsonb)
-          `);
-        }
-
-        // FLOW 46 / Bug A: create cheques rows with direction='emitido' for each cheque payment method.
-        for (const pm of paymentMethods) {
-          if (pm.method === 'cheque' && pm.cheque_data) {
-            const chequeId = uuid();
-            await db.execute(sql`
-              INSERT INTO cheques (
-                id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount,
-                issue_date, due_date, status, direction, pago_id, enterprise_id,
-                business_unit_id, created_by
-              )
-              VALUES (
-                ${chequeId}, ${companyId}, ${pm.cheque_data.number}, ${pm.cheque_data.bank},
-                ${pm.cheque_data.drawer}, ${pm.cheque_data.drawer_cuit || null},
-                ${pm.cheque_data.cheque_type || 'propio'}, ${pm.amount.toString()},
-                ${new Date(pm.cheque_data.issue_date)}, ${new Date(pm.cheque_data.due_date)},
-                'emitido', 'emitido', ${pagoId}, ${data.enterprise_id || null},
-                ${data.business_unit_id || null}, ${userId}
-              )
-            `);
-          }
-        }
-
-        // Create explicit retentions inside the transaction
-        if (hasExplicitRetenciones) {
-          const pagoDate = data.payment_date || new Date().toISOString();
-          const period = pagoDate.substring(0, 7);
-          for (const ret of data.retenciones) {
-            await db.execute(sql`
-              INSERT INTO retenciones (id, company_id, type, regime, enterprise_id, pago_id, base_amount, rate, amount, certificate_number, date, period, created_by, direction)
-              VALUES (${uuid()}, ${companyId}, ${ret.type}, ${ret.regime || null}, ${data.enterprise_id || null}, ${pagoId}, ${parseFloat(ret.base_amount).toString()}, ${parseFloat(ret.rate).toString()}, ${parseFloat(ret.amount).toString()}, ${ret.certificate_number || null}, ${pagoDate}, ${period}, ${userId}, 'practicada')
-            `);
-          }
-        }
-
-        // Link pago to purchase invoices if items provided (N:N)
-        if (hasInvoiceItems) {
-          // FLOW 46 / Bug B: dedupe ON CONFLICT silenced. Fail loudly on duplicates.
-          for (const [piId, entry] of piTotals.entries()) {
-            try {
-              await db.execute(sql`
-                INSERT INTO pago_invoice_applications (id, pago_id, purchase_invoice_id, amount_applied, created_by)
-                VALUES (${uuid()}, ${pagoId}, ${piId}, ${entry.amount.toString()}, ${userId})
-              `);
-            } catch (err: any) {
-              if (err && /duplicate|unique/i.test(err.message || '')) {
-                throw new ApiError(409, 'Este pago ya esta vinculado a esta factura de compra');
-              }
-              throw err;
-            }
-            await this.recalculatePurchaseInvoiceStatus(piId);
-            await this.recalculatePurchaseStatusFromInvoices(piId);
-          }
-        }
-
-        await db.execute(sql`COMMIT`);
-      } catch (txError) {
-        await db.execute(sql`ROLLBACK`);
-        throw txError;
-      }
-
-      // Auto-calculate retentions ONLY if user did NOT send explicit retentions
-      if (!hasExplicitRetenciones && data.enterprise_id) {
-        try {
-          const retentions = await retencionesService.calculateRetentionsForPago(
-            companyId, data.enterprise_id, pagoAmount
-          );
-          const pagoDate = data.payment_date || new Date().toISOString();
-          const period = pagoDate.substring(0, 7);
-          for (const ret of retentions) {
-            await retencionesService.createRetention(companyId, userId, {
-              type: ret.type,
-              regime: ret.regime || undefined,
-              enterprise_id: data.enterprise_id,
-              pago_id: pagoId,
-              base_amount: pagoAmount,
-              rate: ret.rate,
-              amount: ret.amount,
-              date: pagoDate,
-              period,
-            });
-          }
-          // Recalculate total_amount after auto-retentions
-          const autoRetResult = await db.execute(sql`
-            SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total_ret FROM retenciones WHERE pago_id = ${pagoId}
-          `);
-          const autoRetTotal = parseFloat(((autoRetResult as any).rows || [])[0]?.total_ret || '0');
-          if (autoRetTotal > 0) {
-            const newTotalAmount = pagoAmount + autoRetTotal;
-            await db.execute(sql`
-              UPDATE pagos SET total_amount = ${newTotalAmount.toString()} WHERE id = ${pagoId}
-            `);
-          }
-        } catch (retError) {
-          // Non-blocking: log but don't fail the pago
-          console.warn('Auto-retention calculation warning:', retError);
-        }
-      }
-
-      // Accounting entry (after retentions are created)
-      try {
-        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
-        const retResult = await db.execute(sql`
-          SELECT type, CAST(amount AS decimal) as amount FROM retenciones WHERE pago_id = ${pagoId}
-        `);
-        const retenciones = ((retResult as any).rows || []).map((r: any) => ({
-          type: r.type,
-          amount: parseFloat(r.amount || '0'),
-        }));
-        await accountingEntriesService.createEntryForPago({
-          id: pagoId,
-          company_id: companyId,
-          date: data.payment_date || new Date().toISOString(),
-          amount: pagoAmount.toString(),
-          payment_method: summaryMethod,
-          bank_id: data.bank_id,
-          pending_status: pendingStatus,
-          retenciones,
-        });
-      } catch (accErr) { console.warn('Accounting entry skipped (pago):', (accErr as Error).message); }
-
-      // SELECT result outside transaction (read-only)
       const result = await db.execute(sql`
         SELECT p.*, e.name as enterprise_name, pu.purchase_number, b.bank_name,
           COALESCE((SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
             FROM entity_tags et JOIN tags t ON et.tag_id=t.id
             WHERE et.entity_id=e.id AND et.entity_type='enterprise'),'[]'::json) as enterprise_tags,
-          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number))
+          COALESCE((SELECT json_agg(json_build_object('id',ret.id,'type',ret.type,'rate',ret.rate,'amount',ret.amount,'regime',ret.regime,'jurisdiction',ret.jurisdiction,'certificate_number',ret.certificate_number,'purchase_invoice_id',ret.purchase_invoice_id))
             FROM retenciones ret WHERE ret.pago_id = p.id),'[]'::json) as retenciones
         FROM pagos p
         LEFT JOIN enterprises e ON p.enterprise_id = e.id
@@ -450,179 +555,223 @@ export class PagosService {
         WHERE p.id = ${pagoId}
       `);
       const rows = (result as any).rows || result || [];
-      return rows[0];
+      return rows[0] || { id: pagoId };
     } catch (error) {
-      console.error('Create pago error:', error);
-      throw new ApiError(500, 'Failed to create pago');
-    }
-  }
-
-  async deletePago(companyId: string, pagoId: string) {
-    await this.ensureTables();
-    // Validations outside transaction
-    const check = await db.execute(sql`SELECT id FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
-    const rows = (check as any).rows || check || [];
-    if (rows.length === 0) throw new ApiError(404, 'Pago not found');
-
-    // Read pago data before delete (for accounting reversal + cheque revert)
-    let pagoForAccounting: any = null;
-    let pagoFull: any = null;
-    try {
-      const pagoResult = await db.execute(sql`SELECT id, company_id, payment_method, cheque_id FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
-      pagoFull = ((pagoResult as any).rows || [])[0];
-      pagoForAccounting = pagoFull ? { id: pagoFull.id, company_id: pagoFull.company_id } : null;
-    } catch {}
-
-    try {
-      // Get linked purchase invoices before deleting (for recalculation)
-      const linkedPIs = await db.execute(sql`
-        SELECT purchase_invoice_id FROM pago_invoice_applications WHERE pago_id = ${pagoId}
-      `);
-      const piIds = ((linkedPIs as any).rows || []).map((r: any) => r.purchase_invoice_id);
-
-      // Transaction: delete + recalculate atomically
-      await db.execute(sql`BEGIN`);
-      try {
-        // SECURITY (FLOW 35): if this pago is a cheque endoso, revert the
-        // cheque back to 'a_cobrar' so it can be reused legitimately.
-        // Without this, deleting an endoso pago would orphan the cheque in
-        // 'endosado' status forever.
-        if (pagoFull && pagoFull.payment_method === 'cheque_endosado' && pagoFull.cheque_id) {
-          const revertResult: any = await db.execute(sql`
-            UPDATE cheques
-            SET status = 'a_cobrar',
-                endorsed_pago_id = NULL,
-                endorsed_to_enterprise_id = NULL,
-                endorsed_at = NULL
-            WHERE id = ${pagoFull.cheque_id}
-              AND company_id = ${companyId}
-              AND endorsed_pago_id = ${pagoId}
-          `);
-          const reverted = (revertResult?.rowCount ?? ((revertResult as any)?.rows?.length || 0)) > 0;
-          if (reverted) {
-            await db.execute(sql`
-              INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
-              VALUES (${pagoFull.cheque_id}, 'endosado', 'a_cobrar', 'Revertido por eliminacion de pago endoso', NULL)
-            `);
-          }
-        }
-
-        // Delete pago (CASCADE will delete pago_invoice_applications)
-        await db.execute(sql`DELETE FROM pagos WHERE id = ${pagoId} AND company_id = ${companyId}`);
-
-        // Recalculate payment_status for affected purchase invoices + cascade to purchases
-        for (const piId of piIds) {
-          await this.recalculatePurchaseInvoiceStatus(piId);
-          await this.recalculatePurchaseStatusFromInvoices(piId);
-        }
-
-        await db.execute(sql`COMMIT`);
-      } catch (txError) {
-        await db.execute(sql`ROLLBACK`);
-        throw txError;
-      }
-
-      // After delete, create reverse accounting entry
-      if (pagoForAccounting) {
-        try {
-          const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
-          await accountingEntriesService.createReverseEntry(pagoForAccounting.company_id, 'pago', pagoId);
-        } catch (accErr) { console.warn('Accounting reversal skipped (pago):', (accErr as Error).message); }
-      }
-
-      return { success: true };
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      throw new ApiError(500, 'Failed to delete pago');
-    }
-  }
-
-  private async recalculatePurchaseInvoiceStatus(purchaseInvoiceId: string) {
-    try {
-      // FLOW 46 / Bug C: include retenciones practicadas in applied total.
-      // A purchase invoice $121k can be paid with $100k cash + $21k retencion practicada
-      // and must be marked 'pagado'. Previously only summed pago_invoice_applications.
-      const result = await db.execute(sql`
-        SELECT
-          CAST(pi.total_amount AS decimal) as total,
-          COALESCE((
-            SELECT SUM(CAST(pia.amount_applied AS decimal))
-            FROM pago_invoice_applications pia
-            LEFT JOIN pagos p ON p.id = pia.pago_id
-            WHERE pia.purchase_invoice_id = pi.id
-              AND (p.status IS NULL OR p.status != 'anulado')
-          ), 0) as applied_cash,
-          COALESCE((
-            SELECT SUM(CAST(r.amount AS decimal))
-            FROM retenciones r
-            LEFT JOIN pagos p2 ON p2.id = r.pago_id
-            WHERE r.purchase_invoice_id = pi.id
-              AND r.direction = 'practicada'
-              AND (p2.status IS NULL OR p2.status != 'anulado')
-          ), 0) as retenciones_total
-        FROM purchase_invoices pi
-        WHERE pi.id = ${purchaseInvoiceId}
-      `);
-      const row = ((result as any).rows || [])[0];
-      if (!row) return;
-
-      const total = parseFloat(row.total);
-      const applied = parseFloat(row.applied_cash) + parseFloat(row.retenciones_total);
-
-      let status = 'pendiente';
-      if (applied + 0.01 >= total && total > 0) status = 'pagado';
-      else if (applied > 0) status = 'parcial';
-
-      await db.execute(sql`
-        UPDATE purchase_invoices SET payment_status = ${status} WHERE id = ${purchaseInvoiceId}
-      `);
-    } catch (error) {
-      console.warn('Recalculate purchase invoice status error:', error);
+      console.error('Read-back pago error:', error);
+      return { id: pagoId };
     }
   }
 
   /**
-   * Recalculate purchase.payment_status from ALL its purchase_invoices' pago applications.
-   * Chain: pagos → purchase_invoices → purchase (cascada completa)
+   * Bug C1: soft-delete a pago with full audit trail (mirrors anularCobro).
+   * - status='anulado', anulled_at/by/reason persisted
+   * - emitido cheques marked as 'anulado' (cannot be cashed anymore)
+   * - recibido endosados reverted to 'a_cobrar' so the cheque is reusable
+   * - purchase_invoice.payment_status recalculated for each affected invoice
+   * - retenciones stay in DB but are excluded by the (p.status != 'anulado')
+   *   filter in recalc queries
    */
-  private async recalculatePurchaseStatusFromInvoices(purchaseInvoiceId: string) {
-    try {
-      // Get the purchase_id from this invoice
-      const piResult = await db.execute(sql`
-        SELECT purchase_id FROM purchase_invoices WHERE id = ${purchaseInvoiceId}
-      `);
-      const purchaseId = ((piResult as any).rows || [])[0]?.purchase_id;
-      if (!purchaseId) return; // standalone invoice, no purchase to update
-
-      // Calculate total paid across ALL purchase_invoices of this purchase
-      const result = await db.execute(sql`
-        SELECT
-          CAST(p.total_amount AS decimal) as purchase_total,
-          COALESCE((
-            SELECT SUM(CAST(pia.amount_applied AS decimal))
-            FROM pago_invoice_applications pia
-            JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
-            WHERE pi.purchase_id = ${purchaseId} AND pi.status NOT IN ('cancelled', 'cancelado')
-          ), 0) as total_paid
-        FROM purchases p
-        WHERE p.id = ${purchaseId}
-      `);
-      const row = ((result as any).rows || [])[0];
-      if (!row) return;
-
-      const purchaseTotal = parseFloat(row.purchase_total);
-      const totalPaid = parseFloat(row.total_paid);
-
-      let status = 'pendiente';
-      if (totalPaid >= purchaseTotal && purchaseTotal > 0) status = 'pagada';
-      else if (totalPaid > 0) status = 'parcial';
-
-      await db.execute(sql`
-        UPDATE purchases SET payment_status = ${status} WHERE id = ${purchaseId}
-      `);
-    } catch (error) {
-      console.warn('Recalculate purchase status from invoices error:', error);
+  async anularPago(companyId: string, pagoId: string, userId: string | null, reason: string) {
+    await this.ensureTables();
+    if (!reason || reason.trim().length < 5) {
+      throw new ApiError(400, 'Motivo de la anulacion obligatorio (minimo 5 caracteres)');
     }
+
+    const client = await pool.connect();
+    let pagoForAccounting: any = null;
+    let affectedPiIds: string[] = [];
+    try {
+      await client.query('BEGIN');
+
+      const lockRes = await client.query(
+        `SELECT id, company_id, status, payment_method
+         FROM pagos WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+        [pagoId, companyId]
+      );
+      if (lockRes.rows.length === 0) throw new ApiError(404, 'Pago no encontrado');
+      const pagoRow = lockRes.rows[0];
+      if (pagoRow.status === 'anulado') {
+        throw new ApiError(409, 'El pago ya esta anulado');
+      }
+      pagoForAccounting = { id: pagoRow.id, company_id: pagoRow.company_id };
+
+      await client.query(
+        `UPDATE pagos
+         SET status='anulado', anulled_at=NOW(), anulled_by=$1, anulled_reason=$2
+         WHERE id = $3`,
+        [userId || null, reason, pagoId]
+      );
+
+      // Handle linked cheques.
+      const chequesRes = await client.query(
+        `SELECT id, direction, status FROM cheques WHERE pago_id = $1`,
+        [pagoId]
+      );
+      for (const ch of chequesRes.rows) {
+        if (ch.direction === 'emitido' && ch.status === 'emitido') {
+          await client.query(`UPDATE cheques SET status='anulado' WHERE id = $1`, [ch.id]);
+          await client.query(
+            `INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
+             VALUES ($1,'emitido','anulado','Pago anulado',$2)`,
+            [ch.id, userId || null]
+          ).catch(() => { /* history table optional */ });
+        }
+      }
+
+      // Endorsed cheques: revert to 'a_cobrar' so the physical cheque can be
+      // reused legitimately. The anulled pago still shows the endorsement
+      // audit trail via endorsed_pago_id=NULL + anulled_reason.
+      const endorsedRes = await client.query(
+        `SELECT id FROM cheques
+         WHERE endorsed_pago_id = $1 AND status='endosado' AND direction='recibido'`,
+        [pagoId]
+      );
+      for (const ch of endorsedRes.rows) {
+        await client.query(
+          `UPDATE cheques
+           SET status='a_cobrar', endorsed_pago_id=NULL,
+               endorsed_to_enterprise_id=NULL, endorsed_at=NULL
+           WHERE id = $1 AND company_id = $2`,
+          [ch.id, companyId]
+        );
+        await client.query(
+          `INSERT INTO cheque_status_history (cheque_id, old_status, new_status, notes, changed_by)
+           VALUES ($1,'endosado','a_cobrar','Revertido por anulacion de pago',$2)`,
+          [ch.id, userId || null]
+        ).catch(() => { /* history table optional */ });
+      }
+
+      // Legacy direct-link column cheque_id (pre payment_methods array).
+      if (pagoRow.payment_method === 'cheque_endosado') {
+        const legacyRes = await client.query(
+          `SELECT cheque_id FROM pagos WHERE id = $1`, [pagoId]
+        );
+        const legacyChequeId = legacyRes.rows[0]?.cheque_id;
+        if (legacyChequeId) {
+          await client.query(
+            `UPDATE cheques
+             SET status='a_cobrar', endorsed_pago_id=NULL,
+                 endorsed_to_enterprise_id=NULL, endorsed_at=NULL
+             WHERE id = $1 AND company_id = $2 AND status='endosado'`,
+            [legacyChequeId, companyId]
+          );
+        }
+      }
+
+      // Recalculate purchase_invoices linked to this pago.
+      const linkedRes = await client.query(
+        `SELECT DISTINCT purchase_invoice_id FROM pago_invoice_applications WHERE pago_id = $1`,
+        [pagoId]
+      );
+      affectedPiIds = linkedRes.rows.map((r: any) => r.purchase_invoice_id).filter(Boolean);
+      for (const piId of affectedPiIds) {
+        await this.recalculatePurchaseInvoiceStatusInTx(client, piId);
+        await this.recalculatePurchaseStatusFromInvoicesInTx(client, piId);
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* best effort */ }
+      client.release();
+      if (err instanceof ApiError) throw err;
+      console.error('Anular pago error:', err);
+      throw new ApiError(500, 'Failed to anular pago');
+    }
+    client.release();
+
+    if (pagoForAccounting) {
+      try {
+        const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
+        await accountingEntriesService.createReverseEntry(pagoForAccounting.company_id, 'pago', pagoId);
+      } catch (accErr) {
+        console.warn('Accounting reversal skipped (pago):', (accErr as Error).message);
+      }
+    }
+
+    return { id: pagoId, status: 'anulado', success: true };
+  }
+
+  /**
+   * deletePago is kept as a thin alias for the API layer. It delegates to
+   * anularPago so the HTTP DELETE verb still works for existing clients but
+   * soft-deletes with the same audit guarantees.
+   */
+  async deletePago(companyId: string, pagoId: string, userId?: string, reason?: string) {
+    return this.anularPago(companyId, pagoId, userId || null, reason || 'Eliminado via DELETE endpoint');
+  }
+
+  // In-transaction recalc: uses the locked client so writes are part of the
+  // same atomic unit. Kept separate from the db.execute-based version to
+  // avoid mixing connections.
+  private async recalculatePurchaseInvoiceStatusInTx(client: any, purchaseInvoiceId: string) {
+    const res = await client.query(
+      `SELECT
+         CAST(pi.total_amount AS decimal) as total,
+         COALESCE((
+           SELECT SUM(CAST(pia.amount_applied AS decimal))
+           FROM pago_invoice_applications pia
+           LEFT JOIN pagos p ON p.id = pia.pago_id
+           WHERE pia.purchase_invoice_id = pi.id
+             AND (p.status IS NULL OR p.status != 'anulado')
+         ), 0) as applied_cash,
+         COALESCE((
+           SELECT SUM(CAST(r.amount AS decimal))
+           FROM retenciones r
+           LEFT JOIN pagos p2 ON p2.id = r.pago_id
+           WHERE r.purchase_invoice_id = pi.id
+             AND r.direction = 'practicada'
+             AND (p2.status IS NULL OR p2.status != 'anulado')
+         ), 0) as retenciones_total
+       FROM purchase_invoices pi WHERE pi.id = $1`,
+      [purchaseInvoiceId]
+    );
+    const row = res.rows[0];
+    if (!row) return;
+    const total = parseFloat(row.total);
+    const applied = parseFloat(row.applied_cash) + parseFloat(row.retenciones_total);
+    let status = 'pendiente';
+    if (applied + 0.01 >= total && total > 0) status = 'pagado';
+    else if (applied > 0) status = 'parcial';
+    await client.query(
+      `UPDATE purchase_invoices SET payment_status = $1 WHERE id = $2`,
+      [status, purchaseInvoiceId]
+    );
+  }
+
+  private async recalculatePurchaseStatusFromInvoicesInTx(client: any, purchaseInvoiceId: string) {
+    const piRes = await client.query(
+      `SELECT purchase_id FROM purchase_invoices WHERE id = $1`,
+      [purchaseInvoiceId]
+    );
+    const purchaseId = piRes.rows[0]?.purchase_id;
+    if (!purchaseId) return;
+
+    const res = await client.query(
+      `SELECT
+         CAST(p.total_amount AS decimal) as purchase_total,
+         COALESCE((
+           SELECT SUM(CAST(pia.amount_applied AS decimal))
+           FROM pago_invoice_applications pia
+           JOIN purchase_invoices pi ON pia.purchase_invoice_id = pi.id
+           LEFT JOIN pagos pg ON pg.id = pia.pago_id
+           WHERE pi.purchase_id = $1
+             AND pi.status NOT IN ('cancelled','cancelado')
+             AND (pg.status IS NULL OR pg.status != 'anulado')
+         ), 0) as total_paid
+       FROM purchases p WHERE p.id = $1`,
+      [purchaseId]
+    );
+    const row = res.rows[0];
+    if (!row) return;
+    const purchaseTotal = parseFloat(row.purchase_total);
+    const totalPaid = parseFloat(row.total_paid);
+    let status = 'pendiente';
+    if (totalPaid >= purchaseTotal && purchaseTotal > 0) status = 'pagada';
+    else if (totalPaid > 0) status = 'parcial';
+    await client.query(
+      `UPDATE purchases SET payment_status = $1 WHERE id = $2`,
+      [status, purchaseId]
+    );
   }
 
   async getSummary(companyId: string) {
@@ -630,7 +779,7 @@ export class PagosService {
     try {
       const result = await db.execute(sql`
         SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total_pagado, COUNT(*) as count
-        FROM pagos WHERE company_id = ${companyId}
+        FROM pagos WHERE company_id = ${companyId} AND (status IS NULL OR status != 'anulado')
       `);
       const rows = (result as any).rows || result || [];
       return {

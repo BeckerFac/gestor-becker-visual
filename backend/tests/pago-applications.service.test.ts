@@ -53,20 +53,16 @@ describe('PagoApplicationsService', () => {
         return Promise.resolve({ rows: [] })
       }
       // 4. Pago unallocated balance
-      if (sqlStr.includes('FROM pagos p') && sqlStr.includes('LEFT JOIN pago_invoice_applications')) {
-        return Promise.resolve({ rows: [{ total: '10000', allocated: '0' }] })
+      if (sqlStr.includes('FROM pagos p') && sqlStr.includes('LEFT JOIN pago_invoice_applications') && sqlStr.includes('pago_cash')) {
+        return Promise.resolve({ rows: [{ pago_cash: '10000', allocated: '0' }] })
       }
-      // 5. Purchase invoice remaining balance
-      if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('LEFT JOIN pago_invoice_applications')) {
-        return Promise.resolve({ rows: [{ total: '10000', applied: '0' }] })
+      // 5. Purchase invoice remaining balance (now has retenciones subqueries)
+      if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('retenciones_total') && sqlStr.includes('applied_cash')) {
+        return Promise.resolve({ rows: [{ total: '10000', applied_cash: '0', retenciones_total: '0', retenciones_via_pago: '0' }] })
       }
       // 6. INSERT application
       if (sqlStr.includes('INSERT INTO pago_invoice_applications')) {
         return Promise.resolve({ rows: [] })
-      }
-      // 7. Recalculate PI payment_status
-      if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('GROUP BY pi.id')) {
-        return Promise.resolve({ rows: [{ total: '10000', applied: '5000' }] })
       }
       // 8. UPDATE purchase_invoices SET payment_status
       if (sqlStr.includes('UPDATE purchase_invoices SET payment_status')) {
@@ -164,7 +160,7 @@ describe('PagoApplicationsService', () => {
       mockDbRows([{ ...validPurchaseInvoice, business_unit_id: null }])
       mockDbEmpty() // no duplicate
       // Pago balance: only 200 left
-      mockDbRows([{ total: '10000', allocated: '9800' }])
+      mockDbRows([{ pago_cash: '10000', allocated: '9800' }])
 
       await expect(
         service.linkPagoToPurchaseInvoice(companyId, userId, pagoId, purchaseInvoiceId, 5000)
@@ -175,8 +171,8 @@ describe('PagoApplicationsService', () => {
       mockDbRows([{ ...validPago, business_unit_id: null }])
       mockDbRows([{ ...validPurchaseInvoice, business_unit_id: null }])
       mockDbEmpty() // no duplicate
-      mockDbRows([{ total: '10000', allocated: '0' }]) // pago balance OK
-      mockDbRows([{ total: '10000', applied: '9500' }]) // PI only 500 left
+      mockDbRows([{ pago_cash: '10000', allocated: '0' }]) // pago balance OK
+      mockDbRows([{ total: '10000', applied_cash: '9500', retenciones_total: '0', retenciones_via_pago: '0' }]) // PI only 500 left
 
       await expect(
         service.linkPagoToPurchaseInvoice(companyId, userId, pagoId, purchaseInvoiceId, 5000)
@@ -198,9 +194,9 @@ describe('PagoApplicationsService', () => {
         if (sqlStr.includes('DELETE FROM pago_invoice_applications')) {
           return Promise.resolve({ rows: [{ id: 'app-1' }] })
         }
-        // Recalculate PI payment_status
-        if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('GROUP BY pi.id')) {
-          return Promise.resolve({ rows: [{ total: '10000', applied: '0' }] })
+        // Recalculate PI payment_status (new shape with retenciones subqueries)
+        if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('retenciones_total')) {
+          return Promise.resolve({ rows: [{ total: '10000', applied_cash: '0', retenciones_total: '0', retenciones_via_pago: '0' }] })
         }
         if (sqlStr.includes('UPDATE purchase_invoices SET payment_status')) {
           return Promise.resolve({ rows: [] })
@@ -209,9 +205,9 @@ describe('PagoApplicationsService', () => {
         if (sqlStr.includes('SELECT purchase_id FROM purchase_invoices')) {
           return Promise.resolve({ rows: [{ purchase_id: null }] })
         }
-        // Pago unallocated balance
-        if (sqlStr.includes('FROM pagos p') && sqlStr.includes('LEFT JOIN pago_invoice_applications')) {
-          return Promise.resolve({ rows: [{ total: '10000', allocated: '0' }] })
+        // Pago unallocated balance (new shape: pago_cash)
+        if (sqlStr.includes('FROM pagos p') && sqlStr.includes('LEFT JOIN pago_invoice_applications') && sqlStr.includes('pago_cash')) {
+          return Promise.resolve({ rows: [{ pago_cash: '10000', allocated: '0' }] })
         }
         // Pago amount
         if (sqlStr.includes('SELECT amount FROM pagos')) {
@@ -226,6 +222,159 @@ describe('PagoApplicationsService', () => {
 
       const result = await service.unlinkPagoFromPurchaseInvoice(companyId, pagoId, purchaseInvoiceId)
       expect(result).toEqual({ success: true })
+    })
+  })
+
+  // ===== FIX: retenciones practicadas + epsilon + anulado =====
+  describe('recalculatePurchaseInvoicePaymentStatus (retenciones + epsilon)', () => {
+    /**
+     * Helper: route the two "UPDATE purchase_invoices SET payment_status" +
+     * the recalc SELECT, returning the custom row, and capture the status written.
+     */
+    function setupRecalcCapture(recalcRow: any) {
+      const captured: { status?: string } = {}
+      mockDbExecute.mockImplementation((...args: any[]) => {
+        const tpl = args[0]
+        const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
+        const values: any[] = tpl?.values || []
+
+        if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('retenciones_total')) {
+          return Promise.resolve({ rows: [recalcRow] })
+        }
+        if (sqlStr.includes('UPDATE purchase_invoices SET payment_status')) {
+          // First interpolation is the status string
+          captured.status = values[0]
+          return Promise.resolve({ rows: [] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+      return captured
+    }
+
+    it('PI 100k + pago 100k cash → pagado', async () => {
+      const captured = setupRecalcCapture({
+        total: '100000',
+        applied_cash: '100000',
+        retenciones_total: '0',
+        retenciones_via_pago: '0',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('PI 121k + 100k cash + 21k retencion practicada (purchase_invoice_id set) → pagado', async () => {
+      const captured = setupRecalcCapture({
+        total: '121000',
+        applied_cash: '100000',
+        retenciones_total: '21000',
+        retenciones_via_pago: '0',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('PI 121k + 100k cash + 21k retencion via pago_id (no purchase_invoice_id) → pagado', async () => {
+      const captured = setupRecalcCapture({
+        total: '121000',
+        applied_cash: '100000',
+        retenciones_total: '0',
+        retenciones_via_pago: '21000',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('epsilon edge: 99999.995 vs 100000 → pagado', async () => {
+      const captured = setupRecalcCapture({
+        total: '100000',
+        applied_cash: '99999.995',
+        retenciones_total: '0',
+        retenciones_via_pago: '0',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('pagado')
+    })
+
+    it('partial payment → parcial', async () => {
+      const captured = setupRecalcCapture({
+        total: '100000',
+        applied_cash: '50000',
+        retenciones_total: '0',
+        retenciones_via_pago: '0',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('parcial')
+    })
+
+    it('no payment → pendiente', async () => {
+      const captured = setupRecalcCapture({
+        total: '100000',
+        applied_cash: '0',
+        retenciones_total: '0',
+        retenciones_via_pago: '0',
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      expect(captured.status).toBe('pendiente')
+    })
+
+    /**
+     * SQL-level filter test: verify the emitted SQL filters anulado pagos.
+     * Since the mock returns pre-aggregated values, we assert the SQL text contains
+     * the anulado filter so the query engine excludes them in production.
+     */
+    it('SQL excludes anulado pagos from applied_cash and retenciones', async () => {
+      let capturedSql = ''
+      mockDbExecute.mockImplementation((...args: any[]) => {
+        const tpl = args[0]
+        const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
+        if (sqlStr.includes('FROM purchase_invoices pi') && sqlStr.includes('retenciones_total')) {
+          capturedSql = sqlStr
+          return Promise.resolve({ rows: [{ total: '100000', applied_cash: '0', retenciones_total: '0', retenciones_via_pago: '0' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+      await service.recalculatePurchaseInvoicePaymentStatus(purchaseInvoiceId)
+      // 3 occurrences: one per pago alias (p, p2, p3)
+      const anuladoCount = (capturedSql.match(/!= 'anulado'/g) || []).length
+      expect(anuladoCount).toBeGreaterThanOrEqual(3)
+      expect(capturedSql).toContain("r.direction = 'practicada'")
+      expect(capturedSql).toContain("r2.purchase_invoice_id IS NULL")
+    })
+  })
+
+  describe('getPagoUnallocatedBalance (excludes retencion portion)', () => {
+    it('uses pagos.amount (raw cash), not total_amount', async () => {
+      let capturedSql = ''
+      mockDbExecute.mockImplementation((...args: any[]) => {
+        const tpl = args[0]
+        const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
+        capturedSql = sqlStr
+        return Promise.resolve({ rows: [{ pago_cash: '100000', allocated: '30000' }] })
+      })
+      const balance = await service.getPagoUnallocatedBalance(pagoId)
+      expect(balance).toBe(70000)
+      // Must NOT use total_amount (which includes retenciones)
+      expect(capturedSql).not.toContain('p.total_amount')
+      expect(capturedSql).toContain('p.amount')
+    })
+  })
+
+  describe('linkPagoToPurchaseInvoice anulado guards', () => {
+    it('throws 409 when pago is anulado', async () => {
+      mockDbRows([{ ...validPago, status: 'anulado' }])
+
+      await expect(
+        service.linkPagoToPurchaseInvoice(companyId, userId, pagoId, purchaseInvoiceId, 5000)
+      ).rejects.toThrow('No se puede vincular un pago anulado')
+    })
+
+    it('throws 409 when purchase invoice is anulada', async () => {
+      mockDbRows([{ ...validPago, status: 'active' }])
+      mockDbRows([{ ...validPurchaseInvoice, status: 'anulada' }])
+
+      await expect(
+        service.linkPagoToPurchaseInvoice(companyId, userId, pagoId, purchaseInvoiceId, 5000)
+      ).rejects.toThrow('No se puede vincular pago a factura de compra anulada')
     })
   })
 })

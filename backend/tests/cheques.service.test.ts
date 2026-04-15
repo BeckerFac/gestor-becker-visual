@@ -15,6 +15,11 @@ describe('ChequesService', () => {
     mockDbVoid() // ALTER TABLE cheque_type
     mockDbVoid() // ALTER TABLE drawer_cuit
     mockDbVoid() // ALTER TABLE cobro_id
+    mockDbVoid() // ALTER TABLE direction
+    mockDbVoid() // UPDATE direction default
+    mockDbVoid() // ALTER TABLE issuer_type
+    mockDbVoid() // UPDATE issuer_type default
+    mockDbVoid() // CREATE UNIQUE INDEX
   }
 
   describe('createCheque', () => {
@@ -254,11 +259,11 @@ describe('ChequesService', () => {
     })
 
     it('blocks deletion of non-pending cheque', async () => {
-      mockDbRows([{ id: 'ch-1', status: 'cobrado' }])
+      mockDbRows([{ id: 'ch-1', status: 'cobrado', direction: 'recibido' }])
 
       await expect(
         service.deleteCheque('company-1', 'ch-1')
-      ).rejects.toThrow('Solo se pueden eliminar cheques pendientes')
+      ).rejects.toThrow(/No se puede eliminar cheque en estado cobrado/)
     })
 
     it('throws 404 when cheque not found', async () => {
@@ -415,6 +420,150 @@ describe('ChequesService', () => {
       await expect(
         service.endorseCheque('company-1', 'user-2', 'ch-1', { enterprise_id: 'ent-2', amount: 50000 })
       ).rejects.toThrow(/no disponible para endosar/)
+    })
+
+    it('H2: rejects endorsing an emitido cheque', async () => {
+      mockMigrations()
+      queueClient([
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'ch-1', company_id: 'company-1', status: 'a_cobrar', amount: '50000', number: '12345', business_unit_id: null, endorsed_pago_id: null, direction: 'emitido' }] },
+        { rows: [] }, // ROLLBACK
+      ])
+
+      await expect(
+        service.endorseCheque('company-1', 'user-1', 'ch-1', { enterprise_id: 'ent-1', amount: 50000 })
+      ).rejects.toThrow(/cheques recibidos de terceros/)
+    })
+  })
+
+  describe('direction: emitido lifecycle', () => {
+    describe('getCheques with direction filter', () => {
+      it('returns only emitido cheques when direction=emitido', async () => {
+        mockMigrations()
+        mockDbRows([{ id: 'ch-e-1', direction: 'emitido', status: 'emitido' }])
+
+        const result = await service.getCheques('company-1', { direction: 'emitido' })
+        expect(result).toHaveLength(1)
+        expect((result as any)[0].direction).toBe('emitido')
+      })
+    })
+
+    describe('updateChequeStatus with direction=emitido', () => {
+      it('allows emitido -> entregado', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'emitido', direction: 'emitido' }])
+        mockDbVoid() // INSERT history
+        mockDbVoid() // UPDATE cheque
+        const result = await service.updateChequeStatus('company-1', 'ch-1', 'entregado')
+        expect(result.status).toBe('entregado')
+      })
+
+      it('allows entregado -> cobrado', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'entregado', direction: 'emitido' }])
+        mockDbVoid()
+        mockDbVoid()
+        const result = await service.updateChequeStatus('company-1', 'ch-1', 'cobrado')
+        expect(result.status).toBe('cobrado')
+      })
+
+      it('rejects invalid emitido -> a_cobrar', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'emitido', direction: 'emitido' }])
+        await expect(
+          service.updateChequeStatus('company-1', 'ch-1', 'a_cobrar')
+        ).rejects.toThrow(/No se puede cambiar de "emitido" a "a_cobrar"/)
+      })
+
+      it('rejects entregado -> entregado (no-op)', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'entregado', direction: 'emitido' }])
+        await expect(
+          service.updateChequeStatus('company-1', 'ch-1', 'entregado')
+        ).rejects.toThrow(/No se puede cambiar de "entregado" a "entregado"/)
+      })
+
+      it('accepts anulado as a valid new status', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'emitido', direction: 'emitido' }])
+        mockDbVoid()
+        mockDbVoid()
+        const result = await service.updateChequeStatus('company-1', 'ch-1', 'anulado')
+        expect(result.status).toBe('anulado')
+      })
+    })
+
+    describe('deleteCheque with direction', () => {
+      it('allows deleting emitido cheque in status=emitido with no pago_id', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'emitido', direction: 'emitido', pago_id: null, cobro_id: null }])
+        mockDbVoid() // DELETE
+        const result = await service.deleteCheque('company-1', 'ch-1')
+        expect(result.deleted).toBe(true)
+      })
+
+      it('blocks deleting emitido cheque when linked to pago', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'emitido', direction: 'emitido', pago_id: 'pago-xyz', cobro_id: null }])
+        await expect(
+          service.deleteCheque('company-1', 'ch-1')
+        ).rejects.toThrow(/vinculado a pago\/cobro/)
+      })
+
+      it('blocks deleting emitido cheque in status=entregado', async () => {
+        mockDbRows([{ id: 'ch-1', status: 'entregado', direction: 'emitido', pago_id: null, cobro_id: null }])
+        await expect(
+          service.deleteCheque('company-1', 'ch-1')
+        ).rejects.toThrow(/No se puede eliminar cheque en estado entregado/)
+      })
+    })
+
+    describe('createCheque H5: due_date >= issue_date', () => {
+      it('rejects when due_date < issue_date', async () => {
+        await expect(
+          service.createCheque('company-1', 'user-1', {
+            number: '123', bank: 'X', drawer: 'Y', amount: 100,
+            issue_date: '2025-05-01', due_date: '2025-04-01',
+          })
+        ).rejects.toThrow(/Fecha de vencimiento no puede ser anterior/)
+      })
+
+      it('accepts when due_date = issue_date', async () => {
+        mockMigrations()
+        mockDbVoid() // INSERT
+        const result = await service.createCheque('company-1', 'user-1', {
+          number: '123', bank: 'X', drawer: 'Y', amount: 100,
+          issue_date: '2025-05-01', due_date: '2025-05-01',
+        })
+        expect(result).toHaveProperty('id')
+      })
+
+      it('creates an emitido cheque with status=emitido', async () => {
+        mockMigrations()
+        mockDbVoid() // INSERT
+        const result = await service.createCheque('company-1', 'user-1', {
+          number: '456', bank: 'Banco Nacion', drawer: 'Mi Empresa', amount: 100000,
+          issue_date: '2025-05-01', due_date: '2025-06-01',
+          direction: 'emitido',
+        }) as any
+        expect(result.status).toBe('emitido')
+        expect(result.direction).toBe('emitido')
+      })
+    })
+
+    describe('getSummary buckets', () => {
+      it('returns separate recibidos/emitidos buckets', async () => {
+        mockDbRows([{
+          r_total_a_cobrar: '150000', r_count_a_cobrar: '3',
+          e_total_emitido: '75000', e_count_emitido: '2',
+          e_total_entregado: '25000', e_count_entregado: '1',
+          // legacy
+          total_a_cobrar: '150000', count_a_cobrar: '3',
+        }])
+
+        const result = await service.getSummary('company-1') as any
+
+        expect(result.recibidos.total_a_cobrar).toBe(150000)
+        expect(result.recibidos.count_a_cobrar).toBe(3)
+        expect(result.emitidos.total_emitido).toBe(75000)
+        expect(result.emitidos.count_emitido).toBe(2)
+        expect(result.emitidos.total_entregado).toBe(25000)
+        // legacy flat keys preserved
+        expect(result.total_a_cobrar).toBe(150000)
+      })
     })
   })
 })

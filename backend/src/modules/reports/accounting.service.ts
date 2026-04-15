@@ -228,13 +228,21 @@ export class AccountingService {
         : sql``;
 
       // Use purchase_invoices table (facturas de compra) instead of purchases
-      // Only include invoices from fiscal business units
+      // Only include invoices from fiscal business units.
+      // PR7-T20: NCs excluded from aggregations.
+      // A proper "NCs-as-credit" feature (where NCs reduce totals) should be built as
+      // a separate calculation path with explicit debit/credit semantics.
+      // PR7-T9: use ::text cast on enum invoice_type for safe LIKE matching.
+      // PR7-T-CURRENCY: convert USD -> ARS using exchange_rate. Report exposes both
+      // the original currency/rate and the ARS-equivalent columns.
       const result = await db.execute(sql`
         SELECT
           TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') as date,
           pi.invoice_type,
           COALESCE(pi.punto_venta, '') as punto_venta,
           pi.invoice_number,
+          COALESCE(pi.currency, 'ARS') as currency,
+          COALESCE(CAST(pi.exchange_rate AS decimal), 1) as exchange_rate,
           COALESCE(e.name, 'Proveedor desconocido') as enterprise_name,
           COALESCE(e.cuit, '') as enterprise_cuit,
           COALESCE(CAST(pi.subtotal AS decimal), COALESCE(CAST(pi.total_amount AS decimal), 0) - COALESCE(CAST(pi.vat_amount AS decimal), 0)) as neto_gravado,
@@ -242,12 +250,21 @@ export class AccountingService {
           0 as op_exentas,
           COALESCE(CAST(pi.vat_amount AS decimal), 0) as iva,
           COALESCE(CAST(pi.other_taxes AS decimal), 0) as otros_tributos,
-          COALESCE(CAST(pi.total_amount AS decimal), 0) as total
+          COALESCE(CAST(pi.total_amount AS decimal), 0) as total,
+          (COALESCE(CAST(pi.subtotal AS decimal), COALESCE(CAST(pi.total_amount AS decimal), 0) - COALESCE(CAST(pi.vat_amount AS decimal), 0))
+            * CASE WHEN COALESCE(pi.currency, 'ARS') = 'ARS' THEN 1 ELSE COALESCE(CAST(pi.exchange_rate AS decimal), 1) END) as neto_gravado_ars,
+          (COALESCE(CAST(pi.vat_amount AS decimal), 0)
+            * CASE WHEN COALESCE(pi.currency, 'ARS') = 'ARS' THEN 1 ELSE COALESCE(CAST(pi.exchange_rate AS decimal), 1) END) as iva_ars,
+          (COALESCE(CAST(pi.other_taxes AS decimal), 0)
+            * CASE WHEN COALESCE(pi.currency, 'ARS') = 'ARS' THEN 1 ELSE COALESCE(CAST(pi.exchange_rate AS decimal), 1) END) as otros_tributos_ars,
+          (COALESCE(CAST(pi.total_amount AS decimal), 0)
+            * CASE WHEN COALESCE(pi.currency, 'ARS') = 'ARS' THEN 1 ELSE COALESCE(CAST(pi.exchange_rate AS decimal), 1) END) as total_ars
         FROM purchase_invoices pi
         LEFT JOIN enterprises e ON pi.enterprise_id = e.id
         LEFT JOIN business_units bu ON pi.business_unit_id = bu.id
         WHERE pi.company_id = ${companyId}
           AND pi.status = 'active'
+          AND pi.invoice_type::text NOT LIKE 'NC%'
           AND (bu.is_fiscal = true OR pi.business_unit_id IS NULL)
           AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
           AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
@@ -278,12 +295,19 @@ export class AccountingService {
           nro_doc_emisor: (r.enterprise_cuit || '').replace(/[-.\s]/g, ''),
           enterprise_name: r.enterprise_name,
           enterprise_cuit: r.enterprise_cuit,
+          currency: r.currency || 'ARS',
+          exchange_rate: parseFloat(r.exchange_rate) || 1,
           neto_gravado: parseFloat(r.neto_gravado) || 0,
           neto_no_gravado: parseFloat(r.neto_no_gravado) || 0,
           op_exentas: parseFloat(r.op_exentas) || 0,
           iva: parseFloat(r.iva) || 0,
           otros_tributos: parseFloat(r.otros_tributos) || 0,
           total: parseFloat(r.total) || 0,
+          // ARS-equivalent columns (for AFIP reporting when currency != ARS)
+          neto_gravado_ars: round2(parseFloat(r.neto_gravado_ars) || 0),
+          iva_ars: round2(parseFloat(r.iva_ars) || 0),
+          otros_tributos_ars: round2(parseFloat(r.otros_tributos_ars) || 0),
+          total_ars: round2(parseFloat(r.total_ars) || 0),
         };
       });
 
@@ -295,8 +319,13 @@ export class AccountingService {
           iva: acc.iva + row.iva,
           otros_tributos: acc.otros_tributos + row.otros_tributos,
           total: acc.total + row.total,
+          neto_gravado_ars: acc.neto_gravado_ars + row.neto_gravado_ars,
+          iva_ars: acc.iva_ars + row.iva_ars,
+          otros_tributos_ars: acc.otros_tributos_ars + row.otros_tributos_ars,
+          total_ars: acc.total_ars + row.total_ars,
         }),
-        { neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0 },
+        { neto_gravado: 0, neto_no_gravado: 0, op_exentas: 0, iva: 0, otros_tributos: 0, total: 0,
+          neto_gravado_ars: 0, iva_ars: 0, otros_tributos_ars: 0, total_ars: 0 },
       );
 
       const totals = Object.fromEntries(
@@ -332,15 +361,23 @@ export class AccountingService {
       `);
 
       // Credito fiscal: IVA from purchase_invoices (facturas de compra) by month
-      // Only from fiscal business units
+      // Only from fiscal business units.
+      // PR7-T20: NCs excluded from aggregations.
+      // A proper "NCs-as-credit" feature (where NCs reduce totals) should be built as
+      // a separate calculation path with explicit debit/credit semantics.
+      // PR7-T-CURRENCY: convert foreign currency invoices to ARS at their exchange_rate.
       const creditoResult = await db.execute(sql`
         SELECT
           TO_CHAR(pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as periodo,
-          COALESCE(SUM(COALESCE(CAST(pi.vat_amount AS decimal), 0)), 0) as credito_fiscal
+          COALESCE(SUM(
+            COALESCE(CAST(pi.vat_amount AS decimal), 0)
+            * CASE WHEN COALESCE(pi.currency, 'ARS') = 'ARS' THEN 1 ELSE COALESCE(CAST(pi.exchange_rate AS decimal), 1) END
+          ), 0) as credito_fiscal
         FROM purchase_invoices pi
         LEFT JOIN business_units bu ON pi.business_unit_id = bu.id
         WHERE pi.company_id = ${companyId}
           AND pi.status = 'active'
+          AND pi.invoice_type::text NOT LIKE 'NC%'
           AND (bu.is_fiscal = true OR pi.business_unit_id IS NULL)
           AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
           AND (pi.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date

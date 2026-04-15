@@ -206,4 +206,210 @@ describe('CuentaCorrienteService — NC exclusion + retenciones + anulado filter
       expect(result.totales.saldo).toBe(90000)
     })
   })
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SUPPLIER-SIDE 7 BUG FIXES (C1, C2, H1, H2, H3, H4, H5)
+  // ═══════════════════════════════════════════════════════════════════════
+  describe('C1 — Purchase NCs excluded from compras/pagos_aplicados', () => {
+    it('getResumen total_compras excludes purchase NCs', async () => {
+      await service.getResumen('company-1')
+      const sql = executedSqls.find((s) => s.includes('total_compras'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_compras')[0]
+      // The purchase_invoices subquery for total_compras must filter NC_*
+      expect(block).toContain("pi.invoice_type::text NOT LIKE 'NC%'")
+    })
+
+    it('getResumen total_pagos_aplicados excludes applications against NCs', async () => {
+      await service.getResumen('company-1')
+      const sql = executedSqls.find((s) => s.includes('total_pagos_aplicados'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_pagos_aplicados')[0]
+      expect(block).toContain("pi.invoice_type::text NOT LIKE 'NC%'")
+    })
+
+    it('getDetalle purchase_invoices branch excludes NCs', async () => {
+      await service.getDetalle('company-1', 'ent-1')
+      const union = executedSqls.find((s) => s.includes('FROM purchase_invoices pi'))
+      expect(union).toBeDefined()
+      expect(union!).toMatch(/pi\.invoice_type.*NOT LIKE 'NC%'/)
+    })
+
+    it('getPdfData purchase_invoices query excludes NCs', async () => {
+      await service.getPdfData('company-1', 'ent-1', '2025-01-01', '2025-12-31')
+      const sql = executedSqls.find((s) => s.includes("'factura_compra' as tipo"))
+      expect(sql).toBeDefined()
+      expect(sql!).toMatch(/pi\.invoice_type.*NOT LIKE 'NC%'/)
+    })
+  })
+
+  describe('C2 — Multi-currency detection', () => {
+    it('getResumen probes for multi-currency purchase_invoices', async () => {
+      await service.getResumen('company-1')
+      const probe = executedSqls.find((s) => s.includes('COUNT(DISTINCT currency)'))
+      expect(probe).toBeDefined()
+    })
+  })
+
+  describe('H1 — adelantos_pagos only counts unassigned portion', () => {
+    it('getResumen adelantos_pagos subtracts pia_inner.amount_applied from pago total', async () => {
+      await service.getResumen('company-1')
+      const sql = executedSqls.find((s) => s.includes('total_adelantos_pagos'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_adelantos_pagos')[0]
+      // Must subtract already-applied portion so it doesn't overlap with total_pagos_aplicados
+      expect(block).toMatch(/pa\.total_amount[\s\S]*pia_inner\.amount_applied/)
+    })
+  })
+
+  describe('H2 — BU filter on retenciones + adjustments', () => {
+    it('getResumen retenciones practicadas inherit BU from pago when bu filter is set', async () => {
+      await service.getResumen('company-1', 'bu-1')
+      const sql = executedSqls.find((s) => s.includes('total_retenciones_practicadas'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_retenciones_practicadas')[0]
+      expect(block).toContain('LEFT JOIN pagos rp ON rp.id = r.pago_id')
+      expect(block).toContain('rp.business_unit_id')
+    })
+
+    it('getResumen retenciones sufridas inherit BU from cobro when bu filter is set', async () => {
+      await service.getResumen('company-1', 'bu-1')
+      const sql = executedSqls.find((s) => s.includes('total_retenciones_sufridas'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_retenciones_sufridas')[0]
+      expect(block).toContain('LEFT JOIN cobros rc ON rc.id = r.cobro_id')
+      expect(block).toContain('rc.business_unit_id')
+    })
+  })
+
+  describe('H3 — Opening balance with date range', () => {
+    it('getDetalle with dateFrom issues an opening balance query and starts running balance from it', async () => {
+      mockPoolQuery.mockImplementation((sqlStr: string) => {
+        if (sqlStr.includes('FROM enterprises WHERE id')) {
+          return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Test', cuit: '20-12345678-9' }] })
+        }
+        if (sqlStr.includes('SELECT status FROM')) return Promise.resolve({ rows: [] })
+        if (sqlStr.includes('SELECT business_unit_id FROM account_adjustments')) return Promise.resolve({ rows: [] })
+        if (sqlStr.includes('saldo_inicial')) {
+          // Opening balance query: return 50k (prior debe balance)
+          return Promise.resolve({ rows: [{ saldo_inicial: '50000' }] })
+        }
+        // Main UNION query: return one movement inside range
+        return Promise.resolve({
+          rows: [
+            { fecha: '2025-06-01', tipo: 'fact_venta', nro_comprobante: 'A 0001', debe: '20000', haber: '0', descripcion: 'Factura A', reference_id: 'inv-1' },
+          ],
+        })
+      })
+
+      const result = await service.getDetalle('company-1', 'ent-1', { dateFrom: '2025-06-01', dateTo: '2025-12-31' })
+      expect(result.opening_balance).toBe(50000)
+      // Running balance must start at opening, so saldo after +20k = 70k
+      expect(result.movimientos[0].saldo).toBe(70000)
+      expect(result.closing_balance).toBe(70000)
+      // totales.saldo should match closing balance (unified with running)
+      expect(result.totales.saldo).toBe(70000)
+    })
+
+    it('getDetalle without dateFrom returns opening_balance = 0', async () => {
+      mockPoolQuery.mockImplementation((sqlStr: string) => {
+        if (sqlStr.includes('FROM enterprises WHERE id')) {
+          return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Test', cuit: '20-12345678-9' }] })
+        }
+        if (sqlStr.includes('SELECT status FROM')) return Promise.resolve({ rows: [] })
+        if (sqlStr.includes('SELECT business_unit_id FROM account_adjustments')) return Promise.resolve({ rows: [] })
+        return Promise.resolve({ rows: [] })
+      })
+      const result = await service.getDetalle('company-1', 'ent-1')
+      expect(result.opening_balance).toBe(0)
+      // No opening balance query should have been issued
+      const openingQuery = executedSqls.find((s) => s.includes('saldo_inicial'))
+      expect(openingQuery).toBeUndefined()
+    })
+  })
+
+  describe('H4 — getDetalle and getPdfData agree on sign convention', () => {
+    it('both endpoints compute running balance as +debe -haber (no isPagar flip)', async () => {
+      // Same 2 movements: one fact_compra $100k, one pago $40k.
+      // Under the unified convention: saldo goes 0 -> +100k -> +60k.
+      mockPoolQuery.mockImplementation((sqlStr: string) => {
+        if (sqlStr.includes('FROM enterprises WHERE id')) {
+          return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Test', cuit: '20-12345678-9' }] })
+        }
+        if (sqlStr.includes('SELECT status FROM')) return Promise.resolve({ rows: [] })
+        if (sqlStr.includes('SELECT business_unit_id FROM account_adjustments')) return Promise.resolve({ rows: [] })
+        return Promise.resolve({
+          rows: [
+            { fecha: '2025-01-01', tipo: 'fact_compra', nro_comprobante: 'A', debe: '100000', haber: '0', descripcion: 'Fact Compra', reference_id: 'pi-1' },
+            { fecha: '2025-01-02', tipo: 'orden_pago', nro_comprobante: 'OP-1', debe: '0', haber: '40000', descripcion: 'Pago', reference_id: 'pa-1' },
+          ],
+        })
+      })
+      const detalle = await service.getDetalle('company-1', 'ent-1')
+      expect(detalle.movimientos[0].saldo).toBe(100000)
+      expect(detalle.movimientos[1].saldo).toBe(60000)
+      expect(detalle.totales.saldo).toBe(60000)
+
+      // getPdfData uses db.execute for its 8 queries. We mock empty rows for
+      // most, but seed purchaseInvoices and pagos to reconstruct the same scenario.
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = flattenSql(tpl)
+        if (s.includes('FROM enterprises WHERE id')) return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Test', cuit: '20-12345678-9' }] })
+        if (s.includes('FROM companies WHERE id')) return Promise.resolve({ rows: [{ name: 'Co', cuit: '20-11111111-1' }] })
+        if (s.includes("'factura_compra' as tipo")) {
+          return Promise.resolve({ rows: [{ id: 'pi-1', tipo: 'factura_compra', fecha: '2025-01-01', descripcion: 'Fact Compra', monto: '100000' }] })
+        }
+        if (s.includes("'pago' as tipo")) {
+          return Promise.resolve({ rows: [{ id: 'pa-1', tipo: 'pago', fecha: '2025-01-02', descripcion: 'Pago', monto: '40000' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+      const pdf = await service.getPdfData('company-1', 'ent-1', '2025-01-01', '2025-12-31')
+      // totalBalance is the final runningBalance with the unified convention: +100k -40k = +60k
+      expect(pdf.totalBalance).toBe(60000)
+    })
+  })
+
+  describe('H5 — Retenciones exclude entries linked to anulado pago/cobro', () => {
+    it('getResumen practicadas subquery joins pagos and filters anulado', async () => {
+      await service.getResumen('company-1')
+      const sql = executedSqls.find((s) => s.includes('total_retenciones_practicadas'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_retenciones_practicadas')[0]
+      expect(block).toContain('LEFT JOIN pagos rp ON rp.id = r.pago_id')
+      expect(block).toMatch(/rp\.status.*!=.*'anulado'/)
+    })
+
+    it('getResumen sufridas subquery joins cobros and filters anulado', async () => {
+      await service.getResumen('company-1')
+      const sql = executedSqls.find((s) => s.includes('total_retenciones_sufridas'))
+      expect(sql).toBeDefined()
+      const block = sql!.split('total_retenciones_sufridas')[0]
+      expect(block).toContain('LEFT JOIN cobros rc ON rc.id = r.cobro_id')
+      expect(block).toMatch(/rc\.status.*!=.*'anulado'/)
+    })
+
+    it('getDetalle retencion branches filter anulado on linked pago/cobro', async () => {
+      await service.getDetalle('company-1', 'ent-1')
+      const sql = executedSqls.find((s) => s.includes("'retencion_practicada'"))
+      expect(sql).toBeDefined()
+      expect(sql!).toContain('LEFT JOIN pagos rp ON rp.id = r.pago_id')
+      expect(sql!).toMatch(/rp\.status.*!=.*'anulado'/)
+      expect(sql!).toContain('LEFT JOIN cobros rc ON rc.id = r.cobro_id')
+      expect(sql!).toMatch(/rc\.status.*!=.*'anulado'/)
+    })
+
+    it('getPdfData retencion queries filter anulado on linked pago/cobro', async () => {
+      await service.getPdfData('company-1', 'ent-1', '2025-01-01', '2025-12-31')
+      const practicadas = executedSqls.find((s) => s.includes("'retencion_practicada' as tipo"))
+      expect(practicadas).toBeDefined()
+      expect(practicadas!).toContain('LEFT JOIN pagos rp')
+      expect(practicadas!).toMatch(/rp\.status.*!=.*'anulado'/)
+
+      const sufridas = executedSqls.find((s) => s.includes("'retencion_sufrida' as tipo"))
+      expect(sufridas).toBeDefined()
+      expect(sufridas!).toContain('LEFT JOIN cobros rc')
+      expect(sufridas!).toMatch(/rc\.status.*!=.*'anulado'/)
+    })
+  })
 })

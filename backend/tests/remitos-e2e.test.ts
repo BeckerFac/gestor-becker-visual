@@ -695,3 +695,272 @@ describe('E2E Flow 7: getRemito returns items with source_ref', () => {
     expect(remito.items[0].qty_pending_to_invoice).toBe('0');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// FLOW 8: Stock decrement for order-linked items (PR7-T11 BUGFIX)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('E2E Flow 8: order_item stock decrement', () => {
+  beforeEach(() => resetMocks());
+
+  // Helper: build a mock client for order_item-linked remito creation.
+  // Simulates product lookup + stock FOR UPDATE based on a scenario map.
+  function buildClient(scenario: {
+    orderItemProductId: string | null;
+    controlsStock?: boolean;
+    currentStock?: number;
+    hasWarehouse?: boolean;
+    hasStockRow?: boolean;
+  }) {
+    const executedQueries: Array<{ sql: string; params?: any[] }> = [];
+    const mockClient = {
+      query: vi.fn().mockImplementation(async (sql: string, params?: any[]) => {
+        executedQueries.push({ sql, params });
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+        if (sql.includes('MAX(remito_number)')) return { rows: [{ next_number: 1 }] };
+        if (sql.includes('FOR UPDATE OF oi')) {
+          return {
+            rows: [{
+              id: 'oi-1', quantity: 10, qty_delivered: 0,
+              enterprise_id: 'ent-1', order_id: 'ord-1',
+            }],
+          };
+        }
+        if (sql.includes('SELECT product_id FROM order_items')) {
+          return { rows: [{ product_id: scenario.orderItemProductId }] };
+        }
+        if (sql.includes('FROM products WHERE id')) {
+          return { rows: [{ id: scenario.orderItemProductId, controls_stock: scenario.controlsStock ?? false }] };
+        }
+        if (sql.includes('FROM warehouses')) {
+          return { rows: scenario.hasWarehouse === false ? [] : [{ id: 'wh-1' }] };
+        }
+        if (sql.includes('SELECT quantity FROM stock') && sql.includes('FOR UPDATE')) {
+          return {
+            rows: scenario.hasStockRow === false
+              ? []
+              : [{ quantity: String(scenario.currentStock ?? 100) }],
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    return { mockClient, executedQueries };
+  }
+
+  function mockBasePool() {
+    mockPoolQuery.mockImplementation(async (sql: string) => {
+      if (sql?.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
+      if (sql?.includes('SELECT id, enterprise_id FROM customers')) return { rows: [{ id: 'cust-1', enterprise_id: 'ent-1' }] };
+      return { rows: [] };
+    });
+  }
+
+  it('decrements stock when order_item product has controls_stock=true', async () => {
+    const { mockClient, executedQueries } = buildClient({
+      orderItemProductId: 'prod-1',
+      controlsStock: true,
+      currentStock: 100,
+    });
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Pintura', quantity: 3, order_item_id: 'oi-1' }],
+    });
+
+    // qty_delivered still updated
+    const updateQty = executedQueries.find(q =>
+      q.sql.includes('UPDATE order_items SET qty_delivered') && q.params?.includes(3)
+    );
+    expect(updateQty).toBeDefined();
+
+    // Stock movement logged with 'sale' + reference_type='remito' + negative qty
+    const stockMov = executedQueries.find(q =>
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'sale'") && q.sql.includes("'remito'")
+    );
+    expect(stockMov).toBeDefined();
+    expect(stockMov!.params).toContain(-3);
+
+    // Stock row double-written (quantity AND quantity_num)
+    const stockUpdate = executedQueries.find(q =>
+      q.sql.includes('UPDATE stock SET quantity') && q.sql.includes('quantity_num')
+    );
+    expect(stockUpdate).toBeDefined();
+
+    // remito_items INSERT must persist the resolved product_id (so anular can revert)
+    const insertRi = executedQueries.find(q => q.sql.includes('INSERT INTO remito_items'));
+    expect(insertRi).toBeDefined();
+    expect(insertRi!.params).toContain('prod-1');
+
+    // FOR UPDATE lock on stock row
+    const lockStock = executedQueries.find(q =>
+      q.sql.includes('SELECT quantity FROM stock') && q.sql.includes('FOR UPDATE')
+    );
+    expect(lockStock).toBeDefined();
+  });
+
+  it('does NOT touch stock when order_item product has controls_stock=false', async () => {
+    const { mockClient, executedQueries } = buildClient({
+      orderItemProductId: 'prod-service',
+      controlsStock: false,
+    });
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Servicio', quantity: 1, order_item_id: 'oi-1' }],
+    });
+
+    // qty_delivered updated
+    const updateQty = executedQueries.find(q =>
+      q.sql.includes('UPDATE order_items SET qty_delivered')
+    );
+    expect(updateQty).toBeDefined();
+
+    // No stock_movements insert, no stock UPDATE
+    expect(executedQueries.find(q =>
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'sale'")
+    )).toBeUndefined();
+    expect(executedQueries.find(q => q.sql.includes('UPDATE stock SET quantity'))).toBeUndefined();
+  });
+
+  it('rejects with 400 when stock insufficient for order-linked item', async () => {
+    const { mockClient } = buildClient({
+      orderItemProductId: 'prod-1',
+      controlsStock: true,
+      currentStock: 2, // only 2 available, requesting 5
+    });
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await expect(service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Pintura', quantity: 5, order_item_id: 'oi-1' }],
+    })).rejects.toThrow(/Stock insuficiente.*Disponible: 2.*solicitado: 5/);
+  });
+
+  it('skips stock when order_item.product_id is NULL (ad-hoc order item)', async () => {
+    const { mockClient, executedQueries } = buildClient({
+      orderItemProductId: null,
+    });
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Ad-hoc', quantity: 2, order_item_id: 'oi-1' }],
+    });
+
+    // qty_delivered updated
+    expect(executedQueries.find(q =>
+      q.sql.includes('UPDATE order_items SET qty_delivered')
+    )).toBeDefined();
+
+    // No products lookup, no stock queries
+    expect(executedQueries.find(q => q.sql.includes('FROM products WHERE id'))).toBeUndefined();
+    expect(executedQueries.find(q => q.sql.includes('INSERT INTO stock_movements'))).toBeUndefined();
+
+    // remito_items row has NULL product_id
+    const insertRi = executedQueries.find(q => q.sql.includes('INSERT INTO remito_items'));
+    expect(insertRi!.params![2]).toBeNull();
+  });
+
+  it('uses FOR UPDATE lock on stock row to serialize concurrent remitos', async () => {
+    // Two sequential createRemito calls against the same mock client —
+    // both must issue FOR UPDATE on the stock row before updating.
+    const { mockClient, executedQueries } = buildClient({
+      orderItemProductId: 'prod-1',
+      controlsStock: true,
+      currentStock: 100,
+    });
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Pintura', quantity: 1, order_item_id: 'oi-1' }],
+    });
+    await service.createRemito('comp-1', 'user-1', {
+      enterprise_id: 'ent-1',
+      items: [{ product_name: 'Pintura', quantity: 1, order_item_id: 'oi-1' }],
+    });
+
+    const lockQueries = executedQueries.filter(q =>
+      q.sql.includes('SELECT quantity FROM stock') && q.sql.includes('FOR UPDATE')
+    );
+    expect(lockQueries.length).toBe(2);
+  });
+
+  it('anular reverts stock for order-linked item via existing return_customer path', async () => {
+    // Simulates an anulacion where the remito_item has BOTH order_item_id AND product_id
+    // (the new behavior: createRemito now persists resolvedProductId on remito_items).
+    // The existing anularRemito query filters by product_id, so the revert must fire.
+    const executedQueries: Array<{ sql: string; params?: any[] }> = [];
+    const mockClient = {
+      query: vi.fn().mockImplementation(async (sql: string, params?: any[]) => {
+        executedQueries.push({ sql, params });
+        if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] };
+        if (sql.includes('SELECT id, status FROM remitos')) return { rows: [{ id: 'rem-1', status: 'pendiente' }] };
+        if (sql.includes('SELECT id, order_item_id, product_id, quantity FROM remito_items')) {
+          return { rows: [
+            // order-linked AND product-bound — new behavior
+            { id: 'ri-1', order_item_id: 'oi-1', product_id: 'prod-1', quantity: 3 },
+          ]};
+        }
+        if (sql.includes('warehouse_id FROM stock_movements')) return { rows: [{ warehouse_id: 'wh-1' }] };
+        if (sql.includes('SELECT quantity FROM stock')) return { rows: [{ quantity: '0' }] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    mockBasePool();
+    (pool.connect as any).mockResolvedValue(mockClient);
+
+    const { RemitosService } = await import('../src/modules/remitos/remitos.service');
+    const service = new (RemitosService as any)();
+    service.tablesEnsured = true;
+
+    await service.anularRemito('comp-1', 'rem-1', 'user-1');
+
+    // qty_delivered reverted
+    expect(executedQueries.find(q =>
+      q.sql.includes('UPDATE order_items SET qty_delivered = GREATEST')
+    )).toBeDefined();
+
+    // Stock movement ENTRADA (return_customer) for the order-linked item
+    const stockRet = executedQueries.find(q =>
+      q.sql.includes('INSERT INTO stock_movements') && q.sql.includes("'return_customer'")
+    );
+    expect(stockRet).toBeDefined();
+    expect(stockRet!.params).toContain(3); // positive qty revert
+
+    // Stock row ADDED back
+    expect(executedQueries.find(q =>
+      q.sql.includes('UPDATE stock SET quantity = COALESCE(quantity, 0) + $1')
+    )).toBeDefined();
+  });
+});
