@@ -133,7 +133,8 @@ export class PagosService {
         ORDER BY p.payment_date DESC
       `);
       return (result as any).rows || result || [];
-    } catch (error) {
+    } catch (error: any) {
+      console.error('[getPagos] SQL error:', error?.message, error?.stack);
       throw new ApiError(500, 'Failed to get pagos');
     }
   }
@@ -787,7 +788,8 @@ export class PagosService {
         total_pagado: parseFloat(rows[0]?.total_pagado || '0'),
         count: parseInt(rows[0]?.count || '0'),
       };
-    } catch (error) {
+    } catch (error: any) {
+      console.error('[getPagosSummary] SQL error:', error?.message, error?.stack);
       throw new ApiError(500, 'Failed to get pagos summary');
     }
   }

@@ -132,9 +132,12 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ];
 const corsEnvRaw = process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || '';
-const allowedOrigins = corsEnvRaw
+const envOrigins = corsEnvRaw
   ? corsEnvRaw.split(',').map(o => o.trim()).filter(Boolean)
-  : DEFAULT_ALLOWED_ORIGINS;
+  : [];
+// Union env + defaults so the Render backend origin is always allowed even when CORS_ALLOWED_ORIGINS is set.
+// Defaults are safe (own domains only), so overriding them is never what we want.
+const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envOrigins]));
 if (!corsEnvRaw && isProduction) {
   console.warn('[CORS] CORS_ALLOWED_ORIGINS not set — using built-in defaults:', allowedOrigins.join(', '));
 }
