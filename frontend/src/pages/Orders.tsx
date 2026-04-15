@@ -561,6 +561,24 @@ export const Orders: React.FC = () => {
     }
   }
 
+  const handleDownloadOrderPdf = async (order: Order) => {
+    try {
+      const blob = await api.downloadOrderPdf(order.id)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const num = String(order.order_number || 0).padStart(4, '0')
+      a.download = `pedido-${num}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('PDF descargado')
+    } catch (e: any) {
+      toast.error(e?.message || 'Error al descargar PDF')
+    }
+  }
+
   const handleEditOrder = (order: Order) => {
     const status = invoicingStatus[order.id]
     const orderItems: FormItem[] = (status?.items || []).map((item: any) => ({
@@ -2710,6 +2728,13 @@ export const Orders: React.FC = () => {
         items.push({ id: 'sep-actions', label: '', separator: true })
 
         // --- ACTIONS ---
+        items.push({
+          id: 'download-pdf',
+          label: 'Descargar PDF',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>,
+          onClick: () => handleDownloadOrderPdf(order),
+        })
+
         items.push({
           id: 'edit',
           label: 'Editar Pedido',

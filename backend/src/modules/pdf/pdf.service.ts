@@ -1834,6 +1834,322 @@ ${methodsRows}
 </html>`
   }
 
+  /**
+   * Generate a PDF for an order ("pedido"). Mirrors the invoice PDF layout
+   * but uses order-level fields and the customer enterprise's fiscal data.
+   *
+   * BU guard: enforces company_id and optional business_unit_id via
+   * assertBelongsToTenant. Anulado watermark applied if the order is voided.
+   */
+  async generateOrderPdf(orderId: string, companyId: string, businessUnitId?: string): Promise<Buffer> {
+    try {
+      await this.initialize()
+
+      // 1) Order row (raw SQL — orders has columns added at runtime by ensureMigrations)
+      const orderResult = await db.execute(sql`SELECT * FROM orders WHERE id = ${orderId}`)
+      const order = ((orderResult as any).rows || [])[0]
+      this.assertBelongsToTenant(order, companyId, businessUnitId, 'Pedido')
+
+      // 2) Items
+      const itemsResult = await db.execute(sql`
+        SELECT oi.*, p.sku
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.order_id = ${orderId}
+        ORDER BY oi.created_at ASC
+      `)
+      const items = ((itemsResult as any).rows || [])
+
+      // 3) Emitter (company)
+      const companyResult = await db.execute(sql`SELECT * FROM companies WHERE id = ${companyId}`)
+      const company = ((companyResult as any).rows || [])[0]
+      if (!company) {
+        throw new ApiError(404, 'Empresa no encontrada')
+      }
+
+      // 4) Customer enterprise (fiscal data). Try direct enterprise_id first;
+      // fall back to customer.enterprise_id (some orders only have customer_id).
+      let enterprise: any = null
+      if (order.enterprise_id) {
+        const eR = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${order.enterprise_id} AND company_id = ${companyId}`)
+        enterprise = ((eR as any).rows || [])[0] || null
+      }
+      let customer: any = null
+      if (order.customer_id) {
+        const cR = await db.execute(sql`SELECT * FROM customers WHERE id = ${order.customer_id} AND company_id = ${companyId}`)
+        customer = ((cR as any).rows || [])[0] || null
+        if (!enterprise && customer?.enterprise_id) {
+          const eR = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${customer.enterprise_id} AND company_id = ${companyId}`)
+          enterprise = ((eR as any).rows || [])[0] || null
+        }
+      }
+
+      let html = this.generateOrderHtml({ order, items, company, enterprise, customer })
+
+      if (this.isAnulado(order)) {
+        const anulledByName = await this.resolveUserName(order.anulled_by)
+        html = this.renderAnuladoWatermark(html, {
+          anulled_at: order.anulled_at,
+          anulled_by_name: anulledByName,
+          anulled_reason: order.anulled_reason,
+        })
+      }
+
+      if (!this.browser) throw new Error('Browser not initialized')
+      const page = await this.browser.newPage()
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const pdf = await page.pdf({
+        format: 'A4',
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+        timeout: 15000,
+      })
+      await page.close()
+      return pdf
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(500, `Order PDF generation failed: ${(error as Error).message}`)
+    }
+  }
+
+  /**
+   * Build HTML for the order PDF. Visual style mirrors generateInvoiceHtml
+   * (same fonts, header bar, info-bar, receptor box, items table, totals)
+   * but adapted for order-specific fields.
+   */
+  private generateOrderHtml(data: { order: any; items: any[]; company: any; enterprise: any; customer: any }): string {
+    const { order, items, company, enterprise, customer } = data
+    const esc = this.escapeHtml.bind(this)
+    const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+    // ---- Emisora (company) ----
+    const companyName = company?.name || ''
+    const companyCuit = this.formatCuit(company?.cuit || '')
+    const companyDomicilio = [company?.address, company?.city, company?.province].filter(Boolean).join(', ')
+    const companyPhone = company?.phone || ''
+    const companyEmail = company?.email || ''
+    const companyLogo = company?.logo_url || ''
+
+    // ---- Cliente (enterprise) ----
+    const cliRazon = enterprise?.razon_social || enterprise?.name || customer?.name || '-'
+    const cliCuit = enterprise?.cuit || customer?.cuit || ''
+    const cliCuitFmt = cliCuit ? this.formatCuit(cliCuit) : '-'
+    const cliCondIva = enterprise?.tax_condition || customer?.tax_condition || '-'
+    const cliFiscal = [enterprise?.fiscal_address, enterprise?.fiscal_city, enterprise?.fiscal_province, enterprise?.fiscal_postal_code]
+      .filter(Boolean).join(', ') || '-'
+    // Shipping = enterprise commercial address (address/city/province) — distinct from fiscal.
+    const cliEntrega = [enterprise?.address, enterprise?.city, enterprise?.province, enterprise?.postal_code]
+      .filter(Boolean).join(', ') || cliFiscal
+    const cliContacto = [customer?.name, customer?.email, customer?.phone].filter(Boolean).join(' · ') || '-'
+
+    // ---- Pedido ----
+    const orderNumberStr = String(order.order_number || 0).padStart(8, '0')
+    const todayStr = new Date().toLocaleDateString('es-AR')
+    const createdStr = order.created_at ? new Date(order.created_at).toLocaleDateString('es-AR') : todayStr
+    const deliveryStr = order.estimated_delivery ? new Date(order.estimated_delivery).toLocaleDateString('es-AR') : '-'
+    const priorityStr = order.priority || 'normal'
+
+    // ---- Items + totals ----
+    const discountPercent = parseFloat(order.discount_percent || '0') || 0
+    let subtotalNeto = 0
+    const ivaByRate = new Map<number, number>()
+    const itemRows = items.map((it: any, idx: number) => {
+      const qty = parseFloat(it.quantity || '0') || 0
+      const price = parseFloat(it.unit_price || '0') || 0
+      const vatRate = parseFloat(it.vat_rate || '0') || 0
+      const lineSubtotal = qty * price
+      const lineIva = lineSubtotal * (vatRate / 100)
+      const lineTotal = lineSubtotal + lineIva
+      subtotalNeto += lineSubtotal
+      ivaByRate.set(vatRate, (ivaByRate.get(vatRate) || 0) + lineIva)
+      return `
+        <tr>
+          <td class="center">${String(idx + 1).padStart(3, '0')}</td>
+          <td>${esc(it.product_name || '-')}</td>
+          <td class="center">${qty.toFixed(2)}</td>
+          <td class="right">${fmt(price)}</td>
+          <td class="right">${vatRate.toFixed(2)}</td>
+          <td class="right">${fmt(lineSubtotal)}</td>
+          <td class="right">${fmt(lineTotal)}</td>
+        </tr>`
+    }).join('')
+
+    const discountAmount = subtotalNeto * (discountPercent / 100)
+    const netoConDescuento = subtotalNeto - discountAmount
+    const discountMultiplier = subtotalNeto > 0 ? (netoConDescuento / subtotalNeto) : 1
+    let totalIvaConDescuento = 0
+    const ivaBreakdownRows: string[] = []
+    Array.from(ivaByRate.entries()).sort((a, b) => a[0] - b[0]).forEach(([rate, amt]) => {
+      const adjusted = amt * discountMultiplier
+      totalIvaConDescuento += adjusted
+      ivaBreakdownRows.push(`
+        <div class="totals-row">
+          <span class="totals-label">IVA ${rate.toFixed(2)}%:</span>
+          <span class="totals-amount">$ ${fmt(adjusted)}</span>
+        </div>`)
+    })
+    const totalFinal = netoConDescuento + totalIvaConDescuento
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Pedido ${orderNumberStr}</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 11px; line-height: 1.4; }
+    .header-wrapper { border: 1.5px solid #000; display: flex; margin-bottom: 8px; position: relative; }
+    .header-left, .header-right { flex: 1; padding: 12px 16px; }
+    .letter-box {
+      position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
+      width: 72px; background: #fff; border: 1.5px solid #000;
+      text-align: center; padding: 4px 0 2px;
+    }
+    .letter-box .letter { font-size: 22px; font-weight: bold; line-height: 1; }
+    .letter-box .cod { font-size: 8px; color: #555; }
+    .header-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-left: 1.5px solid #000; }
+    .razonsocial { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+    .header-label { font-size: 10px; color: #444; }
+    .header-value { font-size: 11px; font-weight: 600; }
+    .header-row { margin-bottom: 3px; }
+    .comprobante-tipo { font-size: 13px; font-weight: bold; margin-bottom: 6px; }
+    .comprobante-nro { font-size: 16px; font-weight: bold; font-family: 'Courier New', monospace; margin-bottom: 8px; }
+    .info-bar { border: 1.5px solid #000; border-top: none; display: flex; margin-bottom: 10px; }
+    .info-bar-left, .info-bar-right { flex: 1; padding: 6px 16px; }
+    .info-bar-left { border-right: 1.5px solid #000; }
+    .info-row { display: flex; margin-bottom: 2px; }
+    .info-label { font-size: 10px; color: #444; min-width: 140px; }
+    .info-value { font-size: 11px; }
+    .receptor { border: 1.5px solid #000; padding: 8px 16px; margin-bottom: 10px; }
+    .receptor-title { font-size: 10px; font-weight: bold; color: #444; text-transform: uppercase; margin-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead th { background: #e8e8e8; border: 1px solid #999; padding: 6px 8px; font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center; }
+    thead th.left { text-align: left; }
+    thead th.right { text-align: right; }
+    tbody td { border: 1px solid #ccc; padding: 5px 8px; font-size: 11px; }
+    tbody td.center { text-align: center; }
+    tbody td.right { text-align: right; font-family: 'Courier New', monospace; }
+    .totals-wrapper { border: 1.5px solid #000; border-top: none; margin-bottom: 12px; }
+    .totals-row { display: flex; justify-content: flex-end; padding: 4px 16px; border-bottom: 1px solid #ddd; }
+    .totals-row:last-child { border-bottom: none; }
+    .totals-label { font-size: 11px; min-width: 200px; text-align: right; padding-right: 20px; }
+    .totals-amount { font-size: 11px; font-family: 'Courier New', monospace; font-weight: bold; min-width: 120px; text-align: right; }
+    .totals-row.grand { background: #f0f0f0; padding: 8px 16px; }
+    .totals-row.grand .totals-label, .totals-row.grand .totals-amount { font-size: 14px; font-weight: bold; }
+    .notes { margin-top: 12px; padding: 10px 14px; border: 1px dashed #888; font-size: 11px; color: #333; }
+    .footer { margin-top: 14px; text-align: center; font-size: 9px; color: #888; padding-top: 6px; border-top: 1px solid #ddd; }
+    .logo { max-height: 48px; max-width: 160px; }
+  </style>
+</head>
+<body>
+
+  <div class="header-wrapper">
+    <div class="header-divider"></div>
+    <div class="letter-box">
+      <div class="letter">PED</div>
+      <div class="cod">PEDIDO</div>
+    </div>
+
+    <div class="header-left">
+      ${companyLogo ? `<img class="logo" src="${esc(companyLogo)}" alt="logo" />` : ''}
+      <div class="razonsocial">${esc(companyName)}</div>
+      ${companyDomicilio ? `<div class="header-row"><span class="header-label">Domicilio Comercial:</span> ${esc(companyDomicilio)}</div>` : ''}
+      <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${esc(companyCuit)}</span></div>
+      ${companyPhone ? `<div class="header-row"><span class="header-label">Teléfono:</span> ${esc(companyPhone)}</div>` : ''}
+      ${companyEmail ? `<div class="header-row"><span class="header-label">Email:</span> ${esc(companyEmail)}</div>` : ''}
+    </div>
+
+    <div class="header-right" style="padding-left: 50px;">
+      <div class="comprobante-tipo">PEDIDO DE VENTA</div>
+      <div class="comprobante-nro">N° ${orderNumberStr}</div>
+      <div class="header-row"><span class="header-label">Fecha de Emisión:</span> <span class="header-value">${esc(todayStr)}</span></div>
+      <div class="header-row"><span class="header-label">Fecha de Creación:</span> <span class="header-value">${esc(createdStr)}</span></div>
+      <div class="header-row"><span class="header-label">Entrega Estimada:</span> <span class="header-value">${esc(deliveryStr)}</span></div>
+      <div class="header-row"><span class="header-label">Prioridad:</span> <span class="header-value">${esc(priorityStr)}</span></div>
+    </div>
+  </div>
+
+  <div class="info-bar">
+    <div class="info-bar-left">
+      <div class="info-row"><span class="info-label">Título:</span> <span class="info-value">${esc(order.title || '-')}</span></div>
+      <div class="info-row"><span class="info-label">Estado:</span> <span class="info-value">${esc(order.status || '-')}</span></div>
+    </div>
+    <div class="info-bar-right">
+      <div class="info-row"><span class="info-label">Tipo:</span> <span class="info-value">${esc(order.product_type || '-')}</span></div>
+      <div class="info-row"><span class="info-label">Método de Pago:</span> <span class="info-value">${esc(order.payment_method || '-')}</span></div>
+    </div>
+  </div>
+
+  <div class="receptor">
+    <div class="receptor-title">Cliente</div>
+    <div style="display: flex; gap: 40px;">
+      <div style="flex: 1;">
+        <div class="info-row"><span class="info-label">Razón Social:</span> <span class="info-value" style="font-weight: bold;">${esc(cliRazon)}</span></div>
+        <div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(cliCuitFmt)}</span></div>
+        <div class="info-row"><span class="info-label">Condición IVA:</span> <span class="info-value">${esc(cliCondIva)}</span></div>
+        <div class="info-row"><span class="info-label">Contacto:</span> <span class="info-value">${esc(cliContacto)}</span></div>
+      </div>
+      <div style="flex: 1;">
+        <div class="info-row"><span class="info-label">Domicilio Fiscal:</span> <span class="info-value">${esc(cliFiscal)}</span></div>
+        <div class="info-row"><span class="info-label">Dirección de Entrega:</span> <span class="info-value">${esc(cliEntrega)}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="left" style="width:6%;">#</th>
+        <th class="left" style="width:38%;">Producto / Servicio</th>
+        <th style="width:8%;">Cantidad</th>
+        <th class="right" style="width:12%;">P. Unitario</th>
+        <th class="right" style="width:8%;">% IVA</th>
+        <th class="right" style="width:14%;">Subtotal</th>
+        <th class="right" style="width:14%;">Total c/IVA</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows || `<tr><td colspan="7" class="center" style="padding: 12px; color: #888;">Sin items</td></tr>`}
+    </tbody>
+  </table>
+
+  <div class="totals-wrapper">
+    <div class="totals-row">
+      <span class="totals-label">Subtotal Neto:</span>
+      <span class="totals-amount">$ ${fmt(subtotalNeto)}</span>
+    </div>
+    ${discountPercent > 0 ? `
+    <div class="totals-row">
+      <span class="totals-label">Descuento ${discountPercent.toFixed(2)}%:</span>
+      <span class="totals-amount">- $ ${fmt(discountAmount)}</span>
+    </div>
+    <div class="totals-row">
+      <span class="totals-label">Neto con Descuento:</span>
+      <span class="totals-amount">$ ${fmt(netoConDescuento)}</span>
+    </div>
+    ` : ''}
+    ${ivaBreakdownRows.join('')}
+    <div class="totals-row grand">
+      <span class="totals-label">Total: $</span>
+      <span class="totals-amount">${fmt(totalFinal)}</span>
+    </div>
+  </div>
+
+  ${order.notes ? `
+  <div class="notes">
+    <strong>Notas:</strong><br/>
+    ${esc(order.notes)}
+  </div>
+  ` : ''}
+
+  <div class="footer">
+    Documento no fiscal - Pedido generado el ${esc(todayStr)}
+  </div>
+
+</body>
+</html>`
+  }
+
   async close() {
     if (this.browser) {
       await this.browser.close()

@@ -12,6 +12,7 @@ ordersRouter.get('/:id/context-data', authorize('orders', 'view'), (req, res) =>
 ordersRouter.get('/:id/invoicing-detail', authorize('orders', 'view'), (req, res) => ordersController.getOrderInvoicingDetail(req as any, res));
 ordersRouter.get('/:id/uninvoiced-items', authorize('orders', 'view'), (req, res) => ordersController.getUninvoicedItems(req as any, res));
 ordersRouter.get('/:id/bom-check', authorize('orders', 'view'), (req, res) => ordersController.checkBOMAvailability(req as any, res));
+ordersRouter.get('/:id/pdf', authorize('orders', 'view'), (req, res) => ordersController.getOrderPdf(req as any, res));
 ordersRouter.get('/:id', authorize('orders', 'view'), (req, res) => ordersController.getOrder(req as any, res));
 ordersRouter.put('/:id', authorize('orders', 'edit'), (req, res) => ordersController.updateOrder(req as any, res));
 ordersRouter.delete('/:id', authorize('orders', 'delete'), (req, res) => ordersController.deleteOrder(req as any, res));

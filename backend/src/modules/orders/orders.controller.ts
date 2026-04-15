@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { ordersService } from './orders.service';
+import { pdfService } from '../pdf/pdf.service';
 
 export class OrdersController {
   async getOrders(req: AuthRequest, res: Response) {
@@ -91,6 +92,26 @@ export class OrdersController {
   async checkBOMAvailability(req: AuthRequest, res: Response) {
     const data = await ordersService.checkBOMAvailability(req.user!.company_id, req.params.id);
     res.json(data);
+  }
+
+  async getOrderPdf(req: AuthRequest, res: Response) {
+    try {
+      const businessUnitId = (req.query.business_unit_id as string) || undefined;
+      const pdf = await pdfService.generateOrderPdf(
+        req.params.id,
+        req.user!.company_id,
+        businessUnitId
+      );
+      const orderNum = String(req.params.id).slice(0, 8);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="pedido-${orderNum}.pdf"`);
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating order PDF:', error);
+      const status = (error as any).statusCode || 500;
+      const message = (error as any).message || 'Error al generar PDF del pedido';
+      res.status(status).json({ error: message });
+    }
   }
 }
 

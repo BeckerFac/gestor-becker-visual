@@ -1221,6 +1221,10 @@ export const api = {
     const { data } = await client.get(`/orders/${orderId}/bom-check`)
     return data
   },
+  downloadOrderPdf: async (orderId: string): Promise<Blob> => {
+    const response = await client.get(`/orders/${orderId}/pdf`, { responseType: 'blob' })
+    return response.data
+  },
 
   // Quotes
   getQuotes: async (filters?: Record<string, any>) => {
