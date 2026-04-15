@@ -1837,6 +1837,16 @@ export const Orders: React.FC = () => {
                         <td colSpan={8} className="px-0 py-0 border-b-2 border-blue-300">
                           <div className="mx-3 my-3 bg-blue-50 dark:bg-gray-800 border border-blue-200 dark:border-gray-600 rounded-lg shadow-sm overflow-hidden animate-slideDown">
                             <div className="border-l-4 border-blue-500 px-4 py-4">
+                              <div className="flex justify-end mb-3">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDownloadOrderPdf(order) }}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition-colors"
+                                  title="Descargar PDF del pedido"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>
+                                  Descargar PDF
+                                </button>
+                              </div>
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
                                 {/* Column 1: Product & Items details */}
