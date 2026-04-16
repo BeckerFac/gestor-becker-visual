@@ -214,7 +214,7 @@ export const Remitos: React.FC = () => {
       if (filterSearch)     filters.search        = filterSearch
       if (filterDateFrom)   filters.date_from     = filterDateFrom
       if (filterDateTo)     filters.date_to       = filterDateTo
-      if (canAccessLuna)    filters.fiscal_type   = filterFiscalType
+      if (canAccessLuna && filterFiscalType !== 'all') filters.fiscal_type = filterFiscalType
 
       const res = await api.getRemitos(filters).catch(() => ({ items: [], total: 0 }))
       setRemitos(res.items ?? [])

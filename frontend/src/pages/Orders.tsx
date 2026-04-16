@@ -286,8 +286,8 @@ export const Orders: React.FC = () => {
           product_type: filterType.length === 1 ? filterType[0] : undefined,
           enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
           has_invoice: filterInvoice.length === 1 ? filterInvoice[0] : undefined,
-          // Sol/Luna: non-Luna users never request anything but 'fiscal'.
-          fiscal_type: canAccessLuna ? filterFiscalType : 'fiscal',
+          // Sol/Luna: 'all' = omit param (service returns both). Non-Luna users forced to 'fiscal'.
+          fiscal_type: !canAccessLuna ? 'fiscal' : filterFiscalType === 'all' ? undefined : filterFiscalType,
           search: searchRef.current || undefined,
         }).catch((err: any) => {
           setError(`Error cargando pedidos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
