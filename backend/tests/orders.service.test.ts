@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbError, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbError, mockDbVoid, mockClientQuery, resetMocks } from './helpers/setup'
 
 // Import after mocks are set up
 import { OrdersService } from '../src/modules/orders/orders.service'
@@ -129,6 +129,8 @@ describe('OrdersService', () => {
         }
         return { rows: [] }
       })
+      // Transaction queries go through pool.connect() -> client.query()
+      mockClientQuery.mockResolvedValue({ rows: [] })
 
       const result = await service.createOrder('company-1', 'user-1', {
         title: 'New Order',
@@ -148,12 +150,14 @@ describe('OrdersService', () => {
         callIndex++
         if (callIndex === 10) return Promise.resolve({ rows: [{ next_number: '1' }] }) // next_number
         if (callIndex === 11) return Promise.resolve({ rows: [] }) // customer lookup (no enterprise)
-        // calls 12-14: INSERT order, INSERT item, INSERT history
-        if (callIndex === 15) return Promise.resolve({ rows: [] }) // UPDATE deduct_stock
-        if (callIndex === 16) return Promise.resolve({ rows: [{ id: 'warehouse-1' }] }) // warehouse
-        if (callIndex === 17) return Promise.resolve({ rows: [{ id: 'product-1', controls_stock: true }] }) // product
+        // Stock deduction calls (after transaction committed via client)
+        if (callIndex === 12) return Promise.resolve({ rows: [] }) // UPDATE deduct_stock
+        if (callIndex === 13) return Promise.resolve({ rows: [{ id: 'warehouse-1' }] }) // warehouse
+        if (callIndex === 14) return Promise.resolve({ rows: [{ id: 'product-1', controls_stock: true }] }) // product
         return Promise.resolve({ rows: [] })
       })
+      // Transaction queries go through pool.connect() -> client.query()
+      mockClientQuery.mockResolvedValue({ rows: [] })
 
       const result = await service.createOrder('company-1', 'user-1', {
         title: 'Stock Order',
@@ -168,8 +172,7 @@ describe('OrdersService', () => {
     })
 
     it('calculates totals from items (subtotal, VAT, profit)', async () => {
-      let insertValues: any[] = []
-
+      // Pre-transaction queries go through db.execute
       mockDbExecute.mockImplementation((...args: any[]) => {
         const tpl = args[0]
         const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
@@ -180,11 +183,10 @@ describe('OrdersService', () => {
         if (sqlStr.includes('SELECT enterprise_id FROM customers')) {
           return Promise.resolve({ rows: [] })
         }
-        if (sqlStr.includes('INSERT INTO orders') && tpl?.values) {
-          insertValues = tpl.values
-        }
         return Promise.resolve({ rows: [] })
       })
+      // Transaction queries go through pool.connect() -> client.query()
+      mockClientQuery.mockResolvedValue({ rows: [] })
 
       await service.createOrder('company-1', 'user-1', {
         title: 'Calc Test',
@@ -195,16 +197,23 @@ describe('OrdersService', () => {
         vat_rate: 21,
       })
 
+      // Find the INSERT INTO orders call on the client (parameterized)
+      const insertCall = mockClientQuery.mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO orders')
+      )
+      expect(insertCall).toBeDefined()
+      const insertParams = insertCall?.[1] || []
       // subtotal = 100*2 + 200*1 = 400
       // totalWithVat = 400 * 1.21 = 484
       // estimatedProfit = 400 - (50*2 + 100*1) = 200
-      expect(insertValues.length).toBeGreaterThan(0)
-      expect(insertValues).toContain('484')
-      expect(insertValues).toContain('200')
+      expect(insertParams.length).toBeGreaterThan(0)
+      expect(insertParams).toContain('484')
+      expect(insertParams).toContain('200')
     })
 
     it('derives mixed product_type when items have different types', async () => {
       mockDbExecute.mockResolvedValue({ rows: [{ next_number: '1' }] })
+      mockClientQuery.mockResolvedValue({ rows: [] })
 
       // Should not throw
       await service.createOrder('company-1', 'user-1', {
@@ -307,11 +316,19 @@ describe('OrdersService', () => {
 
   describe('deleteOrder', () => {
     it('deletes order and related records', async () => {
-      mockDbRows([{ id: 'order-1' }])
-      mockDbVoid() // delete status_history
-      mockDbVoid() // delete order_items
-      mockDbVoid() // unlink cheques
-      mockDbVoid() // delete order
+      mockDbExecute.mockImplementation((...args: any[]) => {
+        const tpl = args[0]
+        const s = tpl?.strings ? tpl.strings.join('') : ''
+        if (s.includes('FROM orders WHERE id') && s.includes('SELECT id')) {
+          return Promise.resolve({ rows: [{ id: 'order-1', locked_at: null }] })
+        }
+        if (s.includes('FROM remitos r')) return Promise.resolve({ rows: [{ cnt: 0 }] })
+        if (s.includes('linked_invoices')) return Promise.resolve({ rows: [{ authorized_count: 0, draft_count: 0, details: [] }] })
+        if (s.includes('FROM cobro_invoice_applications')) return Promise.resolve({ rows: [{ cnt: 0 }] })
+        return Promise.resolve({ rows: [] })
+      })
+      // Transaction queries go through pool.connect() -> client.query()
+      mockClientQuery.mockResolvedValue({ rows: [] })
 
       const result = await service.deleteOrder('company-1', 'order-1')
       expect(result.deleted).toBe(true)

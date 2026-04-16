@@ -10,7 +10,7 @@
  *  - getOrder: row-level 404 for Luna-as-Sol, 200 for Luna-as-Luna.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockClientQuery, resetMocks } from './helpers/setup'
 import { OrdersService } from '../src/modules/orders/orders.service'
 
 describe('Sol/Luna OrdersService', () => {
@@ -41,6 +41,8 @@ describe('Sol/Luna OrdersService', () => {
       if (s.includes('COALESCE(MAX(order_number)')) return Promise.resolve({ rows: [{ next_number: '1' }] })
       return Promise.resolve({ rows: [orderRow] })
     })
+    // Transaction queries go through pool.connect() -> client.query()
+    mockClientQuery.mockResolvedValue({ rows: [] })
   }
 
   // ============================================================
@@ -55,11 +57,12 @@ describe('Sol/Luna OrdersService', () => {
         items: [{ product_name: 'item', quantity: 1, unit_price: 100, vat_rate: 21 }],
       })
       expect(result.fiscal_type).toBe('fiscal')
-      const insertCall = mockDbExecute.mock.calls.find((c: any[]) =>
-        c[0]?.strings?.join('').includes('INSERT INTO orders')
+      // Transaction INSERT goes through pool.connect() -> client.query(text, params)
+      const insertCall = mockClientQuery.mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO orders')
       )
       expect(insertCall).toBeDefined()
-      const values = insertCall?.[0]?.values || []
+      const values = insertCall?.[1] || []
       expect(values).toContain('fiscal')
     })
 
@@ -110,10 +113,11 @@ describe('Sol/Luna OrdersService', () => {
         title: 'Sin lock',
         items: [{ product_name: 'x', quantity: 1, unit_price: 10, vat_rate: 21 }],
       })
-      const insertCall = mockDbExecute.mock.calls.find((c: any[]) =>
-        c[0]?.strings?.join('').includes('INSERT INTO orders')
+      // Transaction INSERT goes through pool.connect() -> client.query(text, params)
+      const insertCall = mockClientQuery.mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO orders')
       )
-      const sqlStr = insertCall?.[0]?.strings?.join('') || ''
+      const sqlStr = insertCall?.[0] || ''
       // We never write locked_at on insert — DB default (NULL) is relied on.
       expect(sqlStr).not.toContain('locked_at')
     })
@@ -130,11 +134,12 @@ describe('Sol/Luna OrdersService', () => {
         },
         { userCanAccessLuna: true }
       )
-      const itemInsert = mockDbExecute.mock.calls.find((c: any[]) =>
-        c[0]?.strings?.join('').includes('INSERT INTO order_items')
+      // Transaction INSERT goes through pool.connect() -> client.query(text, params)
+      const itemInsert = mockClientQuery.mock.calls.find((c: any[]) =>
+        typeof c[0] === 'string' && c[0].includes('INSERT INTO order_items')
       )
       expect(itemInsert).toBeDefined()
-      const values = itemInsert?.[0]?.values || []
+      const values = itemInsert?.[1] || []
       // The vat_rate slot is the last parameter; it must be '0' for Luna.
       expect(values[values.length - 1]).toBe('0')
     })
@@ -169,6 +174,8 @@ describe('Sol/Luna OrdersService', () => {
         }
         return Promise.resolve({ rows: [] })
       })
+      // Transaction queries go through pool.connect() -> client.query()
+      mockClientQuery.mockResolvedValue({ rows: [] })
       const payload: any = { title: 'new', fiscal_type: 'no_fiscal' }
       await service.updateOrder('company-1', 'order-1', payload)
       // Service mutates the passed object as per spec ("silently drop").

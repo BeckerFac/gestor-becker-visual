@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockClientQuery, resetMocks } from './helpers/setup'
 
 import { OrdersService } from '../src/modules/orders/orders.service'
 
@@ -47,6 +47,9 @@ describe('OrdersService.deleteOrder', () => {
     const draft = counts.draft ?? 0
     const cobros = counts.cobros ?? 0
     const invDetails = counts.invDetails ?? []
+
+    // Transaction queries go through pool.connect() -> client.query()
+    mockClientQuery.mockResolvedValue({ rows: [] })
 
     mockDbExecute.mockImplementation((...args: any[]) => {
       const tpl = args[0]

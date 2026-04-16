@@ -448,34 +448,45 @@ export class OrdersService {
         orderProductType = itemTypes.join(', ').substring(0, 50);
       }
 
-      // --- BEGIN TRANSACTION ---
-      await db.execute(sql`BEGIN`);
+      // --- BEGIN TRANSACTION (dedicated connection for pgbouncer compat) ---
+      const createClient = await pool.connect();
+      try {
+        await createClient.query('BEGIN');
 
-      await db.execute(sql`
-        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by, fiscal_type)
-        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${discountPercent.toString()}, ${data.notes || null}, ${userId}, ${fiscalType})
-      `);
+        await createClient.query(
+          `INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by, fiscal_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pendiente',$11,$12,$13,$14,$15,$16,$17,$18,'pendiente',$19,$20,$21,$22)`,
+          [orderId, companyId, data.customer_id || null, enterpriseId, data.bank_id || null, data.business_unit_id || null, orderNumber, data.title, data.description || null, orderProductType, data.priority || 'normal', data.quantity || 1, subtotal.toString(), totalWithVat.toString(), vatRate.toString(), estimatedProfit.toString(), data.estimated_delivery || null, data.payment_method || null, discountPercent.toString(), data.notes || null, userId, fiscalType]
+        );
 
-      // Insert items. Luna items: vat_rate=0 (precio final).
-      if (data.items && Array.isArray(data.items)) {
-        for (const item of data.items) {
-          const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
-          const itemVatRate = isLuna ? '0' : (item.vat_rate ?? 21).toString();
-          await db.execute(sql`
-            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
-            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false}, ${itemVatRate})
-          `);
+        // Insert items. Luna items: vat_rate=0 (precio final).
+        if (data.items && Array.isArray(data.items)) {
+          for (const item of data.items) {
+            const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+            const itemVatRate = isLuna ? '0' : (item.vat_rate ?? 21).toString();
+            await createClient.query(
+              `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+              [uuid(), orderId, item.product_id || null, item.product_name, item.description || null, item.quantity, item.unit_price.toString(), (item.cost || 0).toString(), itemSubtotal.toString(), item.product_type || 'otro', item.deduct_stock || false, itemVatRate]
+            );
+          }
         }
+
+        // Record initial status
+        await createClient.query(
+          `INSERT INTO order_status_history (id, order_id, new_status, notes, changed_by)
+           VALUES ($1,$2,'pendiente','Pedido creado',$3)`,
+          [uuid(), orderId, userId]
+        );
+
+        await createClient.query('COMMIT');
+      } catch (txErr) {
+        await createClient.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        createClient.release();
       }
-
-      // Record initial status
-      await db.execute(sql`
-        INSERT INTO order_status_history (id, order_id, new_status, notes, changed_by)
-        VALUES (${uuid()}, ${orderId}, 'pendiente', 'Pedido creado', ${userId})
-      `);
-
-      // --- COMMIT TRANSACTION ---
-      await db.execute(sql`COMMIT`);
+      // --- END TRANSACTION ---
 
       // Deduct stock AFTER commit so a stock error doesn't abort the order transaction
       if (data.items && Array.isArray(data.items)) {
@@ -517,7 +528,6 @@ export class OrdersService {
         fiscal_type: fiscalType,
       };
     } catch (error) {
-      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('createOrder FAILED', { companyId, error });
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to create order');
@@ -785,73 +795,96 @@ export class OrdersService {
       // Helper: undefined = keep old value, '' = set null, value = set value
       const v = (field: any) => field !== undefined ? (field === '' ? null : field) : undefined;
 
-      // --- BEGIN TRANSACTION ---
-      await db.execute(sql`BEGIN`);
+      // --- BEGIN TRANSACTION (dedicated connection for pgbouncer compat) ---
+      const updateClient = await pool.connect();
+      try {
+        await updateClient.query('BEGIN');
 
-      await db.execute(sql`
-        UPDATE orders SET
-          title = CASE WHEN ${data.title !== undefined} THEN ${v(data.title)} ELSE title END,
-          description = CASE WHEN ${data.description !== undefined} THEN ${v(data.description)} ELSE description END,
-          product_type = CASE WHEN ${data.product_type !== undefined} THEN ${v(data.product_type)} ELSE product_type END,
-          priority = CASE WHEN ${data.priority !== undefined} THEN ${v(data.priority)} ELSE priority END,
-          customer_id = CASE WHEN ${data.customer_id !== undefined} THEN ${v(data.customer_id)} ELSE customer_id END,
-          enterprise_id = CASE WHEN ${data.enterprise_id !== undefined} THEN ${v(data.enterprise_id)} ELSE enterprise_id END,
-          bank_id = CASE WHEN ${data.bank_id !== undefined} THEN ${v(data.bank_id)} ELSE bank_id END,
-          invoice_id = CASE WHEN ${data.invoice_id !== undefined} THEN ${v(data.invoice_id)} ELSE invoice_id END,
-          has_invoice = CASE WHEN ${data.has_invoice !== undefined} THEN ${data.has_invoice ?? null} ELSE has_invoice END,
-          estimated_delivery = CASE WHEN ${data.estimated_delivery !== undefined} THEN ${v(data.estimated_delivery)} ELSE estimated_delivery END,
-          payment_method = CASE WHEN ${data.payment_method !== undefined} THEN ${v(data.payment_method)} ELSE payment_method END,
-          discount_percent = CASE WHEN ${data.discount_percent !== undefined} THEN ${v(data.discount_percent)} ELSE discount_percent END,
-          notes = CASE WHEN ${data.notes !== undefined} THEN ${v(data.notes)} ELSE notes END,
-          production_started_at = CASE WHEN ${data.production_started_at !== undefined} THEN ${v(data.production_started_at)} ELSE production_started_at END,
-          updated_at = NOW()
-        WHERE id = ${orderId}
-      `);
+        await updateClient.query(
+          `UPDATE orders SET
+            title = CASE WHEN $1 THEN $2 ELSE title END,
+            description = CASE WHEN $3 THEN $4 ELSE description END,
+            product_type = CASE WHEN $5 THEN $6 ELSE product_type END,
+            priority = CASE WHEN $7 THEN $8 ELSE priority END,
+            customer_id = CASE WHEN $9 THEN $10 ELSE customer_id END,
+            enterprise_id = CASE WHEN $11 THEN $12 ELSE enterprise_id END,
+            bank_id = CASE WHEN $13 THEN $14 ELSE bank_id END,
+            invoice_id = CASE WHEN $15 THEN $16 ELSE invoice_id END,
+            has_invoice = CASE WHEN $17 THEN $18 ELSE has_invoice END,
+            estimated_delivery = CASE WHEN $19 THEN $20 ELSE estimated_delivery END,
+            payment_method = CASE WHEN $21 THEN $22 ELSE payment_method END,
+            discount_percent = CASE WHEN $23 THEN $24 ELSE discount_percent END,
+            notes = CASE WHEN $25 THEN $26 ELSE notes END,
+            production_started_at = CASE WHEN $27 THEN $28 ELSE production_started_at END,
+            updated_at = NOW()
+          WHERE id = $29`,
+          [
+            data.title !== undefined, v(data.title),
+            data.description !== undefined, v(data.description),
+            data.product_type !== undefined, v(data.product_type),
+            data.priority !== undefined, v(data.priority),
+            data.customer_id !== undefined, v(data.customer_id),
+            data.enterprise_id !== undefined, v(data.enterprise_id),
+            data.bank_id !== undefined, v(data.bank_id),
+            data.invoice_id !== undefined, v(data.invoice_id),
+            data.has_invoice !== undefined, data.has_invoice ?? null,
+            data.estimated_delivery !== undefined, v(data.estimated_delivery),
+            data.payment_method !== undefined, v(data.payment_method),
+            data.discount_percent !== undefined, v(data.discount_percent),
+            data.notes !== undefined, v(data.notes),
+            data.production_started_at !== undefined, v(data.production_started_at),
+            orderId,
+          ]
+        );
 
-      // Update items if provided (delete + re-insert)
-      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-        // Unlink invoice_items before deleting order_items (FK constraint)
-        await db.execute(sql`
-          UPDATE invoice_items SET order_item_id = NULL
-          WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = ${orderId})
-        `).catch((err) => console.warn('Unlink invoice_items (non-critical):', err.message));
-        await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
+        // Update items if provided (delete + re-insert)
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          // Unlink invoice_items before deleting order_items (FK constraint)
+          await updateClient.query(
+            `UPDATE invoice_items SET order_item_id = NULL
+             WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = $1)`,
+            [orderId]
+          ).catch((err: Error) => console.warn('Unlink invoice_items (non-critical):', err.message));
+          await updateClient.query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
 
-        const validItems = data.items.filter((it: any) => it.product_name && String(it.product_name).trim());
-        if (validItems.length === 0) throw new ApiError(400, 'At least one item with a product name is required');
+          const validItems = data.items.filter((it: any) => it.product_name && String(it.product_name).trim());
+          if (validItems.length === 0) throw new ApiError(400, 'At least one item with a product name is required');
 
-        let subtotal = 0;
-        let totalVat = 0;
-        for (const item of validItems) {
-          const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
-          subtotal += itemSubtotal;
-          const itemVatRate = Number(item.vat_rate ?? 21);
-          totalVat += itemSubtotal * itemVatRate / 100;
-          const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
-          await db.execute(sql`
-            INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
-            VALUES (${uuid()}, ${orderId}, ${productId}, ${item.product_name}, ${item.description || null}, ${item.quantity || 1}, ${(item.unit_price || 0).toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false}, ${itemVatRate.toString()})
-          `);
+          let subtotal = 0;
+          let totalVat = 0;
+          for (const item of validItems) {
+            const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
+            subtotal += itemSubtotal;
+            const itemVatRate = Number(item.vat_rate ?? 21);
+            totalVat += itemSubtotal * itemVatRate / 100;
+            const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
+            await updateClient.query(
+              `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+              [uuid(), orderId, productId, item.product_name, item.description || null, item.quantity || 1, (item.unit_price || 0).toString(), (item.cost || 0).toString(), itemSubtotal.toString(), item.product_type || 'otro', item.deduct_stock || false, itemVatRate.toString()]
+            );
+          }
+
+          // Recalculate totals (IVA per item)
+          const vatRate = subtotal > 0 ? (totalVat / subtotal) * 100 : 21;
+          const totalWithVat = subtotal + totalVat;
+          await updateClient.query(
+            `UPDATE orders SET total_amount = $1, vat_rate = $2, updated_at = NOW() WHERE id = $3`,
+            [totalWithVat.toString(), vatRate.toString(), orderId]
+          );
         }
 
-        // Recalculate totals (IVA per item)
-        const vatRate = subtotal > 0 ? (totalVat / subtotal) * 100 : 21;
-        const totalWithVat = subtotal + totalVat;
-        await db.execute(sql`
-          UPDATE orders SET
-            total_amount = ${totalWithVat.toString()},
-            vat_rate = ${vatRate.toString()},
-            updated_at = NOW()
-          WHERE id = ${orderId}
-        `);
+        await updateClient.query('COMMIT');
+      } catch (txErr) {
+        await updateClient.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        updateClient.release();
       }
-
-      // --- COMMIT TRANSACTION ---
-      await db.execute(sql`COMMIT`);
+      // --- END TRANSACTION ---
 
       return { id: orderId, updated: true };
     } catch (error) {
-      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Update order error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update order');
@@ -997,21 +1030,25 @@ export class OrdersService {
         await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by UUID`).catch(() => {});
         await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`).catch(() => {});
 
-        await db.execute(sql`BEGIN`);
+        const softClient = await pool.connect();
         try {
-          await db.execute(sql`
-            UPDATE orders
-            SET status = 'cancelado',
-                cancelled_at = NOW(),
-                cancelled_by = ${userId || null},
-                cancellation_reason = ${opts.reason || null},
-                updated_at = NOW()
-            WHERE id = ${orderId} AND company_id = ${companyId}
-          `);
-          await db.execute(sql`COMMIT`);
+          await softClient.query('BEGIN');
+          await softClient.query(
+            `UPDATE orders
+             SET status = 'cancelado',
+                 cancelled_at = NOW(),
+                 cancelled_by = $1,
+                 cancellation_reason = $2,
+                 updated_at = NOW()
+             WHERE id = $3 AND company_id = $4`,
+            [userId || null, opts.reason || null, orderId, companyId]
+          );
+          await softClient.query('COMMIT');
         } catch (e) {
-          await db.execute(sql`ROLLBACK`).catch(() => {});
+          await softClient.query('ROLLBACK').catch(() => {});
           throw e;
+        } finally {
+          softClient.release();
         }
         return { id: orderId, cancelled: true, mode: 'soft' as const };
       }
@@ -1019,54 +1056,61 @@ export class OrdersService {
       // ============================================================
       // HARD MODE — Borrado fisico completo, dentro de transaccion.
       // ============================================================
-      await db.execute(sql`BEGIN`);
+      const hardClient = await pool.connect();
       try {
+        await hardClient.query('BEGIN');
+
         // Borrar drafts vinculados (no fiscales) si los hay.
         if (draftCount > 0) {
           // Items de facturas draft vinculadas via legacy o N:N.
-          await db.execute(sql`
-            DELETE FROM invoice_items
-            WHERE invoice_id IN (
-              SELECT i.id FROM invoices i
-              WHERE i.company_id = ${companyId}
-                AND (
-                  i.order_id = ${orderId}
-                  OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
-                )
-                AND (i.cae IS NULL OR i.cae = '') AND i.status = 'draft'
-            )
-          `);
+          await hardClient.query(
+            `DELETE FROM invoice_items
+             WHERE invoice_id IN (
+               SELECT i.id FROM invoices i
+               WHERE i.company_id = $1
+                 AND (
+                   i.order_id = $2
+                   OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = $2)
+                 )
+                 AND (i.cae IS NULL OR i.cae = '') AND i.status = 'draft'
+             )`,
+            [companyId, orderId]
+          );
           // Filas de N:N invoice_orders.
-          await db.execute(sql`
-            DELETE FROM invoice_orders
-            WHERE order_id = ${orderId}
-              AND invoice_id IN (
-                SELECT id FROM invoices
-                WHERE company_id = ${companyId}
-                  AND (cae IS NULL OR cae = '') AND status = 'draft'
-              )
-          `);
+          await hardClient.query(
+            `DELETE FROM invoice_orders
+             WHERE order_id = $1
+               AND invoice_id IN (
+                 SELECT id FROM invoices
+                 WHERE company_id = $2
+                   AND (cae IS NULL OR cae = '') AND status = 'draft'
+               )`,
+            [orderId, companyId]
+          );
           // Las facturas draft propias.
-          await db.execute(sql`
-            DELETE FROM invoices
-            WHERE company_id = ${companyId}
-              AND (
-                order_id = ${orderId}
-                OR id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
-              )
-              AND (cae IS NULL OR cae = '') AND status = 'draft'
-          `);
+          await hardClient.query(
+            `DELETE FROM invoices
+             WHERE company_id = $1
+               AND (
+                 order_id = $2
+                 OR id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = $2)
+               )
+               AND (cae IS NULL OR cae = '') AND status = 'draft'`,
+            [companyId, orderId]
+          );
         }
 
-        await db.execute(sql`DELETE FROM order_status_history WHERE order_id = ${orderId}`);
-        await db.execute(sql`DELETE FROM order_items WHERE order_id = ${orderId}`);
-        await db.execute(sql`UPDATE cheques SET order_id = NULL WHERE order_id = ${orderId}`);
-        await db.execute(sql`DELETE FROM orders WHERE id = ${orderId} AND company_id = ${companyId}`);
+        await hardClient.query('DELETE FROM order_status_history WHERE order_id = $1', [orderId]);
+        await hardClient.query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
+        await hardClient.query('UPDATE cheques SET order_id = NULL WHERE order_id = $1', [orderId]);
+        await hardClient.query('DELETE FROM orders WHERE id = $1 AND company_id = $2', [orderId, companyId]);
 
-        await db.execute(sql`COMMIT`);
+        await hardClient.query('COMMIT');
       } catch (e) {
-        await db.execute(sql`ROLLBACK`).catch(() => {});
+        await hardClient.query('ROLLBACK').catch(() => {});
         throw e;
+      } finally {
+        hardClient.release();
       }
 
       return { id: orderId, deleted: true, mode: 'hard' as const };
