@@ -177,7 +177,14 @@ export class AuthService {
       });
 
       // Sol/Luna: single global flag lookup (column owned by DB-FOUNDATION).
-      const canAccessLuna = (user as any).can_access_luna === true;
+      // `can_access_luna` is NOT in the Drizzle schema — query it raw so
+      // the login path reflects the latest DB value (toggled via setCircuitAccess).
+      let canAccessLuna = (user as any).can_access_luna === true;
+      try {
+        const lunaRes = await db.execute(sql`SELECT can_access_luna FROM users WHERE id = ${user.id}`);
+        const lunaRows = (lunaRes as any).rows || lunaRes || [];
+        if (lunaRows.length > 0) canAccessLuna = lunaRows[0].can_access_luna === true;
+      } catch { /* column missing or mocked DB: fall back to Drizzle-provided value */ }
 
       // Generate tokens
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
@@ -242,7 +249,12 @@ export class AuthService {
         throw new ApiError(403, 'User deactivated');
       }
 
-      const canAccessLuna = (user as any).can_access_luna === true;
+      let canAccessLuna = (user as any).can_access_luna === true;
+      try {
+        const lunaRes = await db.execute(sql`SELECT can_access_luna FROM users WHERE id = ${user.id}`);
+        const lunaRows = (lunaRes as any).rows || lunaRes || [];
+        if (lunaRows.length > 0) canAccessLuna = lunaRows[0].can_access_luna === true;
+      } catch { /* column missing or mocked DB: fall back to Drizzle-provided value */ }
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
 
       return tokens;
@@ -285,7 +297,12 @@ export class AuthService {
         where: eq(companies.id, user.company_id),
       });
 
-      const canAccessLuna = (user as any).can_access_luna === true;
+      let canAccessLuna = (user as any).can_access_luna === true;
+      try {
+        const lunaRes = await db.execute(sql`SELECT can_access_luna FROM users WHERE id = ${user.id}`);
+        const lunaRows = (lunaRes as any).rows || lunaRes || [];
+        if (lunaRows.length > 0) canAccessLuna = lunaRows[0].can_access_luna === true;
+      } catch { /* column missing or mocked DB: fall back to Drizzle-provided value */ }
       const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
 
       // Rotate: delete old session, store new refresh token + access jti

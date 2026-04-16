@@ -146,6 +146,8 @@ describe('AuthService', () => {
         cuit: '20123456789',
       } as any)
 
+      // Mock: can_access_luna raw SELECT (Sol/Luna — precedes storeSession)
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ can_access_luna: false }] })
       // Mock: storeSession -> DELETE expired sessions (db.execute)
       mockDbExecute.mockResolvedValueOnce({ rows: [] })
       // Mock: is_superadmin check (db.execute)
@@ -276,6 +278,8 @@ describe('AuthService', () => {
       const insertValues = vi.fn().mockResolvedValue(undefined)
       vi.mocked(db.insert).mockReturnValueOnce({ values: insertValues } as any)
 
+      // Sol/Luna raw SELECT
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ can_access_luna: false }] })
       // storeSession -> DELETE expired sessions
       mockDbExecute.mockResolvedValueOnce({ rows: [] })
       // is_superadmin check
@@ -348,6 +352,7 @@ describe('AuthService', () => {
       vi.mocked(db.insert).mockReturnValueOnce({
         values: vi.fn().mockResolvedValue(undefined),
       } as any)
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ can_access_luna: false }] })
       mockDbExecute.mockResolvedValueOnce({ rows: [] })
       mockDbExecute.mockResolvedValueOnce({ rows: [{ is_superadmin: false }] })
 
