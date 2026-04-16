@@ -29,9 +29,14 @@ export class CuentaCorrienteService {
       ? Boolean(businessUnitIdOrOpts.userCanAccessLuna)
       : Boolean(userCanAccessLunaArg);
     try {
-      const buFilter = businessUnitId
-        ? sql` AND business_unit_id = ${businessUnitId}`
-        : sql``;
+      // PR7-T21: each subquery uses a different table alias, so we need
+      // per-alias BU filters to avoid "column reference is ambiguous" error.
+      // The axios interceptor in the frontend auto-injects business_unit_id on ALL GETs.
+      const buFilterI = businessUnitId ? sql` AND i.business_unit_id = ${businessUnitId}` : sql``;
+      const buFilterCo = businessUnitId ? sql` AND co.business_unit_id = ${businessUnitId}` : sql``;
+      const buFilterCs = businessUnitId ? sql` AND cs.business_unit_id = ${businessUnitId}` : sql``;
+      const buFilterPi = businessUnitId ? sql` AND pi.business_unit_id = ${businessUnitId}` : sql``;
+      const buFilterPa = businessUnitId ? sql` AND pa.business_unit_id = ${businessUnitId}` : sql``;
 
       // PR7-T16: defensive try/catch para migrations no aplicadas.
       // Verificar que las columnas/tablas criticas existan, sino loguear warning
@@ -117,7 +122,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.status != 'cancelled'
               AND i.invoice_type::text NOT LIKE 'NC%'
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_ventas_sol,
           COALESCE((
             SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='no_fiscal' THEN CAST(i.total_amount AS decimal) ELSE 0 END)
@@ -127,7 +132,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.status != 'cancelled'
               AND i.invoice_type::text NOT LIKE 'NC%'
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_ventas_luna,
           -- Legacy total_ventas retained for back-compat (tests use this label).
           COALESCE((
@@ -138,7 +143,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.status != 'cancelled'
               AND i.invoice_type::text NOT LIKE 'NC%'
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_ventas,
 
           -- Cobros aplicados (via tabla intermedia)
@@ -155,7 +160,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${cobrosAnuladoFilter}
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_cobros_aplicados_sol,
           COALESCE((
             SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='no_fiscal' THEN CAST(cia.amount_applied AS decimal) ELSE 0 END)
@@ -167,7 +172,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${cobrosAnuladoFilter}
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_cobros_aplicados_luna,
           COALESCE((
             SELECT SUM(CAST(cia.amount_applied AS decimal))
@@ -179,7 +184,7 @@ export class CuentaCorrienteService {
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${cobrosAnuladoFilter}
-              ${buFilter}
+              ${buFilterI}
           ), 0) as total_cobros_aplicados,
 
           -- Adelantos cobros (monto NO asignado de cobros pending)
@@ -196,7 +201,7 @@ export class CuentaCorrienteService {
               AND co.enterprise_id = e.id
               AND co.pending_status = 'pending_invoice'
               ${cobrosAnuladoFilterCo}
-              ${buFilter}
+              ${buFilterCo}
           ), 0) as total_adelantos_cobros,
           COALESCE((
             SELECT SUM(CASE WHEN COALESCE(co.fiscal_type,'fiscal')='fiscal' THEN
@@ -210,7 +215,7 @@ export class CuentaCorrienteService {
               AND co.enterprise_id = e.id
               AND co.pending_status = 'pending_invoice'
               ${cobrosAnuladoFilterCo}
-              ${buFilter}
+              ${buFilterCo}
           ), 0) as total_adelantos_cobros_sol,
           COALESCE((
             SELECT SUM(CASE WHEN COALESCE(co.fiscal_type,'fiscal')='no_fiscal' THEN
@@ -224,7 +229,7 @@ export class CuentaCorrienteService {
               AND co.enterprise_id = e.id
               AND co.pending_status = 'pending_invoice'
               ${cobrosAnuladoFilterCo}
-              ${buFilter}
+              ${buFilterCo}
           ), 0) as total_adelantos_cobros_luna,
 
           -- Compras: purchase_invoices no canceladas
@@ -237,7 +242,7 @@ export class CuentaCorrienteService {
               AND pi.enterprise_id = e.id
               AND pi.status NOT IN ('cancelled', 'cancelado')
               AND pi.invoice_type::text NOT LIKE 'NC%'
-              ${buFilter}
+              ${buFilterPi}
           ), 0) as total_compras,
 
           -- Pagos aplicados (via tabla intermedia)
@@ -253,7 +258,7 @@ export class CuentaCorrienteService {
               AND pi.status NOT IN ('cancelled', 'cancelado')
               AND pi.invoice_type::text NOT LIKE 'NC%'
               ${pagosAnuladoFilterPa}
-              ${buFilter}
+              ${buFilterPi}
           ), 0) as total_pagos_aplicados,
 
           -- Adelantos pagos (monto NO asignado de pagos pending)
@@ -270,7 +275,7 @@ export class CuentaCorrienteService {
               AND pa.enterprise_id = e.id
               AND pa.pending_status = 'pending_invoice'
               ${pagosAnuladoFilterPa}
-              ${buFilter}
+              ${buFilterPa}
           ), 0) as total_adelantos_pagos,
 
           -- Ajustes debit
