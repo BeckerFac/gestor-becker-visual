@@ -1057,24 +1057,33 @@ export const Invoices: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Tabs: 4 categorias */}
-      <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit flex-wrap">
-        {(([
-          { key: 'venta_fiscal', label: 'Sol - Facturas Venta' },
-          ...(canAccessLuna ? [{ key: 'venta_no_fiscal', label: 'Luna - No Fiscal' } as const] : []),
-          { key: 'compra', label: 'Facturas de Compra' },
-        ] as const) as ReadonlyArray<{ key: 'venta_fiscal' | 'venta_no_fiscal' | 'compra'; label: string }>).map(tab => (
+      <div className="flex gap-1 items-center flex-wrap">
+        <button
+          className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+            vistaMode === 'venta_fiscal'
+              ? 'bg-amber-200 text-amber-900'
+              : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'
+          }`}
+          onClick={() => handleChangeVistaMode('venta_fiscal')}
+        >☀️</button>
+        {canAccessLuna && (
           <button
-            key={tab.key}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              vistaMode === tab.key
-                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              vistaMode === 'venta_no_fiscal'
+                ? 'bg-indigo-200 text-indigo-900'
+                : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'
             }`}
-            onClick={() => handleChangeVistaMode(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
+            onClick={() => handleChangeVistaMode('venta_no_fiscal')}
+          >🌙</button>
+        )}
+        <button
+          className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+            vistaMode === 'compra'
+              ? 'bg-gray-800 text-white'
+              : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-500'
+          }`}
+          onClick={() => handleChangeVistaMode('compra')}
+        >Compra</button>
       </div>
 
       {/* Purchase Invoices tab */}

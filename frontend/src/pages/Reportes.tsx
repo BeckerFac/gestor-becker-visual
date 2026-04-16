@@ -528,32 +528,33 @@ export const Reportes: React.FC = () => {
         </nav>
       </div>
 
-      {/* Sol/Luna circuit toggle — business tabs only, Luna users only */}
+      {/* Sol/Luna circuit pills — business tabs only, Luna users only */}
       {canAccessLuna && !isAccountingTab(activeTab) && (
-        <div className="flex items-center gap-2 print:hidden">
-          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-            Circuito
-          </span>
-          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
-            {([
-              { value: 'fiscal' as const, label: 'Solo Sol', icon: '\u2600\ufe0f' },
-              { value: 'no_fiscal' as const, label: 'Solo Luna', icon: '\ud83c\udf19' },
-              { value: 'all' as const, label: 'Ambos', icon: '\u2600\ufe0f\ud83c\udf19' },
-            ]).map(t => (
-              <button
-                key={t.value}
-                onClick={() => setFiscalFilter(t.value)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  fiscalFilter === t.value
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                <span className="mr-1">{t.icon}</span>
-                {t.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex gap-1 items-center print:hidden">
+          <button
+            onClick={() => setFiscalFilter('fiscal')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              fiscalFilter === 'fiscal'
+                ? 'bg-amber-200 text-amber-900'
+                : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >☀️</button>
+          <button
+            onClick={() => setFiscalFilter('no_fiscal')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              fiscalFilter === 'no_fiscal'
+                ? 'bg-indigo-200 text-indigo-900'
+                : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >🌙</button>
+          <button
+            onClick={() => setFiscalFilter('all')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              fiscalFilter === 'all'
+                ? 'bg-gray-800 text-white'
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >Todo</button>
         </div>
       )}
 

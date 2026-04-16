@@ -780,27 +780,36 @@ export const Remitos: React.FC = () => {
         </div>
       )}
 
-      {/* Sol/Luna circuit tabs — only visible if user has Luna access */}
+      {/* Sol/Luna circuit pills — only visible if user has Luna access */}
       {canAccessLuna && (
-        <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
-          {[
-            { value: 'all',       label: 'Todos' },
-            { value: 'fiscal',    label: '\u2600\ufe0f Sol' },
-            { value: 'no_fiscal', label: '\ud83c\udf19 Luna' },
-          ].map(t => (
-            <button
-              key={t.value}
-              type="button"
-              onClick={() => setFilterFiscalType(t.value as 'all' | 'fiscal' | 'no_fiscal')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                filterFiscalType === t.value
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="flex gap-1 items-center">
+          <button
+            type="button"
+            onClick={() => setFilterFiscalType('all')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              filterFiscalType === 'all'
+                ? 'bg-gray-800 text-white'
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >Todo</button>
+          <button
+            type="button"
+            onClick={() => setFilterFiscalType('fiscal')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              filterFiscalType === 'fiscal'
+                ? 'bg-amber-200 text-amber-900'
+                : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >☀️</button>
+          <button
+            type="button"
+            onClick={() => setFilterFiscalType('no_fiscal')}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+              filterFiscalType === 'no_fiscal'
+                ? 'bg-indigo-200 text-indigo-900'
+                : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'
+            }`}
+          >🌙</button>
         </div>
       )}
 

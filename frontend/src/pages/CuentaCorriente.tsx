@@ -600,26 +600,27 @@ export const CuentaCorriente: React.FC = () => {
                             <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
                             <div className="space-y-6">
-                              {/* CAT-6: Sol/Luna circuit tabs. Hidden for users without Luna. */}
+                              {/* CAT-6: Sol/Luna circuit pills. Hidden for users without Luna. */}
                               {canAccessLuna && (
-                                <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
-                                  {[
-                                    { value: 'fiscal' as Circuit, label: '\u2600\ufe0f Sol' },
-                                    { value: 'no_fiscal' as Circuit, label: '\ud83c\udf19 Luna' },
-                                  ].map(t => (
-                                    <button
-                                      key={t.value}
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); setActiveCircuit(t.value) }}
-                                      className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                                        activeCircuit === t.value
-                                          ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                          : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
-                                      }`}
-                                    >
-                                      {t.label}
-                                    </button>
-                                  ))}
+                                <div className="flex gap-1 items-center" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setActiveCircuit('fiscal' as Circuit) }}
+                                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                                      activeCircuit === 'fiscal'
+                                        ? 'bg-amber-200 text-amber-900'
+                                        : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'
+                                    }`}
+                                  >☀️</button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setActiveCircuit('no_fiscal' as Circuit) }}
+                                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                                      activeCircuit === 'no_fiscal'
+                                        ? 'bg-indigo-200 text-indigo-900'
+                                        : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'
+                                    }`}
+                                  >🌙</button>
                                 </div>
                               )}
                               {/* Adjustment form */}

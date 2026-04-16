@@ -1177,27 +1177,18 @@ export const Orders: React.FC = () => {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
-          {/* Sol/Luna circuit filter tabs — only when user has Luna access. */}
+          {/* Sol/Luna circuit filter — compact pills */}
           {canAccessLuna && (
             <div className="flex items-center gap-1 mb-3">
-              {([
-                { key: 'all', label: 'Todos', icon: '' },
-                { key: 'fiscal', label: 'Sol', icon: '☀️' },
-                { key: 'no_fiscal', label: 'Luna', icon: '🌙' },
-              ] as const).map(tab => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setFilterFiscalType(tab.key)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    filterFiscalType === tab.key
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {tab.icon} {tab.label}
-                </button>
-              ))}
+              <button type="button" onClick={() => setFilterFiscalType('all')}
+                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${filterFiscalType === 'all' ? 'bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-500'}`}
+              >Todo</button>
+              <button type="button" onClick={() => setFilterFiscalType('fiscal')}
+                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${filterFiscalType === 'fiscal' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'}`}
+              >☀️</button>
+              <button type="button" onClick={() => setFilterFiscalType('no_fiscal')}
+                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${filterFiscalType === 'no_fiscal' ? 'bg-indigo-200 text-indigo-900' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'}`}
+              >🌙</button>
             </div>
           )}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1276,37 +1267,15 @@ export const Orders: React.FC = () => {
           <CardContent>
             <form onSubmit={handleCreateOrder} className="space-y-4">
 
-              {/* Sol/Luna circuit toggle — only when user has Luna access and creating a new order. */}
+              {/* Sol/Luna circuit toggle — compact pill buttons */}
               {canAccessLuna && !editingOrderId && (
-                <div className="flex items-center gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Circuito:</span>
-                  <button
-                    type="button"
-                    onClick={() => setFormFiscalType('fiscal')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      formFiscalType === 'fiscal'
-                        ? 'bg-yellow-100 text-yellow-900 ring-2 ring-yellow-400'
-                        : 'bg-white text-gray-600 hover:bg-yellow-50 dark:bg-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    ☀️ Sol
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormFiscalType('no_fiscal')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      formFiscalType === 'no_fiscal'
-                        ? 'bg-indigo-100 text-indigo-900 ring-2 ring-indigo-400'
-                        : 'bg-white text-gray-600 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    🌙 Luna
-                  </button>
-                  <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
-                    {formFiscalType === 'no_fiscal'
-                      ? 'Precio final, sin IVA desglosado'
-                      : 'Con IVA por item (A/B/C)'}
-                  </span>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => setFormFiscalType('fiscal')}
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'fiscal' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                  >☀️</button>
+                  <button type="button" onClick={() => setFormFiscalType('no_fiscal')}
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'no_fiscal' ? 'bg-indigo-200 text-indigo-900' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                  >🌙</button>
                 </div>
               )}
 
