@@ -120,7 +120,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status != 'cancelled'
+              AND i.status NOT IN ('cancelled', 'draft')
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${buFilterI}
           ), 0) as total_ventas_sol,
@@ -130,7 +130,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status != 'cancelled'
+              AND i.status NOT IN ('cancelled', 'draft')
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${buFilterI}
           ), 0) as total_ventas_luna,
@@ -141,7 +141,7 @@ export class CuentaCorrienteService {
             LEFT JOIN customers ic ON i.customer_id = ic.id
             WHERE i.company_id = ${companyId}
               AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
-              AND i.status != 'cancelled'
+              AND i.status NOT IN ('cancelled', 'draft')
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${buFilterI}
           ), 0) as total_ventas,
@@ -568,7 +568,7 @@ export class CuentaCorrienteService {
             'Factura ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as descripcion,
             i.id as reference_id
           FROM invoices i
-          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
+          WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalFilter('i')}
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
@@ -787,7 +787,7 @@ export class CuentaCorrienteService {
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
-            AND i.status != 'cancelled'
+            AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text NOT LIKE 'NC%'
             AND COALESCE(i.fiscal_type,'fiscal') = ${circuit}
         `);

@@ -173,7 +173,7 @@ export class BusinessService {
             COALESCE(AVG(CAST(total_amount AS decimal)), 0) as ticket_promedio
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
@@ -201,7 +201,7 @@ export class BusinessService {
             COALESCE(AVG(CAST(total_amount AS decimal)), 0) as ticket_promedio
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${prev.dateFrom}::date
@@ -229,7 +229,7 @@ export class BusinessService {
             COUNT(*) as cantidad
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
@@ -257,7 +257,7 @@ export class BusinessService {
             COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${prev.dateFrom}::date
@@ -286,7 +286,7 @@ export class BusinessService {
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
@@ -316,7 +316,7 @@ export class BusinessService {
             COUNT(*) as cantidad
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
@@ -382,7 +382,7 @@ export class BusinessService {
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
@@ -431,7 +431,7 @@ export class BusinessService {
           FROM invoice_items ii
           JOIN invoices i ON ii.invoice_id = i.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND i.invoice_date::date >= ${prev.dateFrom}::date
@@ -498,7 +498,7 @@ export class BusinessService {
           LEFT JOIN customers c ON i.customer_id = c.id
           LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
@@ -530,7 +530,7 @@ export class BusinessService {
           SELECT COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
           FROM invoices
           WHERE company_id = ${companyId}
-            AND status = 'authorized'
+            AND status != 'cancelled'
             AND invoice_type::text NOT LIKE 'NC%'
             ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
@@ -555,7 +555,7 @@ export class BusinessService {
           SELECT COUNT(DISTINCT COALESCE(i.enterprise_id::text, i.customer_id::text)) as activos
           FROM invoices i
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
@@ -579,7 +579,7 @@ export class BusinessService {
               MIN(invoice_date) as primera_factura
             FROM invoices
             WHERE company_id = ${companyId}
-              AND status = 'authorized'
+              AND status != 'cancelled'
               AND invoice_type::text NOT LIKE 'NC%'
               ${fiscalClauseNoAlias}
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
@@ -607,7 +607,7 @@ export class BusinessService {
               MIN(invoice_date) as primera_factura
             FROM invoices
             WHERE company_id = ${companyId}
-              AND status = 'authorized'
+              AND status != 'cancelled'
               AND invoice_type::text NOT LIKE 'NC%'
               ${fiscalClauseNoAlias}
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
@@ -645,7 +645,7 @@ export class BusinessService {
               SUM(CAST(i.total_amount AS decimal)) as total_historico
             FROM invoices i
             WHERE i.company_id = ${companyId}
-              AND i.status = 'authorized'
+              AND i.status != 'cancelled'
               AND i.invoice_type::text NOT LIKE 'NC%'
               ${fiscalClause}
               AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
@@ -731,7 +731,7 @@ export class BusinessService {
             ), 0) as monto
           FROM invoices i
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
@@ -790,7 +790,7 @@ export class BusinessService {
           FROM payments p
           JOIN invoices i ON p.invoice_id = i.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND p.payment_date::date >= ${dates.dateFrom}::date
@@ -812,7 +812,7 @@ export class BusinessService {
           FROM payments p
           JOIN invoices i ON p.invoice_id = i.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND p.payment_date::date >= ${prev.dateFrom}::date
@@ -875,7 +875,7 @@ export class BusinessService {
           LEFT JOIN customers c ON i.customer_id = c.id
           LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
           WHERE i.company_id = ${companyId}
-            AND i.status = 'authorized'
+            AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
