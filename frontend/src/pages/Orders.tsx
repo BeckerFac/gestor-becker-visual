@@ -629,6 +629,40 @@ export const Orders: React.FC = () => {
     setShowForm(true)
   }
 
+  const handleDuplicateOrder = (order: Order) => {
+    const status = invoicingStatus[order.id]
+    const orderItems: FormItem[] = (status?.items || []).map((item: any) => ({
+      product_id: item.product_id || 'custom',
+      product_name: item.product_name || '',
+      description: item.description || '',
+      quantity: Number(item.quantity) || 1,
+      unit_price: parseFloat(item.unit_price?.toString() || '0'),
+      cost: parseFloat(item.cost?.toString() || '0'),
+      product_type: item.product_type || 'otro',
+      deduct_stock: item.deduct_stock || false,
+      category_ids: [],
+      vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
+    }))
+
+    setEditingOrderId(null)
+    setFormTitle(`${order.title || ''} (copia)`)
+    setForm({
+      description: order.description || '',
+      customer_id: order.customer?.id || '',
+      estimated_delivery: '',
+      priority: order.priority || 'normal',
+      notes: order.notes || '',
+      payment_method: order.payment_method || '',
+      bank_id: order.bank?.id || '',
+      discount_percent: parseFloat(order.discount_percent || '0') || 0,
+    })
+    setFormEnterpriseId(order.enterprise?.id || '')
+    setFormFiscalType((order.fiscal_type as any) || 'fiscal')
+    setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
+    setShowForm(true)
+    toast.info('Pedido duplicado — modificá lo que necesites y tocá "Crear Pedido"')
+  }
+
   // --- Status / payment handlers ---
 
   const handleStatusChange = async (orderId: string, newStatus: string) => {
@@ -2836,6 +2870,13 @@ export const Orders: React.FC = () => {
           label: 'Descargar PDF',
           icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>,
           onClick: () => handleDownloadOrderPdf(order),
+        })
+
+        items.push({
+          id: 'duplicate',
+          label: 'Duplicar Pedido',
+          icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>,
+          onClick: () => handleDuplicateOrder(order),
         })
 
         // Sol/Luna: edit/delete disabled while the order is locked.
