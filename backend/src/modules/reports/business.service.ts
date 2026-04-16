@@ -829,8 +829,9 @@ export class BusinessService {
       async () => {
         const cobrosResult = await db.execute(sql`
           SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-          FROM payments
+          FROM cobros
           WHERE company_id = ${companyId}
+            AND (status IS NULL OR status != 'anulado')
             AND payment_date::date >= ${dates.dateFrom}::date
             AND payment_date::date <= ${dates.dateTo}::date
         `);
