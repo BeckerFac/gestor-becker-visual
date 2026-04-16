@@ -9,6 +9,8 @@ export class CobrosController {
       const data = await cobrosService.getCobros(req.user!.company_id, {
         enterprise_id: req.query.enterprise_id as string,
         business_unit_id: req.query.business_unit_id as string,
+        fiscal_type: req.query.fiscal_type as 'fiscal' | 'no_fiscal' | 'all' | undefined,
+        userCanAccessLuna: !!(req.user as any)?.can_access_luna,
       });
       res.json(data);
     } catch (error) {
@@ -21,7 +23,9 @@ export class CobrosController {
 
   async createCobro(req: AuthRequest, res: Response) {
     try {
-      const data = await cobrosService.createCobro(req.user!.company_id, req.user!.id, req.body);
+      const data = await cobrosService.createCobro(req.user!.company_id, req.user!.id, req.body, {
+        userCanAccessLuna: !!(req.user as any)?.can_access_luna,
+      });
       res.status(201).json(data);
     } catch (error) {
       console.error('createCobro controller error:', error);

@@ -17,6 +17,7 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { RemitoPreviewModal } from '@/components/shared/RemitoPreviewModal'
 import { useContextMenu } from '@/hooks/useContextMenu'
@@ -52,6 +53,7 @@ interface Remito {
   transport: string | null
   notes: string | null
   tipo: 'entrega' | 'recepcion'
+  fiscal_type?: 'fiscal' | 'no_fiscal' | null
   status: 'pendiente' | 'entregado' | 'firmado' | 'anulado'
   enterprise?: { id: string; name: string } | null
   enterprise_tags?: { id: string; name: string; color: string }[]
@@ -146,6 +148,10 @@ function hasActiveFilters(filters: {
 export const Remitos: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { canAccessLuna } = useCircuitAccess()
+
+  // Sol/Luna circuit filter: 'all' | 'fiscal' | 'no_fiscal'. Non-Luna users never see this tab bar.
+  const [filterFiscalType, setFilterFiscalType] = useState<'all' | 'fiscal' | 'no_fiscal'>('all')
 
   // Data
   const [remitos, setRemitos]       = useState<Remito[]>([])
@@ -208,6 +214,7 @@ export const Remitos: React.FC = () => {
       if (filterSearch)     filters.search        = filterSearch
       if (filterDateFrom)   filters.date_from     = filterDateFrom
       if (filterDateTo)     filters.date_to       = filterDateTo
+      if (canAccessLuna)    filters.fiscal_type   = filterFiscalType
 
       const res = await api.getRemitos(filters).catch(() => ({ items: [], total: 0 }))
       setRemitos(res.items ?? [])
@@ -217,7 +224,7 @@ export const Remitos: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo])
+  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo, filterFiscalType, canAccessLuna])
 
   const loadStaticData = useCallback(async () => {
     const [entRes, custRes, ordRes, companyRes] = await Promise.all([
@@ -240,7 +247,7 @@ export const Remitos: React.FC = () => {
     setCurrentPage(1)
     loadRemitos(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo, loadRemitos])
+  }, [filterEnterprise, filterStatus, filterTipo, filterSearch, filterDateFrom, filterDateTo, filterFiscalType, loadRemitos])
 
   // ── Filter helpers ─────────────────────────────────────────────────────────
 
@@ -773,6 +780,30 @@ export const Remitos: React.FC = () => {
         </div>
       )}
 
+      {/* Sol/Luna circuit tabs — only visible if user has Luna access */}
+      {canAccessLuna && (
+        <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
+          {[
+            { value: 'all',       label: 'Todos' },
+            { value: 'fiscal',    label: '\u2600\ufe0f Sol' },
+            { value: 'no_fiscal', label: '\ud83c\udf19 Luna' },
+          ].map(t => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setFilterFiscalType(t.value as 'all' | 'fiscal' | 'no_fiscal')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                filterFiscalType === t.value
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Filters card */}
       <Card>
         <CardContent className="py-4">
@@ -1261,9 +1292,21 @@ export const Remitos: React.FC = () => {
                       }
                     }}>
                     <td className="px-4 py-3">
-                      <span className="font-mono font-bold text-blue-700 text-sm">
-                        {fmtRemitoNumber(remito.remito_number)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-blue-700 text-sm">
+                          {fmtRemitoNumber(remito.remito_number)}
+                        </span>
+                        {canAccessLuna && remito.fiscal_type === 'no_fiscal' && (
+                          <span className="text-[10px] font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 px-1.5 py-0.5 rounded-full" title="Circuito Luna">
+                            {'\ud83c\udf19'} Luna
+                          </span>
+                        )}
+                        {canAccessLuna && (remito.fiscal_type === 'fiscal' || !remito.fiscal_type) && (
+                          <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded-full" title="Circuito Sol">
+                            {'\u2600\ufe0f'} Sol
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       {formatDate(remito.date)}

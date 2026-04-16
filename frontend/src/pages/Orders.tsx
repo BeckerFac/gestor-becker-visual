@@ -15,6 +15,7 @@ import { PeriodSelector } from '@/components/shared/PeriodSelector'
 import { MultiSelectFilter } from '@/components/shared/MultiSelectFilter'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { useInvoicePreview } from '@/hooks/useInvoicePreview'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast } from '@/hooks/useToast'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -54,6 +55,8 @@ interface Order {
   invoiced_amount?: string
   invoice_status?: string
   discount_percent?: string
+  fiscal_type?: 'fiscal' | 'no_fiscal'
+  locked_at?: string | null
   created_at: string
 }
 
@@ -159,6 +162,12 @@ const ORDER_DRAFT_KEY = 'bv_order_draft'
 
 export const Orders: React.FC = () => {
   const navigate = useNavigate()
+  // Sol/Luna dual-circuit access
+  const { canAccessLuna } = useCircuitAccess()
+  // Form-level circuit selection (default Sol). Immutable after create.
+  const [formFiscalType, setFormFiscalType] = useState<'fiscal' | 'no_fiscal'>('fiscal')
+  // List-level filter: 'all' | 'fiscal' | 'no_fiscal'. Non-Luna users always see only fiscal.
+  const [filterFiscalType, setFilterFiscalType] = useState<'all' | 'fiscal' | 'no_fiscal'>('all')
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -277,6 +286,8 @@ export const Orders: React.FC = () => {
           product_type: filterType.length === 1 ? filterType[0] : undefined,
           enterprise_id: filterEnterprise.length === 1 ? filterEnterprise[0] : undefined,
           has_invoice: filterInvoice.length === 1 ? filterInvoice[0] : undefined,
+          // Sol/Luna: non-Luna users never request anything but 'fiscal'.
+          fiscal_type: canAccessLuna ? filterFiscalType : 'fiscal',
           search: searchRef.current || undefined,
         }).catch((err: any) => {
           setError(`Error cargando pedidos: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
@@ -308,7 +319,7 @@ export const Orders: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [filterStatus, filterType, filterEnterprise, filterInvoice])
+  }, [filterStatus, filterType, filterEnterprise, filterInvoice, filterFiscalType, canAccessLuna])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -510,7 +521,9 @@ export const Orders: React.FC = () => {
       // Derive order-level product_type from items (show all types instead of 'mixto')
       const itemTypes = [...new Set(formItems.map(i => i.product_type || 'otro'))]
       const orderProductType = itemTypes.join(', ')
-      const payload = {
+      // Sol/Luna: Luna items zero out vat_rate (precio final model).
+      const isLunaForm = !editingOrderId && formFiscalType === 'no_fiscal'
+      const payload: Record<string, any> = {
         title: formTitle || formItems[0]?.product_name || 'Pedido',
         description: form.description || null,
         product_type: orderProductType,
@@ -534,8 +547,12 @@ export const Orders: React.FC = () => {
           cost: item.cost || 0,
           product_type: item.product_type || 'otro',
           deduct_stock: item.deduct_stock || false,
-          vat_rate: item.vat_rate ?? 21,
+          vat_rate: isLunaForm ? 0 : (item.vat_rate ?? 21),
         })),
+      }
+      // Circuit is only set on create; update must not carry fiscal_type.
+      if (!editingOrderId) {
+        payload.fiscal_type = formFiscalType
       }
       if (editingOrderId) {
         await api.updateOrder(editingOrderId, payload)
@@ -552,6 +569,7 @@ export const Orders: React.FC = () => {
       setFormTitle('')
       setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
       setFormItems([emptyFormItem()])
+      setFormFiscalType('fiscal')
       await loadData()
     } catch (e: any) {
       toast.error(e.message)
@@ -1159,6 +1177,29 @@ export const Orders: React.FC = () => {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
+          {/* Sol/Luna circuit filter tabs — only when user has Luna access. */}
+          {canAccessLuna && (
+            <div className="flex items-center gap-1 mb-3">
+              {([
+                { key: 'all', label: 'Todos', icon: '' },
+                { key: 'fiscal', label: 'Sol', icon: '☀️' },
+                { key: 'no_fiscal', label: 'Luna', icon: '🌙' },
+              ] as const).map(tab => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setFilterFiscalType(tab.key)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    filterFiscalType === tab.key
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {tab.icon} {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <MultiSelectFilter
               label="Estado"
@@ -1225,11 +1266,49 @@ export const Orders: React.FC = () => {
       </Card>
 
       {/* Create Order Form */}
-      {showForm && (
+      {showForm && (() => {
+        // Sol/Luna: true only when creating (not editing) a Luna order. Editing
+        // an existing order never exposes the toggle and keeps the Sol layout.
+        const isLunaForm = !editingOrderId && formFiscalType === 'no_fiscal'
+        return (
         <Card className="animate-fadeIn">
           <CardHeader><h3 className="text-lg font-semibold">{editingOrderId ? 'Editar Pedido' : 'Nuevo Pedido'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleCreateOrder} className="space-y-4">
+
+              {/* Sol/Luna circuit toggle — only when user has Luna access and creating a new order. */}
+              {canAccessLuna && !editingOrderId && (
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Circuito:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormFiscalType('fiscal')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      formFiscalType === 'fiscal'
+                        ? 'bg-yellow-100 text-yellow-900 ring-2 ring-yellow-400'
+                        : 'bg-white text-gray-600 hover:bg-yellow-50 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    ☀️ Sol
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormFiscalType('no_fiscal')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      formFiscalType === 'no_fiscal'
+                        ? 'bg-indigo-100 text-indigo-900 ring-2 ring-indigo-400'
+                        : 'bg-white text-gray-600 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    🌙 Luna
+                  </button>
+                  <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                    {formFiscalType === 'no_fiscal'
+                      ? 'Precio final, sin IVA desglosado'
+                      : 'Con IVA por item (A/B/C)'}
+                  </span>
+                </div>
+              )}
 
               {/* Enterprise + Customer selector */}
               <EnterpriseCustomerSelector
@@ -1480,9 +1559,9 @@ export const Orders: React.FC = () => {
                             required
                           />
                         </div>
-                        {/* Unit price */}
+                        {/* Unit price — "Precio final" on Luna (no IVA). */}
                         <div className="flex flex-col gap-1">
-                          <label className="text-xs font-medium text-gray-500">Precio Unitario</label>
+                          <label className="text-xs font-medium text-gray-500">{isLunaForm ? 'Precio Final' : 'Precio Unitario'}</label>
                           <input
                             type="number" step="0.01" min="0"
                             className={`px-2 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${priceResolutions[idx]?.price_list_name ? 'border-blue-400 dark:border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}
@@ -1532,19 +1611,21 @@ export const Orders: React.FC = () => {
                           )}
                         </div>
                         {/* Cost tracked internally from product pricing, not shown to user */}
-                        {/* IVA per item */}
-                        <div className="flex flex-col gap-1">
-                          <label className="text-xs font-medium text-gray-500">IVA %</label>
-                          <select
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={item.vat_rate}
-                            onChange={e => updateFormItem(idx, 'vat_rate', parseFloat(e.target.value))}
-                          >
-                            {VAT_RATE_OPTIONS.map(opt => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
-                        </div>
+                        {/* IVA per item — hidden on Luna (precio final model). */}
+                        {!isLunaForm && (
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium text-gray-500">IVA %</label>
+                            <select
+                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              value={item.vat_rate}
+                              onChange={e => updateFormItem(idx, 'vat_rate', parseFloat(e.target.value))}
+                            >
+                              {VAT_RATE_OPTIONS.map(opt => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         {/* Subtotal + remove */}
                         <div className="flex items-end gap-2">
                           <div className="flex-1 flex flex-col gap-1">
@@ -1596,17 +1677,19 @@ export const Orders: React.FC = () => {
                 {/* Totals */}
                 <div className="mt-4 flex justify-end">
                   <div className="w-80 space-y-1">
-                    <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                      <span>Subtotal Neto:</span>
-                      <span className="font-medium">{formatCurrency(formTotals.subtotalBruto)}</span>
-                    </div>
+                    {!isLunaForm && (
+                      <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                        <span>Subtotal Neto:</span>
+                        <span className="font-medium">{formatCurrency(formTotals.subtotalBruto)}</span>
+                      </div>
+                    )}
                     {formTotals.discountPercent > 0 && (
                       <div className="flex justify-between text-sm text-red-600 dark:text-red-400">
                         <span>Descuento ({formTotals.discountPercent}%):</span>
                         <span className="font-medium">-{formatCurrency(formTotals.discountAmount)}</span>
                       </div>
                     )}
-                    {Object.entries(formTotals.vatByRate)
+                    {!isLunaForm && Object.entries(formTotals.vatByRate)
                       .sort(([a], [b]) => Number(a) - Number(b))
                       .map(([rate, amount]) => (
                         <div key={rate} className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
@@ -1653,7 +1736,8 @@ export const Orders: React.FC = () => {
             </form>
           </CardContent>
         </Card>
-      )}
+        )
+      })()}
 
       {/* Orders Table with expandable rows */}
       {loading ? (
@@ -1808,20 +1892,60 @@ export const Orders: React.FC = () => {
                               ))}
                             </select>
                           </PermissionGate>
+                          {/* Sol/Luna lock and circuit badge */}
+                          {order.locked_at && (
+                            <span
+                              className="text-amber-600 text-sm"
+                              title="Pedido bloqueado: hay comprobantes emitidos. Anular para editar."
+                              aria-label="Pedido bloqueado"
+                            >
+                              🔒
+                            </span>
+                          )}
+                          {canAccessLuna && order.fiscal_type && (
+                            <span
+                              className="text-xs"
+                              title={order.fiscal_type === 'no_fiscal' ? 'Circuito Luna' : 'Circuito Sol'}
+                            >
+                              {order.fiscal_type === 'no_fiscal' ? '🌙' : '☀️'}
+                            </span>
+                          )}
                           <PermissionGate module="orders" action="edit">
                             <button
-                              onClick={e => { e.stopPropagation(); handleEditOrder(order) }}
-                              className="text-blue-500 hover:text-blue-700 text-xs font-medium"
-                              title="Editar pedido"
+                              onClick={e => {
+                                e.stopPropagation()
+                                if (order.locked_at) return
+                                handleEditOrder(order)
+                              }}
+                              disabled={!!order.locked_at}
+                              className={`text-xs font-medium ${
+                                order.locked_at
+                                  ? 'text-gray-400 cursor-not-allowed'
+                                  : 'text-blue-500 hover:text-blue-700'
+                              }`}
+                              title={order.locked_at
+                                ? 'Pedido bloqueado: hay comprobantes emitidos. Anular para editar.'
+                                : 'Editar pedido'}
                             >
                               Editar
                             </button>
                           </PermissionGate>
                           <PermissionGate module="orders" action="delete">
                             <button
-                              onClick={e => { e.stopPropagation(); setDeleteTarget(order.id) }}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors text-sm"
-                              title="Eliminar pedido"
+                              onClick={e => {
+                                e.stopPropagation()
+                                if (order.locked_at) return
+                                setDeleteTarget(order.id)
+                              }}
+                              disabled={!!order.locked_at}
+                              className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors text-sm ${
+                                order.locked_at
+                                  ? 'text-gray-300 cursor-not-allowed'
+                                  : 'text-red-400 hover:bg-red-100 hover:text-red-700'
+                              }`}
+                              title={order.locked_at
+                                ? 'Pedido bloqueado: anular comprobantes para eliminar.'
+                                : 'Eliminar pedido'}
                             >
                               x
                             </button>
@@ -2745,19 +2869,23 @@ export const Orders: React.FC = () => {
           onClick: () => handleDownloadOrderPdf(order),
         })
 
+        // Sol/Luna: edit/delete disabled while the order is locked.
+        const isLocked = !!order.locked_at
         items.push({
           id: 'edit',
-          label: 'Editar Pedido',
+          label: isLocked ? 'Editar Pedido (bloqueado)' : 'Editar Pedido',
           icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-          onClick: () => handleEditOrder(order),
+          disabled: isLocked,
+          onClick: () => { if (!isLocked) handleEditOrder(order) },
         })
 
         items.push({
           id: 'delete',
-          label: 'Eliminar Pedido',
+          label: isLocked ? 'Eliminar Pedido (bloqueado)' : 'Eliminar Pedido',
           icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
-          danger: true,
-          onClick: () => setDeleteTarget(order.id),
+          danger: !isLocked,
+          disabled: isLocked,
+          onClick: () => { if (!isLocked) setDeleteTarget(order.id) },
         })
 
         return (

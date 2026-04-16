@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { ordersController } from './orders.controller';
 import { authorize } from '../../middlewares/authorize';
+import { authorizeCircuit } from '../../middlewares/authorizeCircuit';
 
 export const ordersRouter = Router();
 
-ordersRouter.get('/', authorize('orders', 'view'), (req, res) => ordersController.getOrders(req as any, res));
-ordersRouter.post('/', authorize('orders', 'create'), (req, res) => ordersController.createOrder(req as any, res));
+ordersRouter.get('/', authorize('orders', 'view'), authorizeCircuit('query'), (req, res) => ordersController.getOrders(req as any, res));
+ordersRouter.post('/', authorize('orders', 'create'), authorizeCircuit('body'), (req, res) => ordersController.createOrder(req as any, res));
 ordersRouter.get('/without-invoice', authorize('orders', 'view'), (req, res) => ordersController.getOrdersWithoutInvoice(req as any, res));
 ordersRouter.get('/:id/invoicing-status', authorize('orders', 'view'), (req, res) => ordersController.getInvoicingStatus(req as any, res));
 ordersRouter.get('/:id/context-data', authorize('orders', 'view'), (req, res) => ordersController.getOrderContextData(req as any, res));

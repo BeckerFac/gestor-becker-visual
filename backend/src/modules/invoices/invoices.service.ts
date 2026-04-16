@@ -82,6 +82,34 @@ export class InvoicesService {
   async createInvoice(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
 
+    // Sol/Luna: cross-circuit validation against linked order (must happen
+    // BEFORE inferring fiscal_type so we can use the order's circuit as
+    // default and reject explicit mismatches).
+    let orderCircuit: 'fiscal' | 'no_fiscal' | null = null;
+    if (data.order_id) {
+      const orderRes = await db.execute(sql`
+        SELECT fiscal_type FROM orders WHERE id = ${data.order_id} AND company_id = ${companyId}
+      `);
+      const orderRow = ((orderRes as any).rows || [])[0];
+      if (orderRow) {
+        const ft = orderRow.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+        orderCircuit = ft;
+        // If caller specified fiscal_type explicitly, it must match the order's circuit.
+        if (data.fiscal_type && data.fiscal_type !== 'interno' && data.fiscal_type !== ft) {
+          throw new ApiError(400, 'El circuito del comprobante no coincide con el del pedido');
+        }
+        // Default the invoice's fiscal_type to the order's when not provided.
+        if (!data.fiscal_type) {
+          data.fiscal_type = ft;
+        }
+      }
+    }
+
+    // Sol/Luna: Block NC/ND for Luna circuit (not supported in this sprint).
+    if (data.fiscal_type === 'no_fiscal' && typeof data.invoice_type === 'string' && data.invoice_type.startsWith('NC_')) {
+      throw new ApiError(400, 'Notas de Credito Luna no soportadas en este sprint');
+    }
+
     // Auto-assign default business_unit_id if not provided
     if (!data.business_unit_id) {
       try {
@@ -130,7 +158,10 @@ export class InvoicesService {
       }
 
       const fiscalType = data.fiscal_type === 'interno' ? 'interno' : (data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal');
-      const invoiceType = (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? null : (data.invoice_type || 'B');
+      // Sol/Luna: Luna invoices always use invoice_type='LUN'; legacy interno still uses NULL.
+      const invoiceType = fiscalType === 'no_fiscal'
+        ? 'LUN'
+        : (fiscalType === 'interno' ? null : (data.invoice_type || 'B'));
 
       // PR2-T3: advisory lock para serializar generacion de invoice_number
       // Previene race condition cuando 2 requests crean facturas del mismo tipo
@@ -140,9 +171,17 @@ export class InvoicesService {
       const lockKey = `invoice_num:${companyId}:${fiscalType}:${invoiceType || 'null'}`;
       await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
 
-      // Get next sequential invoice number — separate sequences for fiscal vs internal
+      // Get next sequential invoice number — separate sequences for fiscal vs internal vs Luna
       let nextNumber: number;
-      if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
+      if (fiscalType === 'no_fiscal') {
+        // Luna: dedicated sequence scoped by invoice_type='LUN'
+        const maxResult = await db.execute(sql`
+          SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
+          FROM invoices WHERE company_id = ${companyId} AND fiscal_type = 'no_fiscal' AND invoice_type = 'LUN'
+        `);
+        const rows = (maxResult as any).rows || maxResult || [];
+        nextNumber = parseInt(rows[0]?.next_number || '1');
+      } else if (fiscalType === 'interno') {
         const maxResult = await db.execute(sql`
           SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
           FROM invoices WHERE company_id = ${companyId} AND fiscal_type = ${fiscalType}
@@ -192,13 +231,21 @@ export class InvoicesService {
 
       // -- TRANSACTION started above (PR2-T3 advisory lock) --
       const isExportType = ['E', 'NC_E', 'ND_E'].includes(invoiceType || '');
-      if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
-        // Internal/no-fiscal vouchers: raw SQL insert (invoice_type can be NULL, status = 'emitido')
+      if (fiscalType === 'no_fiscal') {
+        // Luna: raw SQL insert with invoice_type='LUN', status='emitido'
+        await db.execute(sql`
+          INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+            subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
+          VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, 'LUN', ${nextNumber}, NOW(),
+            '0', '0', '0', 'emitido', 'no_fiscal', ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
+        `);
+      } else if (fiscalType === 'interno') {
+        // Legacy internal vouchers: invoice_type NULL, status 'emitido'
         await db.execute(sql`
           INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
             subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
           VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, NULL, ${nextNumber}, NOW(),
-            '0', '0', '0', 'emitido', ${fiscalType}, ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
+            '0', '0', '0', 'emitido', 'interno', ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
         `);
       } else if (isExportType) {
         // Export invoices: use raw SQL to handle extended enum values safely
@@ -227,7 +274,10 @@ export class InvoicesService {
       // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, currency, and retenciones_esperadas via raw SQL (columns added by migration)
       const currency = data.currency || 'ARS';
       const exchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
-      const retencionesEsperadas = Array.isArray(data.retenciones_esperadas) ? JSON.stringify(data.retenciones_esperadas) : '[]';
+      // Sol/Luna: Luna circuit has no retenciones concept — always force empty array.
+      const retencionesEsperadas = fiscalType === 'no_fiscal'
+        ? '[]'
+        : (Array.isArray(data.retenciones_esperadas) ? JSON.stringify(data.retenciones_esperadas) : '[]');
       await db.execute(sql`
         UPDATE invoices SET order_id = ${data.order_id || null}, enterprise_id = ${enterpriseId},
           fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null},
@@ -264,7 +314,11 @@ export class InvoicesService {
           let productId = item.product_id || null;
           let productName = item.product_name || '';
           let unitPrice = validateNumeric(item.unit_price || 0, 'Precio unitario', { min: 0, max: 999999999 });
-          let vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
+          // Sol/Luna: Luna items treat unit_price as "precio final" — force vat_rate=0 so
+          // the subtotal equals the line total and no IVA is broken out.
+          let vatRate = fiscalType === 'no_fiscal'
+            ? 0
+            : validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
 
           if (item.order_item_id) {
             // BUG S9 #4: scope to company
@@ -407,6 +461,29 @@ export class InvoicesService {
       await db.execute(sql`COMMIT`);
       // -- END TRANSACTION --
 
+      // Sol/Luna: lock the linked order (idempotent). Called after commit so
+      // the lock only lives if the invoice actually persisted. Covers both
+      // fiscal and no_fiscal circuits.
+      try {
+        const { ordersService } = await import('../orders/orders.service');
+        const lockReason = `factura ${invoiceType || fiscalType} ${nextNumber} emitida`;
+        if (data.order_id) {
+          await ordersService.lockOrder(data.order_id, lockReason, userId);
+        }
+        // Also lock any orders linked through invoice_items.order_item_id (N:N).
+        if (collectedOrderItemIds.length > 0) {
+          const ordsRes = await db.execute(sql`
+            SELECT DISTINCT order_id FROM order_items WHERE id = ANY(${collectedOrderItemIds as any}::uuid[])
+          `);
+          const ordRows = (ordsRes as any).rows || [];
+          for (const r of ordRows) {
+            if (r.order_id) await ordersService.lockOrder(r.order_id, lockReason, userId);
+          }
+        }
+      } catch (lockErr) {
+        console.warn('[sol-luna] lockOrder post-create failed:', (lockErr as Error).message);
+      }
+
       // Accounting entry for non-fiscal invoices (fiscal ones go through authorizeInvoice)
       if (fiscalType === 'interno' || fiscalType === 'no_fiscal') {
         try {
@@ -427,13 +504,25 @@ export class InvoicesService {
             total: parseFloat(totalsRow?.total_amount?.toString() || '0'),
             subtotal: parseFloat(totalsRow?.subtotal?.toString() || '0'),
             vat_amount: parseFloat(totalsRow?.vat_amount?.toString() || '0'),
-            invoice_type: fiscalType,
+            invoice_type: invoiceType,
+            // Sol/Luna: route through the dual-circuit branch. 'interno' (legacy)
+            // was previously mapped into Sol — keep that behavior; only the
+            // explicit 'no_fiscal' path flows into the Luna (parallel) accounts.
+            fiscal_type: fiscalType === 'no_fiscal' ? 'no_fiscal' : 'fiscal',
             items: itemsForAccounting,
           });
         } catch (accErr) { console.warn('Accounting entry skipped (non-fiscal invoice):', (accErr as Error).message); }
       }
 
-      return { id: invoiceId, order_id: data.order_id || null, enterprise_id: enterpriseId, fiscal_type: fiscalType };
+      return {
+        id: invoiceId,
+        order_id: data.order_id || null,
+        enterprise_id: enterpriseId,
+        fiscal_type: fiscalType,
+        invoice_type: invoiceType,
+        invoice_number: nextNumber,
+        status: (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? 'emitido' : 'draft',
+      };
     } catch (error) {
       await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create invoice error:', error);
@@ -453,10 +542,21 @@ export class InvoicesService {
     date_from?: string;
     date_to?: string;
     fiscal_type?: string;
+    userCanAccessLuna?: boolean;
   } = {}) {
     await this.ensureMigrations();
     try {
-      const { enterprise_id, business_unit_id, status, invoice_type, search, date_from, date_to, fiscal_type } = filters;
+      const { enterprise_id, business_unit_id, status, invoice_type, search, date_from, date_to } = filters;
+      let fiscal_type = filters.fiscal_type;
+      // Sol/Luna: if the caller has no Luna access, force the fiscal circuit
+      // no matter what they requested. Invisibility is the contract.
+      if (!filters.userCanAccessLuna && (fiscal_type === 'no_fiscal' || fiscal_type === 'all')) {
+        fiscal_type = 'fiscal';
+      }
+      // Default for Luna-enabled users: show both circuits (unless interno/fiscal explicitly set).
+      if (filters.userCanAccessLuna && (fiscal_type === undefined || fiscal_type === '')) {
+        fiscal_type = 'all';
+      }
       const skip = Math.max(0, Math.min(Number(filters.skip) || 0, 100000));
       const limit = Math.max(1, Math.min(Number(filters.limit) || 50, 200));
 
@@ -467,7 +567,8 @@ export class InvoicesService {
       } else if (fiscal_type === 'no_fiscal') {
         whereClause = sql`${whereClause} AND i.fiscal_type = 'no_fiscal'`;
       } else if (fiscal_type === 'all') {
-        // show all
+        // Sol/Luna: both circuits (fiscal + Luna no_fiscal). Exclude legacy 'interno'.
+        whereClause = sql`${whereClause} AND (i.fiscal_type IN ('fiscal','no_fiscal') OR i.fiscal_type IS NULL)`;
       } else {
         whereClause = sql`${whereClause} AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)`;
       }
@@ -557,7 +658,7 @@ export class InvoicesService {
     }
   }
 
-  async getInvoice(companyId: string, invoiceId: string) {
+  async getInvoice(companyId: string, invoiceId: string, userCanAccessLuna: boolean = true) {
     await this.ensureMigrations();
     try {
       const result = await db.execute(sql`
@@ -581,6 +682,11 @@ export class InvoicesService {
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Invoice not found');
+
+      // Sol/Luna: hide Luna rows from users without access (404 to avoid existence leak).
+      if (rows[0]?.fiscal_type === 'no_fiscal' && !userCanAccessLuna) {
+        throw new ApiError(404, 'Factura no encontrada');
+      }
 
       // Get items
       const itemsResult = await db.execute(sql`
@@ -860,6 +966,15 @@ export class InvoicesService {
             WHERE id = ${orderId} AND company_id = ${companyId}
           `);
         }
+
+        // Sol/Luna: release the order lock if no other active docs remain.
+        // The helper is cascade-aware, so it's safe to invoke unconditionally.
+        try {
+          const { ordersService } = await import('../orders/orders.service');
+          await ordersService.unlockOrder(orderId);
+        } catch (unlockErr) {
+          console.warn('[sol-luna] unlockOrder post-delete failed:', (unlockErr as Error).message);
+        }
       }
 
       return { deleted: true };
@@ -1012,10 +1127,13 @@ export class InvoicesService {
 
   async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1, overrideCondicionIva?: number) {
     try {
-      // Block internal vouchers from AFIP authorization
+      // Block internal + Luna vouchers from AFIP authorization
       const ftCheck = await db.execute(sql`SELECT fiscal_type FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}`);
       const ft = ((ftCheck as any).rows || [])[0]?.fiscal_type;
-      if (ft === 'interno' || ft === 'no_fiscal') {
+      if (ft === 'no_fiscal') {
+        throw new ApiError(400, 'Los comprobantes Luna no se autorizan en AFIP');
+      }
+      if (ft === 'interno') {
         throw new ApiError(400, 'Los comprobantes internos/no fiscales no pueden autorizarse en AFIP');
       }
 

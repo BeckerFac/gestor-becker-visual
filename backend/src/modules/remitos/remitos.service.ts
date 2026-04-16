@@ -6,6 +6,7 @@ import puppeteer from 'puppeteer';
 import { getRows, getFirstRow } from '../../lib/db-utils';
 import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape';
 import { validateBase64Upload } from '../../lib/upload-validation';
+import { ordersService } from '../orders/orders.service';
 
 export class RemitosService {
   private tablesEnsured = false;
@@ -157,10 +158,24 @@ export class RemitosService {
     date_to?: string;
     skip?: number;
     limit?: number;
+    fiscal_type?: 'fiscal' | 'no_fiscal' | 'all';
+    userCanAccessLuna?: boolean;
   } = {}) {
     await this.ensureTables();
     try {
       const { enterprise_id, status, tipo, search, date_from, date_to } = filters;
+
+      // Sol/Luna circuit filter: non-Luna users NEVER see Luna rows.
+      // Luna users can request 'fiscal' | 'no_fiscal' | 'all' (default: 'all').
+      const canLuna = !!filters.userCanAccessLuna;
+      let effectiveFiscal: 'fiscal' | 'no_fiscal' | 'all';
+      if (!canLuna) {
+        effectiveFiscal = 'fiscal';
+      } else if (filters.fiscal_type === 'fiscal' || filters.fiscal_type === 'no_fiscal' || filters.fiscal_type === 'all') {
+        effectiveFiscal = filters.fiscal_type;
+      } else {
+        effectiveFiscal = 'all';
+      }
       // BUG S6 #3/#4: clamp limit/skip to safe ranges
       const rawLimit = Number(filters.limit);
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 100;
@@ -173,6 +188,11 @@ export class RemitosService {
       }
 
       let whereClause = sql`r.company_id = ${companyId}`;
+      if (effectiveFiscal === 'fiscal') {
+        whereClause = sql`${whereClause} AND (r.fiscal_type = 'fiscal' OR r.fiscal_type IS NULL)`;
+      } else if (effectiveFiscal === 'no_fiscal') {
+        whereClause = sql`${whereClause} AND r.fiscal_type = 'no_fiscal'`;
+      }
       if (enterprise_id) {
         whereClause = sql`${whereClause} AND (r.enterprise_id = ${enterprise_id} OR c.enterprise_id = ${enterprise_id})`;
       }
@@ -244,7 +264,7 @@ export class RemitosService {
     }
   }
 
-  async getRemito(companyId: string, remitoId: string): Promise<Record<string, any>> {
+  async getRemito(companyId: string, remitoId: string, opts: { userCanAccessLuna?: boolean } = {}): Promise<Record<string, any>> {
     await this.ensureTables();
     try {
       const result = await db.execute(sql`
@@ -260,6 +280,12 @@ export class RemitosService {
       `);
       const rows = getRows(result);
       if (rows.length === 0) throw new ApiError(404, 'Remito not found');
+
+      // Sol/Luna: row-level guard — non-Luna users get 404 on Luna rows.
+      const rowFiscal = (rows[0].fiscal_type || 'fiscal') as 'fiscal' | 'no_fiscal';
+      if (rowFiscal === 'no_fiscal' && !opts.userCanAccessLuna) {
+        throw new ApiError(404, 'Remito not found');
+      }
 
       // PR7-T18: items incluyen qty_pending_to_invoice para el flujo
       // "Crear factura desde remito". Por cada remito_item con order_item_id:
@@ -335,8 +361,21 @@ export class RemitosService {
     }
   }
 
-  async createRemito(companyId: string, userId: string, data: any) {
+  async createRemito(companyId: string, userId: string, data: any, opts: { userCanAccessLuna?: boolean } = {}) {
     await this.ensureTables();
+
+    // ═══ Sol/Luna: validate fiscal_type if explicitly passed (standalone remitos) ═══
+    // For order-linked remitos, fiscal_type is derived inside the tx from the
+    // linked orders and must match. For standalone remitos (no order link),
+    // we honor the payload (default 'fiscal'). Luna requires user access.
+    if (data.fiscal_type !== undefined && data.fiscal_type !== null) {
+      if (data.fiscal_type !== 'fiscal' && data.fiscal_type !== 'no_fiscal') {
+        throw new ApiError(400, 'fiscal_type invalido. Valores: fiscal, no_fiscal');
+      }
+      if (data.fiscal_type === 'no_fiscal' && !opts.userCanAccessLuna) {
+        throw new ApiError(403, 'Sin acceso al circuito Luna');
+      }
+    }
 
     // ═══ VALIDATIONS (Plan: Seccion 2 + 3 bugs) ═══
     // BUG #5/6: validate each item qty > 0 BEFORE opening connection
@@ -487,7 +526,7 @@ export class RemitosService {
       if (orderItemIds.length > 0) {
         // BUG S4 #1: exclude items from cancelled orders
         const lockResult = await client.query(
-          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id, oi.order_id, o.status as order_status
+          `SELECT oi.id, oi.quantity, COALESCE(oi.qty_delivered, 0) as qty_delivered, o.enterprise_id, oi.order_id, o.status as order_status, o.fiscal_type
            FROM order_items oi JOIN orders o ON oi.order_id = o.id
            WHERE oi.id = ANY($1) AND o.company_id = $2
              AND o.status NOT IN ('cancelado', 'cancelled')
@@ -551,18 +590,51 @@ export class RemitosService {
         }
       }
 
+      // ═══ Sol/Luna: derive fiscal_type from linked orders ═══
+      // Gather candidate order_ids from: item-level links + legacy order_id.
+      const candidateOrderIds = new Set<string>(orderIdsSet);
+      if (data.order_id) candidateOrderIds.add(data.order_id);
+
+      let derivedFiscalType: 'fiscal' | 'no_fiscal' = 'fiscal';
+      if (candidateOrderIds.size > 0) {
+        const fiscalRes = await client.query(
+          `SELECT DISTINCT COALESCE(fiscal_type, 'fiscal') AS fiscal_type
+             FROM orders WHERE id = ANY($1) AND company_id = $2`,
+          [Array.from(candidateOrderIds), companyId]
+        );
+        const distinctFiscals = fiscalRes.rows.map((r: any) => r.fiscal_type || 'fiscal');
+        if (distinctFiscals.length > 1) {
+          throw new ApiError(400, 'No se puede crear un remito con pedidos de circuitos mixtos');
+        }
+        if (distinctFiscals.length === 1) {
+          derivedFiscalType = distinctFiscals[0] === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+          // Gate: non-Luna user cannot emit a Luna remito even if derived from Luna orders.
+          if (derivedFiscalType === 'no_fiscal' && !opts.userCanAccessLuna) {
+            throw new ApiError(403, 'Sin acceso al circuito Luna');
+          }
+          // If the payload explicitly disagrees with the derived value, reject.
+          if (data.fiscal_type && data.fiscal_type !== derivedFiscalType) {
+            throw new ApiError(400, 'fiscal_type no coincide con los pedidos vinculados');
+          }
+        }
+      } else {
+        // Standalone remito: honor payload or default to 'fiscal'.
+        derivedFiscalType = data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+      }
+
       // 5. Create remito
       const remitoId = uuid();
       const tipo = data.tipo === 'recepcion' ? 'recepcion' : 'entrega';
       await client.query(`
         INSERT INTO remitos (id, company_id, customer_id, enterprise_id, order_id, remito_number, punto_venta,
           date, delivery_address, receiver_name, transport, tipo, notes, status,
-          factura_ref, pedido_ref, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pendiente',$14,$15,$16)
+          factura_ref, pedido_ref, fiscal_type, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pendiente',$14,$15,$16,$17)
       `, [remitoId, companyId, data.customer_id || null, enterpriseId, data.order_id || null,
         remitoNumber, puntoVenta, data.date || new Date().toISOString(),
         data.delivery_address || null, data.receiver_name || null, data.transport || null,
-        tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null, userId]);
+        tipo, data.notes || null, data.factura_ref || null, data.pedido_ref || null,
+        derivedFiscalType, userId]);
 
       // 6. Create items + update qty_delivered + deduct stock
       // orderIdsSet was already populated above from lockResult (no N+1 query)
@@ -794,7 +866,17 @@ export class RemitosService {
       }
 
       await client.query('COMMIT');
-      return { id: remitoId, remito_number: remitoNumber };
+
+      // Sol/Luna: lock every linked order post-create (idempotent).
+      for (const affectedOrderId of orderIdsSet) {
+        try {
+          await ordersService.lockOrder(affectedOrderId, 'remito emitido', userId);
+        } catch (e) {
+          console.warn('[createRemito] lockOrder failed for', affectedOrderId, (e as Error).message);
+        }
+      }
+
+      return { id: remitoId, remito_number: remitoNumber, fiscal_type: derivedFiscalType };
     } catch (error) {
       await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));
       console.error('Create remito error:', error);
@@ -968,11 +1050,29 @@ export class RemitosService {
         }
       }
 
+      // Capture linked order_ids BEFORE deleting remito_orders so we can unlock them.
+      const linkedOrdersRes = await client.query(
+        `SELECT DISTINCT order_id FROM remito_orders WHERE remito_id = $1`,
+        [remitoId]
+      );
+      const linkedOrderIds: string[] = linkedOrdersRes.rows.map((r: any) => r.order_id).filter(Boolean);
+
       // PR7-T11: desvincular el remito del pedido borrando las entradas de remito_orders.
       // El remito queda como fila historica (status='anulado') pero no sigue "linkeado" al pedido.
       await client.query(`DELETE FROM remito_orders WHERE remito_id = $1`, [remitoId]);
 
       await client.query('COMMIT');
+
+      // Sol/Luna: attempt unlock on every previously linked order. unlockOrder's
+      // cascade check decides whether the order actually clears.
+      for (const orderId of linkedOrderIds) {
+        try {
+          await ordersService.unlockOrder(orderId);
+        } catch (e) {
+          console.warn('[anularRemito] unlockOrder failed for', orderId, (e as Error).message);
+        }
+      }
+
       return { id: remitoId, status: 'anulado' };
     } catch (error) {
       await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));

@@ -3,6 +3,57 @@ import { sql } from 'drizzle-orm';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
+// ═══ Sol/Luna dual-circuit support ═══
+export type FiscalType = 'fiscal' | 'no_fiscal';
+
+export interface CircuitOpts {
+  fiscal_types?: FiscalType[];
+  userCanAccessLuna?: boolean;
+}
+
+/**
+ * Normalize a fiscal_types filter for a report query.
+ *
+ * Rules:
+ * - Default (undefined/empty) → ['fiscal']  (pure Sol, backward-compatible).
+ * - Invalid values are silently dropped.
+ * - If result is empty after sanitization, fall back to ['fiscal'].
+ * - Non-Luna users asking for 'no_fiscal' are silently downgraded to ['fiscal'].
+ *   We NEVER 403 here: that would leak Luna's existence.
+ */
+export function resolveFiscalTypes(opts?: CircuitOpts): FiscalType[] {
+  const canLuna = !!opts?.userCanAccessLuna;
+  const raw = Array.isArray(opts?.fiscal_types) ? opts!.fiscal_types! : [];
+  // Sanitize
+  const cleaned = raw.filter((t): t is FiscalType => t === 'fiscal' || t === 'no_fiscal');
+  // Dedupe
+  const uniq: FiscalType[] = [];
+  for (const t of cleaned) if (!uniq.includes(t)) uniq.push(t);
+  // Default if empty
+  const base: FiscalType[] = uniq.length > 0 ? uniq : ['fiscal'];
+  // Silent downgrade for non-Luna users
+  if (!canLuna) return ['fiscal'];
+  return base;
+}
+
+/**
+ * Build a SQL fragment that filters an invoices row (alias `i` or no alias)
+ * by its `fiscal_type` column. Coalesces to 'fiscal' so legacy rows without
+ * the column set fall into Sol by default.
+ *
+ * The fragment is self-contained and prefixed with ` AND`. If an empty array
+ * somehow slipped through, it returns an always-true clause.
+ */
+export function buildFiscalClause(types: FiscalType[], alias: string = 'i') {
+  if (!types || types.length === 0) {
+    // Safety net — shouldn't happen because resolveFiscalTypes guarantees non-empty.
+    return sql.raw(' AND 1=1');
+  }
+  const prefix = alias ? `${alias}.` : '';
+  const list = types.map(t => `'${t}'`).join(',');
+  return sql.raw(` AND COALESCE(${prefix}fiscal_type, 'fiscal') = ANY(ARRAY[${list}]::text[])`);
+}
+
 /**
  * Safely execute a sub-query for a report section.
  * Returns the fallback value on failure and pushes a warning.
@@ -102,10 +153,14 @@ export class BusinessService {
   /**
    * Ventas Report: revenue, orders count, AOV, sales by month, top products, sales by day of week
    */
-  async getVentasReport(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getVentasReport(companyId: string, dateFrom?: string, dateTo?: string, opts?: CircuitOpts) {
     const warnings: string[] = [];
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
+    const fiscalTypes = resolveFiscalTypes(opts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
+    // For queries that use the invoices table without the `i` alias.
+    const fiscalClauseNoAlias = buildFiscalClause(fiscalTypes, '');
 
     // Current period totals - from authorized invoices only
     const { totalFacturado, cantidadFacturas, ticketPromedio } = await safeQuery(
@@ -120,6 +175,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
         `);
@@ -147,6 +203,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${prev.dateFrom}::date
             AND invoice_date::date <= ${prev.dateTo}::date
         `);
@@ -174,6 +231,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
           GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
@@ -201,6 +259,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${prev.dateFrom}::date
             AND invoice_date::date <= ${prev.dateTo}::date
           GROUP BY TO_CHAR(invoice_date, 'YYYY-MM')
@@ -229,6 +288,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
           GROUP BY ii.product_name
@@ -258,6 +318,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
           GROUP BY EXTRACT(DOW FROM invoice_date)
@@ -294,10 +355,12 @@ export class BusinessService {
   /**
    * Rentabilidad Report: margin per product, top by margin, negative margin alert, weighted avg margin
    */
-  async getRentabilidadReport(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getRentabilidadReport(companyId: string, dateFrom?: string, dateTo?: string, opts?: CircuitOpts) {
     const warnings: string[] = [];
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
+    const fiscalTypes = resolveFiscalTypes(opts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
 
     // Margin by product - from authorized invoices only
     const productos = await safeQuery(
@@ -321,6 +384,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
           GROUP BY ii.product_name, ii.product_id
@@ -369,6 +433,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND i.invoice_date::date >= ${prev.dateFrom}::date
             AND i.invoice_date::date <= ${prev.dateTo}::date
         `);
@@ -408,10 +473,13 @@ export class BusinessService {
   /**
    * Clientes Report: top clients, new vs returning, DSO per client, inactive clients
    */
-  async getClientesReport(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getClientesReport(companyId: string, dateFrom?: string, dateTo?: string, opts?: CircuitOpts) {
     const warnings: string[] = [];
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
+    const fiscalTypes = resolveFiscalTypes(opts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
+    const fiscalClauseNoAlias = buildFiscalClause(fiscalTypes, '');
 
     // Top 10 clients by revenue in period - from authorized invoices
     const topClientes = await safeQuery(
@@ -432,6 +500,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
             AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
@@ -463,6 +532,7 @@ export class BusinessService {
           WHERE company_id = ${companyId}
             AND status = 'authorized'
             AND invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClauseNoAlias}
             AND invoice_date::date >= ${dates.dateFrom}::date
             AND invoice_date::date <= ${dates.dateTo}::date
         `);
@@ -487,6 +557,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND i.invoice_date::date >= ${dates.dateFrom}::date
             AND i.invoice_date::date <= ${dates.dateTo}::date
             AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
@@ -510,6 +581,7 @@ export class BusinessService {
             WHERE company_id = ${companyId}
               AND status = 'authorized'
               AND invoice_type::text NOT LIKE 'NC%'
+              ${fiscalClauseNoAlias}
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
@@ -537,6 +609,7 @@ export class BusinessService {
             WHERE company_id = ${companyId}
               AND status = 'authorized'
               AND invoice_type::text NOT LIKE 'NC%'
+              ${fiscalClauseNoAlias}
               AND (enterprise_id IS NOT NULL OR customer_id IS NOT NULL)
             GROUP BY COALESCE(enterprise_id::text, customer_id::text)
           )
@@ -574,6 +647,7 @@ export class BusinessService {
             WHERE i.company_id = ${companyId}
               AND i.status = 'authorized'
               AND i.invoice_type::text NOT LIKE 'NC%'
+              ${fiscalClause}
               AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
             GROUP BY COALESCE(i.enterprise_id::text, i.customer_id::text), i.enterprise_id, i.customer_id
             HAVING MAX(i.invoice_date)::date < (CURRENT_DATE - INTERVAL '30 days')
@@ -613,10 +687,12 @@ export class BusinessService {
    * Fully defensive: every sub-query is wrapped so partial failures return
    * empty/zero data with warnings instead of crashing the whole report.
    */
-  async getCobranzasReport(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getCobranzasReport(companyId: string, dateFrom?: string, dateTo?: string, opts?: CircuitOpts) {
     const warnings: string[] = [];
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
+    const fiscalTypes = resolveFiscalTypes(opts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
 
     // --- Aging report --- based on authorized invoices with payments
     const allBuckets = ['al_dia', '1_30', '31_60', '61_90', '90_plus'];
@@ -657,6 +733,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
             )
@@ -715,6 +792,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND p.payment_date::date >= ${dates.dateFrom}::date
             AND p.payment_date::date <= ${dates.dateTo}::date
         `);
@@ -736,6 +814,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND p.payment_date::date >= ${prev.dateFrom}::date
             AND p.payment_date::date <= ${prev.dateTo}::date
         `);
@@ -797,6 +876,7 @@ export class BusinessService {
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
             )

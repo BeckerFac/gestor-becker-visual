@@ -844,10 +844,11 @@ export const api = {
   },
 
   // Reports
-  getDashboard: async (dateFrom?: string, dateTo?: string) => {
+  getDashboard: async (dateFrom?: string, dateTo?: string, fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
     const params = new URLSearchParams()
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
+    if (fiscalTypes && fiscalTypes.length > 0) params.set('fiscal_types', fiscalTypes.join(','))
     const qs = params.toString()
     const { data } = await client.get(`/reports/dashboard${qs ? `?${qs}` : ''}`)
     return data
@@ -885,20 +886,28 @@ export const api = {
     return data
   },
   // Business Intelligence Reports
-  getBusinessVentas: async (dateFrom: string, dateTo: string) => {
-    const { data } = await client.get('/reports/business/ventas', { params: { date_from: dateFrom, date_to: dateTo } })
+  getBusinessVentas: async (dateFrom: string, dateTo: string, fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params: any = { date_from: dateFrom, date_to: dateTo }
+    if (fiscalTypes && fiscalTypes.length > 0) params.fiscal_types = fiscalTypes.join(',')
+    const { data } = await client.get('/reports/business/ventas', { params })
     return data
   },
-  getBusinessRentabilidad: async (dateFrom: string, dateTo: string) => {
-    const { data } = await client.get('/reports/business/rentabilidad', { params: { date_from: dateFrom, date_to: dateTo } })
+  getBusinessRentabilidad: async (dateFrom: string, dateTo: string, fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params: any = { date_from: dateFrom, date_to: dateTo }
+    if (fiscalTypes && fiscalTypes.length > 0) params.fiscal_types = fiscalTypes.join(',')
+    const { data } = await client.get('/reports/business/rentabilidad', { params })
     return data
   },
-  getBusinessClientes: async (dateFrom: string, dateTo: string) => {
-    const { data } = await client.get('/reports/business/clientes', { params: { date_from: dateFrom, date_to: dateTo } })
+  getBusinessClientes: async (dateFrom: string, dateTo: string, fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params: any = { date_from: dateFrom, date_to: dateTo }
+    if (fiscalTypes && fiscalTypes.length > 0) params.fiscal_types = fiscalTypes.join(',')
+    const { data } = await client.get('/reports/business/clientes', { params })
     return data
   },
-  getBusinessCobranzas: async (dateFrom: string, dateTo: string) => {
-    const { data } = await client.get('/reports/business/cobranzas', { params: { date_from: dateFrom, date_to: dateTo } })
+  getBusinessCobranzas: async (dateFrom: string, dateTo: string, fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params: any = { date_from: dateFrom, date_to: dateTo }
+    if (fiscalTypes && fiscalTypes.length > 0) params.fiscal_types = fiscalTypes.join(',')
+    const { data } = await client.get('/reports/business/cobranzas', { params })
     return data
   },
   getBusinessInventario: async () => {
@@ -1380,18 +1389,30 @@ export const api = {
     const { data } = await client.get('/cuenta-corriente')
     return data
   },
-  getCuentaCorrienteDetalle: async (enterpriseId: string) => {
-    const { data } = await client.get(`/cuenta-corriente/${enterpriseId}`)
+  // CAT-6: fiscal_type is required for detalle + pdf + adjustment (Sol/Luna split).
+  getCuentaCorrienteDetalle: async (
+    enterpriseId: string,
+    filters: { fiscal_type: 'fiscal' | 'no_fiscal'; date_from?: string; date_to?: string; business_unit_id?: string }
+  ) => {
+    const { data } = await client.get(`/cuenta-corriente/${enterpriseId}`, { params: filters })
     return data
   },
-  downloadCuentaCorrientePdf: async (enterpriseId: string, dateFrom: string, dateTo: string): Promise<Blob> => {
+  downloadCuentaCorrientePdf: async (
+    enterpriseId: string,
+    fiscal_type: 'fiscal' | 'no_fiscal',
+    dateFrom: string,
+    dateTo: string
+  ): Promise<Blob> => {
     const response = await client.get(`/cuenta-corriente/${enterpriseId}/pdf`, {
-      params: { date_from: dateFrom, date_to: dateTo },
+      params: { date_from: dateFrom, date_to: dateTo, fiscal_type },
       responseType: 'blob',
     })
     return response.data
   },
-  createCuentaCorrienteAdjustment: async (enterpriseId: string, data: { amount: number; reason: string; adjustment_type: 'credit' | 'debit' }) => {
+  createCuentaCorrienteAdjustment: async (
+    enterpriseId: string,
+    data: { amount: number; reason: string; adjustment_type: 'credit' | 'debit'; fiscal_type: 'fiscal' | 'no_fiscal' }
+  ) => {
     const { data: result } = await client.post(`/cuenta-corriente/${enterpriseId}/adjustment`, data)
     return result
   },
@@ -1489,6 +1510,11 @@ export const api = {
   deleteUser: async (id: string) => {
     const { data } = await client.delete(`/users/${id}`)
     return data
+  },
+  // Sol/Luna: grant/revoke Luna access for a user (owner/admin only).
+  setCircuitAccess: async (userId: string, payload: { luna: boolean }) => {
+    const { data } = await client.post(`/users/${userId}/circuit-access`, payload)
+    return data.user
   },
   getUserPermissions: async (id: string) => {
     const { data } = await client.get(`/users/${id}/permissions`)

@@ -9,6 +9,7 @@ import { DateInput } from '@/components/ui/DateInput'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { useCircuitAccess, type Circuit } from '@/hooks/useCircuitAccess'
 
 interface EnterpriseSaldo {
   id: string
@@ -21,6 +22,9 @@ interface EnterpriseSaldo {
   a_cobrar: number
   a_pagar: number
   saldo: number
+  // CAT-6: dual-circuit saldos. saldo_luna only present when user has Luna access.
+  saldo_sol?: number
+  saldo_luna?: number
   // Semantic fields (always >= 0)
   deuda_cliente?: number
   credito_cliente?: number
@@ -81,10 +85,12 @@ const TipoBadge = ({ tipo }: { tipo: string }) => {
 
 interface AdjustmentFormProps {
   enterpriseId: string
+  // CAT-6: circuit is derived from the active tab (Sol/Luna). Readonly in the form.
+  fiscalType: Circuit
   onCreated: () => void
 }
 
-const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated }) => {
+const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, fiscalType, onCreated }) => {
   const [open, setOpen] = useState(false)
   const [tipo, setTipo] = useState<'credit' | 'debit'>('credit')
   const [monto, setMonto] = useState('')
@@ -118,6 +124,7 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
         amount,
         reason: motivo.trim(),
         adjustment_type: tipo,
+        fiscal_type: fiscalType,
       })
       toast.success('Ajuste creado correctamente')
       setMonto('')
@@ -209,10 +216,13 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, onCreated
 }
 
 export const CuentaCorriente: React.FC = () => {
+  const { canAccessLuna } = useCircuitAccess()
   const [resumen, setResumen] = useState<EnterpriseSaldo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedEnterprise, setSelectedEnterprise] = useState<string | null>(null)
+  // CAT-6: which circuit tab is open inside the drawer. Default: Sol.
+  const [activeCircuit, setActiveCircuit] = useState<Circuit>('fiscal')
   const [detalle, setDetalle] = useState<Detalle | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
   const [pdfDateFrom, setPdfDateFrom] = useState<string>(() => {
@@ -275,16 +285,10 @@ export const CuentaCorriente: React.FC = () => {
     loadResumen()
   }, [])
 
-  const handleVerDetalle = async (enterpriseId: string) => {
-    if (selectedEnterprise === enterpriseId) {
-      setSelectedEnterprise(null)
-      setDetalle(null)
-      return
-    }
+  const loadDetalleFor = async (enterpriseId: string, circuit: Circuit) => {
     try {
       setLoadingDetalle(true)
-      setSelectedEnterprise(enterpriseId)
-      const data = await api.getCuentaCorrienteDetalle(enterpriseId)
+      const data = await api.getCuentaCorrienteDetalle(enterpriseId, { fiscal_type: circuit })
       setDetalle(data)
     } catch (e: any) {
       toast.error(e.message)
@@ -294,6 +298,26 @@ export const CuentaCorriente: React.FC = () => {
     }
   }
 
+  const handleVerDetalle = async (enterpriseId: string) => {
+    if (selectedEnterprise === enterpriseId) {
+      setSelectedEnterprise(null)
+      setDetalle(null)
+      return
+    }
+    setSelectedEnterprise(enterpriseId)
+    // Always default to Sol when opening a drawer.
+    setActiveCircuit('fiscal')
+    await loadDetalleFor(enterpriseId, 'fiscal')
+  }
+
+  // Reload detalle whenever the user switches tabs.
+  useEffect(() => {
+    if (selectedEnterprise) {
+      loadDetalleFor(selectedEnterprise, activeCircuit)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCircuit])
+
   const handleDownloadPdf = async (enterpriseId: string, enterpriseName: string) => {
     if (!pdfDateFrom || !pdfDateTo) {
       toast.error('Selecciona un rango de fechas')
@@ -301,11 +325,12 @@ export const CuentaCorriente: React.FC = () => {
     }
     try {
       setDownloadingPdf(true)
-      const blob = await api.downloadCuentaCorrientePdf(enterpriseId, pdfDateFrom, pdfDateTo)
+      const blob = await api.downloadCuentaCorrientePdf(enterpriseId, activeCircuit, pdfDateFrom, pdfDateTo)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `cuenta_corriente_${enterpriseName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+      const circuitTag = activeCircuit === 'no_fiscal' ? 'luna' : 'sol'
+      a.download = `cuenta_corriente_${circuitTag}_${enterpriseName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -320,12 +345,7 @@ export const CuentaCorriente: React.FC = () => {
   const handleAdjustmentCreated = async () => {
     loadResumen()
     if (selectedEnterprise) {
-      try {
-        const data = await api.getCuentaCorrienteDetalle(selectedEnterprise)
-        setDetalle(data)
-      } catch (e: any) {
-        toast.error(e.message)
-      }
+      await loadDetalleFor(selectedEnterprise, activeCircuit)
     }
   }
 
@@ -555,6 +575,17 @@ export const CuentaCorriente: React.FC = () => {
                         ) : (
                           <span className="text-xs text-gray-400">Saldado</span>
                         )}
+                        {/* CAT-6: Sol/Luna chips. Luna chip only when user has access. */}
+                        {canAccessLuna && (
+                          <div className="flex gap-1 justify-center mt-1">
+                            <span className="text-[10px] font-medium rounded px-1.5 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title="Saldo Sol (fiscal)">
+                              {'\u2600\ufe0f'} {fmt(r.saldo_sol ?? 0)}
+                            </span>
+                            <span className="text-[10px] font-medium rounded px-1.5 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="Saldo Luna (no fiscal)">
+                              {'\ud83c\udf19'} {fmt(r.saldo_luna ?? 0)}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-blue-600">
                         {selectedEnterprise === r.id ? '\u25b2' : '\u25bc'}
@@ -569,9 +600,32 @@ export const CuentaCorriente: React.FC = () => {
                             <SkeletonTable rows={4} cols={6} />
                           ) : detalle ? (
                             <div className="space-y-6">
+                              {/* CAT-6: Sol/Luna circuit tabs. Hidden for users without Luna. */}
+                              {canAccessLuna && (
+                                <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+                                  {[
+                                    { value: 'fiscal' as Circuit, label: '\u2600\ufe0f Sol' },
+                                    { value: 'no_fiscal' as Circuit, label: '\ud83c\udf19 Luna' },
+                                  ].map(t => (
+                                    <button
+                                      key={t.value}
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); setActiveCircuit(t.value) }}
+                                      className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                                        activeCircuit === t.value
+                                          ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                          : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
+                                      }`}
+                                    >
+                                      {t.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               {/* Adjustment form */}
                               <AdjustmentForm
                                 enterpriseId={r.id}
+                                fiscalType={activeCircuit}
                                 onCreated={handleAdjustmentCreated}
                               />
 

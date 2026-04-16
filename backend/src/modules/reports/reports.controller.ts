@@ -2,14 +2,49 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { reportsService } from './reports.service';
 import { accountingService } from './accounting.service';
-import { businessService } from './business.service';
+import { businessService, FiscalType } from './business.service';
+
+/**
+ * Sol/Luna dual-circuit: parse fiscal_types from the request query.
+ *
+ * Supports:
+ *  - ?fiscal_types=fiscal
+ *  - ?fiscal_types=fiscal,no_fiscal
+ *  - ?fiscal_types=fiscal&fiscal_types=no_fiscal (multi-param)
+ *
+ * Returns undefined when the caller didn't provide the filter so the service
+ * can apply its default (['fiscal']). Invalid tokens are silently stripped —
+ * we never 400 here, that would leak Luna's existence.
+ */
+function parseFiscalTypes(raw: any): FiscalType[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const tokens: string[] = [];
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === 'string') tokens.push(...item.split(','));
+    }
+  } else if (typeof raw === 'string') {
+    tokens.push(...raw.split(','));
+  }
+  const cleaned = tokens
+    .map(t => t.trim().toLowerCase())
+    .filter((t): t is FiscalType => t === 'fiscal' || t === 'no_fiscal');
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function getCircuitOpts(req: AuthRequest) {
+  return {
+    fiscal_types: parseFiscalTypes(req.query.fiscal_types),
+    userCanAccessLuna: !!(req.user as any)?.can_access_luna,
+  };
+}
 
 export class ReportsController {
   async getDashboard(req: AuthRequest, res: Response) {
     const dateFrom = req.query.date_from as string | undefined;
     const dateTo = req.query.date_to as string | undefined;
     const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
-    const data = await reportsService.getDashboard(req.user!.company_id, dateFrom, dateTo, userPermissions);
+    const data = await reportsService.getDashboard(req.user!.company_id, dateFrom, dateTo, userPermissions, getCircuitOpts(req));
     res.json(data);
   }
 
@@ -105,7 +140,7 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await businessService.getVentasReport(req.user!.company_id, dateFrom, dateTo);
+      const data = await businessService.getVentasReport(req.user!.company_id, dateFrom, dateTo, getCircuitOpts(req));
       res.json(data);
     } catch (error) {
       console.error('Controller getBusinessVentas error:', error);
@@ -119,7 +154,7 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await businessService.getRentabilidadReport(req.user!.company_id, dateFrom, dateTo);
+      const data = await businessService.getRentabilidadReport(req.user!.company_id, dateFrom, dateTo, getCircuitOpts(req));
       res.json(data);
     } catch (error) {
       console.error('Controller getBusinessRentabilidad error:', error);
@@ -133,7 +168,7 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await businessService.getClientesReport(req.user!.company_id, dateFrom, dateTo);
+      const data = await businessService.getClientesReport(req.user!.company_id, dateFrom, dateTo, getCircuitOpts(req));
       res.json(data);
     } catch (error) {
       console.error('Controller getBusinessClientes error:', error);
@@ -147,7 +182,7 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await businessService.getCobranzasReport(req.user!.company_id, dateFrom, dateTo);
+      const data = await businessService.getCobranzasReport(req.user!.company_id, dateFrom, dateTo, getCircuitOpts(req));
       res.json(data);
     } catch (error: any) {
       console.error('Controller getBusinessCobranzas FULL ERROR:', {

@@ -8,12 +8,28 @@ export class CuentaCorrienteController {
   async getResumen(req: AuthRequest, res: Response) {
     const data = await cuentaCorrienteService.getResumen(
       req.user!.company_id,
-      req.query.business_unit_id as string
+      {
+        businessUnitId: req.query.business_unit_id as string | undefined,
+        userCanAccessLuna: Boolean(req.user!.can_access_luna),
+      }
     );
     res.json(data);
   }
 
   async getDetalle(req: AuthRequest, res: Response) {
+    const rawCircuit = req.query.fiscal_type as string | undefined;
+    // CAT-6: fiscal_type is REQUIRED. No more mixed.
+    if (!rawCircuit) {
+      throw new ApiError(400, 'fiscal_type es requerido (fiscal | no_fiscal)');
+    }
+    if (rawCircuit !== 'fiscal' && rawCircuit !== 'no_fiscal') {
+      throw new ApiError(400, 'fiscal_type invalido');
+    }
+    const userCanAccessLuna = Boolean(req.user!.can_access_luna);
+    if (rawCircuit === 'no_fiscal' && !userCanAccessLuna) {
+      // Leak defense — 404 instead of 403.
+      throw new ApiError(404, 'No encontrado');
+    }
     const data = await cuentaCorrienteService.getDetalle(
       req.user!.company_id,
       req.params.enterpriseId,
@@ -21,6 +37,8 @@ export class CuentaCorrienteController {
         dateFrom: req.query.date_from as string | undefined,
         dateTo: req.query.date_to as string | undefined,
         businessUnitId: req.query.business_unit_id as string | undefined,
+        fiscal_type: rawCircuit,
+        userCanAccessLuna,
       }
     );
     res.json(data);
@@ -31,6 +49,7 @@ export class CuentaCorrienteController {
       const { enterpriseId } = req.params;
       const dateFrom = req.query.date_from as string;
       const dateTo = req.query.date_to as string;
+      const rawCircuit = req.query.fiscal_type as string | undefined;
 
       if (!dateFrom || !dateTo) {
         res.status(400).json({ error: 'date_from and date_to son requeridos' });
@@ -43,11 +62,22 @@ export class CuentaCorrienteController {
         return;
       }
 
+      if (!rawCircuit || (rawCircuit !== 'fiscal' && rawCircuit !== 'no_fiscal')) {
+        res.status(400).json({ error: 'fiscal_type es requerido (fiscal | no_fiscal)' });
+        return;
+      }
+      const userCanAccessLuna = Boolean(req.user!.can_access_luna);
+      if (rawCircuit === 'no_fiscal' && !userCanAccessLuna) {
+        res.status(404).json({ error: 'No encontrado' });
+        return;
+      }
+
       const data = await cuentaCorrienteService.getPdfData(
         req.user!.company_id,
         enterpriseId,
         dateFrom,
-        dateTo
+        dateTo,
+        { fiscal_type: rawCircuit, userCanAccessLuna }
       );
 
       const pdf = await pdfService.generateCuentaCorrientePdf(data);
@@ -63,12 +93,19 @@ export class CuentaCorrienteController {
 
   async createAdjustment(req: AuthRequest, res: Response) {
     const { enterpriseId } = req.params;
-    const { amount, reason, adjustment_type } = req.body;
+    const { amount, reason, adjustment_type, fiscal_type } = req.body;
 
     const data = await cuentaCorrienteService.createAdjustment(
       req.user!.company_id,
       enterpriseId,
-      { amount, reason, adjustment_type, created_by: req.user!.id }
+      {
+        amount,
+        reason,
+        adjustment_type,
+        created_by: req.user!.id,
+        fiscal_type: fiscal_type || 'fiscal',
+        userCanAccessLuna: Boolean(req.user!.can_access_luna),
+      }
     );
     res.status(201).json(data);
   }

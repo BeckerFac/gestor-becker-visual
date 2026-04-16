@@ -55,15 +55,34 @@ export class OrdersService {
     enterprise_id?: string;
     business_unit_id?: string;
     has_invoice?: string;
+    fiscal_type?: 'fiscal' | 'no_fiscal' | 'all';
     search?: string;
     skip?: number;
     limit?: number;
+    userCanAccessLuna?: boolean;
   } = {}) {
     await this.ensureMigrations();
     try {
       const { status, product_type, customer_id, enterprise_id, business_unit_id, has_invoice, search, skip = 0, limit = 50 } = filters;
 
+      // Sol/Luna circuit filter: non-Luna users NEVER see Luna rows regardless of requested filter.
+      // Luna users can request 'fiscal' | 'no_fiscal' | 'all' (default: 'all' to see both).
+      const canLuna = !!filters.userCanAccessLuna;
+      let effectiveFiscal: 'fiscal' | 'no_fiscal' | 'all';
+      if (!canLuna) {
+        effectiveFiscal = 'fiscal';
+      } else if (filters.fiscal_type === 'fiscal' || filters.fiscal_type === 'no_fiscal' || filters.fiscal_type === 'all') {
+        effectiveFiscal = filters.fiscal_type;
+      } else {
+        effectiveFiscal = 'all';
+      }
+
       let whereClause = sql`o.company_id = ${companyId}`;
+      if (effectiveFiscal === 'fiscal') {
+        whereClause = sql`${whereClause} AND (o.fiscal_type = 'fiscal' OR o.fiscal_type IS NULL)`;
+      } else if (effectiveFiscal === 'no_fiscal') {
+        whereClause = sql`${whereClause} AND o.fiscal_type = 'no_fiscal'`;
+      }
       if (business_unit_id) {
         whereClause = sql`${whereClause} AND o.business_unit_id = ${business_unit_id}`;
       }
@@ -210,7 +229,7 @@ export class OrdersService {
     }
   }
 
-  async getOrder(companyId: string, orderId: string) {
+  async getOrder(companyId: string, orderId: string, opts: { userCanAccessLuna?: boolean } = {}) {
     await this.ensureMigrations();
     try {
       const result = await db.execute(sql`
@@ -237,6 +256,13 @@ export class OrdersService {
       `);
       const rows = (result as any).rows || result || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
+
+      // Sol/Luna: row-level circuit guard. Non-Luna users see 404 (not 403)
+      // on Luna rows to avoid leaking existence.
+      const rowFiscal = (rows[0].fiscal_type || 'fiscal') as 'fiscal' | 'no_fiscal';
+      if (rowFiscal === 'no_fiscal' && !opts.userCanAccessLuna) {
+        throw new ApiError(404, 'Orden no encontrada');
+      }
 
       // Get items
       const itemsResult = await db.execute(sql`
@@ -265,9 +291,20 @@ export class OrdersService {
     }
   }
 
-  async createOrder(companyId: string, userId: string, data: any) {
+  async createOrder(companyId: string, userId: string, data: any, opts: { userCanAccessLuna?: boolean } = {}) {
     await this.ensureMigrations();
     try {
+      // ═══ Sol/Luna circuit selection ═══
+      // Default to 'fiscal'. Reject unknown values (prevents typos/probing).
+      // Luna ('no_fiscal') requires can_access_luna on the caller.
+      const fiscalType: 'fiscal' | 'no_fiscal' = data.fiscal_type ?? 'fiscal';
+      if (fiscalType !== 'fiscal' && fiscalType !== 'no_fiscal') {
+        throw new ApiError(400, 'fiscal_type invalido. Valores: fiscal, no_fiscal');
+      }
+      if (fiscalType === 'no_fiscal' && !opts.userCanAccessLuna) {
+        throw new ApiError(403, 'Sin acceso al circuito Luna');
+      }
+
       // ═══ VALIDATIONS (Plan: fix 8 bugs from endpoint audit) ═══
       // BUG #2: title required
       if (!data.title || typeof data.title !== 'string' || !data.title.trim()) {
@@ -371,7 +408,9 @@ export class OrdersService {
         }
       }
 
-      // Calculate totals from items (IVA per item)
+      // Calculate totals from items.
+      // Sol: IVA per item on top of neto. Luna: precio final, no IVA breakdown.
+      const isLuna = fiscalType === 'no_fiscal';
       let subtotal = 0;
       let totalCost = 0;
       let totalVat = 0;
@@ -380,11 +419,15 @@ export class OrdersService {
           const itemNet = Number(item.unit_price) * Number(item.quantity);
           subtotal += itemNet;
           totalCost += Number(item.cost || 0) * Number(item.quantity);
-          totalVat += itemNet * Number(item.vat_rate ?? 21) / 100;
+          if (!isLuna) {
+            totalVat += itemNet * Number(item.vat_rate ?? 21) / 100;
+          }
         }
       } else {
         subtotal = Number(data.total_amount || 0);
-        totalVat = subtotal * Number(data.vat_rate || 21) / 100;
+        if (!isLuna) {
+          totalVat = subtotal * Number(data.vat_rate || 21) / 100;
+        }
       }
 
       // Apply order-level discount (already validated above)
@@ -394,8 +437,9 @@ export class OrdersService {
       const discountedVat = totalVat * discountMultiplier;
       const totalWithVat = discountedSubtotal + discountedVat;
       const estimatedProfit = discountedSubtotal - totalCost;
-      // Weighted average VAT rate for order-level display
-      const vatRate = subtotal > 0 ? (totalVat / subtotal) * 100 : 21;
+      // Weighted average VAT rate for order-level display.
+      // Luna: 0 (no IVA). Sol: weighted average of items.
+      const vatRate = isLuna ? 0 : (subtotal > 0 ? (totalVat / subtotal) * 100 : 21);
 
       // Derive order-level product_type from items
       let orderProductType = data.product_type || 'otro';
@@ -408,17 +452,18 @@ export class OrdersService {
       await db.execute(sql`BEGIN`);
 
       await db.execute(sql`
-        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by)
-        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${discountPercent.toString()}, ${data.notes || null}, ${userId})
+        INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by, fiscal_type)
+        VALUES (${orderId}, ${companyId}, ${data.customer_id || null}, ${enterpriseId}, ${data.bank_id || null}, ${data.business_unit_id || null}, ${orderNumber}, ${data.title}, ${data.description || null}, ${orderProductType}, 'pendiente', ${data.priority || 'normal'}, ${data.quantity || 1}, ${subtotal.toString()}, ${totalWithVat.toString()}, ${vatRate.toString()}, ${estimatedProfit.toString()}, ${data.estimated_delivery || null}, ${data.payment_method || null}, 'pendiente', ${discountPercent.toString()}, ${data.notes || null}, ${userId}, ${fiscalType})
       `);
 
-      // Insert items
+      // Insert items. Luna items: vat_rate=0 (precio final).
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
           const itemSubtotal = Number(item.unit_price) * Number(item.quantity);
+          const itemVatRate = isLuna ? '0' : (item.vat_rate ?? 21).toString();
           await db.execute(sql`
             INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
-            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false}, ${(item.vat_rate ?? 21).toString()})
+            VALUES (${uuid()}, ${orderId}, ${item.product_id || null}, ${item.product_name}, ${item.description || null}, ${item.quantity}, ${item.unit_price.toString()}, ${(item.cost || 0).toString()}, ${itemSubtotal.toString()}, ${item.product_type || 'otro'}, ${item.deduct_stock || false}, ${itemVatRate})
           `);
         }
       }
@@ -469,6 +514,7 @@ export class OrdersService {
         order_number: orderNumber,
         total_amount: totalWithVat,
         status: 'pendiente',
+        fiscal_type: fiscalType,
       };
     } catch (error) {
       await db.execute(sql`ROLLBACK`).catch(() => {});
@@ -720,10 +766,21 @@ export class OrdersService {
     await this.ensureMigrations();
     try {
       const orderResult = await db.execute(sql`
-        SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
+        SELECT id, locked_at FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
       `);
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
+
+      // Sol/Luna lock: if any document (invoice/remito/cobro) has been emitted
+      // the order becomes read-only until those documents are cancelled.
+      if (rows[0].locked_at != null) {
+        throw new ApiError(423, 'Pedido bloqueado: hay comprobantes emitidos. Anular comprobantes para editar.');
+      }
+
+      // Circuit is IMMUTABLE after create: silently drop fiscal_type if present.
+      if (data && Object.prototype.hasOwnProperty.call(data, 'fiscal_type')) {
+        delete data.fiscal_type;
+      }
 
       // Helper: undefined = keep old value, '' = set null, value = set value
       const v = (field: any) => field !== undefined ? (field === '' ? null : field) : undefined;
@@ -841,10 +898,15 @@ export class OrdersService {
     try {
       // Pedido existe?
       const orderResult = await db.execute(sql`
-        SELECT id FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
+        SELECT id, locked_at FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
       `);
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Pedido no encontrado');
+
+      // Sol/Luna lock: block delete when comprobantes emitted.
+      if (rows[0].locked_at != null) {
+        throw new ApiError(423, 'Pedido bloqueado: hay comprobantes emitidos. Anular comprobantes para editar.');
+      }
 
       // ============================================================
       // CHECK 1 — Remitos (legacy FK + N:N remito_orders).
@@ -1013,6 +1075,84 @@ export class OrdersService {
       console.error('Delete order error:', error);
       throw new ApiError(500, 'Failed to delete order');
     }
+  }
+
+  /**
+   * Sol/Luna lock: called by downstream emission flows (invoice/remito/cobro
+   * emission) to freeze a pedido. Idempotent — re-locking is a no-op.
+   */
+  async lockOrder(orderId: string, reason: string, userId: string): Promise<void> {
+    await db.execute(sql`
+      UPDATE orders
+      SET locked_at = NOW(), locked_reason = ${reason}, locked_by = ${userId}
+      WHERE id = ${orderId} AND locked_at IS NULL
+    `);
+  }
+
+  /**
+   * Sol/Luna unlock: called after cancellation of documents that caused the
+   * lock. Only lifts the lock if NO active (non-cancelled/non-anulado)
+   * invoices, remitos, or cobros remain linked to the order.
+   */
+  async unlockOrder(orderId: string): Promise<void> {
+    // Look up company_id for scoped sub-queries.
+    const ordRes = await db.execute(sql`
+      SELECT company_id FROM orders WHERE id = ${orderId}
+    `);
+    const ordRows = (ordRes as any).rows || ordRes || [];
+    if (ordRows.length === 0) return;
+    const companyId = ordRows[0].company_id;
+
+    // Active invoices (authorized/emitido/draft — any non-cancelled state blocks unlock).
+    const invRes = await db.execute(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM invoices i
+      WHERE i.company_id = ${companyId}
+        AND (
+          i.order_id = ${orderId}
+          OR i.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+        )
+        AND i.status NOT IN ('cancelled', 'anulado')
+    `);
+    const invCnt = Number(((invRes as any).rows || [])[0]?.cnt || 0);
+    if (invCnt > 0) return;
+
+    // Active remitos.
+    const remRes = await db.execute(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM remitos r
+      WHERE r.company_id = ${companyId}
+        AND (
+          r.order_id = ${orderId}
+          OR r.id IN (SELECT remito_id FROM remito_orders WHERE order_id = ${orderId})
+        )
+        AND (r.status IS NULL OR r.status != 'anulado')
+    `);
+    const remCnt = Number(((remRes as any).rows || [])[0]?.cnt || 0);
+    if (remCnt > 0) return;
+
+    // Active cobros applied to invoices of this order.
+    const cobRes = await db.execute(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM cobro_invoice_applications cia
+      JOIN invoices inv ON inv.id = cia.invoice_id
+      JOIN cobros c ON c.id = cia.cobro_id
+      WHERE inv.company_id = ${companyId}
+        AND (
+          inv.order_id = ${orderId}
+          OR inv.id IN (SELECT invoice_id FROM invoice_orders WHERE order_id = ${orderId})
+        )
+        AND (c.status IS NULL OR c.status != 'anulado')
+    `);
+    const cobCnt = Number(((cobRes as any).rows || [])[0]?.cnt || 0);
+    if (cobCnt > 0) return;
+
+    // All clear — release the lock.
+    await db.execute(sql`
+      UPDATE orders
+      SET locked_at = NULL, locked_reason = NULL, locked_by = NULL
+      WHERE id = ${orderId}
+    `);
   }
 
   async getOrdersWithoutInvoice(companyId: string) {

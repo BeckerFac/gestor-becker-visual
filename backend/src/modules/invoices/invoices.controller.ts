@@ -31,6 +31,7 @@ export class InvoicesController {
         date_from: req.query.date_from as string,
         date_to: req.query.date_to as string,
         fiscal_type: req.query.fiscal_type as string,
+        userCanAccessLuna: Boolean(req.user.can_access_luna),
       });
       res.json(data);
     } catch (error) {
@@ -58,7 +59,7 @@ export class InvoicesController {
   async getInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
-      const invoice = await invoicesService.getInvoice(req.user.company_id, req.params.id);
+      const invoice = await invoicesService.getInvoice(req.user.company_id, req.params.id, Boolean(req.user.can_access_luna));
       res.json(invoice);
     } catch (error) {
       if (error instanceof ApiError) {

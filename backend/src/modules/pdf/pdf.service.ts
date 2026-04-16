@@ -106,10 +106,26 @@ export class PdfService {
         }
       }
 
-      // Generate HTML — bifurcate between fiscal and internal voucher
-      let html = invoice.fiscal_type === 'interno'
-        ? this.generateInternalVoucherHtml({ invoice, items, customer, company: input })
-        : this.generateInvoiceHtml({ invoice, items, customer, company: input, qrDataUrl })
+      // Generate HTML — bifurcate between fiscal, legacy internal, and Luna (no_fiscal)
+      // Sol/Luna: Luna comprobantes use a dedicated no-IVA template with a
+      // "DOCUMENTO NO FISCAL - USO INTERNO" watermark. No CAE, no QR.
+      let enterprise: any = null
+      if (invoice.enterprise_id) {
+        try {
+          const entRes = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${invoice.enterprise_id}`)
+          enterprise = ((entRes as any).rows || [])[0] || null
+        } catch {
+          enterprise = null
+        }
+      }
+      let html: string
+      if (invoice.fiscal_type === 'no_fiscal') {
+        html = this.generateLunaComprobanteHtml({ invoice, items, customer, enterprise, company: input })
+      } else if (invoice.fiscal_type === 'interno') {
+        html = this.generateInternalVoucherHtml({ invoice, items, customer, company: input })
+      } else {
+        html = this.generateInvoiceHtml({ invoice, items, customer, company: input, qrDataUrl })
+      }
 
       // Anulado watermark (soft-delete aware)
       if (this.isAnulado(invoice)) {
@@ -715,6 +731,150 @@ export class PdfService {
 </html>`
   }
 
+  /**
+   * Sol/Luna: Luna comprobante template. No CAE, no QR, no IVA breakdown.
+   * Uses a diagonal "DOCUMENTO NO FISCAL - USO INTERNO" watermark and a
+   * single "precio final" column — items are stored with vat_rate=0 and the
+   * line total is unit_price * quantity.
+   */
+  private generateLunaComprobanteHtml(data: any): string {
+    const { invoice, items, customer, enterprise, company } = data
+    const esc = this.escapeHtml.bind(this)
+
+    const nroStr = String(invoice.invoice_number).padStart(8, '0')
+    const comprobanteNum = `LUN-${nroStr}`
+    const invoiceDate = invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('es-AR') : new Date().toLocaleDateString('es-AR')
+    const companyCuit = this.formatCuit(company.companyCuit || '')
+    const domicilio = [company.companyAddress, company.companyCity, company.companyProvince]
+      .filter(Boolean).join(', ')
+
+    // Client block: prefer enterprise, fall back to customer
+    const clientName = enterprise?.razon_social || enterprise?.name || customer?.name || 'Sin especificar'
+    const clientCuit = enterprise?.cuit || customer?.cuit || ''
+    const clientAddress = enterprise?.fiscal_address || enterprise?.address || customer?.address || ''
+
+    let grandTotal = 0
+    const rows = (items || []).map((item: any, idx: number) => {
+      const qty = parseFloat(item.quantity || '0')
+      const price = parseFloat(item.unit_price || '0')
+      const total = qty * price
+      grandTotal += total
+      return `
+        <tr>
+          <td class="center">${String(idx + 1).padStart(3, '0')}</td>
+          <td>${esc(item.product_name || '-')}</td>
+          <td class="center">${qty.toFixed(2)}</td>
+          <td class="right">${price.toFixed(2)}</td>
+          <td class="right">${total.toFixed(2)}</td>
+        </tr>`
+    }).join('')
+
+    // Prefer stored invoice.total_amount when available (authoritative), else computed sum.
+    const storedTotal = parseFloat(invoice.total_amount || '0')
+    const displayTotal = storedTotal > 0 ? storedTotal : grandTotal
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Comprobante Luna ${comprobanteNum}</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 11px; line-height: 1.4; position: relative; }
+    .luna-watermark {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 0;
+    }
+    .luna-watermark span {
+      font-size: 60px; font-weight: bold; color: #b00020;
+      opacity: 0.08; transform: rotate(-30deg); white-space: nowrap;
+      letter-spacing: 4px;
+    }
+    .content { position: relative; z-index: 1; }
+    .header-wrapper { border: 1.5px solid #000; display: flex; margin-bottom: 8px; }
+    .header-left, .header-right { flex: 1; padding: 12px 16px; }
+    .header-right { border-left: 1.5px solid #000; }
+    .razonsocial { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+    .header-label { font-size: 10px; color: #444; }
+    .header-value { font-size: 11px; font-weight: 600; }
+    .header-row { margin-bottom: 3px; }
+    .comprobante-tipo { font-size: 14px; font-weight: bold; margin-bottom: 6px; color: #b00020; }
+    .comprobante-nro { font-size: 18px; font-weight: bold; font-family: 'Courier New', monospace; margin-bottom: 8px; }
+    .receptor { border: 1.5px solid #000; padding: 8px 16px; margin-bottom: 10px; }
+    .info-row { display: flex; margin-bottom: 2px; }
+    .info-label { font-size: 10px; color: #444; min-width: 120px; }
+    .info-value { font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead th { background: #e8e8e8; border: 1px solid #999; padding: 6px 8px; font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center; }
+    thead th.left { text-align: left; }
+    thead th.right { text-align: right; }
+    tbody td { border: 1px solid #ccc; padding: 5px 8px; font-size: 11px; }
+    tbody td.center { text-align: center; }
+    tbody td.right { text-align: right; font-family: 'Courier New', monospace; }
+    .totals-wrapper { border: 1.5px solid #000; border-top: none; margin-bottom: 12px; }
+    .totals-row { display: flex; justify-content: flex-end; padding: 8px 16px; background: #f0f0f0; }
+    .totals-label { font-size: 14px; font-weight: bold; min-width: 160px; text-align: right; padding-right: 20px; }
+    .totals-amount { font-size: 14px; font-family: 'Courier New', monospace; font-weight: bold; min-width: 120px; text-align: right; }
+    .luna-footer { border: 2px solid #b00020; padding: 12px; text-align: center; color: #b00020; font-weight: bold; font-size: 12px; margin-top: 10px; }
+    .footer { text-align: center; font-size: 9px; color: #888; padding-top: 6px; border-top: 1px solid #ddd; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="luna-watermark"><span>DOCUMENTO NO FISCAL - USO INTERNO</span></div>
+  <div class="content">
+    <div class="header-wrapper">
+      <div class="header-left">
+        <div class="razonsocial">${esc(company.companyName)}</div>
+        ${domicilio ? `<div class="header-row"><span class="header-label">Domicilio:</span> ${esc(domicilio)}</div>` : ''}
+        <div class="header-row"><span class="header-label">CUIT:</span> <span class="header-value">${esc(companyCuit)}</span></div>
+      </div>
+      <div class="header-right">
+        <div class="comprobante-tipo">COMPROBANTE LUNA</div>
+        <div class="comprobante-nro">N° ${comprobanteNum}</div>
+        <div class="header-row"><span class="header-label">Fecha:</span> <span class="header-value">${invoiceDate}</span></div>
+      </div>
+    </div>
+
+    <div class="receptor">
+      <div class="info-row"><span class="info-label">Razon Social:</span> <span class="info-value" style="font-weight:bold;">${esc(clientName)}</span></div>
+      ${clientCuit ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(clientCuit))}</span></div>` : ''}
+      ${clientAddress ? `<div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(clientAddress)}</span></div>` : ''}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width:6%;">#</th>
+          <th class="left" style="width:50%;">Producto</th>
+          <th style="width:12%;">Cantidad</th>
+          <th class="right" style="width:16%;">Precio Unitario</th>
+          <th class="right" style="width:16%;">Total</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <div class="totals-wrapper">
+      <div class="totals-row">
+        <span class="totals-label">Total: $</span>
+        <span class="totals-amount">${displayTotal.toFixed(2)}</span>
+      </div>
+    </div>
+
+    <div class="luna-footer">
+      Comprobante Luna - Sin valor fiscal - Uso interno
+    </div>
+
+    <div class="footer">
+      Generado el ${new Date().toLocaleDateString('es-AR')} - Circuito Luna (no fiscal)
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
   async generateCatalogPdf(products: any[], companyName: string): Promise<Buffer> {
     try {
       await this.initialize()
@@ -806,6 +966,8 @@ export class PdfService {
     }>;
     totalBalance: number;
     totalMovimientos: number;
+    // CAT-6: Sol/Luna circuit banner.
+    circuit?: 'fiscal' | 'no_fiscal';
   }): Promise<Buffer> {
     let page: any = null;
     try {
@@ -854,6 +1016,7 @@ export class PdfService {
     }>;
     totalBalance: number;
     totalMovimientos: number;
+    circuit?: 'fiscal' | 'no_fiscal';
   }): string {
     const esc = this.escapeHtml.bind(this);
     const now = new Date();
@@ -897,6 +1060,11 @@ export class PdfService {
     const companyCuit = this.formatCuit(data.company.cuit || '');
     const enterpriseCuit = data.enterprise.cuit ? this.formatCuit(data.enterprise.cuit) : 'No registrado';
     const balanceColor = data.totalBalance >= 0 ? '#2E7D32' : '#c62828';
+    // CAT-6: Sol/Luna banner
+    const circuitLabel = data.circuit === 'no_fiscal'
+      ? 'Cuenta Corriente - Circuito Luna'
+      : 'Cuenta Corriente - Circuito Sol';
+    const circuitBanner = `<div style="margin: 0 0 12px 0; padding: 10px 14px; border-radius: 6px; font-weight: 600; font-size: 13px; ${data.circuit === 'no_fiscal' ? 'background: #1e1b4b; color: #e0e7ff;' : 'background: #fef3c7; color: #92400e;'}">${esc(circuitLabel)}</div>`;
     const truncatedNote = data.totalMovimientos > 500
       ? `<p style="font-size: 11px; color: #e65100; margin-top: 10px;">Nota: Se muestran los 500 movimientos mas recientes de ${data.totalMovimientos} totales en el periodo.</p>`
       : '';
@@ -931,7 +1099,7 @@ export class PdfService {
 </head>
 <body>
 <div style="font-family: Inter, Arial, sans-serif; padding: 40px; color: #111;">
-
+  ${circuitBanner}
   <!-- Header -->
   <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 20px;">
     <div>
@@ -1920,6 +2088,8 @@ ${methodsRows}
     const { order, items, company, enterprise, customer } = data
     const esc = this.escapeHtml.bind(this)
     const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    // Sol/Luna: Luna orders render without IVA column / IVA breakdown.
+    const isLuna = order?.fiscal_type === 'no_fiscal'
 
     // ---- Emisora (company) ----
     const companyName = company?.name || ''
@@ -1955,12 +2125,22 @@ ${methodsRows}
     const itemRows = items.map((it: any, idx: number) => {
       const qty = parseFloat(it.quantity || '0') || 0
       const price = parseFloat(it.unit_price || '0') || 0
-      const vatRate = parseFloat(it.vat_rate || '0') || 0
+      const vatRate = isLuna ? 0 : (parseFloat(it.vat_rate || '0') || 0)
       const lineSubtotal = qty * price
       const lineIva = lineSubtotal * (vatRate / 100)
       const lineTotal = lineSubtotal + lineIva
       subtotalNeto += lineSubtotal
       ivaByRate.set(vatRate, (ivaByRate.get(vatRate) || 0) + lineIva)
+      if (isLuna) {
+        return `
+        <tr>
+          <td class="center">${String(idx + 1).padStart(3, '0')}</td>
+          <td>${esc(it.product_name || '-')}</td>
+          <td class="center">${qty.toFixed(2)}</td>
+          <td class="right">${fmt(price)}</td>
+          <td class="right">${fmt(lineSubtotal)}</td>
+        </tr>`
+      }
       return `
         <tr>
           <td class="center">${String(idx + 1).padStart(3, '0')}</td>
@@ -2099,24 +2279,25 @@ ${methodsRows}
     <thead>
       <tr>
         <th class="left" style="width:6%;">#</th>
-        <th class="left" style="width:38%;">Producto / Servicio</th>
-        <th style="width:8%;">Cantidad</th>
-        <th class="right" style="width:12%;">P. Unitario</th>
-        <th class="right" style="width:8%;">% IVA</th>
-        <th class="right" style="width:14%;">Subtotal</th>
-        <th class="right" style="width:14%;">Total c/IVA</th>
+        <th class="left" style="width:${isLuna ? '50%' : '38%'};">Producto / Servicio</th>
+        <th style="width:10%;">Cantidad</th>
+        <th class="right" style="width:16%;">P. Unitario</th>
+        ${isLuna ? '' : '<th class="right" style="width:8%;">% IVA</th>'}
+        <th class="right" style="width:${isLuna ? '18%' : '14%'};">${isLuna ? 'Total' : 'Subtotal'}</th>
+        ${isLuna ? '' : '<th class="right" style="width:14%;">Total c/IVA</th>'}
       </tr>
     </thead>
     <tbody>
-      ${itemRows || `<tr><td colspan="7" class="center" style="padding: 12px; color: #888;">Sin items</td></tr>`}
+      ${itemRows || `<tr><td colspan="${isLuna ? 5 : 7}" class="center" style="padding: 12px; color: #888;">Sin items</td></tr>`}
     </tbody>
   </table>
 
   <div class="totals-wrapper">
+    ${isLuna ? '' : `
     <div class="totals-row">
       <span class="totals-label">Subtotal Neto:</span>
       <span class="totals-amount">$ ${fmt(subtotalNeto)}</span>
-    </div>
+    </div>`}
     ${discountPercent > 0 ? `
     <div class="totals-row">
       <span class="totals-label">Descuento ${discountPercent.toFixed(2)}%:</span>
@@ -2127,7 +2308,7 @@ ${methodsRows}
       <span class="totals-amount">$ ${fmt(netoConDescuento)}</span>
     </div>
     ` : ''}
-    ${ivaBreakdownRows.join('')}
+    ${isLuna ? '' : ivaBreakdownRows.join('')}
     <div class="totals-row grand">
       <span class="totals-label">Total: $</span>
       <span class="totals-amount">${fmt(totalFinal)}</span>

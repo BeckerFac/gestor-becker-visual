@@ -20,6 +20,7 @@ interface UserRecord {
   active: boolean
   last_login: string | null
   created_at: string
+  can_access_luna?: boolean
 }
 
 interface InvitationRecord {
@@ -59,7 +60,7 @@ const ROLE_LABELS: Record<string, string> = {
 // Roles that admins can assign (not owner)
 const ASSIGNABLE_ROLES = ['admin', 'gerente', 'editor', 'vendedor', 'contable', 'stock_manager', 'viewer']
 
-const emptyForm = { name: '', email: '', password: '', role: 'editor' }
+const emptyForm = { name: '', email: '', password: '', role: 'editor', can_access_luna: false }
 const emptyInviteForm = { email: '', role: 'editor', name: '' }
 
 export const Users: React.FC = () => {
@@ -73,6 +74,7 @@ export const Users: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [showLunaRevokeConfirm, setShowLunaRevokeConfirm] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -175,7 +177,13 @@ export const Users: React.FC = () => {
   }
 
   const handleOpenEdit = (user: UserRecord) => {
-    setForm({ name: user.name, email: user.email, password: '', role: user.role })
+    setForm({
+      name: user.name,
+      email: user.email,
+      password: '',
+      role: user.role,
+      can_access_luna: user.can_access_luna === true,
+    })
     setEditingId(user.id)
     setShowForm(true)
   }
@@ -186,24 +194,54 @@ export const Users: React.FC = () => {
     setForm(emptyForm)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const persistForm = async () => {
     setSaving(true)
     try {
       if (editingId) {
         await api.updateUser(editingId, { name: form.name, email: form.email, role: form.role })
+        // Sol/Luna: if the flag differs from the DB value, write it via the
+        // dedicated endpoint so the audit log and session revocation run.
+        const target = users.find(u => u.id === editingId)
+        const currentLuna = target?.can_access_luna === true
+        if (currentLuna !== form.can_access_luna) {
+          await api.setCircuitAccess(editingId, { luna: form.can_access_luna })
+          // If editing self, keep the store in sync immediately.
+          if (editingId === currentUser?.id) {
+            useAuthStore.getState().updateUser({ can_access_luna: form.can_access_luna })
+          }
+        }
         toast.success('Usuario actualizado')
       } else {
-        await api.createUser({ name: form.name, email: form.email, password: form.password, role: form.role })
+        await api.createUser({
+          name: form.name,
+          email: form.email,
+          password: form.password,
+          role: form.role,
+          can_access_luna: form.can_access_luna,
+        })
         toast.success('Usuario creado')
       }
       handleCloseForm()
       await loadUsers()
     } catch (e: any) {
-      toast.error(e.message || 'Error al guardar usuario')
+      toast.error(e?.response?.data?.error || e.message || 'Error al guardar usuario')
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    // Guard: if editing an existing user and revoking their Luna access, confirm first.
+    if (editingId) {
+      const target = users.find(u => u.id === editingId)
+      const wasLuna = target?.can_access_luna === true
+      if (wasLuna && !form.can_access_luna) {
+        setShowLunaRevokeConfirm(true)
+        return
+      }
+    }
+    await persistForm()
   }
 
   // --- Deactivate / Activate ---
@@ -605,6 +643,30 @@ export const Users: React.FC = () => {
                   <p className="text-xs text-amber-600">No puede cambiar su propio rol</p>
                 )}
               </div>
+              {/* Sol/Luna: Luna access toggle. Only visible to owner/admin. */}
+              {isAdmin && (
+                <div className="col-span-full border-t border-gray-200 dark:border-gray-700 pt-4 mt-2">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                    Acceso a Luna
+                  </h4>
+                  <label className="flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-label="Acceso completo a Luna"
+                      checked={form.can_access_luna}
+                      onChange={e => setForm({ ...form, can_access_luna: e.target.checked })}
+                      className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      Acceso completo a Luna
+                    </span>
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Si esta apagado, el usuario no vera ninguna informacion del circuito no fiscal.
+                  </p>
+                </div>
+              )}
               <div className="flex items-end col-span-full">
                 <Button type="submit" variant="success" loading={saving}>
                   {editingId ? 'Guardar Cambios' : 'Crear Usuario'}
@@ -947,6 +1009,21 @@ export const Users: React.FC = () => {
         loading={deleting}
         onConfirm={confirmToggleActive}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      {/* Sol/Luna: confirm before revoking Luna access from an existing user */}
+      <ConfirmDialog
+        open={showLunaRevokeConfirm}
+        title="Revocar acceso a Luna"
+        message="Este usuario perdera todo acceso a Luna. Continuar?"
+        confirmLabel="Revocar acceso"
+        variant="danger"
+        loading={saving}
+        onConfirm={async () => {
+          setShowLunaRevokeConfirm(false)
+          await persistForm()
+        }}
+        onCancel={() => setShowLunaRevokeConfirm(false)}
       />
 
       {/* Transfer ownership confirm dialog */}

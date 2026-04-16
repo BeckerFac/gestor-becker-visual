@@ -347,7 +347,8 @@ export class AccountingService {
     try {
       const dates = validateDateRange(dateFrom, dateTo);
 
-      // Debito fiscal: IVA from authorized invoices by month
+      // Debito fiscal: IVA from authorized invoices by month.
+      // Sol/Luna: exclude Luna (no_fiscal) invoices — they never generate IVA.
       const debitoResult = await db.execute(sql`
         SELECT
           TO_CHAR(invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as periodo,
@@ -355,6 +356,7 @@ export class AccountingService {
         FROM invoices
         WHERE company_id = ${companyId}
           AND status = 'authorized'
+          AND (fiscal_type = 'fiscal' OR fiscal_type IS NULL)
           AND (invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
           AND (invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
         GROUP BY TO_CHAR(invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM')

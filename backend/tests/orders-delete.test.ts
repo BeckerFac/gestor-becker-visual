@@ -52,9 +52,10 @@ describe('OrdersService.deleteOrder', () => {
       const tpl = args[0]
       const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
 
-      // 1. SELECT id FROM orders WHERE id ...
-      if (sqlStr.includes('SELECT id FROM orders WHERE id')) {
-        return Promise.resolve({ rows: [{ id: orderId }] })
+      // 1. SELECT id[, locked_at] FROM orders WHERE id ...
+      // Sol/Luna added locked_at to the initial SELECT — match either shape.
+      if (sqlStr.includes('FROM orders WHERE id') && sqlStr.includes('SELECT id')) {
+        return Promise.resolve({ rows: [{ id: orderId, locked_at: null }] })
       }
       // 2. Remitos check
       if (sqlStr.includes('FROM remitos r') && sqlStr.includes('remito_orders')) {

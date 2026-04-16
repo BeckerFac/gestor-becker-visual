@@ -10,6 +10,11 @@ export interface User {
   is_superadmin?: boolean
   onboarding_completed?: boolean
   enabled_modules?: string[]
+  /**
+   * Sol/Luna dual-circuit: single global flag. If false/undefined the
+   * Luna (non-fiscal) circuit must be completely invisible to this user.
+   */
+  can_access_luna?: boolean
 }
 
 export interface Company {
@@ -44,6 +49,7 @@ interface AuthStore {
   can: (module: string, action: string) => boolean
   canAny: (module: string) => boolean
   updatePermissions: (permissions: Record<string, string[]> | null) => void
+  updateUser: (patch: Partial<User>) => void
   setOnboardingCompleted: (completed: boolean) => void
   setEnabledModules: (modules: string[]) => void
   isModuleEnabled: (moduleKey: string) => boolean
@@ -158,6 +164,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   updatePermissions: (permissions) => {
     localStorage.setItem('permissions', JSON.stringify(permissions))
     set({ permissions })
+  },
+  updateUser: (patch) => {
+    const current = get().user
+    if (!current) return
+    const next = { ...current, ...patch }
+    localStorage.setItem('user', JSON.stringify(next))
+    set({ user: next })
   },
   setOnboardingCompleted: (completed) => {
     localStorage.setItem('onboardingCompleted', String(completed))

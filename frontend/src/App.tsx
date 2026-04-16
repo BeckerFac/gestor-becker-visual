@@ -192,9 +192,13 @@ function App() {
         if (meData.enabled_modules) {
           setEnabledModules(meData.enabled_modules)
         }
-        // Update is_superadmin in stored user
-        if (meData.is_superadmin !== undefined && user) {
-          const updatedUser = { ...user, is_superadmin: meData.is_superadmin }
+        // Update is_superadmin and can_access_luna in stored user
+        if (user && (meData.is_superadmin !== undefined || meData.can_access_luna !== undefined)) {
+          const updatedUser = {
+            ...user,
+            ...(meData.is_superadmin !== undefined ? { is_superadmin: meData.is_superadmin } : {}),
+            ...(meData.can_access_luna !== undefined ? { can_access_luna: meData.can_access_luna === true } : {}),
+          }
           localStorage.setItem('user', JSON.stringify(updatedUser))
           useAuthStore.setState({ user: updatedUser })
         }

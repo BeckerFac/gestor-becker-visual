@@ -5,6 +5,10 @@ import { pdfService } from '../pdf/pdf.service';
 
 export class OrdersController {
   async getOrders(req: AuthRequest, res: Response) {
+    const rawFiscal = req.query.fiscal_type as string | undefined;
+    const fiscal_type = rawFiscal === 'fiscal' || rawFiscal === 'no_fiscal' || rawFiscal === 'all'
+      ? rawFiscal
+      : undefined;
     const data = await ordersService.getOrders(req.user!.company_id, {
       status: req.query.status as string,
       product_type: req.query.product_type as string,
@@ -12,20 +16,26 @@ export class OrdersController {
       enterprise_id: req.query.enterprise_id as string,
       business_unit_id: req.query.business_unit_id as string,
       has_invoice: req.query.has_invoice as string,
+      fiscal_type,
       search: req.query.search as string,
       skip: parseInt(req.query.skip as string) || 0,
       limit: parseInt(req.query.limit as string) || 50,
+      userCanAccessLuna: !!req.user?.can_access_luna,
     });
     res.json(data);
   }
 
   async getOrder(req: AuthRequest, res: Response) {
-    const data = await ordersService.getOrder(req.user!.company_id, req.params.id);
+    const data = await ordersService.getOrder(req.user!.company_id, req.params.id, {
+      userCanAccessLuna: !!req.user?.can_access_luna,
+    });
     res.json(data);
   }
 
   async createOrder(req: AuthRequest, res: Response) {
-    const data = await ordersService.createOrder(req.user!.company_id, req.user!.id, req.body);
+    const data = await ordersService.createOrder(req.user!.company_id, req.user!.id, req.body, {
+      userCanAccessLuna: !!req.user?.can_access_luna,
+    });
     res.status(201).json(data);
   }
 

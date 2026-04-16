@@ -14,17 +14,23 @@ export class RemitosController {
       date_to: req.query.date_to as string,
       skip: parseInt(req.query.skip as string) || 0,
       limit: parseInt(req.query.limit as string) || 100,
+      fiscal_type: req.query.fiscal_type as 'fiscal' | 'no_fiscal' | 'all' | undefined,
+      userCanAccessLuna: !!(req.user as any)?.can_access_luna,
     });
     res.json(data);
   }
 
   async getRemito(req: AuthRequest, res: Response) {
-    const data = await remitosService.getRemito(req.user!.company_id, req.params.id);
+    const data = await remitosService.getRemito(req.user!.company_id, req.params.id, {
+      userCanAccessLuna: !!(req.user as any)?.can_access_luna,
+    });
     res.json(data);
   }
 
   async createRemito(req: AuthRequest, res: Response) {
-    const data = await remitosService.createRemito(req.user!.company_id, req.user!.id, req.body);
+    const data = await remitosService.createRemito(req.user!.company_id, req.user!.id, req.body, {
+      userCanAccessLuna: !!(req.user as any)?.can_access_luna,
+    });
     res.status(201).json(data);
   }
 

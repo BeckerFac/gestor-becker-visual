@@ -229,7 +229,7 @@ describe('InvoicesService', () => {
 
       await expect(
         service.authorizeInvoice('company-1', 'inv-1')
-      ).rejects.toThrow('Los comprobantes internos/no fiscales no pueden autorizarse en AFIP')
+      ).rejects.toThrow('Los comprobantes Luna no se autorizan en AFIP')
     })
 
     it('blocks interno invoices from AFIP authorization', async () => {

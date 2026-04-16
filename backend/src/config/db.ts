@@ -91,10 +91,117 @@ export async function runCriticalMigrations() {
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0', 'retenciones.rate'],
     // backfill: date from created_at for existing rows
     ['UPDATE retenciones SET date = created_at WHERE date IS NULL AND created_at IS NOT NULL', 'retenciones.date backfill'],
+
+    // ════════════════════════════════════════════════════════════════
+    // Sol/Luna dual-circuit feature (CAT-1: DB Foundation)
+    // Sol = fiscal (existing). Luna = no fiscal (new, invoice_type='LUN').
+    // Every change idempotent; all tryMig'd; non-fatal.
+    // ════════════════════════════════════════════════════════════════
+
+    // orders: fiscal_type + lock fields (for closing a period / immutability)
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'orders.fiscal_type'],
+    ['ALTER TABLE orders ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP WITH TIME ZONE', 'orders.locked_at'],
+    ['ALTER TABLE orders ADD COLUMN IF NOT EXISTS locked_reason TEXT', 'orders.locked_reason'],
+    ['ALTER TABLE orders ADD COLUMN IF NOT EXISTS locked_by UUID', 'orders.locked_by'],
+
+    // remitos: fiscal_type
+    [`ALTER TABLE remitos ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'remitos.fiscal_type'],
+
+    // cobros: fiscal_type
+    [`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'cobros.fiscal_type'],
+
+    // users: can_access_luna flag
+    [`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_luna BOOLEAN DEFAULT FALSE`, 'users.can_access_luna'],
+
+    // invoices: ensure fiscal_type exists (already added lazily by invoices.service, but belt-and-suspenders)
+    [`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'invoices.fiscal_type'],
+
+    // audit_log: circuit tagging (sol/luna)
+    [`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS circuit VARCHAR(20)`, 'audit_log.circuit'],
+
+    // CAT-6: account_adjustments fiscal_type for Sol/Luna dual CC
+    [`ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'account_adjustments.fiscal_type'],
+
+    // ════════════════════════════════════════════════════════════════
+    // Backfills — idempotent, zero-risk UPDATEs
+    // ════════════════════════════════════════════════════════════════
+    [`UPDATE invoices SET fiscal_type='no_fiscal' WHERE fiscal_type='interno'`, 'backfill: invoices interno->no_fiscal'],
+    [`UPDATE orders SET fiscal_type='fiscal' WHERE fiscal_type IS NULL`, 'backfill: orders.fiscal_type'],
+    [`UPDATE remitos SET fiscal_type='fiscal' WHERE fiscal_type IS NULL`, 'backfill: remitos.fiscal_type'],
+    [`UPDATE cobros SET fiscal_type='fiscal' WHERE fiscal_type IS NULL`, 'backfill: cobros.fiscal_type'],
+    [`UPDATE account_adjustments SET fiscal_type='fiscal' WHERE fiscal_type IS NULL`, 'backfill: account_adjustments.fiscal_type'],
+    [`UPDATE users SET can_access_luna=FALSE WHERE can_access_luna IS NULL`, 'backfill: users.can_access_luna null->false'],
+    [`UPDATE users SET can_access_luna=TRUE WHERE role IN ('owner','admin') AND can_access_luna IS DISTINCT FROM TRUE`, 'backfill: users.can_access_luna admins=true'],
   ];
   for (const [sql, label] of criticalAlters) {
     await tryMig(sql, `critical: ${label}`);
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // invoice_type enum: add 'LUN' value. Postgres requires ALTER TYPE
+  // ADD VALUE to run OUTSIDE a transaction — we use pool.query directly
+  // (tryMig already does that). We also guard against the case where
+  // invoice_type is a VARCHAR column (not an enum) — in GoBecker it IS
+  // currently VARCHAR(5) on both invoices + purchase_invoices, so this
+  // block is a no-op guard for future-proofing.
+  // ════════════════════════════════════════════════════════════════
+  try {
+    const typeCheck = await pool.query(`
+      SELECT t.typname
+      FROM pg_type t
+      WHERE t.typname = 'invoice_type' AND t.typtype = 'e'
+      LIMIT 1
+    `);
+    if (typeCheck.rowCount && typeCheck.rowCount > 0) {
+      // Enum exists — add LUN if missing
+      try {
+        await pool.query(`ALTER TYPE invoice_type ADD VALUE IF NOT EXISTS 'LUN'`);
+        console.log('[critical-migrations] invoice_type enum: LUN ensured');
+      } catch (e: any) {
+        console.error(`[MIGRATION FAIL] invoice_type ADD VALUE 'LUN': ${e?.message || e}`);
+      }
+    } else {
+      console.log('[critical-migrations] invoice_type is VARCHAR (not enum) — no ALTER TYPE needed');
+    }
+  } catch (e: any) {
+    console.error(`[MIGRATION FAIL] invoice_type enum probe: ${e?.message || e}`);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Seed "no fiscal" accounting accounts per company (idempotent)
+  // ════════════════════════════════════════════════════════════════
+  try {
+    const { ensureNoFiscalAccounts } = await import('../modules/accounting/accounting-accounts.service');
+    const companies = await pool.query('SELECT id FROM companies');
+    for (const c of companies.rows) {
+      await ensureNoFiscalAccounts(c.id).catch((e: any) =>
+        console.error(`[ensureNoFiscalAccounts] ${c.id}: ${e?.message || e}`)
+      );
+    }
+    console.log(`[critical-migrations] ensureNoFiscalAccounts: processed ${companies.rowCount} companies`);
+  } catch (e: any) {
+    console.error(`[ensureNoFiscalAccounts] loader failed: ${e?.message || e}`);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // CAT-7: journal_entries.circuit — Sol/Luna dual-circuit ledger tag.
+  // Existing rows default to 'fiscal' (safe — legacy Luna never wrote asientos).
+  // ════════════════════════════════════════════════════════════════
+  try {
+    await pool.query(
+      `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS circuit VARCHAR(20) DEFAULT 'fiscal'`
+    );
+    await pool.query(
+      `UPDATE journal_entries SET circuit = 'fiscal' WHERE circuit IS NULL`
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_je_circuit ON journal_entries(company_id, circuit)`
+    );
+    console.log('[critical-migrations] journal_entries.circuit: ensured');
+  } catch (e: any) {
+    console.error(`[journal_entries.circuit] migration failed: ${e?.message || e}`);
+  }
+
   console.log('[critical-migrations] completed');
 }
 

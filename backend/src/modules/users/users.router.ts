@@ -22,6 +22,9 @@ usersRouter.post('/:id/reset-password', authorize('users', 'edit'), (req, res) =
 // Transfer ownership (owner only)
 usersRouter.post('/transfer-ownership', requireRole('owner'), (req, res) => usersController.transferOwnership(req, res));
 
+// Sol/Luna: grant/revoke Luna circuit access (owner/admin only)
+usersRouter.post('/:id/circuit-access', requireRole('owner', 'admin'), (req, res) => usersController.setCircuitAccess(req as any, res));
+
 // Session management (admin/owner only)
 usersRouter.get('/:id/sessions', requireMinRole('admin'), (req, res) => usersController.getUserSessions(req, res));
 usersRouter.delete('/:id/sessions/:sessionId', requireMinRole('admin'), (req, res) => usersController.revokeSession(req, res));

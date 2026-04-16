@@ -12,18 +12,18 @@ import { recordRoleChange } from '../../lib/security-monitor';
 export class UsersService {
   async getUsers(companyId: string) {
     const result = await db.execute(sql`
-      SELECT id, email, name, role, active, created_at, last_login
+      SELECT id, email, name, role, active, created_at, last_login, can_access_luna
       FROM users
       WHERE company_id = ${companyId}
       ORDER BY created_at DESC
     `);
     const rows = (result as any).rows || result || [];
-    return rows;
+    return rows.map((r: any) => ({ ...r, can_access_luna: r.can_access_luna === true }));
   }
 
   async getUser(companyId: string, userId: string) {
     const result = await db.execute(sql`
-      SELECT id, email, name, role, active, created_at, last_login
+      SELECT id, email, name, role, active, created_at, last_login, can_access_luna
       FROM users
       WHERE id = ${userId} AND company_id = ${companyId}
     `);
@@ -33,10 +33,16 @@ export class UsersService {
     }
     const user = rows[0];
     const permissions = await this.getUserPermissions(userId);
-    return { ...user, permissions };
+    return { ...user, can_access_luna: user.can_access_luna === true, permissions };
   }
 
-  async createUser(companyId: string, data: { email: string; name: string; password: string; role: string }, requesterId?: string, ipAddress?: string) {
+  async createUser(
+    companyId: string,
+    data: { email: string; name: string; password: string; role: string; can_access_luna?: boolean },
+    requesterId?: string,
+    ipAddress?: string,
+    requesterRole?: string,
+  ) {
     // Cannot create an owner user
     if (data.role === 'owner') {
       throw new ApiError(400, 'No se puede crear un usuario con rol Owner');
@@ -60,9 +66,15 @@ export class UsersService {
     const id = uuid();
     const hashedPassword = await bcrypt.hash(data.password, env.BCRYPT_ROUNDS);
 
+    // Sol/Luna: defaults to false. Only owner/admin can explicitly grant
+    // Luna access at creation time — any other caller's attempt is ignored.
+    const allowLunaFromCaller =
+      requesterRole === 'owner' || requesterRole === 'admin';
+    const canAccessLuna = allowLunaFromCaller && data.can_access_luna === true;
+
     await db.execute(sql`
-      INSERT INTO users (id, company_id, email, name, password_hash, role, active)
-      VALUES (${id}, ${companyId}, ${data.email}, ${data.name}, ${hashedPassword}, ${data.role}, true)
+      INSERT INTO users (id, company_id, email, name, password_hash, role, active, can_access_luna)
+      VALUES (${id}, ${companyId}, ${data.email}, ${data.name}, ${hashedPassword}, ${data.role}, true, ${canAccessLuna})
     `);
 
     // Apply role template permissions if template exists
@@ -265,6 +277,82 @@ export class UsersService {
     });
 
     return { message: 'Usuario desactivado' };
+  }
+
+  /**
+   * Sol/Luna: grant or revoke Luna (no_fiscal) access for a target user.
+   *
+   * Only owner/admin callers can invoke this. All callers must belong to
+   * the same company as the target. A soft warning is logged when the last
+   * Luna-capable admin/owner is revoking their own flag — we do not hard
+   * block because business rules say owner always retains the ability to
+   * re-grant it to themselves.
+   */
+  async setCircuitAccess(
+    companyId: string,
+    callerId: string,
+    callerRole: string,
+    targetUserId: string,
+    luna: boolean,
+    ipAddress?: string,
+  ) {
+    if (callerRole !== 'owner' && callerRole !== 'admin') {
+      throw new ApiError(403, 'Solo owner o admin pueden modificar el acceso a Luna');
+    }
+
+    // Target must exist in the same company.
+    const targetResult = await db.execute(sql`
+      SELECT id, email, role, can_access_luna
+      FROM users
+      WHERE id = ${targetUserId} AND company_id = ${companyId}
+    `);
+    const targetRows = (targetResult as any).rows || targetResult || [];
+    if (targetRows.length === 0) {
+      throw new ApiError(404, 'Usuario no encontrado');
+    }
+    const target = targetRows[0] as { id: string; email: string; role: string; can_access_luna: boolean };
+
+    // Soft self-revoke warning: if caller is revoking their own access and
+    // they are the last owner/admin with Luna access, log but do not block.
+    if (callerId === targetUserId && target.can_access_luna && luna === false) {
+      const remainingResult = await db.execute(sql`
+        SELECT COUNT(*)::int AS count
+        FROM users
+        WHERE company_id = ${companyId}
+          AND role IN ('owner', 'admin')
+          AND active = true
+          AND can_access_luna = true
+          AND id != ${targetUserId}
+      `);
+      const remainingRows = (remainingResult as any).rows || remainingResult || [];
+      const remaining = parseInt(String(remainingRows[0]?.count || '0'), 10);
+      if (remaining === 0) {
+        console.warn('[setCircuitAccess] last Luna-capable admin revoking own access', {
+          companyId, userId: targetUserId,
+        });
+      }
+    }
+
+    await db.execute(sql`
+      UPDATE users SET can_access_luna = ${luna} WHERE id = ${targetUserId} AND company_id = ${companyId}
+    `);
+
+    // Invalidate existing sessions for the target so their JWT's stale claim
+    // is refreshed on next login. Without this, a user whose Luna access was
+    // just revoked could keep using it until their access token expires.
+    await db.execute(sql`DELETE FROM sessions WHERE user_id = ${targetUserId}`);
+
+    await auditService.log({
+      companyId,
+      userId: callerId,
+      action: luna ? 'grant_luna_access' : 'revoke_luna_access',
+      entityType: 'user',
+      entityId: targetUserId,
+      details: { email: target.email, previous: target.can_access_luna === true, current: luna },
+      ipAddress,
+    });
+
+    return this.getUser(companyId, targetUserId);
   }
 
   async transferOwnership(companyId: string, currentOwnerId: string, newOwnerId: string, ipAddress?: string) {

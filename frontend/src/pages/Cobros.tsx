@@ -15,6 +15,7 @@ import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { toast } from '@/hooks/useToast'
 import { api } from '@/services/api'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { toLocalYMD } from '@/utils/dates'
 import { PermissionGate } from '@/components/shared/PermissionGate'
@@ -248,6 +249,10 @@ export const Cobros: React.FC = () => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const invoiceParamProcessed = useRef(false)
+  const { canAccessLuna } = useCircuitAccess()
+
+  // Sol/Luna active circuit. Default Sol. Non-Luna users never see the tab bar.
+  const [activeCircuit, setActiveCircuit] = useState<'fiscal' | 'no_fiscal'>('fiscal')
 
   // Data state
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
@@ -408,8 +413,11 @@ export const Cobros: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
+      const cobrosFilter: Record<string, any> = {}
+      if (filterEnterprise) cobrosFilter.enterprise_id = filterEnterprise
+      if (canAccessLuna) cobrosFilter.fiscal_type = activeCircuit
       const [cobrosRes, entRes, ordersRes, bankRes, agingRes, pendingInvRes] = await Promise.all([
-        api.getCobros(filterEnterprise ? { enterprise_id: filterEnterprise } : undefined).catch((err: any) => {
+        api.getCobros(Object.keys(cobrosFilter).length ? cobrosFilter : undefined).catch((err: any) => {
           setError(`Error cargando cobros: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
           return []
         }),
@@ -417,7 +425,7 @@ export const Cobros: React.FC = () => {
         api.getOrders({ limit: 200 }).catch(() => ({ items: [] })),
         api.getBanks().catch(() => []),
         api.getAgingReport().catch(() => null),
-        api.getInvoices({ fiscal_type: 'all', limit: 200 }).catch(() => ({ items: [] })),
+        api.getInvoices({ fiscal_type: canAccessLuna ? activeCircuit : 'fiscal', limit: 200 }).catch(() => ({ items: [] })),
       ])
       // Use cobros as the unified source (receipts migrated to cobros)
       const unifiedReceipts = (cobrosRes || []).map((c: any) => ({
@@ -444,11 +452,11 @@ export const Cobros: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [filterEnterprise])
+  }, [filterEnterprise, activeCircuit, canAccessLuna])
 
   const loadInvoicesForReceipt = useCallback(async () => {
     try {
-      const invoiceRes = await api.getInvoices({ fiscal_type: 'all', limit: 200 }).catch(() => ({ items: [] }))
+      const invoiceRes = await api.getInvoices({ fiscal_type: canAccessLuna ? activeCircuit : 'fiscal', limit: 200 }).catch(() => ({ items: [] }))
       // Load both authorized/emitido AND draft invoices (exclude fully paid)
       const items: InvoiceForReceipt[] = (invoiceRes.items || []).filter((inv: any) =>
         (inv.status === 'authorized' || inv.status === 'emitido' || inv.status === 'draft') &&
@@ -458,7 +466,7 @@ export const Cobros: React.FC = () => {
     } catch (e: any) {
       console.warn('Could not load invoices for receipt:', e.message)
     }
-  }, [])
+  }, [activeCircuit, canAccessLuna])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, dateFrom, dateTo, pageSize])
@@ -733,9 +741,32 @@ export const Cobros: React.FC = () => {
           cheque_data: pm.cheque_data || undefined,
         }))
 
+      // Sol/Luna: client-side guard — every selected invoice must share the active circuit.
+      if (canAccessLuna && hasInvoiceItems) {
+        const mismatched = items
+          .map(it => invoicesForReceipt.find(inv => inv.id === it.invoice_id))
+          .filter((inv): inv is InvoiceForReceipt => !!inv)
+          .find(inv => (inv.fiscal_type || 'fiscal') !== activeCircuit)
+        if (mismatched) {
+          toast.error('Todas las facturas seleccionadas deben pertenecer al circuito activo')
+          setSaving(false)
+          return
+        }
+      }
+      // Sol/Luna: block retenciones on Luna circuit.
+      if (activeCircuit === 'no_fiscal') {
+        const anyRet = retencionesSufridas.some(r => r.enabled && Number(r.amount || 0) > 0)
+        if (anyRet) {
+          toast.error('Los cobros Luna no admiten retenciones')
+          setSaving(false)
+          return
+        }
+      }
+
       // Use createCobro with invoice_items for N:N linking
       const cobroPayload: any = {
         enterprise_id: form.enterprise_id || null,
+        fiscal_type: activeCircuit,
         amount: finalAmount,
         payment_method: paymentMethodsPayload[0]?.method || 'transferencia',
         bank_id: paymentMethodsPayload[0]?.bank_id || null,
@@ -871,6 +902,27 @@ export const Cobros: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {canAccessLuna && (
+        <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
+          {[
+            { value: 'fiscal',    label: '\u2600\ufe0f Sol' },
+            { value: 'no_fiscal', label: '\ud83c\udf19 Luna' },
+          ].map(t => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setActiveCircuit(t.value as 'fiscal' | 'no_fiscal')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                activeCircuit === t.value
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Recibos</h1>
@@ -1441,7 +1493,8 @@ export const Cobros: React.FC = () => {
                 </div>
               </div>
 
-              {/* Retenciones sufridas - collapsible */}
+              {/* Retenciones sufridas - collapsible. Sol/Luna: HIDDEN on Luna circuit. */}
+              {activeCircuit !== 'no_fiscal' && (
               <details className="border border-gray-200 dark:border-gray-700 rounded-lg mt-4">
                 <summary className="px-4 py-3 cursor-pointer font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg select-none">
                   Retenciones sufridas por el cliente
@@ -1526,6 +1579,7 @@ export const Cobros: React.FC = () => {
                 )}
                 </div>
               </details>
+              )}
 
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notas</label>

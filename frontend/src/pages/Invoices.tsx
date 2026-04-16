@@ -22,6 +22,7 @@ import { toast } from '@/hooks/useToast'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { CurrencySelector } from '@/components/shared/CurrencySelector'
 import { checkEnterpriseFiscalData } from '@/utils/fiscal'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 
 // ---- Types ----
 
@@ -360,8 +361,18 @@ export const Invoices: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [formStep, setFormStep] = useState<1 | 2>(1)
 
-  // Vista mode: fiscal (AFIP) or no_fiscal
+  // Sol/Luna dual circuit access
+  const { canAccessLuna } = useCircuitAccess()
+
+  // Vista mode: fiscal (AFIP) or no_fiscal (Luna). Luna tab only visible when allowed.
   const [vistaMode, setVistaMode] = useState<'venta_fiscal' | 'venta_no_fiscal' | 'compra'>('venta_fiscal')
+
+  // Defensive: if the user loses Luna access, snap back to fiscal.
+  useEffect(() => {
+    if (!canAccessLuna && vistaMode === 'venta_no_fiscal') {
+      setVistaMode('venta_fiscal')
+    }
+  }, [canAccessLuna, vistaMode])
 
   // Filters
   const [filterEnterprise, setFilterEnterprise] = useState('')
@@ -1047,11 +1058,11 @@ export const Invoices: React.FC = () => {
     <div className="space-y-6">
       {/* Tabs: 4 categorias */}
       <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit flex-wrap">
-        {([
-          { key: 'venta_fiscal', label: 'Facturas Venta' },
-          { key: 'venta_no_fiscal', label: 'No Fiscal Venta' },
+        {(([
+          { key: 'venta_fiscal', label: 'Sol - Facturas Venta' },
+          ...(canAccessLuna ? [{ key: 'venta_no_fiscal', label: 'Luna - No Fiscal' } as const] : []),
           { key: 'compra', label: 'Facturas de Compra' },
-        ] as const).map(tab => (
+        ] as const) as ReadonlyArray<{ key: 'venta_fiscal' | 'venta_no_fiscal' | 'compra'; label: string }>).map(tab => (
           <button
             key={tab.key}
             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${

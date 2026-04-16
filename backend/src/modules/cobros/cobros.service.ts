@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
+import { ordersService } from '../orders/orders.service';
 
 interface PaymentMethodInput {
   method: string;
@@ -86,10 +87,31 @@ export class CobrosService {
     }
   }
 
-  async getCobros(companyId: string, filters: { enterprise_id?: string; business_unit_id?: string } = {}) {
+  async getCobros(companyId: string, filters: {
+    enterprise_id?: string;
+    business_unit_id?: string;
+    fiscal_type?: 'fiscal' | 'no_fiscal' | 'all';
+    userCanAccessLuna?: boolean;
+  } = {}) {
     await this.ensureTables();
     try {
+      // Sol/Luna circuit filter: non-Luna users NEVER see Luna rows.
+      const canLuna = !!filters.userCanAccessLuna;
+      let effectiveFiscal: 'fiscal' | 'no_fiscal' | 'all';
+      if (!canLuna) {
+        effectiveFiscal = 'fiscal';
+      } else if (filters.fiscal_type === 'fiscal' || filters.fiscal_type === 'no_fiscal' || filters.fiscal_type === 'all') {
+        effectiveFiscal = filters.fiscal_type;
+      } else {
+        effectiveFiscal = 'all';
+      }
+
       let whereClause = sql`c.company_id = ${companyId}`;
+      if (effectiveFiscal === 'fiscal') {
+        whereClause = sql`${whereClause} AND (c.fiscal_type = 'fiscal' OR c.fiscal_type IS NULL)`;
+      } else if (effectiveFiscal === 'no_fiscal') {
+        whereClause = sql`${whereClause} AND c.fiscal_type = 'no_fiscal'`;
+      }
       if (filters.business_unit_id) {
         whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
       }
@@ -159,8 +181,76 @@ export class CobrosService {
     }
   }
 
-  async createCobro(companyId: string, userId: string, data: any) {
+  /**
+   * Sol/Luna row-level guard. Non-Luna users get 404 for Luna rows
+   * (existence leak prevention).
+   */
+  async getCobroById(companyId: string, cobroId: string, opts: { userCanAccessLuna?: boolean } = {}) {
     await this.ensureTables();
+    const result = await db.execute(sql`
+      SELECT c.* FROM cobros c
+      WHERE c.id = ${cobroId} AND c.company_id = ${companyId}
+    `);
+    const rows = (result as any).rows || result || [];
+    if (rows.length === 0) throw new ApiError(404, 'Cobro not found');
+    const rowFiscal = (rows[0].fiscal_type || 'fiscal') as 'fiscal' | 'no_fiscal';
+    if (rowFiscal === 'no_fiscal' && !opts.userCanAccessLuna) {
+      throw new ApiError(404, 'Cobro not found');
+    }
+    return rows[0];
+  }
+
+  async createCobro(companyId: string, userId: string, data: any, opts: { userCanAccessLuna?: boolean } = {}) {
+    await this.ensureTables();
+
+    // ═══ Sol/Luna: validate fiscal_type ═══
+    // Default 'fiscal'. Luna requires user access.
+    const cobroFiscalType: 'fiscal' | 'no_fiscal' =
+      data.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+    if (data.fiscal_type !== undefined && data.fiscal_type !== null &&
+        data.fiscal_type !== 'fiscal' && data.fiscal_type !== 'no_fiscal') {
+      throw new ApiError(400, 'fiscal_type invalido. Valores: fiscal, no_fiscal');
+    }
+    if (cobroFiscalType === 'no_fiscal' && !opts.userCanAccessLuna) {
+      throw new ApiError(403, 'Sin acceso al circuito Luna');
+    }
+
+    // Sol/Luna: Luna cobros do NOT admit retenciones sufridas.
+    if (cobroFiscalType === 'no_fiscal' && Array.isArray(data.retenciones_sufridas)) {
+      const hasEnabled = data.retenciones_sufridas.some(
+        (r: any) => r && (r.enabled === undefined ? true : !!r.enabled) && parseFloat(r.amount || '0') > 0
+      );
+      if (hasEnabled) {
+        throw new ApiError(400, 'Los cobros Luna no admiten retenciones');
+      }
+    }
+
+    // Sol/Luna: cross-circuit invoice application check.
+    // Every invoice referenced in invoice_items must share the cobro's circuit.
+    if (Array.isArray(data.invoice_items) && data.invoice_items.length > 0) {
+      const invoiceIds = [...new Set(
+        data.invoice_items
+          .map((it: any) => it?.invoice_id)
+          .filter((x: any) => typeof x === 'string' && x.length > 0)
+      )] as string[];
+      if (invoiceIds.length > 0) {
+        const ftRes = await db.execute(sql`
+          SELECT id, COALESCE(fiscal_type, 'fiscal') AS fiscal_type
+          FROM invoices
+          WHERE company_id = ${companyId} AND id = ANY(${invoiceIds as any})
+        `);
+        const ftRows = ((ftRes as any).rows || []);
+        for (const r of ftRows) {
+          const invFt = r.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+          if (invFt !== cobroFiscalType) {
+            throw new ApiError(
+              400,
+              'No se puede aplicar un cobro a comprobantes de otro circuito'
+            );
+          }
+        }
+      }
+    }
 
     // Auto-assign default business_unit_id if not provided
     if (!data.business_unit_id) {
@@ -311,8 +401,8 @@ export class CobrosService {
       const totalAmount = receiptAmount + totalRetenciones;
 
       await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${receiptAmount.toString()}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate})
+        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate, fiscal_type)
+        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${receiptAmount.toString()}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate}, ${cobroFiscalType})
       `);
 
       // B.1.4: Insert receipt_payment_methods for each payment method
@@ -507,6 +597,39 @@ export class CobrosService {
         throw txError;
       }
 
+      // Sol/Luna: lock every unique order derived from applied invoices.
+      // Idempotent — safe even if the order is already locked.
+      try {
+        const orderIdsToLock = new Set<string>();
+        if (Array.isArray(data.invoice_items) && data.invoice_items.length > 0) {
+          const invoiceIds = [...new Set(
+            data.invoice_items.map((it: any) => it?.invoice_id).filter((x: any) => !!x)
+          )] as string[];
+          if (invoiceIds.length > 0) {
+            const ordRes = await db.execute(sql`
+              SELECT DISTINCT order_id FROM (
+                SELECT order_id FROM invoices WHERE id = ANY(${invoiceIds as any}) AND order_id IS NOT NULL
+                UNION
+                SELECT order_id FROM invoice_orders WHERE invoice_id = ANY(${invoiceIds as any})
+              ) sub WHERE order_id IS NOT NULL
+            `);
+            for (const r of ((ordRes as any).rows || [])) {
+              if (r.order_id) orderIdsToLock.add(r.order_id);
+            }
+          }
+        }
+        if (data.order_id) orderIdsToLock.add(data.order_id);
+        for (const oid of orderIdsToLock) {
+          try {
+            await ordersService.lockOrder(oid, 'cobro aplicado', userId);
+          } catch (e) {
+            console.warn('[createCobro] lockOrder failed for', oid, (e as Error).message);
+          }
+        }
+      } catch (e) {
+        console.warn('[createCobro] lockOrder derivation failed:', (e as Error).message);
+      }
+
       // Accounting entry
       try {
         const { accountingEntriesService } = await import('../accounting/accounting-entries.service');
@@ -514,10 +637,18 @@ export class CobrosService {
           id: cobroId,
           company_id: companyId,
           date: data.payment_date || new Date().toISOString(),
-          amount: data.amount,
+          amount: pmTotal,
           payment_method: summaryMethod,
           bank_id: data.bank_id,
           pending_status: pendingStatus,
+          // Sol/Luna: thread circuit + payment method breakdown so the
+          // entry hits the right chart-of-accounts lanes (caja vs banco).
+          fiscal_type: cobroFiscalType,
+          payment_methods: paymentMethods.map((pm) => ({
+            method: pm.method,
+            amount: pm.amount,
+            bank_id: pm.bank_id || null,
+          })),
         });
       } catch (accErr) { console.warn('Accounting entry skipped (cobro):', (accErr as Error).message); }
 
@@ -658,6 +789,33 @@ export class CobrosService {
       for (const invId of invoiceIds) {
         await this.recalculateInvoicePaymentStatus(invId);
         await this.recalculateOrderStatusFromInvoice(invId);
+      }
+
+      // Sol/Luna: unlock affected orders (cascade-aware).
+      try {
+        const affectedOrders = new Set<string>();
+        if (invoiceIds.length > 0) {
+          const ordRes = await db.execute(sql`
+            SELECT DISTINCT order_id FROM (
+              SELECT order_id FROM invoices WHERE id = ANY(${invoiceIds as any}) AND order_id IS NOT NULL
+              UNION
+              SELECT order_id FROM invoice_orders WHERE invoice_id = ANY(${invoiceIds as any})
+            ) sub WHERE order_id IS NOT NULL
+          `);
+          for (const r of ((ordRes as any).rows || [])) {
+            if (r.order_id) affectedOrders.add(r.order_id);
+          }
+        }
+        if (cobroForAccounting?.order_id) affectedOrders.add(cobroForAccounting.order_id);
+        for (const oid of affectedOrders) {
+          try {
+            await ordersService.unlockOrder(oid);
+          } catch (e) {
+            console.warn('[anularCobro] unlockOrder failed for', oid, (e as Error).message);
+          }
+        }
+      } catch (e) {
+        console.warn('[anularCobro] unlockOrder derivation failed:', (e as Error).message);
       }
 
       // Accounting reversal entry

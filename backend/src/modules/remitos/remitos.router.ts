@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { remitosController } from './remitos.controller';
 import { authorize } from '../../middlewares/authorize';
+import { authorizeCircuit } from '../../middlewares/authorizeCircuit';
 
 export const remitosRouter = Router();
 
-remitosRouter.get('/', authorize('remitos', 'view'), (req, res) => remitosController.getRemitos(req as any, res));
+remitosRouter.get('/', authorize('remitos', 'view'), authorizeCircuit('query'), (req, res) => remitosController.getRemitos(req as any, res));
 remitosRouter.post('/', authorize('remitos', 'create'), (req, res) => remitosController.createRemito(req as any, res));
 
 // Availability endpoints — BEFORE /:id to avoid route conflicts

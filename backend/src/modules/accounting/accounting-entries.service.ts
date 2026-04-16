@@ -1,6 +1,10 @@
 import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
+import { ensureNoFiscalAccounts } from './accounting-accounts.service';
+
+/** Sol/Luna dual-circuit marker for journal entries. */
+export type CircuitType = 'fiscal' | 'no_fiscal';
 
 // --- accounting_enabled cache & helper ---
 export const accountingEnabledCache = new Map<string, { enabled: boolean; expires: number }>();
@@ -34,6 +38,8 @@ interface CreateEntryParams {
   isAuto?: boolean;
   createdBy?: string;
   lines: JournalLine[];
+  /** Sol/Luna circuit. Defaults to 'fiscal' when missing. */
+  circuit?: CircuitType;
 }
 
 interface InvoiceEntryData {
@@ -44,8 +50,15 @@ interface InvoiceEntryData {
   subtotal?: number | string;
   vat_amount?: number | string;
   invoice_type?: string;
-  fiscal_type?: string;
+  /** Sol/Luna circuit selector. Defaults to 'fiscal' when missing. */
+  fiscal_type?: 'fiscal' | 'no_fiscal' | 'interno' | string;
   items?: Array<{ quantity: number; unit_price: number; vat_rate: number }>;
+}
+
+interface CobroPaymentMethodBreakdown {
+  method?: string;
+  amount: number | string;
+  bank_id?: string | null;
 }
 
 interface CobroData {
@@ -60,6 +73,10 @@ interface CobroData {
   exchange_rate?: number | string;
   original_exchange_rate?: number | string;
   amount_foreign?: number | string;
+  /** Sol/Luna circuit selector. Defaults to 'fiscal' when missing. */
+  fiscal_type?: 'fiscal' | 'no_fiscal' | string;
+  /** Multi-method breakdown (PR7). When present, drives the entry split. */
+  payment_methods?: CobroPaymentMethodBreakdown[];
 }
 
 interface PagoData {
@@ -149,6 +166,11 @@ export const ACCOUNTS = {
   DIF_CAMBIO_NEG: '5.5',
   AJUSTES_CC_EGR: '5.6',
   AJUSTE_INVENTARIO: '5.7',
+  // ── Luna (no fiscal) circuit — parallel accounts, NEVER mix with Sol ──
+  VENTAS_NO_FISCALES: '4.2.1',
+  DEUDORES_NO_FISCALES: '1.2.1.1',
+  COBROS_NO_FISCALES_EN_CAJA: '1.1.1.1',
+  COBROS_NO_FISCALES_EN_BANCO: '1.1.2.1',
 } as const;
 
 // VAT rate -> IVA Debito Fiscal account code mapping
@@ -223,7 +245,7 @@ export class AccountingEntriesService {
    * Validates that total debits = total credits.
    */
   async createEntry(params: CreateEntryParams): Promise<any> {
-    const { companyId, date, description, referenceType, referenceId, isAuto = true, createdBy, lines } = params;
+    const { companyId, date, description, referenceType, referenceId, isAuto = true, createdBy, lines, circuit = 'fiscal' } = params;
 
     // Validate balance
     const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
@@ -237,10 +259,10 @@ export class AccountingEntriesService {
       throw new ApiError(400, 'El asiento debe tener al menos una linea');
     }
 
-    // Create journal entry
+    // Create journal entry (Sol/Luna: persist circuit so reports can filter).
     const entryResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, created_by)
-      VALUES (${companyId}, ${date}::date, ${description}, ${referenceType || null}, ${referenceId || null}, ${isAuto}, ${createdBy || null})
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, created_by, circuit)
+      VALUES (${companyId}, ${date}::date, ${description}, ${referenceType || null}, ${referenceId || null}, ${isAuto}, ${createdBy || null}, ${circuit})
       RETURNING *
     `);
     const entryRows = (entryResult as any).rows || entryResult || [];
@@ -277,8 +299,46 @@ export class AccountingEntriesService {
     const total = Number(invoice.total);
     const date = invoice.date || new Date().toISOString().split('T')[0];
     const invoiceType = invoice.invoice_type || '';
-    const isNC = invoiceType.startsWith('NC_');
-    const isND = invoiceType.startsWith('ND_');
+    const isNC = invoiceType.startsWith('NC_') || invoiceType.startsWith('NC');
+    const isND = invoiceType.startsWith('ND_') || invoiceType.startsWith('ND');
+    const isLuna = invoice.fiscal_type === 'no_fiscal';
+
+    // ── Luna (no fiscal) branch ──────────────────────────────────────────
+    // Parallel accounts only. No IVA. No NCs supported in this sprint.
+    if (isLuna) {
+      if (isNC) {
+        throw new ApiError(400, 'Notas de credito no estan soportadas en el circuito Luna (no fiscal)');
+      }
+      // Ensure Luna accounts exist before we try to resolve them (idempotent).
+      await ensureNoFiscalAccounts(invoice.company_id);
+
+      const rLuna = (n: number) => Math.round(n * 100) / 100;
+      const lunaLines: JournalLine[] = [
+        {
+          accountCode: ACCOUNTS.DEUDORES_NO_FISCALES,
+          debit: rLuna(total),
+          credit: 0,
+          description: 'Deudores no fiscales (Luna)',
+        },
+        {
+          accountCode: ACCOUNTS.VENTAS_NO_FISCALES,
+          debit: 0,
+          credit: rLuna(total),
+          description: 'Ventas no fiscales (Luna)',
+        },
+      ];
+
+      return this.createEntry({
+        companyId: invoice.company_id,
+        date,
+        description: 'Factura de venta (Luna)',
+        referenceType: 'invoice',
+        referenceId: invoice.id,
+        isAuto: true,
+        lines: lunaLines,
+        circuit: 'no_fiscal',
+      });
+    }
 
     // Build VAT breakdown grouped by rate
     const vatByRate = new Map<number, number>();
@@ -339,6 +399,7 @@ export class AccountingEntriesService {
       referenceId: invoice.id,
       isAuto: true,
       lines,
+      circuit: 'fiscal',
     });
   }
 
@@ -351,7 +412,92 @@ export class AccountingEntriesService {
     if (!await isAccountingEnabled(cobro.company_id)) return null;
     const amount = Number(cobro.amount);
     const date = cobro.date || new Date().toISOString().split('T')[0];
+    const isLuna = cobro.fiscal_type === 'no_fiscal';
 
+    // Classify a payment method as "bank" (transferencia / debito / credito / mp)
+    // vs "caja" (efectivo and everything else). Cheques do not flow through the
+    // cobro entry itself (they're handled via createEntryForChequeTransition),
+    // so we treat them as "bank-ish" for splitting purposes in the Luna branch
+    // only — but in practice Luna rarely uses cheques.
+    const isBankMethod = (m?: string): boolean => {
+      if (!m) return false;
+      const x = m.toLowerCase();
+      return x === 'transferencia' || x === 'debito' || x === 'credito'
+        || x === 'tarjeta' || x === 'mp' || x === 'mercadopago';
+    };
+
+    // ── Luna (no fiscal) branch ──────────────────────────────────────────
+    if (isLuna) {
+      await ensureNoFiscalAccounts(cobro.company_id);
+
+      // Determine split by payment_methods. If absent, fall back to the
+      // legacy single payment_method / bank_id pair.
+      const methods: CobroPaymentMethodBreakdown[] = Array.isArray(cobro.payment_methods)
+        && cobro.payment_methods.length > 0
+        ? cobro.payment_methods
+        : [{ method: cobro.payment_method || 'efectivo', amount, bank_id: cobro.bank_id || null }];
+
+      const r = (n: number) => Math.round(n * 100) / 100;
+      let cajaAmount = 0;
+      let bancoAmount = 0;
+      for (const pm of methods) {
+        const pmAmount = Number(pm.amount || 0);
+        if (pmAmount <= 0) continue;
+        if (isBankMethod(pm.method)) {
+          bancoAmount += pmAmount;
+        } else {
+          cajaAmount += pmAmount;
+        }
+      }
+      // Normalize rounding drift so debits match credits to the cent.
+      cajaAmount = r(cajaAmount);
+      bancoAmount = r(bancoAmount);
+      const debitTotal = r(cajaAmount + bancoAmount);
+      // If the sum of method amounts doesn't match the cobro header amount
+      // (legacy callers), fall back to the header amount as a single caja line.
+      if (Math.abs(debitTotal - r(amount)) > 0.01) {
+        cajaAmount = r(amount);
+        bancoAmount = 0;
+      }
+
+      const lunaLines: JournalLine[] = [];
+      if (cajaAmount > 0) {
+        lunaLines.push({
+          accountCode: ACCOUNTS.COBROS_NO_FISCALES_EN_CAJA,
+          debit: cajaAmount,
+          credit: 0,
+          description: 'Cobros no fiscales en caja (Luna)',
+        });
+      }
+      if (bancoAmount > 0) {
+        lunaLines.push({
+          accountCode: ACCOUNTS.COBROS_NO_FISCALES_EN_BANCO,
+          debit: bancoAmount,
+          credit: 0,
+          description: 'Cobros no fiscales en banco (Luna)',
+        });
+      }
+      lunaLines.push({
+        accountCode: ACCOUNTS.DEUDORES_NO_FISCALES,
+        debit: 0,
+        credit: r(cajaAmount + bancoAmount),
+        description: 'Deudores no fiscales (Luna)',
+      });
+
+      return this.createEntry({
+        companyId: cobro.company_id,
+        date,
+        description: 'Cobro registrado (Luna)',
+        referenceType: 'cobro',
+        referenceId: cobro.id,
+        isAuto: true,
+        lines: lunaLines,
+        circuit: 'no_fiscal',
+      });
+      // Note: no exchange-rate diff on Luna — ARS-only circuit by design.
+    }
+
+    // ── Sol (fiscal) branch — existing behavior ──────────────────────────
     const mainEntry = await this.createEntry({
       companyId: cobro.company_id,
       date,
@@ -363,6 +509,7 @@ export class AccountingEntriesService {
         { accountCode: ACCOUNTS.CAJA, debit: amount, credit: 0, description: 'Caja y Bancos' },
         { accountCode: ACCOUNTS.DEUDORES_VENTAS, debit: 0, credit: amount, description: 'Deudores por Ventas' },
       ],
+      circuit: 'fiscal',
     });
 
     // Exchange rate difference entry
@@ -511,8 +658,8 @@ export class AccountingEntriesService {
     if (!diffAccountId || !bankAccountId) return;
 
     const diffEntryResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-      VALUES (${companyId}, ${date}::date, ${'Diferencia de cambio ' + currency}, 'exchange_diff', ${referenceId}, true)
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+      VALUES (${companyId}, ${date}::date, ${'Diferencia de cambio ' + currency}, 'exchange_diff', ${referenceId}, true, 'fiscal')
       RETURNING id
     `);
     const diffEntryId = ((diffEntryResult as any).rows || [])[0]?.id;
@@ -567,8 +714,8 @@ export class AccountingEntriesService {
 
     // Create entry
     const entryResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-      VALUES (${companyId}, ${date}::date, 'Asiento de apertura', 'opening', ${companyId}, false)
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+      VALUES (${companyId}, ${date}::date, 'Asiento de apertura', 'opening', ${companyId}, false, 'fiscal')
       RETURNING id
     `);
     const entryId = ((entryResult as any).rows || [])[0]?.id;
@@ -835,14 +982,25 @@ export class AccountingEntriesService {
 
   /**
    * Get chart of accounts for a company (tree-ordered by code).
+   *
+   * Sol/Luna: when `canAccessLuna` is false, the 4 Luna accounts (1.1.1.1,
+   * 1.1.2.1, 1.2.1.1, 4.2.1) are filtered out so the UI never exposes them.
    */
-  async getChartOfAccounts(companyId: string): Promise<any[]> {
+  async getChartOfAccounts(companyId: string, canAccessLuna: boolean = false): Promise<any[]> {
     const result = await db.execute(sql`
       SELECT * FROM chart_of_accounts
       WHERE company_id = ${companyId}
       ORDER BY code
     `);
-    return (result as any).rows || result || [];
+    const rows = (result as any).rows || result || [];
+    if (canAccessLuna) return rows;
+    const LUNA_CODES = new Set<string>([
+      ACCOUNTS.DEUDORES_NO_FISCALES,
+      ACCOUNTS.VENTAS_NO_FISCALES,
+      ACCOUNTS.COBROS_NO_FISCALES_EN_CAJA,
+      ACCOUNTS.COBROS_NO_FISCALES_EN_BANCO,
+    ]);
+    return rows.filter((r: any) => !LUNA_CODES.has(r.code));
   }
 
   /**
@@ -1034,8 +1192,8 @@ export class AccountingEntriesService {
       }
 
       const entryResultE = await db.execute(sql`
-        INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-        VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque emitido ' + data.new_status}, ${'cheque_emitido_' + data.new_status}, ${data.id}, true)
+        INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+        VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque emitido ' + data.new_status}, ${'cheque_emitido_' + data.new_status}, ${data.id}, true, 'fiscal')
         RETURNING id
       `);
       const entryIdE = ((entryResultE as any).rows || [])[0]?.id;
@@ -1116,8 +1274,8 @@ export class AccountingEntriesService {
 
     // Crear asiento
     const entryResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque ' + data.new_status}, ${'cheque_' + data.new_status}, ${data.id}, true)
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${'Cheque ' + data.new_status}, ${'cheque_' + data.new_status}, ${data.id}, true, 'fiscal')
       RETURNING id
     `);
     const entryId = ((entryResult as any).rows || [])[0]?.id;
@@ -1170,8 +1328,8 @@ export class AccountingEntriesService {
     if (!debitId || !creditId) return;
 
     const entryResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${desc}, 'adjustment', ${data.id}, true)
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+      VALUES (${data.company_id}, ${data.date || sql`NOW()`}, ${desc}, 'adjustment', ${data.id}, true, 'fiscal')
       RETURNING id
     `);
     const entryId = ((entryResult as any).rows || [])[0]?.id;
@@ -1193,7 +1351,7 @@ export class AccountingEntriesService {
 
     // Find original entry
     const entryResult = await db.execute(sql`
-      SELECT je.id, je.description, je.date
+      SELECT je.id, je.description, je.date, je.circuit
       FROM journal_entries je
       WHERE je.company_id = ${companyId}
         AND je.reference_type = ${referenceType}
@@ -1204,6 +1362,8 @@ export class AccountingEntriesService {
     if (entries.length === 0) return; // No entry to reverse
 
     const original = entries[0];
+    // Preserve the original circuit so reversals stay inside the same Sol/Luna lane.
+    const originalCircuit: CircuitType = original.circuit === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
 
     // Get original lines
     const linesResult = await db.execute(sql`
@@ -1213,10 +1373,10 @@ export class AccountingEntriesService {
     const lines = (linesResult as any).rows || [];
     if (lines.length === 0) return;
 
-    // Create reverse entry
+    // Create reverse entry (inherits original circuit so Luna reversals stay in Luna).
     const reverseResult = await db.execute(sql`
-      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto)
-      VALUES (${companyId}, NOW(), ${'Anulacion: ' + (original.description || '')}, ${referenceType + '_reversal'}, ${referenceId}, true)
+      INSERT INTO journal_entries (company_id, date, description, reference_type, reference_id, is_auto, circuit)
+      VALUES (${companyId}, NOW(), ${'Anulacion: ' + (original.description || '')}, ${referenceType + '_reversal'}, ${referenceId}, true, ${originalCircuit})
       RETURNING id
     `);
     const reverseId = ((reverseResult as any).rows || [])[0]?.id;
@@ -1233,8 +1393,35 @@ export class AccountingEntriesService {
 
   /**
    * Libro Mayor: detailed ledger for a specific account with running balance.
+   *
+   * Sol/Luna filter:
+   *   - `circuit`: 'fiscal' | 'no_fiscal' | 'all'. Defaults to 'fiscal'
+   *     (backward compatible — callers that don't pass it see Sol only).
+   *   - `canAccessLuna`: when false, we force-override to 'fiscal' regardless
+   *     of input. This also blocks any access to Luna account codes
+   *     (1.2.1.1 / 4.2.1 / 1.1.1.1 / 1.1.2.1) by returning an empty result.
    */
-  async getLedger(companyId: string, accountCode: string, filters?: { date_from?: string; date_to?: string }): Promise<any[]> {
+  async getLedger(
+    companyId: string,
+    accountCode: string,
+    filters?: { date_from?: string; date_to?: string; circuit?: 'fiscal' | 'no_fiscal' | 'all' },
+    canAccessLuna: boolean = false,
+  ): Promise<any[]> {
+    // Hard guard: users without Luna access can never see Luna accounts.
+    const LUNA_CODES = new Set<string>([
+      ACCOUNTS.DEUDORES_NO_FISCALES,
+      ACCOUNTS.VENTAS_NO_FISCALES,
+      ACCOUNTS.COBROS_NO_FISCALES_EN_CAJA,
+      ACCOUNTS.COBROS_NO_FISCALES_EN_BANCO,
+    ]);
+    if (!canAccessLuna && LUNA_CODES.has(accountCode)) {
+      return [];
+    }
+
+    // Effective circuit: users without Luna access get 'fiscal' forced.
+    const requested = filters?.circuit || 'fiscal';
+    const effectiveCircuit: 'fiscal' | 'no_fiscal' | 'all' = canAccessLuna ? requested : 'fiscal';
+
     const dateConditions: any[] = [];
     if (filters?.date_from) {
       dateConditions.push(sql`je.date >= ${filters.date_from}::date`);
@@ -1247,6 +1434,10 @@ export class AccountingEntriesService {
       ? sql`AND ${sql.join(dateConditions, sql` AND `)}`
       : sql``;
 
+    const circuitFilter = effectiveCircuit === 'all'
+      ? sql``
+      : sql`AND COALESCE(je.circuit, 'fiscal') = ${effectiveCircuit}`;
+
     const result = await db.execute(sql`
       SELECT
         je.date,
@@ -1258,6 +1449,7 @@ export class AccountingEntriesService {
         jel.credit::numeric as credit,
         jel.description as line_description,
         je.created_at,
+        je.circuit,
         coa.type as account_type
       FROM journal_entry_lines jel
       JOIN journal_entries je ON jel.entry_id = je.id
@@ -1265,6 +1457,7 @@ export class AccountingEntriesService {
       WHERE je.company_id = ${companyId}
         AND coa.code = ${accountCode}
         ${dateFilter}
+        ${circuitFilter}
       ORDER BY je.date ASC, je.entry_number ASC, je.created_at ASC
     `);
 
@@ -1298,6 +1491,7 @@ export class AccountingEntriesService {
         line_description: row.line_description,
         created_at: row.created_at,
         account_type: row.account_type,
+        circuit: row.circuit || 'fiscal',
         running_balance: Math.round(runningBalance * 100) / 100,
       };
     });

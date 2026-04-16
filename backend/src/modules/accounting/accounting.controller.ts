@@ -7,7 +7,8 @@ import { seedChartOfAccounts, migrateChartOfAccounts } from './chart-seed';
 
 export class AccountingController {
   async getChartOfAccounts(req: AuthRequest, res: Response) {
-    const data = await accountingEntriesService.getChartOfAccounts(req.user!.company_id);
+    const canAccessLuna = !!(req.user as any)?.can_access_luna;
+    const data = await accountingEntriesService.getChartOfAccounts(req.user!.company_id, canAccessLuna);
     res.json(data);
   }
 
@@ -75,10 +76,22 @@ export class AccountingController {
     if (!accountCode) {
       return res.status(400).json({ error: 'account_code es requerido' });
     }
-    const data = await accountingEntriesService.getLedger(req.user!.company_id, accountCode, {
-      date_from: req.query.date_from as string,
-      date_to: req.query.date_to as string,
-    });
+    const canAccessLuna = !!(req.user as any)?.can_access_luna;
+    const rawCircuit = req.query.circuit as string | undefined;
+    const circuit: 'fiscal' | 'no_fiscal' | 'all' | undefined =
+      rawCircuit === 'no_fiscal' || rawCircuit === 'all' || rawCircuit === 'fiscal'
+        ? rawCircuit
+        : undefined;
+    const data = await accountingEntriesService.getLedger(
+      req.user!.company_id,
+      accountCode,
+      {
+        date_from: req.query.date_from as string,
+        date_to: req.query.date_to as string,
+        circuit,
+      },
+      canAccessLuna,
+    );
     res.json(data);
   }
 

@@ -30,7 +30,7 @@ export class UsersController {
 
   async createUser(req: AuthRequest, res: Response) {
     try {
-      const { email, name, password, role } = req.body;
+      const { email, name, password, role, can_access_luna } = req.body;
 
       if (!email || !name || !password || !role) {
         throw new ApiError(400, 'Faltan campos requeridos: email, name, password, role');
@@ -42,9 +42,10 @@ export class UsersController {
 
       const user = await usersService.createUser(
         req.user!.company_id,
-        { email, name, password, role },
+        { email, name, password, role, can_access_luna },
         req.user!.id,
         req.ip || undefined,
+        req.user!.role,
       );
       res.status(201).json({ user });
     } catch (error) {
@@ -162,6 +163,29 @@ export class UsersController {
         return res.status(error.statusCode).json({ error: error.message });
       }
       res.status(500).json({ error: 'Error al resetear contrasena' });
+    }
+  }
+
+  async setCircuitAccess(req: AuthRequest, res: Response) {
+    try {
+      const { luna } = req.body;
+      if (typeof luna !== 'boolean') {
+        throw new ApiError(400, 'Se requiere el campo luna (boolean)');
+      }
+      const user = await usersService.setCircuitAccess(
+        req.user!.company_id,
+        req.user!.id,
+        req.user!.role,
+        req.params.id,
+        luna,
+        req.ip || undefined,
+      );
+      res.json({ user });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Error al actualizar acceso a Luna' });
     }
   }
 

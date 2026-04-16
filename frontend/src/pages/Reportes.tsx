@@ -8,6 +8,7 @@ import { api } from '@/services/api'
 import { formatDate } from '@/lib/utils'
 import { useBilling } from '@/hooks/useBilling'
 import { useCan } from '@/components/shared/PermissionGate'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 import { UpgradePrompt } from '@/components/shared/UpgradePrompt'
 import { LibroIVAVentasTab } from '@/components/reportes/LibroIVAVentasTab'
 import { LibroIVAComprasTab } from '@/components/reportes/LibroIVAComprasTab'
@@ -152,6 +153,16 @@ export const Reportes: React.FC = () => {
   const { hasFeature } = useBilling()
   const canAccessAdvanced = hasFeature('advanced_reports')
   const canViewFinancial = useCan('reports', 'view_financial')
+  const { canAccessLuna } = useCircuitAccess()
+
+  // Sol/Luna filter: which circuits feed the business reports.
+  // Default ['fiscal'] = only Sol. Luna users can toggle via the segmented control.
+  // Non-Luna users never see the control and the backend silently downgrades any
+  // hypothetical override to ['fiscal'], so Luna stays invisible.
+  type BizFiscalFilter = 'fiscal' | 'no_fiscal' | 'all'
+  const [fiscalFilter, setFiscalFilter] = useState<BizFiscalFilter>('fiscal')
+  const fiscalTypesForApi: Array<'fiscal' | 'no_fiscal'> =
+    fiscalFilter === 'all' ? ['fiscal', 'no_fiscal'] : [fiscalFilter]
 
   const [activeTab, setActiveTab] = useState<TabKey>('biz_ventas')
   const [loading, setLoading] = useState(false)
@@ -230,22 +241,22 @@ export const Reportes: React.FC = () => {
           break
         }
         case 'biz_ventas': {
-          const res = await api.getBusinessVentas(dateFrom, dateTo)
+          const res = await api.getBusinessVentas(dateFrom, dateTo, fiscalTypesForApi)
           setBizVentasData(res)
           break
         }
         case 'biz_rentabilidad': {
-          const res = await api.getBusinessRentabilidad(dateFrom, dateTo)
+          const res = await api.getBusinessRentabilidad(dateFrom, dateTo, fiscalTypesForApi)
           setBizRentabilidadData(res)
           break
         }
         case 'biz_clientes': {
-          const res = await api.getBusinessClientes(dateFrom, dateTo)
+          const res = await api.getBusinessClientes(dateFrom, dateTo, fiscalTypesForApi)
           setBizClientesData(res)
           break
         }
         case 'biz_cobranzas': {
-          const res = await api.getBusinessCobranzas(dateFrom, dateTo)
+          const res = await api.getBusinessCobranzas(dateFrom, dateTo, fiscalTypesForApi)
           setBizCobranzasData(res)
           break
         }
@@ -265,7 +276,7 @@ export const Reportes: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [activeTab, dateFrom, dateTo, canAccessAdvanced])
+  }, [activeTab, dateFrom, dateTo, canAccessAdvanced, fiscalFilter])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -516,6 +527,35 @@ export const Reportes: React.FC = () => {
           )}
         </nav>
       </div>
+
+      {/* Sol/Luna circuit toggle — business tabs only, Luna users only */}
+      {canAccessLuna && !isAccountingTab(activeTab) && (
+        <div className="flex items-center gap-2 print:hidden">
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Circuito
+          </span>
+          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+            {([
+              { value: 'fiscal' as const, label: 'Solo Sol', icon: '\u2600\ufe0f' },
+              { value: 'no_fiscal' as const, label: 'Solo Luna', icon: '\ud83c\udf19' },
+              { value: 'all' as const, label: 'Ambos', icon: '\u2600\ufe0f\ud83c\udf19' },
+            ]).map(t => (
+              <button
+                key={t.value}
+                onClick={() => setFiscalFilter(t.value)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  fiscalFilter === t.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                <span className="mr-1">{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       {showDateFilters && (

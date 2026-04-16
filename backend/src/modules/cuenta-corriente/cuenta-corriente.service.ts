@@ -15,7 +15,19 @@ export class CuentaCorrienteService {
    * - adelantos_pagos = SUM(pagos.amount) where pending_status = 'pending_invoice'
    * - ajustes debit/credit from account_adjustments
    */
-  async getResumen(companyId: string, businessUnitId?: string) {
+  async getResumen(
+    companyId: string,
+    businessUnitIdOrOpts?: string | { businessUnitId?: string; userCanAccessLuna?: boolean },
+    userCanAccessLunaArg?: boolean
+  ) {
+    // Support both legacy positional signature (companyId, buId) and the new
+    // CAT-6 opts object. Defaults: no BU filter, Luna hidden.
+    const businessUnitId = typeof businessUnitIdOrOpts === 'string'
+      ? businessUnitIdOrOpts
+      : businessUnitIdOrOpts?.businessUnitId;
+    const userCanAccessLuna = typeof businessUnitIdOrOpts === 'object' && businessUnitIdOrOpts !== null
+      ? Boolean(businessUnitIdOrOpts.userCanAccessLuna)
+      : Boolean(userCanAccessLunaArg);
     try {
       const buFilter = businessUnitId
         ? sql` AND business_unit_id = ${businessUnitId}`
@@ -93,9 +105,31 @@ export class CuentaCorrienteService {
         SELECT
           e.id, e.name, e.cuit, e.status,
 
-          -- Ventas: facturas no canceladas
+          -- CAT-6: Sol/Luna split via SUM(CASE WHEN fiscal_type=...) aggregates.
+          -- Single query per row, one pass on each source table.
           -- NCs excluded from calculations. This is the PR7-T13 semantic: NCs never
           -- add to revenue nor reduce cobros applied. NCs-as-credit is a separate feature (TODO).
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='fiscal' THEN CAST(i.total_amount AS decimal) ELSE 0 END)
+            FROM invoices i
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status != 'cancelled'
+              AND i.invoice_type::text NOT LIKE 'NC%'
+              ${buFilter}
+          ), 0) as total_ventas_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='no_fiscal' THEN CAST(i.total_amount AS decimal) ELSE 0 END)
+            FROM invoices i
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status != 'cancelled'
+              AND i.invoice_type::text NOT LIKE 'NC%'
+              ${buFilter}
+          ), 0) as total_ventas_luna,
+          -- Legacy total_ventas retained for back-compat (tests use this label).
           COALESCE((
             SELECT SUM(CAST(i.total_amount AS decimal))
             FROM invoices i
@@ -110,7 +144,31 @@ export class CuentaCorrienteService {
           -- Cobros aplicados (via tabla intermedia)
           -- PR7-T5/T16: excluir cobros anulados si la columna status existe.
           -- NCs excluded: si la application apunta a una NC, NO se cuenta como cobro aplicado.
-          -- Mantiene consistencia con total_ventas (que tampoco las cuenta).
+          -- CAT-6: Sol/Luna split by invoice.fiscal_type (applications inherit from their invoice).
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='fiscal' THEN CAST(cia.amount_applied AS decimal) ELSE 0 END)
+            FROM cobro_invoice_applications cia
+            JOIN invoices i ON cia.invoice_id = i.id
+            JOIN cobros cs ON cia.cobro_id = cs.id
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.invoice_type::text NOT LIKE 'NC%'
+              ${cobrosAnuladoFilter}
+              ${buFilter}
+          ), 0) as total_cobros_aplicados_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='no_fiscal' THEN CAST(cia.amount_applied AS decimal) ELSE 0 END)
+            FROM cobro_invoice_applications cia
+            JOIN invoices i ON cia.invoice_id = i.id
+            JOIN cobros cs ON cia.cobro_id = cs.id
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.invoice_type::text NOT LIKE 'NC%'
+              ${cobrosAnuladoFilter}
+              ${buFilter}
+          ), 0) as total_cobros_aplicados_luna,
           COALESCE((
             SELECT SUM(CAST(cia.amount_applied AS decimal))
             FROM cobro_invoice_applications cia
@@ -140,6 +198,34 @@ export class CuentaCorrienteService {
               ${cobrosAnuladoFilterCo}
               ${buFilter}
           ), 0) as total_adelantos_cobros,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(co.fiscal_type,'fiscal')='fiscal' THEN
+              CAST(COALESCE(co.total_amount, co.amount) AS decimal) - COALESCE((
+                SELECT SUM(CAST(cia_inner.amount_applied AS decimal))
+                FROM cobro_invoice_applications cia_inner
+                WHERE cia_inner.cobro_id = co.id
+              ), 0) ELSE 0 END)
+            FROM cobros co
+            WHERE co.company_id = ${companyId}
+              AND co.enterprise_id = e.id
+              AND co.pending_status = 'pending_invoice'
+              ${cobrosAnuladoFilterCo}
+              ${buFilter}
+          ), 0) as total_adelantos_cobros_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(co.fiscal_type,'fiscal')='no_fiscal' THEN
+              CAST(COALESCE(co.total_amount, co.amount) AS decimal) - COALESCE((
+                SELECT SUM(CAST(cia_inner.amount_applied AS decimal))
+                FROM cobro_invoice_applications cia_inner
+                WHERE cia_inner.cobro_id = co.id
+              ), 0) ELSE 0 END)
+            FROM cobros co
+            WHERE co.company_id = ${companyId}
+              AND co.enterprise_id = e.id
+              AND co.pending_status = 'pending_invoice'
+              ${cobrosAnuladoFilterCo}
+              ${buFilter}
+          ), 0) as total_adelantos_cobros_luna,
 
           -- Compras: purchase_invoices no canceladas
           -- NCs excluded per PR7-T13 semantic: NCs neither inflate nor subtract from compras.
@@ -189,6 +275,7 @@ export class CuentaCorrienteService {
 
           -- Ajustes debit
           -- H2: BU filter aplicado si account_adjustments tiene la columna (defensive).
+          -- CAT-6: split por fiscal_type. Total preserved for legacy.
           COALESCE((
             SELECT SUM(CAST(aa.amount AS decimal))
             FROM account_adjustments aa
@@ -196,6 +283,20 @@ export class CuentaCorrienteService {
               AND aa.adjustment_type = 'debit'
               ${ajustesBuFilter}
           ), 0) as total_ajustes_debit,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(aa.fiscal_type,'fiscal')='fiscal' THEN CAST(aa.amount AS decimal) ELSE 0 END)
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'debit'
+              ${ajustesBuFilter}
+          ), 0) as total_ajustes_debit_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(aa.fiscal_type,'fiscal')='no_fiscal' THEN CAST(aa.amount AS decimal) ELSE 0 END)
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'debit'
+              ${ajustesBuFilter}
+          ), 0) as total_ajustes_debit_luna,
 
           -- Ajustes credit
           COALESCE((
@@ -205,9 +306,38 @@ export class CuentaCorrienteService {
               AND aa.adjustment_type = 'credit'
               ${ajustesBuFilter}
           ), 0) as total_ajustes_credit,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(aa.fiscal_type,'fiscal')='fiscal' THEN ABS(CAST(aa.amount AS decimal)) ELSE 0 END)
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'credit'
+              ${ajustesBuFilter}
+          ), 0) as total_ajustes_credit_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(aa.fiscal_type,'fiscal')='no_fiscal' THEN ABS(CAST(aa.amount AS decimal)) ELSE 0 END)
+            FROM account_adjustments aa
+            WHERE aa.company_id = ${companyId} AND aa.enterprise_id = e.id
+              AND aa.adjustment_type = 'credit'
+              ${ajustesBuFilter}
+          ), 0) as total_ajustes_credit_luna,
 
           -- Retenciones sufridas (el cliente nos retuvo — reduce lo que nos debe)
           -- H5: excluir retenciones atadas a cobros anulados. H2: heredar BU del cobro linkeado.
+          -- CAT-6: Luna has NO retenciones (enforced by CAT-5), so luna subquery always 0.
+          COALESCE((
+            SELECT SUM(CAST(r.amount AS decimal))
+            FROM retenciones r
+            LEFT JOIN cobros rc ON rc.id = r.cobro_id
+            WHERE r.company_id = ${companyId}
+              AND r.enterprise_id = e.id
+              AND r.direction = 'sufrida'
+              AND (r.cobro_id IS NULL OR rc.id IS NULL OR ${cobrosStatusExists ? sql`(rc.status IS NULL OR rc.status != 'anulado')` : sql`TRUE`})
+              AND (r.cobro_id IS NULL OR COALESCE(rc.fiscal_type,'fiscal')='fiscal')
+              ${businessUnitId
+                ? sql` AND (r.cobro_id IS NULL OR rc.business_unit_id = ${businessUnitId})`
+                : sql``}
+          ), 0) as total_retenciones_sufridas_sol,
+          -- Retenciones sufridas total (legacy field), Luna should remain 0 by design.
           COALESCE((
             SELECT SUM(CAST(r.amount AS decimal))
             FROM retenciones r
@@ -243,6 +373,28 @@ export class CuentaCorrienteService {
       const rows = (result as any).rows || result || [];
 
       return rows.map((r: any) => {
+        // CAT-6: compute per-circuit balances.
+        // Formula per circuit: ventas + ajustesDebit - cobrosAplicados - retencionesSufridas - ajustesCredit
+        // (note: excludes the "compra side" — CC cliente vs CC proveedor is still mixed
+        //  in the legacy saldo field, but Sol/Luna split only scopes the VENTAS/cobros flow
+        //  because Luna never has purchase invoices or pagos.)
+        const ventasSol = parseFloat(r.total_ventas_sol || '0');
+        const ventasLuna = parseFloat(r.total_ventas_luna || '0');
+        const cobrosAplSol = parseFloat(r.total_cobros_aplicados_sol || '0');
+        const cobrosAplLuna = parseFloat(r.total_cobros_aplicados_luna || '0');
+        const adelCobrosSol = parseFloat(r.total_adelantos_cobros_sol || '0');
+        const adelCobrosLuna = parseFloat(r.total_adelantos_cobros_luna || '0');
+        const ajDebitSol = parseFloat(r.total_ajustes_debit_sol || '0');
+        const ajDebitLuna = parseFloat(r.total_ajustes_debit_luna || '0');
+        const ajCreditSol = parseFloat(r.total_ajustes_credit_sol || '0');
+        const ajCreditLuna = parseFloat(r.total_ajustes_credit_luna || '0');
+        const retSufridasSol = parseFloat(r.total_retenciones_sufridas_sol || '0');
+        // Luna has no retenciones by design (enforced by CAT-5).
+        const totalCobrosSol = cobrosAplSol + adelCobrosSol;
+        const totalCobrosLuna = cobrosAplLuna + adelCobrosLuna;
+        const saldoSol = ventasSol + ajDebitSol - totalCobrosSol - retSufridasSol - ajCreditSol;
+        const saldoLuna = ventasLuna + ajDebitLuna - totalCobrosLuna - ajCreditLuna;
+
         const ventas = parseFloat(r.total_ventas || '0');
         const cobrosAplicados = parseFloat(r.total_cobros_aplicados || '0');
         const adelantosCobros = parseFloat(r.total_adelantos_cobros || '0');
@@ -284,8 +436,9 @@ export class CuentaCorrienteService {
         const hasCompras = compras > 0 || pagosAplicados > 0 || adelantosPagos > 0;
         const tipo = hasVentas && hasCompras ? 'mixto' : hasCompras ? 'proveedor' : 'cliente';
 
-        return {
+        const out: any = {
           ...r,
+          saldo_sol: Math.round(saldoSol * 100) / 100,
           total_ventas: ventas,
           total_cobros: totalCobros,
           total_cobros_aplicados: cobrosAplicados,
@@ -311,6 +464,10 @@ export class CuentaCorrienteService {
           saldo_neto: balanceReal,
           tipo,
         };
+        if (userCanAccessLuna) {
+          out.saldo_luna = Math.round(saldoLuna * 100) / 100;
+        }
+        return out;
       });
     } catch (error: any) {
       // PR7-T16: log causa real con detalle, pero fallback a lista vacia
@@ -323,8 +480,24 @@ export class CuentaCorrienteService {
     }
   }
 
-  async getDetalle(companyId: string, enterpriseId: string, filters?: { dateFrom?: string; dateTo?: string; businessUnitId?: string }) {
+  async getDetalle(
+    companyId: string,
+    enterpriseId: string,
+    filters?: {
+      dateFrom?: string;
+      dateTo?: string;
+      businessUnitId?: string;
+      // CAT-6: Sol/Luna scoping. Defaults to 'fiscal' when omitted (legacy callers).
+      fiscal_type?: 'fiscal' | 'no_fiscal';
+      userCanAccessLuna?: boolean;
+    }
+  ) {
     try {
+      // CAT-6: resolve circuit + leak-defense for non-Luna users.
+      const circuit: 'fiscal' | 'no_fiscal' = filters?.fiscal_type || 'fiscal';
+      if (circuit === 'no_fiscal' && filters?.userCanAccessLuna === false) {
+        throw new ApiError(404, 'No encontrado');
+      }
       // Validate enterprise exists
       const entCheck = await pool.query(
         'SELECT id, name, cuit FROM enterprises WHERE id = $1 AND company_id = $2',
@@ -357,6 +530,15 @@ export class CuentaCorrienteService {
         buFilter = ` AND business_unit_id = $${params.length}`;
       }
 
+      // CAT-6: fiscal_type param — applied to every UNION subquery that has
+      // a fiscal_type column (invoices, cobros, account_adjustments).
+      // purchase_invoices / pagos / retenciones are Sol-only (no Luna),
+      // so under circuit='no_fiscal' we exclude them entirely by gating below.
+      params.push(circuit);
+      const circuitParamIdx = params.length;
+      const fiscalFilter = (alias: string) => ` AND COALESCE(${alias}.fiscal_type,'fiscal') = $${circuitParamIdx}`;
+      const isSol = circuit === 'fiscal';
+
       let dateFilter = '';
       if (filters?.dateFrom) {
         params.push(filters.dateFrom);
@@ -383,6 +565,7 @@ export class CuentaCorrienteService {
           FROM invoices i
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalFilter('i')}
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -398,6 +581,7 @@ export class CuentaCorrienteService {
           FROM cobros c
           WHERE c.enterprise_id = $1 AND c.company_id = $2
             ${cobrosAnuladoFilterC}
+            ${fiscalFilter('c')}
             ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
 
           UNION ALL
@@ -416,6 +600,7 @@ export class CuentaCorrienteService {
             AND (pi.invoice_type IS NULL OR pi.invoice_type::text NOT LIKE 'NC%')
             -- NCs excluded per PR7-T13 semantic: NCs neither inflate nor subtract from compras.
             -- NCs-as-credit (true reduction of supplier debt) is a separate feature TODO.
+            ${isSol ? '' : ' AND FALSE'}
             ${buFilter.replace('business_unit_id', 'pi.business_unit_id')}
 
           UNION ALL
@@ -431,6 +616,7 @@ export class CuentaCorrienteService {
           FROM pagos p
           WHERE p.enterprise_id = $1 AND p.company_id = $2
             ${pagosAnuladoFilterP}
+            ${isSol ? '' : ' AND FALSE'}
             ${buFilter.replace('business_unit_id', 'p.business_unit_id')}
 
           UNION ALL
@@ -445,6 +631,7 @@ export class CuentaCorrienteService {
             aa.id
           FROM account_adjustments aa
           WHERE aa.enterprise_id = $1 AND aa.company_id = $2
+            ${fiscalFilter('aa')}
             ${buFilter && ajustesBusinessUnitExists ? buFilter.replace('business_unit_id', 'aa.business_unit_id') : ''}
 
           UNION ALL
@@ -464,6 +651,7 @@ export class CuentaCorrienteService {
           LEFT JOIN cobros rc ON rc.id = r.cobro_id
           WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'sufrida'
             ${cobrosStatusExists ? ` AND (r.cobro_id IS NULL OR rc.status IS NULL OR rc.status != 'anulado')` : ''}
+            ${isSol ? '' : ' AND FALSE'}
             ${buFilter ? ` AND (r.cobro_id IS NULL OR rc.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1})` : ''}
 
           UNION ALL
@@ -483,6 +671,7 @@ export class CuentaCorrienteService {
           LEFT JOIN pagos rp ON rp.id = r.pago_id
           WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'practicada'
             ${pagosStatusExists ? ` AND (r.pago_id IS NULL OR rp.status IS NULL OR rp.status != 'anulado')` : ''}
+            ${isSol ? '' : ' AND FALSE'}
             ${buFilter ? ` AND (r.pago_id IS NULL OR rp.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1})` : ''}
       `;
 
@@ -546,7 +735,19 @@ export class CuentaCorrienteService {
     }
   }
 
-  async getPdfData(companyId: string, enterpriseId: string, dateFrom: string, dateTo: string) {
+  async getPdfData(
+    companyId: string,
+    enterpriseId: string,
+    dateFrom: string,
+    dateTo: string,
+    opts?: { fiscal_type?: 'fiscal' | 'no_fiscal'; userCanAccessLuna?: boolean }
+  ) {
+    // CAT-6: resolve circuit + leak-defense.
+    const circuit: 'fiscal' | 'no_fiscal' = opts?.fiscal_type || 'fiscal';
+    if (circuit === 'no_fiscal' && opts?.userCanAccessLuna === false) {
+      throw new ApiError(404, 'No encontrado');
+    }
+    const isSol = circuit === 'fiscal';
     try {
       const entCheck = await db.execute(sql`
         SELECT id, name, cuit FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}
@@ -583,6 +784,7 @@ export class CuentaCorrienteService {
             AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
             AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            AND COALESCE(i.fiscal_type,'fiscal') = ${circuit}
         `);
       } catch (e) {
         console.error('[getPdfData] invoices query failed:', (e as any)?.message);
@@ -602,6 +804,7 @@ export class CuentaCorrienteService {
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
             AND (co.status IS NULL OR co.status != 'anulado')
             AND i.invoice_type::text NOT LIKE 'NC%'
+            AND COALESCE(i.fiscal_type,'fiscal') = ${circuit}
         `);
       } catch (e) {
         console.error('[getPdfData] cobros query failed:', (e as any)?.message);
@@ -621,6 +824,7 @@ export class CuentaCorrienteService {
           WHERE co.company_id = ${companyId} AND co.enterprise_id = ${enterpriseId}
             AND co.pending_status = 'pending_invoice'
             AND (co.status IS NULL OR co.status != 'anulado')
+            AND COALESCE(co.fiscal_type,'fiscal') = ${circuit}
         `);
       } catch (e) {
         console.error('[getPdfData] adelantos query failed:', (e as any)?.message);
@@ -637,6 +841,7 @@ export class CuentaCorrienteService {
             aa.adjustment_type
           FROM account_adjustments aa
           WHERE aa.company_id = ${companyId} AND aa.enterprise_id = ${enterpriseId}
+            AND COALESCE(aa.fiscal_type,'fiscal') = ${circuit}
         `);
       } catch (e) {
         console.error('[getPdfData] adjustments query failed:', (e as any)?.message);
@@ -656,6 +861,7 @@ export class CuentaCorrienteService {
           WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
             AND r.direction = 'sufrida'
             AND (r.cobro_id IS NULL OR rc.id IS NULL OR rc.status IS NULL OR rc.status != 'anulado')
+            AND ${isSol ? sql`TRUE` : sql`FALSE`}
         `);
       } catch (e) {
         console.error('[getPdfData] retenciones sufridas query failed:', (e as any)?.message);
@@ -675,6 +881,7 @@ export class CuentaCorrienteService {
           WHERE r.company_id = ${companyId} AND r.enterprise_id = ${enterpriseId}
             AND r.direction = 'practicada'
             AND (r.pago_id IS NULL OR rp.id IS NULL OR rp.status IS NULL OR rp.status != 'anulado')
+            AND ${isSol ? sql`TRUE` : sql`FALSE`}
         `);
       } catch (e) {
         console.error('[getPdfData] retenciones practicadas query failed:', (e as any)?.message);
@@ -692,6 +899,7 @@ export class CuentaCorrienteService {
           WHERE pi.company_id = ${companyId} AND pi.enterprise_id = ${enterpriseId}
             AND pi.status NOT IN ('cancelled', 'cancelado')
             AND (pi.invoice_type IS NULL OR pi.invoice_type::text NOT LIKE 'NC%')
+            AND ${isSol ? sql`TRUE` : sql`FALSE`}
             -- NCs excluded per PR7-T13 semantic: NCs neither inflate nor subtract from compras.
             -- NCs-as-credit (true reduction of supplier debt) is a separate feature TODO.
         `);
@@ -713,6 +921,7 @@ export class CuentaCorrienteService {
           WHERE pa.company_id = ${companyId} AND pa.enterprise_id = ${enterpriseId}
             AND pi.status NOT IN ('cancelled', 'cancelado')
             AND (pi.invoice_type IS NULL OR pi.invoice_type::text NOT LIKE 'NC%')
+            AND ${isSol ? sql`TRUE` : sql`FALSE`}
             ${pagosAnuladoFilterPdf}
         `);
       } catch (e) {
@@ -787,6 +996,7 @@ export class CuentaCorrienteService {
         movimientos: limitedMovimientos,
         totalBalance,
         totalMovimientos: filteredMovimientos.length,
+        circuit,
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -800,6 +1010,9 @@ export class CuentaCorrienteService {
     reason: string;
     adjustment_type: 'credit' | 'debit';
     created_by?: string;
+    // CAT-6: required circuit tag.
+    fiscal_type?: 'fiscal' | 'no_fiscal';
+    userCanAccessLuna?: boolean;
   }) {
     try {
       const entCheck = await db.execute(sql`
@@ -812,13 +1025,22 @@ export class CuentaCorrienteService {
       if (!data.reason || data.reason.trim().length === 0) throw new ApiError(400, 'Reason is required');
       if (!['credit', 'debit'].includes(data.adjustment_type)) throw new ApiError(400, 'adjustment_type must be "credit" or "debit"');
 
+      // CAT-6: default fiscal and enforce luna access.
+      const fiscalType: 'fiscal' | 'no_fiscal' = data.fiscal_type || 'fiscal';
+      if (fiscalType !== 'fiscal' && fiscalType !== 'no_fiscal') {
+        throw new ApiError(400, 'fiscal_type invalido');
+      }
+      if (fiscalType === 'no_fiscal' && data.userCanAccessLuna === false) {
+        throw new ApiError(403, 'Sin acceso al circuito Luna');
+      }
+
       const storedAmount = data.adjustment_type === 'credit'
         ? -Math.abs(data.amount)
         : Math.abs(data.amount);
 
       const result = await db.execute(sql`
-        INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by)
-        VALUES (${companyId}, ${enterpriseId}, ${storedAmount}, ${data.reason.trim()}, ${data.adjustment_type}, ${data.created_by || null})
+        INSERT INTO account_adjustments (company_id, enterprise_id, amount, reason, adjustment_type, created_by, fiscal_type)
+        VALUES (${companyId}, ${enterpriseId}, ${storedAmount}, ${data.reason.trim()}, ${data.adjustment_type}, ${data.created_by || null}, ${fiscalType})
         RETURNING *
       `);
       const adjustment = ((result as any).rows || [])[0];

@@ -176,8 +176,11 @@ export class AuthService {
         where: eq(companies.id, user.company_id),
       });
 
+      // Sol/Luna: single global flag lookup (column owned by DB-FOUNDATION).
+      const canAccessLuna = (user as any).can_access_luna === true;
+
       // Generate tokens
-      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
+      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
 
       // Store refresh token + access jti in sessions table (CRIT-03)
       await this.storeSession(user.id, tokens.refreshToken, tokens.accessJti);
@@ -198,6 +201,7 @@ export class AuthService {
           role: user.role,
           company_id: user.company_id,
           is_superadmin,
+          can_access_luna: canAccessLuna,
         },
         company: company ? {
           id: company.id,
@@ -238,7 +242,8 @@ export class AuthService {
         throw new ApiError(403, 'User deactivated');
       }
 
-      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
+      const canAccessLuna = (user as any).can_access_luna === true;
+      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
 
       return tokens;
     } catch (error) {
@@ -280,7 +285,8 @@ export class AuthService {
         where: eq(companies.id, user.company_id),
       });
 
-      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!);
+      const canAccessLuna = (user as any).can_access_luna === true;
+      const tokens = this.generateTokens(user.id, user.email, user.company_id, user.role!, canAccessLuna);
 
       // Rotate: delete old session, store new refresh token + access jti
       await db.delete(sessions).where(eq(sessions.refresh_token, refreshToken));
@@ -297,6 +303,7 @@ export class AuthService {
           name: user.name,
           role: user.role,
           company_id: user.company_id,
+          can_access_luna: canAccessLuna,
         },
         company: company ? {
           id: company.id,
@@ -314,7 +321,7 @@ export class AuthService {
   async me(userId: string) {
     const result = await db.execute(sql`
       SELECT u.id, u.email, u.name, u.role, u.company_id, u.active,
-             u.is_superadmin, u.email_verified,
+             u.is_superadmin, u.email_verified, u.can_access_luna,
              c.onboarding_completed, c.enabled_modules,
              c.subscription_status, c.trial_ends_at, c.grace_ends_at
       FROM users u
@@ -327,7 +334,7 @@ export class AuthService {
     }
     const user = rows[0] as {
       id: string; email: string; name: string; role: string; company_id: string; active: boolean;
-      is_superadmin: boolean; email_verified: boolean;
+      is_superadmin: boolean; email_verified: boolean; can_access_luna: boolean;
       onboarding_completed: boolean; enabled_modules: string[];
       subscription_status: string; trial_ends_at: string | null; grace_ends_at: string | null;
     };
@@ -357,6 +364,7 @@ export class AuthService {
 
     return {
       ...user,
+      can_access_luna: user.can_access_luna === true,
       permissions,
       subscription_days_remaining,
       subscription_is_read_only,
@@ -609,13 +617,13 @@ export class AuthService {
     return { message: 'Email de verificacion reenviado' };
   }
 
-  private generateTokens(userId: string, email: string, companyId: string, role: string) {
+  private generateTokens(userId: string, email: string, companyId: string, role: string, canAccessLuna: boolean = false) {
     // CRIT-03: embed a jti (UUID v4) in the access token. The middleware looks
     // up this jti in the sessions table to verify the token has not been revoked.
     const accessJti = crypto.randomUUID();
 
     const accessToken = jwt.sign(
-      { id: userId, email, company_id: companyId, role, jti: accessJti },
+      { id: userId, email, company_id: companyId, role, jti: accessJti, can_access_luna: canAccessLuna },
       env.JWT_SECRET,
       { expiresIn: env.JWT_EXPIRATION, algorithm: 'HS256' } as any
     );

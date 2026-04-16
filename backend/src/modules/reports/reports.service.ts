@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { invoices, invoice_items, customers, products, product_pricing, stock, payments } from '../../db/schema';
 import { eq, and, gte, lte, sql, count, sum, desc } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
+import { resolveFiscalTypes, buildFiscalClause, CircuitOpts } from './business.service';
 
 // Helper: check if user has view access to a module (undefined permissions = admin = full access)
 function canView(permissions: Map<string, Set<string>> | undefined, module: string): boolean {
@@ -16,7 +17,12 @@ export class ReportsService {
     dateFrom?: string,
     dateTo?: string,
     userPermissions?: Map<string, Set<string>>,
+    circuitOpts?: CircuitOpts,
   ) {
+    // Sol/Luna: resolve effective fiscal_types. Default ['fiscal']. Non-Luna users
+    // silently downgraded to ['fiscal'] even if they send a different value.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, '');
     try {
       // PR3-T3: timezone Argentina (-03:00). Sin offset, concat 'T23:59:59'
       // se interpretaba como UTC → reports AR perdian 3h de facturas del dia.
@@ -55,6 +61,7 @@ export class ReportsService {
           FROM invoices
           WHERE company_id = ${companyId}
             AND status = 'authorized'
+            ${fiscalClause}
             AND invoice_date >= ${periodStart}
             AND invoice_date <= ${periodEnd}
         `);
@@ -74,6 +81,7 @@ export class ReportsService {
           FROM invoices i
           WHERE i.company_id = ${companyId}
             AND i.status != 'cancelled'
+            ${buildFiscalClause(fiscalTypes, 'i')}
             AND (i.payment_status IS NULL OR i.payment_status != 'pagado')
         `);
 
@@ -88,6 +96,7 @@ export class ReportsService {
           FROM invoices i
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId}
+            ${buildFiscalClause(fiscalTypes, 'i')}
           ORDER BY i.created_at DESC
           LIMIT 5
         `);
@@ -125,14 +134,14 @@ export class ReportsService {
             SELECT COUNT(*) as count,
               COALESCE(SUM(
                 CAST(o.total_amount AS decimal) - COALESCE(
-                  (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%'), 0
+                  (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%' ${buildFiscalClause(fiscalTypes, 'i')}), 0
                 )
               ), 0) as total
             FROM orders o
             WHERE o.company_id = ${companyId}
               AND o.status != 'cancelado'
               AND CAST(o.total_amount AS decimal) > COALESCE(
-                (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%'), 0
+                (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%' ${buildFiscalClause(fiscalTypes, 'i')}), 0
               )
           `);
           const uninvoicedRows = (uninvoicedResult as any).rows || [];

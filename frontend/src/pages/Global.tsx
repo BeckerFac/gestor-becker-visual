@@ -171,7 +171,8 @@ export const Global: React.FC = () => {
           break
         }
         case 'cuenta_corriente': {
-          const ccData = await api.getCuentaCorrienteDetalle(enterpriseId)
+          // CAT-6: Sol/Luna — Global view always shows Sol (fiscal) circuit.
+          const ccData = await api.getCuentaCorrienteDetalle(enterpriseId, { fiscal_type: 'fiscal' })
           setCuentaCorriente(ccData)
           break
         }

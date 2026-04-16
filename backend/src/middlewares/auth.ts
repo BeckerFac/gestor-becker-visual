@@ -15,6 +15,13 @@ export interface AuthRequest extends Request {
     enterprise_id?: string;
     customer_id?: string;
     jti?: string;
+    /**
+     * Sol/Luna dual-circuit: single global flag granting full access to the
+     * non-fiscal (Luna) circuit. False / undefined means Luna is invisible
+     * for this user. Full-access roles (owner/admin) do NOT implicitly get
+     * Luna — it must be granted explicitly.
+     */
+    can_access_luna?: boolean;
   };
 }
 
@@ -74,6 +81,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       enterprise_id?: string;
       customer_id?: string;
       jti?: string;
+      can_access_luna?: boolean;
     };
 
     // Validate required claims exist
@@ -106,6 +114,23 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       }
     }
 
+    // Sol/Luna: if the JWT lacks the claim (legacy token issued before the
+    // dual-circuit rollout), look it up from the users table. Customer/portal
+    // tokens always default to false — the portal does not expose Luna.
+    let canAccessLuna = decoded.can_access_luna === true;
+    if (decoded.can_access_luna === undefined && !isPortalOrEphemeral) {
+      try {
+        const result: any = await db.execute(sql`
+          SELECT can_access_luna FROM users WHERE id = ${decoded.id} LIMIT 1
+        `);
+        const rows = result?.rows ?? result ?? [];
+        canAccessLuna = rows.length > 0 ? rows[0].can_access_luna === true : false;
+      } catch (err) {
+        console.error('[auth] can_access_luna lookup failed:', err);
+        canAccessLuna = false; // fail closed
+      }
+    }
+
     req.user = {
       id: decoded.id,
       email: decoded.email,
@@ -116,6 +141,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       enterprise_id: decoded.enterprise_id,
       customer_id: decoded.customer_id,
       jti: decoded.jti,
+      can_access_luna: canAccessLuna,
     };
 
     // Enforce read-only mode for impersonation tokens

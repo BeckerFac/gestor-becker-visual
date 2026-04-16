@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { AIInsightsPanel } from '@/components/ai/AIInsightsPanel'
 import { useBilling } from '@/hooks/useBilling'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 
 interface DashboardData {
   sales_month: number
@@ -96,6 +97,13 @@ export const Dashboard: React.FC = () => {
   const [period, setPeriod] = useState('mes')
   const [periodDates, setPeriodDates] = useState<{ from: string; to: string }>({ from: '', to: '' })
 
+  // Sol/Luna dashboard circuit: 'fiscal' (Sol), 'no_fiscal' (Luna), or 'all' (both).
+  // Default 'fiscal'. Non-Luna users never see the toggle and backend enforces Sol.
+  const { canAccessLuna } = useCircuitAccess()
+  const [dashboardCircuit, setDashboardCircuit] = useState<'fiscal' | 'no_fiscal' | 'all'>('fiscal')
+  const circuitFiscalTypes: Array<'fiscal' | 'no_fiscal'> =
+    dashboardCircuit === 'all' ? ['fiscal', 'no_fiscal'] : [dashboardCircuit]
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
@@ -119,7 +127,7 @@ export const Dashboard: React.FC = () => {
         setLoading(true)
         setError(null)
         const [dashRes, insightsRes, agingRes] = await Promise.all([
-          api.getDashboard(periodDates.from || undefined, periodDates.to || undefined).catch((err: any) => {
+          api.getDashboard(periodDates.from || undefined, periodDates.to || undefined, circuitFiscalTypes).catch((err: any) => {
             setError(`Error cargando dashboard: ${err?.response?.data?.error || err?.message || 'Error desconocido'}`)
             // PR6-T3: fallback completo — shape total del dashboard para que
             // ningun campo termine como `undefined` en la UI (que renderiza "undefined").
@@ -148,7 +156,7 @@ export const Dashboard: React.FC = () => {
       }
     }
     loadData()
-  }, [periodDates, period])
+  }, [periodDates, period, dashboardCircuit])
 
   // Close search results on click outside
   useEffect(() => {
@@ -435,8 +443,32 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Period Selector */}
-      <PeriodSelector selected={period} onChange={p => { setPeriod(p.value); setPeriodDates({ from: p.dateFrom, to: p.dateTo }) }} />
+      {/* Period Selector + Sol/Luna circuit toggle */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <PeriodSelector selected={period} onChange={p => { setPeriod(p.value); setPeriodDates({ from: p.dateFrom, to: p.dateTo }) }} />
+        {canAccessLuna && (
+          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+            {([
+              { value: 'fiscal' as const, label: 'Solo Sol', icon: '\u2600\ufe0f' },
+              { value: 'no_fiscal' as const, label: 'Solo Luna', icon: '\ud83c\udf19' },
+              { value: 'all' as const, label: 'Ambos', icon: '\u2600\ufe0f\ud83c\udf19' },
+            ]).map(t => (
+              <button
+                key={t.value}
+                onClick={() => setDashboardCircuit(t.value)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  dashboardCircuit === t.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                <span className="mr-1">{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
