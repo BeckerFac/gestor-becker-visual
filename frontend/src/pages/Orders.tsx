@@ -629,38 +629,44 @@ export const Orders: React.FC = () => {
     setShowForm(true)
   }
 
-  const handleDuplicateOrder = (order: Order) => {
-    const status = invoicingStatus[order.id]
-    const orderItems: FormItem[] = (status?.items || []).map((item: any) => ({
-      product_id: item.product_id || 'custom',
-      product_name: item.product_name || '',
-      description: item.description || '',
-      quantity: Number(item.quantity) || 1,
-      unit_price: parseFloat(item.unit_price?.toString() || '0'),
-      cost: parseFloat(item.cost?.toString() || '0'),
-      product_type: item.product_type || 'otro',
-      deduct_stock: item.deduct_stock || false,
-      category_ids: [],
-      vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
-    }))
+  const handleDuplicateOrder = async (order: Order) => {
+    try {
+      // Always fetch fresh order detail to get items (invoicingStatus may not be loaded)
+      const detail = await api.getOrderInvoicingStatus(order.id)
+      const items = detail?.items || []
+      const orderItems: FormItem[] = items.map((item: any) => ({
+        product_id: item.product_id || 'custom',
+        product_name: item.product_name || '',
+        description: item.description || '',
+        quantity: Number(item.quantity) || 1,
+        unit_price: parseFloat(item.unit_price?.toString() || '0'),
+        cost: parseFloat(item.cost?.toString() || '0'),
+        product_type: item.product_type || 'otro',
+        deduct_stock: item.deduct_stock || false,
+        category_ids: [],
+        vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
+      }))
 
-    setEditingOrderId(null)
-    setFormTitle(`${order.title || ''} (copia)`)
-    setForm({
-      description: order.description || '',
-      customer_id: order.customer?.id || '',
-      estimated_delivery: '',
-      priority: order.priority || 'normal',
-      notes: order.notes || '',
-      payment_method: order.payment_method || '',
-      bank_id: order.bank?.id || '',
-      discount_percent: parseFloat(order.discount_percent || '0') || 0,
-    })
-    setFormEnterpriseId(order.enterprise?.id || '')
-    setFormFiscalType((order.fiscal_type as any) || 'fiscal')
-    setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
-    setShowForm(true)
-    toast.info('Pedido duplicado — modificá lo que necesites y tocá "Crear Pedido"')
+      setEditingOrderId(null)
+      setFormTitle(`${order.title || ''} (copia)`)
+      setForm({
+        description: order.description || '',
+        customer_id: order.customer?.id || '',
+        estimated_delivery: '',
+        priority: order.priority || 'normal',
+        notes: order.notes || '',
+        payment_method: order.payment_method || '',
+        bank_id: order.bank?.id || '',
+        discount_percent: parseFloat(order.discount_percent || '0') || 0,
+      })
+      setFormEnterpriseId(order.enterprise?.id || '')
+      setFormFiscalType((order.fiscal_type as any) || 'fiscal')
+      setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
+      setShowForm(true)
+      toast.info('Pedido duplicado — modificá lo que necesites y tocá "Crear Pedido"')
+    } catch (e: any) {
+      toast.error('Error al duplicar pedido: ' + (e?.message || 'Error desconocido'))
+    }
   }
 
   // --- Status / payment handlers ---
