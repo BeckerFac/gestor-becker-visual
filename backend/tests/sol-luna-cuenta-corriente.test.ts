@@ -91,6 +91,9 @@ describe('CuentaCorrienteService — Sol/Luna dual-circuit (CAT-6)', () => {
       total_retenciones_sufridas: '0',
       total_retenciones_sufridas_sol: '0',
       total_retenciones_practicadas: '0',
+      total_ncs: '0',
+      total_ncs_sol: '0',
+      total_ncs_luna: '0',
       ...overrides,
     }
   }
@@ -353,6 +356,212 @@ describe('CuentaCorrienteService — Sol/Luna dual-circuit (CAT-6)', () => {
           userCanAccessLuna: false,
         })
       ).rejects.toMatchObject({ statusCode: 403 })
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // NCs (Notas de Credito) en CC — nuevo semantic (issue: NC anula factura).
+  // ────────────────────────────────────────────────────────────────
+
+  describe('getResumen — NCs reducen saldo del cliente', () => {
+    function primeRow(row: Record<string, any>) {
+      (service as any).__resumenRow = [row]
+    }
+
+    it('T-NC1: Sol invoice + Sol NC → saldo_sol = ventas - ncs', async () => {
+      primeRow(makeResumenRow({
+        total_ventas_sol: '10000',
+        total_ncs_sol: '3000',
+      }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      expect(result[0].saldo_sol).toBe(7000)
+    })
+
+    it('T-NC2: Luna invoice + Luna NC → saldo_luna = ventas - ncs', async () => {
+      primeRow(makeResumenRow({
+        total_ventas_luna: '8000',
+        total_ncs_luna: '1500',
+      }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      expect(result[0].saldo_luna).toBe(6500)
+    })
+
+    it('total_ncs is exposed in output and reduces legacy saldo', async () => {
+      primeRow(makeResumenRow({
+        total_ventas: '5000',
+        total_ncs: '2000',
+      }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      expect(result[0].total_ncs).toBe(2000)
+      // balanceReal = ventas - totalCobros - retSufridas - ajCredit - ncs - (compras - ...) = 5000 - 2000 = 3000
+      expect(result[0].saldo).toBe(3000)
+    })
+
+    it('SQL aggregates total_ncs_sol and total_ncs_luna in main query', async () => {
+      await service.getResumen('company-1', { userCanAccessLuna: true })
+      const sqlStr = executedSqls.find((s) => s.includes('FROM enterprises') && s.includes('total_ncs_sol'))
+      expect(sqlStr).toBeDefined()
+      expect(sqlStr!).toContain('total_ncs_sol')
+      expect(sqlStr!).toContain('total_ncs_luna')
+      // Critical: NC subquery MUST include `LIKE 'NC%'` (not NOT LIKE).
+      const ncsSection = sqlStr!.substring(sqlStr!.indexOf('total_ncs_sol') - 500, sqlStr!.indexOf('total_ncs_sol'))
+      expect(ncsSection).toContain("LIKE 'NC%'")
+    })
+
+    it('T-NC6: NCs with status draft/cancelled are excluded (status NOT IN filter)', async () => {
+      await service.getResumen('company-1', { userCanAccessLuna: true })
+      const sqlStr = executedSqls.find((s) => s.includes('total_ncs_sol'))
+      expect(sqlStr).toBeDefined()
+      // The NC subquery must reuse the same status filter as regular invoices.
+      const ncsStart = sqlStr!.indexOf('total_ncs_sol')
+      const ncsBlock = sqlStr!.substring(Math.max(0, ncsStart - 400), ncsStart)
+      expect(ncsBlock).toContain("status NOT IN ('cancelled', 'draft')")
+    })
+
+    it('NC only applies to its own circuit (Sol NC does NOT reduce Luna saldo)', async () => {
+      primeRow(makeResumenRow({
+        total_ventas_sol: '10000',
+        total_ventas_luna: '10000',
+        total_ncs_sol: '4000',
+        total_ncs_luna: '0',
+      }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      expect(result[0].saldo_sol).toBe(6000)
+      expect(result[0].saldo_luna).toBe(10000)
+    })
+  })
+
+  describe('getDetalle — NC movements in UNION', () => {
+    it('T-NC3: Sol getDetalle UNION includes nc_venta branch with haber > 0', async () => {
+      await service.getDetalle('company-1', 'ent-1', { fiscal_type: 'fiscal', userCanAccessLuna: true })
+      const unionSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(unionSql).toBeDefined()
+      // Haber column populated from total_amount, debe is 0.
+      expect(unionSql!).toContain("'nc_venta' as tipo")
+      expect(unionSql!).toContain("CAST(i.total_amount AS decimal) as haber")
+      // Must filter by status (emitidas only) and invoice_type LIKE 'NC%'
+      expect(unionSql!).toContain("status NOT IN ('cancelled', 'draft')")
+      expect(unionSql!).toContain("invoice_type::text LIKE 'NC%'")
+    })
+
+    it('T-NC3b: NC branch filters by fiscal_type (circuit isolation)', async () => {
+      await service.getDetalle('company-1', 'ent-1', { fiscal_type: 'fiscal', userCanAccessLuna: true })
+      const unionSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(unionSql).toBeDefined()
+      // Every branch should apply the circuit param.
+      expect(unionSql!).toMatch(/COALESCE\(i\.fiscal_type,'fiscal'\) = \$/)
+    })
+
+    it('T-NC4: Luna getDetalle excludes Sol NCs via fiscal_type param binding', async () => {
+      // circuit='no_fiscal' is passed as last param; the UNION uses fiscalFilter(alias)
+      // which applies to the NC branch as well.
+      await service.getDetalle('company-1', 'ent-1', { fiscal_type: 'no_fiscal', userCanAccessLuna: true })
+      const unionSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(unionSql).toBeDefined()
+      // The $circuit param is bound and applied to all fiscal_type filters.
+      expect(unionSql!).toContain("COALESCE(i.fiscal_type,'fiscal') = $")
+    })
+
+    it('NC branch LEFT JOINs related invoice to compose descripcion', async () => {
+      await service.getDetalle('company-1', 'ent-1', { fiscal_type: 'fiscal', userCanAccessLuna: true })
+      const unionSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(unionSql).toBeDefined()
+      expect(unionSql!).toContain('LEFT JOIN invoices ri ON ri.id = i.related_invoice_id')
+    })
+  })
+
+  describe('getDetalle — running balance with NC (T-NC5)', () => {
+    it('T-NC5: running balance correctly decreases on NC row', async () => {
+      // Simulate 1 factura (debe=10000) + 1 NC (haber=3000) returned by pool.query.
+      mockPoolQuery.mockImplementation((sqlStr: string) => {
+        executedSqls.push(sqlStr)
+        if (sqlStr.includes('FROM enterprises WHERE id')) {
+          return Promise.resolve({ rows: [{ id: 'ent-1', name: 'Test', cuit: '20-12345678-9' }] })
+        }
+        if (sqlStr.includes('SELECT * FROM') && sqlStr.includes('movimientos')) {
+          return Promise.resolve({
+            rows: [
+              {
+                fecha: '2025-06-01',
+                tipo: 'fact_venta',
+                nro_comprobante: 'A 00001',
+                debe: '10000',
+                haber: '0',
+                descripcion: 'Factura A 00001',
+                reference_id: 'inv-1',
+              },
+              {
+                fecha: '2025-06-15',
+                tipo: 'nc_venta',
+                nro_comprobante: 'NC_A 00001',
+                debe: '0',
+                haber: '3000',
+                descripcion: 'NC NC_A 00001',
+                reference_id: 'nc-1',
+              },
+            ],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+
+      const result = await service.getDetalle('company-1', 'ent-1', { fiscal_type: 'fiscal', userCanAccessLuna: true })
+      expect(result.movimientos).toHaveLength(2)
+      expect(result.movimientos[0].saldo).toBe(10000)
+      expect(result.movimientos[1].saldo).toBe(7000)
+      expect(result.totales.saldo).toBe(7000)
+    })
+  })
+
+  describe('getPdfData — NC movements (T-NC7)', () => {
+    it('T-NC7: PDF data includes nc_venta query', async () => {
+      await service.getPdfData('company-1', 'ent-1', '2025-01-01', '2025-12-31', {
+        fiscal_type: 'fiscal',
+        userCanAccessLuna: true,
+      })
+      const ncSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(ncSql).toBeDefined()
+      expect(ncSql!).toContain("status NOT IN ('cancelled', 'draft')")
+      expect(ncSql!).toContain("invoice_type::text LIKE 'NC%'")
+      expect(ncSql!).toContain("COALESCE(i.fiscal_type,'fiscal') =")
+    })
+
+    it('Luna PDF fetches NCs with circuit=no_fiscal', async () => {
+      await service.getPdfData('company-1', 'ent-1', '2025-01-01', '2025-12-31', {
+        fiscal_type: 'no_fiscal',
+        userCanAccessLuna: true,
+      })
+      const ncSql = executedSqls.find((s) => s.includes("'nc_venta' as tipo"))
+      expect(ncSql).toBeDefined()
+      // The circuit param in the prepared statement should be 'no_fiscal'.
+      // Since drizzle tagged template renders values separately, look at the mock tpl object:
+      expect(ncSql!).toContain('no_fiscal')
+    })
+  })
+
+  // T-NC8: regression — existing shape/gating still holds with NC columns present.
+  describe('T-NC8: regression — non-NC scenarios unchanged', () => {
+    function primeRow(row: Record<string, any>) {
+      (service as any).__resumenRow = [row]
+    }
+
+    it('saldo_sol with no NCs matches legacy formula', async () => {
+      primeRow(makeResumenRow({
+        total_ventas_sol: '5000',
+        total_cobros_aplicados_sol: '1500',
+        total_retenciones_sufridas_sol: '500',
+      }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      // 5000 - 1500 - 500 - 0 (no NCs) = 3000
+      expect(result[0].saldo_sol).toBe(3000)
+    })
+
+    it('enterprise with no NCs exposes total_ncs=0 in output', async () => {
+      primeRow(makeResumenRow({ total_ventas: '1000' }))
+      const result = await service.getResumen('company-1', { userCanAccessLuna: true })
+      expect(result[0].total_ncs).toBe(0)
+      expect(result[0].total_ncs_sol).toBe(0)
+      expect(result[0].total_ncs_luna).toBe(0)
     })
   })
 })

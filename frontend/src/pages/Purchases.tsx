@@ -76,6 +76,33 @@ interface ProductOption {
   pricing?: { cost: string; final_price: string; vat_rate?: string }
 }
 
+// ----- Retenciones (practicadas al proveedor al registrar la compra) -----
+
+interface RetencionRow {
+  type: string
+  enabled: boolean
+  base_amount: number
+  rate: number
+  amount: number
+  regime: string
+  jurisdiction?: string
+  certificate_number?: string
+}
+
+const RETENCION_LABELS: Record<string, string> = {
+  iibb: 'IIBB',
+  ganancias: 'Ganancias',
+  iva: 'IVA',
+  suss: 'SUSS',
+}
+
+const INITIAL_RETENCIONES: RetencionRow[] = [
+  { type: 'iibb', enabled: false, base_amount: 0, rate: 3.0, amount: 0, regime: '', jurisdiction: '' },
+  { type: 'ganancias', enabled: false, base_amount: 0, rate: 2.0, amount: 0, regime: '' },
+  { type: 'iva', enabled: false, base_amount: 0, rate: 0, amount: 0, regime: '' },
+  { type: 'suss', enabled: false, base_amount: 0, rate: 0, amount: 0, regime: '' },
+]
+
 // ----- Constants -----
 
 const PAYMENT_METHODS = [
@@ -175,6 +202,10 @@ export const Purchases: React.FC = () => {
   })
   const [items, setItems] = useState<PurchaseItem[]>([emptyItem()])
 
+  // Retenciones practicadas (collapsible, opt-in)
+  const [retenciones, setRetenciones] = useState<RetencionRow[]>(INITIAL_RETENCIONES)
+  const [retencionesOpen, setRetencionesOpen] = useState(false)
+
   // ----- Load data -----
 
   const loadData = useCallback(async () => {
@@ -240,6 +271,28 @@ export const Purchases: React.FC = () => {
 
   const addItem = () => setItems(prev => [...prev, emptyItem()])
   const removeItem = (idx: number) => setItems(prev => prev.length === 1 ? prev : prev.filter((_, i) => i !== idx))
+
+  // Retenciones handlers (mirrors Pagos)
+  const handleRetencionToggle = (idx: number) => {
+    setRetenciones(prev => prev.map((r, i) => i !== idx ? r : { ...r, enabled: !r.enabled }))
+  }
+  const handleRetencionChange = (idx: number, field: string, value: number) => {
+    setRetenciones(prev => prev.map((r, i) => {
+      if (i !== idx) return r
+      const updated = { ...r, [field]: value }
+      if (field === 'base_amount' || field === 'rate') {
+        updated.amount = Math.round(updated.base_amount * updated.rate) / 100
+      }
+      return updated
+    }))
+  }
+  const setRetencionField = (idx: number, field: string, value: string) => {
+    setRetenciones(prev => prev.map((r, i) => i !== idx ? r : { ...r, [field]: value }))
+  }
+  const totalRetenciones = useMemo(
+    () => retenciones.filter(r => r.enabled).reduce((s, r) => s + r.amount, 0),
+    [retenciones]
+  )
   const updateItem = (idx: number, field: keyof PurchaseItem, value: any) => {
     setItems(prev => {
       const next = [...prev]
@@ -283,6 +336,8 @@ export const Purchases: React.FC = () => {
       add_to_inventory: true,
     })
     setItems([emptyItem()])
+    setRetenciones(INITIAL_RETENCIONES)
+    setRetencionesOpen(false)
     setEditingId(null)
   }
 
@@ -315,7 +370,7 @@ export const Purchases: React.FC = () => {
         product_id: i.product_id || '',
         product_name: i.product_name || '',
         description: i.description || '',
-        quantity: i.quantity?.toString() || '1',
+        quantity: (parseInt(String(i.quantity ?? '1'), 10) || 1).toString(),
         unit_price: i.unit_price?.toString() || '0',
         vat_rate: parseFloat(i.vat_rate?.toString() || '21') || 21,
         add_to_stock: false,
@@ -346,7 +401,7 @@ export const Purchases: React.FC = () => {
         product_id: i.product_id || '',
         product_name: i.product_name || '',
         description: i.description || '',
-        quantity: i.quantity?.toString() || '1',
+        quantity: (parseInt(String(i.quantity ?? '1'), 10) || 1).toString(),
         unit_price: i.unit_price?.toString() || '0',
         vat_rate: parseFloat(i.vat_rate?.toString() || '21') || 21,
         add_to_stock: true,
@@ -386,11 +441,22 @@ export const Purchases: React.FC = () => {
           product_id: i.product_id && i.product_id !== 'custom' ? i.product_id : null,
           product_name: i.product_name,
           description: i.description || null,
-          quantity: Number(i.quantity) || 0,
+          quantity: parseInt(String(i.quantity), 10) || 0,
           unit_price: Number(i.unit_price) || 0,
           vat_rate: Number(i.vat_rate) || 0,
           add_to_stock: i.add_to_stock !== false,
         })),
+        retenciones: retenciones
+          .filter(r => r.enabled && r.amount > 0)
+          .map(r => ({
+            type: r.type,
+            base_amount: r.base_amount,
+            rate: r.rate,
+            amount: r.amount,
+            regime: r.regime || null,
+            jurisdiction: r.type === 'iibb' ? (r.jurisdiction || null) : (r.jurisdiction || undefined),
+            certificate_number: r.certificate_number || null,
+          })),
       }
       let result: any
       if (editingId) {
@@ -461,7 +527,7 @@ export const Purchases: React.FC = () => {
       const stockItems = (detail.items || [])
         .map((i: any) => ({
           product_id: i.product_id || '',
-          quantity: parseFloat(String(i.quantity || '0')),
+          quantity: parseInt(String(i.quantity || '0'), 10) || 0,
         }))
         .filter((i: any) => i.product_id && i.quantity > 0)
 
@@ -789,7 +855,25 @@ export const Purchases: React.FC = () => {
                         </div>
                         <div className="col-span-4 md:col-span-1">
                           <label className="text-xs font-medium text-gray-500">Cant.</label>
-                          <Input type="number" step="0.01" placeholder="1" value={item.quantity} onChange={e => updateItem(idx, 'quantity', e.target.value)} />
+                          <Input
+                            type="number"
+                            step="1"
+                            min="0"
+                            placeholder="1"
+                            value={(() => {
+                              const n = parseInt(String(item.quantity), 10)
+                              return Number.isNaN(n) ? '' : String(n)
+                            })()}
+                            onChange={e => {
+                              const raw = e.target.value
+                              if (raw === '') {
+                                updateItem(idx, 'quantity', '')
+                                return
+                              }
+                              const n = parseInt(raw, 10)
+                              updateItem(idx, 'quantity', Number.isNaN(n) ? 1 : n)
+                            }}
+                          />
                         </div>
                         <div className="col-span-4 md:col-span-2">
                           <label className="text-xs font-medium text-gray-500">P. Unit.</label>
@@ -818,6 +902,114 @@ export const Purchases: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Retenciones practicadas (collapsible, opt-in) */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setRetencionesOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg"
+                  aria-expanded={retencionesOpen}
+                >
+                  <span>
+                    Retenciones practicadas
+                    {totalRetenciones > 0 && (
+                      <span className="ml-2 text-sm text-amber-600 font-normal">
+                        (${totalRetenciones.toFixed(2)})
+                      </span>
+                    )}
+                  </span>
+                  <svg
+                    className={`w-4 h-4 text-gray-500 transition-transform ${retencionesOpen ? 'rotate-180' : ''}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                {retencionesOpen && (
+                  <div className="px-4 pb-4">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                      Retenciones aplicadas al proveedor en esta compra (Ganancias, IVA, IIBB, SUSS).
+                    </p>
+                    <div className="space-y-2">
+                      {retenciones.map((ret, idx) => (
+                        <div key={ret.type}>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <input
+                              type="checkbox"
+                              checked={ret.enabled}
+                              onChange={() => handleRetencionToggle(idx)}
+                              className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                            />
+                            <span className="w-24 text-sm font-medium text-gray-700 dark:text-gray-300">
+                              {RETENCION_LABELS[ret.type]}
+                            </span>
+                            <input
+                              type="number" placeholder="Base" step="0.01" min="0"
+                              value={ret.base_amount || ''}
+                              disabled={!ret.enabled}
+                              className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
+                              onChange={e => handleRetencionChange(idx, 'base_amount', parseFloat(e.target.value) || 0)}
+                            />
+                            <input
+                              type="number" placeholder="%" step="0.01" min="0"
+                              value={ret.rate || ''}
+                              disabled={!ret.enabled}
+                              className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
+                              onChange={e => handleRetencionChange(idx, 'rate', parseFloat(e.target.value) || 0)}
+                            />
+                            <input
+                              type="text" placeholder="Regimen"
+                              value={ret.regime}
+                              disabled={!ret.enabled}
+                              className="w-28 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
+                              onChange={e => setRetencionField(idx, 'regime', e.target.value)}
+                            />
+                            <span className="w-28 text-right text-sm font-medium text-amber-700 dark:text-amber-400">
+                              $ {ret.amount.toFixed(2)}
+                            </span>
+                          </div>
+                          {ret.enabled && (
+                            <div className="grid grid-cols-2 gap-2 mt-1 ml-7">
+                              <div>
+                                <label className="text-xs text-gray-500">N° Certificado</label>
+                                <input
+                                  type="text" maxLength={14} placeholder="14 digitos"
+                                  value={ret.certificate_number || ''}
+                                  onChange={e => setRetencionField(idx, 'certificate_number', e.target.value)}
+                                  className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100"
+                                />
+                              </div>
+                              {ret.type === 'iibb' && (
+                                <div>
+                                  <label className="text-xs text-gray-500">Jurisdiccion *</label>
+                                  <select
+                                    value={ret.jurisdiction || ''}
+                                    onChange={e => setRetencionField(idx, 'jurisdiction', e.target.value)}
+                                    className="w-full rounded border border-gray-300 dark:border-gray-600 p-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100"
+                                  >
+                                    <option value="">Seleccionar...</option>
+                                    <option value="caba">CABA</option>
+                                    <option value="pba">Provincia de Buenos Aires</option>
+                                    <option value="otra">Otra</option>
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {totalRetenciones > 0 && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-end text-sm text-gray-700 dark:text-gray-300">
+                        <span>Total retenciones: <b>$ {totalRetenciones.toFixed(2)}</b></span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Inventory toggle + stock impact preview */}

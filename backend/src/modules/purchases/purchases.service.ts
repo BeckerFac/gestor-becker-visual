@@ -20,6 +20,48 @@ function getRows(result: any): any[] {
   return (result as any)?.rows || result || [];
 }
 
+// Retenciones practicadas on purchase create (mirrors pagos validation).
+const VALID_RET_TYPES = ['iibb', 'ganancias', 'iva', 'suss'];
+
+interface PurchaseRetencionInput {
+  type: string;
+  base_amount: number | string;
+  rate: number | string;
+  amount: number | string;
+  regime?: string | null;
+  jurisdiction?: string | null;
+  certificate_number?: string | null;
+}
+
+function validatePurchaseRetencion(ret: PurchaseRetencionInput): void {
+  if (!ret || !ret.type || !VALID_RET_TYPES.includes(ret.type)) {
+    throw new ApiError(400, `Tipo de retencion invalido. Tipos validos: ${VALID_RET_TYPES.join(', ')}`);
+  }
+  const rate = Number(ret.rate);
+  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+    throw new ApiError(400, 'Alicuota de retencion invalida (debe estar entre 0 y 100)');
+  }
+  const base = Number(ret.base_amount);
+  if (!Number.isFinite(base) || base <= 0) {
+    throw new ApiError(400, 'Monto base de retencion invalido');
+  }
+  const amount = Number(ret.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new ApiError(400, 'Monto de retencion invalido');
+  }
+  const expected = base * rate / 100;
+  const tolerance = Math.max(0.01, expected * 0.01);
+  if (Math.abs(amount - expected) > tolerance) {
+    throw new ApiError(
+      400,
+      `Monto de retencion inconsistente. Esperado ~${expected.toFixed(2)}, recibido ${amount.toFixed(2)}`
+    );
+  }
+  if (ret.type === 'iibb' && !ret.jurisdiction) {
+    throw new ApiError(400, 'Retenciones IIBB requieren jurisdiccion (caba, pba, otra)');
+  }
+}
+
 interface NumericOpts {
   min?: number;
   max?: number;
@@ -259,6 +301,14 @@ export class PurchasesService {
     // C1: Tenant validation BEFORE any write.
     await this.validateTenantRefs(companyId, data);
 
+    // Validate retenciones structurally BEFORE opening the TX.
+    const hasRetenciones = Array.isArray(data.retenciones) && data.retenciones.length > 0;
+    if (hasRetenciones) {
+      for (const ret of data.retenciones as PurchaseRetencionInput[]) {
+        validatePurchaseRetencion(ret);
+      }
+    }
+
     // Auto-assign default business_unit_id if not provided
     if (!data.business_unit_id) {
       try {
@@ -355,6 +405,32 @@ export class PurchasesService {
               norm.unit_price,
               norm.vat_rate,
               norm.subtotal,
+            ]
+          );
+        }
+      }
+
+      // Retenciones practicadas: persist inside the same TX.
+      // Linked via purchase_id (column added in critical migrations). direction='practicada'.
+      if (hasRetenciones) {
+        const purchaseDate = data.date || new Date().toISOString();
+        const period = String(purchaseDate).substring(0, 7);
+        for (const ret of data.retenciones as PurchaseRetencionInput[]) {
+          await client.query(
+            `INSERT INTO retenciones (
+               id, company_id, type, regime, enterprise_id, purchase_id,
+               base_amount, rate, amount, certificate_number, date, period, created_by,
+               direction, jurisdiction, status
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'practicada',$14,'activa')`,
+            [
+              uuid(), companyId, ret.type, ret.regime || null,
+              data.enterprise_id || null, purchaseId,
+              Number(ret.base_amount).toString(),
+              Number(ret.rate).toString(),
+              Number(ret.amount).toString(),
+              ret.certificate_number || null,
+              purchaseDate, period, userId,
+              ret.jurisdiction || null,
             ]
           );
         }

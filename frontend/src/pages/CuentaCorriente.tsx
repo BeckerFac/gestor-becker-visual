@@ -73,6 +73,7 @@ const tipoBadgeConfig: Record<string, { label: string; bg: string; text: string 
   ajuste: { label: 'Ajuste', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300' },
   retencion_sufrida: { label: 'Ret. Sufrida', bg: 'bg-teal-100 dark:bg-teal-900/40', text: 'text-teal-700 dark:text-teal-300' },
   retencion_practicada: { label: 'Ret. Practicada', bg: 'bg-teal-100 dark:bg-teal-900/40', text: 'text-teal-700 dark:text-teal-300' },
+  nc_venta: { label: 'Nota de Credito', bg: 'bg-pink-100 dark:bg-pink-900/40', text: 'text-pink-700 dark:text-pink-300' },
 }
 
 const defaultBadge = { label: 'Otro', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300' }
@@ -237,6 +238,7 @@ export const CuentaCorriente: React.FC = () => {
     factura: true, venta: true, cobro: true, adelanto: true, factura_compra: true,
     compra: true, pago: true, adelanto_pago: true,
     retencion_sufrida: true, retencion_practicada: true,
+    nc_venta: true,
   })
 
   const toggleTipo = (tipo: string) => setTiposVisibles(prev => ({ ...prev, [tipo]: !prev[tipo] }))

@@ -75,6 +75,7 @@ export async function runCriticalMigrations() {
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS cobro_id UUID', 'retenciones.cobro_id'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID', 'retenciones.invoice_id'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_invoice_id UUID', 'retenciones.purchase_invoice_id'],
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS purchase_id UUID', 'retenciones.purchase_id'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS enterprise_id UUID', 'retenciones.enterprise_id'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS company_id UUID', 'retenciones.company_id'],
     [`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS direction VARCHAR(20) DEFAULT 'practicada'`, 'retenciones.direction'],
@@ -109,6 +110,10 @@ export async function runCriticalMigrations() {
 
     // cobros: fiscal_type
     [`ALTER TABLE cobros ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'cobros.fiscal_type'],
+
+    // purchases: invoice_type + invoice_cae (already present in prod via manual SQL; this is for future deploys)
+    [`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS invoice_type VARCHAR(20)`, 'purchases.invoice_type'],
+    [`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS invoice_cae VARCHAR(50)`, 'purchases.invoice_cae'],
 
     // users: can_access_luna flag
     [`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_luna BOOLEAN DEFAULT FALSE`, 'users.can_access_luna'],

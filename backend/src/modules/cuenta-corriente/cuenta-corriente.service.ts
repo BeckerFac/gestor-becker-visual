@@ -369,7 +369,42 @@ export class CuentaCorrienteService {
               ${businessUnitId
                 ? sql` AND (r.pago_id IS NULL OR rp.business_unit_id = ${businessUnitId})`
                 : sql``}
-          ), 0) as total_retenciones_practicadas
+          ), 0) as total_retenciones_practicadas,
+
+          -- NCs (Notas de Credito) de venta — anulan/reducen lo que el cliente debe.
+          -- Se incluyen SOLO NCs emitidas (status NOT IN ('cancelled','draft')), con la misma
+          -- semantica que las facturas: un NC draft no reduce saldo, un NC cancelled tampoco.
+          -- Sign convention: total_ncs suma positiva, luego se RESTA del saldo del cliente.
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='fiscal' THEN CAST(i.total_amount AS decimal) ELSE 0 END)
+            FROM invoices i
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status NOT IN ('cancelled', 'draft')
+              AND i.invoice_type::text LIKE 'NC%'
+              ${buFilterI}
+          ), 0) as total_ncs_sol,
+          COALESCE((
+            SELECT SUM(CASE WHEN COALESCE(i.fiscal_type,'fiscal')='no_fiscal' THEN CAST(i.total_amount AS decimal) ELSE 0 END)
+            FROM invoices i
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status NOT IN ('cancelled', 'draft')
+              AND i.invoice_type::text LIKE 'NC%'
+              ${buFilterI}
+          ), 0) as total_ncs_luna,
+          COALESCE((
+            SELECT SUM(CAST(i.total_amount AS decimal))
+            FROM invoices i
+            LEFT JOIN customers ic ON i.customer_id = ic.id
+            WHERE i.company_id = ${companyId}
+              AND (i.enterprise_id = e.id OR ic.enterprise_id = e.id)
+              AND i.status NOT IN ('cancelled', 'draft')
+              AND i.invoice_type::text LIKE 'NC%'
+              ${buFilterI}
+          ), 0) as total_ncs
 
         FROM enterprises e
         WHERE e.company_id = ${companyId}
@@ -394,11 +429,14 @@ export class CuentaCorrienteService {
         const ajCreditSol = parseFloat(r.total_ajustes_credit_sol || '0');
         const ajCreditLuna = parseFloat(r.total_ajustes_credit_luna || '0');
         const retSufridasSol = parseFloat(r.total_retenciones_sufridas_sol || '0');
+        // NCs reduce client balance: anular/acreditar lo facturado. Same convention as retenciones sufridas.
+        const ncsSol = parseFloat(r.total_ncs_sol || '0');
+        const ncsLuna = parseFloat(r.total_ncs_luna || '0');
         // Luna has no retenciones by design (enforced by CAT-5).
         const totalCobrosSol = cobrosAplSol + adelCobrosSol;
         const totalCobrosLuna = cobrosAplLuna + adelCobrosLuna;
-        const saldoSol = ventasSol + ajDebitSol - totalCobrosSol - retSufridasSol - ajCreditSol;
-        const saldoLuna = ventasLuna + ajDebitLuna - totalCobrosLuna - ajCreditLuna;
+        const saldoSol = ventasSol + ajDebitSol - totalCobrosSol - retSufridasSol - ajCreditSol - ncsSol;
+        const saldoLuna = ventasLuna + ajDebitLuna - totalCobrosLuna - ajCreditLuna - ncsLuna;
 
         const ventas = parseFloat(r.total_ventas || '0');
         const cobrosAplicados = parseFloat(r.total_cobros_aplicados || '0');
@@ -410,6 +448,7 @@ export class CuentaCorrienteService {
         const ajustesCredit = parseFloat(r.total_ajustes_credit || '0');
         const retencionesSufridas = parseFloat(r.total_retenciones_sufridas || '0');
         const retencionesPracticadas = parseFloat(r.total_retenciones_practicadas || '0');
+        const totalNcs = parseFloat(r.total_ncs || '0');
 
         // LOGIC: Balance reflects CASH REALITY (all money in/out)
         // "Sin asociar" is informational only — the money already moved
@@ -419,8 +458,8 @@ export class CuentaCorrienteService {
         const totalCobros = cobrosAplicados + adelantosCobros;
         const totalPagos = pagosAplicados + adelantosPagos;
 
-        // Facturas pendientes (paper debt — applied cobros + retenciones reduce this)
-        const pendienteCobro = Math.max(ventas + ajustesDebit - cobrosAplicados - retencionesSufridas - ajustesCredit, 0);
+        // Facturas pendientes (paper debt — applied cobros + retenciones + NCs reduce this)
+        const pendienteCobro = Math.max(ventas + ajustesDebit - cobrosAplicados - retencionesSufridas - ajustesCredit - totalNcs, 0);
         const pendientePago = Math.max(compras - pagosAplicados - retencionesPracticadas, 0);
 
         // Cobros/pagos sin factura asociada (info: "ir a vincular en Cobros/Pagos")
@@ -430,7 +469,8 @@ export class CuentaCorrienteService {
         // Balance REAL = todo el dinero que entró - todo el dinero que salió
         // Incluye cobros y pagos sin asociar porque la plata ya se movió
         // Retenciones: sufridas son como cobros adicionales, practicadas como pagos adicionales
-        const balanceReal = (ventas + ajustesDebit - totalCobros - retencionesSufridas - ajustesCredit) - (compras - totalPagos - retencionesPracticadas);
+        // NCs: reducen la deuda del cliente (son como cobros "documentales" — anulan lo facturado).
+        const balanceReal = (ventas + ajustesDebit - totalCobros - retencionesSufridas - ajustesCredit - totalNcs) - (compras - totalPagos - retencionesPracticadas);
 
         // Legacy compat
         const aCobrar = pendienteCobro;
@@ -464,6 +504,9 @@ export class CuentaCorrienteService {
           credito_proveedor: 0,
           retenciones_sufridas: retencionesSufridas,
           retenciones_practicadas: retencionesPracticadas,
+          total_ncs: totalNcs,
+          total_ncs_sol: ncsSol,
+          total_ncs_luna: ncsLuna,
           adelantos_recibidos: cobrosNoAsociados,
           adelantos_entregados: pagosNoAsociados,
           saldo_neto: balanceReal,
@@ -570,6 +613,34 @@ export class CuentaCorrienteService {
           FROM invoices i
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text NOT LIKE 'NC%'
+            ${fiscalFilter('i')}
+            ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
+
+          UNION ALL
+
+          -- Notas de Credito de venta: reducen la deuda del cliente.
+          -- Haber > 0 para que el running balance (saldo += debe - haber) DECREMENTE el saldo.
+          -- Status: solo NCs emitidas (mismo filtro que facturas). Draft y cancelled NO cuentan.
+          -- fiscal_type: la NC hereda su propio circuito (Sol/Luna) almacenado en su row.
+          -- related_invoice_id: si existe, incluir "anula FC <nro>" en la descripcion.
+          SELECT
+            i.invoice_date as fecha,
+            'nc_venta' as tipo,
+            COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as nro_comprobante,
+            0::decimal as debe,
+            CAST(i.total_amount AS decimal) as haber,
+            CASE
+              WHEN ri.id IS NOT NULL THEN
+                'NC ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number
+                || ' — anula ' || COALESCE(ri.invoice_type::text, '') || ' ' || ri.invoice_number
+              ELSE 'NC ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number
+            END as descripcion,
+            i.id as reference_id
+          FROM invoices i
+          LEFT JOIN invoices ri ON ri.id = i.related_invoice_id
+          WHERE i.enterprise_id = $1 AND i.company_id = $2
+            AND i.status NOT IN ('cancelled', 'draft')
+            AND i.invoice_type::text LIKE 'NC%'
             ${fiscalFilter('i')}
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
@@ -796,6 +867,34 @@ export class CuentaCorrienteService {
         throw new ApiError(500, 'Failed to load invoices for CC PDF');
       }
 
+      // NCs (notas de credito de venta) — reducen la deuda del cliente.
+      // Mismo filtro de status que facturas (cancelled/draft excluidos).
+      // Hereda fiscal_type de la NC propia.
+      let allNcs: any = { rows: [] };
+      try {
+        allNcs = await db.execute(sql`
+          SELECT i.id, 'nc_venta' as tipo, COALESCE(i.invoice_date, i.created_at) as fecha,
+            CASE
+              WHEN ri.id IS NOT NULL THEN
+                'NC ' || COALESCE(i.invoice_type::text, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0')
+                || ' — anula ' || COALESCE(ri.invoice_type::text, 'NF') || ' ' || LPAD(CAST(COALESCE(ri.invoice_number, 0) AS TEXT), 8, '0')
+              ELSE 'NC ' || COALESCE(i.invoice_type::text, 'NF') || ' ' || LPAD(CAST(COALESCE(i.invoice_number, 0) AS TEXT), 8, '0')
+            END as descripcion,
+            CAST(COALESCE(i.total_amount, 0) AS decimal) as monto
+          FROM invoices i
+          LEFT JOIN customers c ON i.customer_id = c.id
+          LEFT JOIN invoices ri ON ri.id = i.related_invoice_id
+          WHERE i.company_id = ${companyId}
+            AND (i.enterprise_id = ${enterpriseId} OR c.enterprise_id = ${enterpriseId})
+            AND i.status NOT IN ('cancelled', 'draft')
+            AND i.invoice_type::text LIKE 'NC%'
+            AND COALESCE(i.fiscal_type,'fiscal') = ${circuit}
+        `);
+      } catch (e) {
+        console.error('[getPdfData] ncs query failed:', (e as any)?.message);
+        throw new ApiError(500, 'Failed to load NCs for CC PDF');
+      }
+
       // Cobros aplicados
       let allCobros: any = { rows: [] };
       try {
@@ -943,6 +1042,7 @@ export class CuentaCorrienteService {
         }));
 
       const invoices = parseRows(allInvoices);
+      const ncs = parseRows(allNcs);
       const cobros = parseRows(allCobros);
       const adelantos = parseRows(allAdelantos);
       const retSufridas = parseRows(allRetSufridas);
@@ -954,6 +1054,7 @@ export class CuentaCorrienteService {
       // Build ALL movements sorted by date
       const allMovimientos = [
         ...invoices.map((o: any) => ({ ...o, debe: o.monto, haber: 0 })),
+        ...ncs.map((n: any) => ({ ...n, debe: 0, haber: n.monto })),
         ...cobros.map((c: any) => ({ ...c, debe: 0, haber: c.monto })),
         ...adelantos.map((a: any) => ({ ...a, debe: 0, haber: a.monto })),
         ...retSufridas.map((r: any) => ({ ...r, debe: 0, haber: r.monto })),
