@@ -238,6 +238,11 @@ describe('SECCION 1 — T1.4: Error handling', () => {
       if (sqlStr.includes('SELECT enterprise_id FROM customers')) return { rows: [] };
       return { rows: [] };
     });
+    mockClientQuery.mockImplementation(async (...args: any[]) => {
+      const s = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (s.includes('MAX(order_number)')) return { rows: [{ next_number: 1 }] };
+      return { rows: [], rowCount: 0 };
+    });
 
     const { OrdersService } = await import('../src/modules/orders/orders.service');
     const service = new (OrdersService as any)();
@@ -271,6 +276,11 @@ describe('SECCION 1 — T1.5: Pedido con descuento', () => {
       if (sqlStr.includes('MAX(order_number)')) return { rows: [{ next_number: 1 }] };
       if (sqlStr.includes('SELECT enterprise_id FROM customers')) return { rows: [] };
       return { rows: [] };
+    });
+    mockClientQuery.mockImplementation(async (...args: any[]) => {
+      const s = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (s.includes('MAX(order_number)')) return { rows: [{ next_number: 1 }] };
+      return { rows: [], rowCount: 0 };
     });
 
     const { OrdersService } = await import('../src/modules/orders/orders.service');

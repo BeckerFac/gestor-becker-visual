@@ -3,7 +3,7 @@
  * Estos tests verifican que los 8 bugs fueron ARREGLADOS
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockDbExecute, resetMocks } from './helpers/setup';
+import { mockDbExecute, mockClientQuery, resetMocks } from './helpers/setup';
 
 vi.mock('../src/config/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -225,6 +225,11 @@ describe('BUG #6 FIX: Return completo', () => {
       if (sqlStr.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
       return { rows: [] };
     });
+    mockClientQuery.mockImplementation(async (...args: any[]) => {
+      const s = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (s.includes('MAX(order_number)')) return { rows: [{ next_number: 42 }] };
+      return { rows: [], rowCount: 0 };
+    });
 
     const { OrdersService } = await import('../src/modules/orders/orders.service');
     const service = new (OrdersService as any)();
@@ -300,6 +305,11 @@ describe('BUG #8 FIX: priority validada', () => {
       if (sqlStr.includes('MAX(order_number)')) return { rows: [{ next_number: 1 }] };
       if (sqlStr.includes('SELECT id FROM enterprises')) return { rows: [{ id: 'ent-1' }] };
       return { rows: [] };
+    });
+    mockClientQuery.mockImplementation(async (...args: any[]) => {
+      const s = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (s.includes('MAX(order_number)')) return { rows: [{ next_number: 1 }] };
+      return { rows: [], rowCount: 0 };
     });
 
     const { OrdersService } = await import('../src/modules/orders/orders.service');

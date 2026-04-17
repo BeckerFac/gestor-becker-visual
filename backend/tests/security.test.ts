@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockClientQuery, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
 
 import { OrdersService } from '../src/modules/orders/orders.service'
 import { ChequesService } from '../src/modules/cheques/cheques.service'
@@ -46,6 +46,11 @@ describe('Security Tests', () => {
     it('order title with script tag is stored as-is (output encoding is frontend responsibility)', async () => {
       const svc = new OrdersService()
       mockDbExecute.mockResolvedValue({ rows: [{ next_number: '1' }] })
+      mockClientQuery.mockImplementation(async (...args: any[]) => {
+        const s = typeof args[0] === 'string' ? args[0] : String(args[0])
+        if (s.includes('MAX(order_number)')) return { rows: [{ next_number: '1' }] }
+        return { rows: [], rowCount: 0 }
+      })
 
       // The service stores text as-is using parameterized queries
       // XSS prevention is a frontend/output concern

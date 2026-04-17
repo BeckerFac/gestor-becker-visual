@@ -194,7 +194,18 @@ export class OrdersService {
 
       const rows = (result as any).rows || result || [];
 
-      // Get totals for summary
+      // H5 fix: summary also respects circuit visibility so a non-Luna user
+      // never sees counts/totals that include Luna rows.
+      const summaryOrdersFiscalClause = effectiveFiscal === 'fiscal'
+        ? sql` AND (fiscal_type = 'fiscal' OR fiscal_type IS NULL)`
+        : effectiveFiscal === 'no_fiscal'
+        ? sql` AND fiscal_type = 'no_fiscal'`
+        : sql``;
+      const summaryInvoicesFiscalClause = effectiveFiscal === 'fiscal'
+        ? sql` AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)`
+        : effectiveFiscal === 'no_fiscal'
+        ? sql` AND i.fiscal_type = 'no_fiscal'`
+        : sql``;
       const summaryResult = await db.execute(sql`
         SELECT
           COUNT(*) as total,
@@ -202,10 +213,11 @@ export class OrdersService {
           COUNT(*) FILTER (WHERE status = 'en_produccion') as en_produccion,
           COUNT(*) FILTER (WHERE status = 'terminado') as terminados,
           COUNT(*) FILTER (WHERE status = 'entregado') as entregados,
-          COALESCE((SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.company_id = ${companyId} AND i.status = 'authorized' AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)), 0) as total_facturado,
+          COALESCE((SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.company_id = ${companyId} AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%' ${summaryInvoicesFiscalClause}), 0) as total_facturado,
           COALESCE(SUM(total_amount), 0) as total_pedidos
         FROM orders
         WHERE company_id = ${companyId}
+          ${summaryOrdersFiscalClause}
       `);
       const summary = ((summaryResult as any).rows || summaryResult || [])[0] || {};
 
@@ -223,9 +235,11 @@ export class OrdersService {
         },
       };
     } catch (error: any) {
-      console.error('Get orders error:', error?.message || error);
+      // H1 fix: do NOT leak internal DB error messages to the client
+      // (can expose column names, query fragments, table structure).
+      console.error('Get orders error:', error?.message || error, error?.stack?.split('\n').slice(0, 5).join('\n'));
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, `Failed to get orders: ${error?.message || 'unknown error'}`);
+      throw new ApiError(500, 'Error al obtener pedidos');
     }
   }
 
@@ -389,12 +403,10 @@ export class OrdersService {
         } catch { /* no business units yet, leave null */ }
       }
 
-      // Generate order_number
-      const numResult = await db.execute(sql`
-        SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = ${companyId}
-      `);
-      const numRows = (numResult as any).rows || numResult || [];
-      const orderNumber = parseInt(numRows[0]?.next_number || '1');
+      // order_number is generated INSIDE the transaction after acquiring an
+      // advisory lock (see below). Two concurrent createOrder calls for the
+      // same company will serialize on the lock, preventing duplicate numbers.
+      let orderNumber: number | null = null;
 
       // Auto-resolve enterprise_id from customer if not provided (customer already validated above)
       let enterpriseId = data.enterprise_id || null;
@@ -452,6 +464,15 @@ export class OrdersService {
       const createClient = await pool.connect();
       try {
         await createClient.query('BEGIN');
+
+        // H2 fix: advisory lock on (company_id) serializes order_number generation.
+        // Prevents two concurrent createOrder calls from reading the same MAX().
+        await createClient.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`order_num:${companyId}`]);
+        const numRes = await createClient.query(
+          `SELECT COALESCE(MAX(order_number), 0) + 1 as next_number FROM orders WHERE company_id = $1`,
+          [companyId]
+        );
+        orderNumber = parseInt(numRes.rows[0]?.next_number || '1');
 
         await createClient.query(
           `INSERT INTO orders (id, company_id, customer_id, enterprise_id, bank_id, business_unit_id, order_number, title, description, product_type, status, priority, quantity, unit_price, total_amount, vat_rate, estimated_profit, estimated_delivery, payment_method, payment_status, discount_percent, notes, created_by, fiscal_type)
