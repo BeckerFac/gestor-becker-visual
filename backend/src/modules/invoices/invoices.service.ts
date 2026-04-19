@@ -73,10 +73,111 @@ export class InvoicesService {
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4)`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS amount_foreign DECIMAL(12,2)`);
 
+      // Nor feedback item 4: snapshot of the receiver identity used at
+      // emission time. Falls back via COALESCE to customer/enterprise for
+      // historical rows that have NULL here.
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_cuit VARCHAR(20)`);
+      await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_razon_social VARCHAR(255)`);
+
       this.migrationsRun = true;
     } catch (error) {
       console.error('Invoices migrations error:', error);
     }
+  }
+
+  /**
+   * Nor feedback item 4: resolve the fiscal identity (CUIT + razon_social +
+   * tax_condition + fiscal_address) for an invoice's RECEIVER.
+   *
+   * Priority:
+   *   1. customer-level — if customer has BOTH cuit AND razon_social set, it
+   *      bills under its own identity (multi-RS per empresa).
+   *   2. enterprise-level — falls back to enterprise fiscal data.
+   *
+   * CC aggregation remains at the enterprise level regardless of which
+   * identity is used at emission time. The enterprise_id is always returned
+   * so callers can persist it on the invoice for CC grouping.
+   *
+   * Both CUIT and razon_social are required at customer level: a customer
+   * with only a CUIT (no razon_social) falls back to the enterprise so the
+   * receiver identity is never partially-resolved.
+   */
+  async resolveInvoiceFiscalIdentity(
+    payload: { customer_id?: string | null; enterprise_id?: string | null },
+    companyId: string
+  ): Promise<{
+    cuit: string | null;
+    razon_social: string | null;
+    tax_condition: string | null;
+    fiscal_address: string | null;
+    enterprise_id: string | null;
+    source: 'customer' | 'enterprise';
+  }> {
+    // Priority 1: customer-level fiscal identity (if customer has cuit + razon_social)
+    if (payload.customer_id) {
+      const custResult = await db.execute(sql`
+        SELECT c.cuit, c.razon_social, c.tax_condition, c.fiscal_address,
+               c.address, c.enterprise_id
+        FROM customers c
+        WHERE c.id = ${payload.customer_id} AND c.company_id = ${companyId}
+      `);
+      const c = ((custResult as any).rows || [])[0];
+      if (c && c.cuit && c.razon_social) {
+        // Validate CUIT format before it ever reaches AFIP (defensive).
+        const cleanCuit = String(c.cuit).replace(/[-\s]/g, '');
+        if (!/^\d{11}$/.test(cleanCuit)) {
+          throw new ApiError(400, 'El CUIT del cliente tiene un formato invalido (debe tener 11 digitos)');
+        }
+        return {
+          cuit: c.cuit,
+          razon_social: c.razon_social,
+          tax_condition: c.tax_condition || null,
+          // Cascade: customer's fiscal_address > customer's commercial address.
+          fiscal_address: c.fiscal_address || c.address || null,
+          enterprise_id: c.enterprise_id || payload.enterprise_id || null,
+          source: 'customer',
+        };
+      }
+    }
+
+    // Priority 2: enterprise-level
+    // Resolve enterprise_id from customer if not provided and customer lacks
+    // its own fiscal identity.
+    let entId = payload.enterprise_id || null;
+    if (!entId && payload.customer_id) {
+      const custRes = await db.execute(sql`
+        SELECT enterprise_id FROM customers
+        WHERE id = ${payload.customer_id} AND company_id = ${companyId}
+      `);
+      const custRow = ((custRes as any).rows || [])[0];
+      if (custRow?.enterprise_id) entId = custRow.enterprise_id;
+    }
+
+    if (entId) {
+      const entResult = await db.execute(sql`
+        SELECT cuit, razon_social, tax_condition, fiscal_address, address, name
+        FROM enterprises
+        WHERE id = ${entId} AND company_id = ${companyId}
+      `);
+      const e = ((entResult as any).rows || [])[0];
+      if (e) {
+        return {
+          cuit: e.cuit || null,
+          // When enterprise doesn't have a razon_social set (legacy rows),
+          // fall back to the commercial name so the receiver block never
+          // renders empty.
+          razon_social: e.razon_social || e.name || null,
+          tax_condition: e.tax_condition || null,
+          // Cascade: fiscal_address > commercial address.
+          fiscal_address: e.fiscal_address || e.address || null,
+          enterprise_id: entId,
+          source: 'enterprise',
+        };
+      }
+    }
+
+    // Neither customer nor enterprise could be resolved → invalid state.
+    throw new ApiError(400, 'No se pudo resolver la identidad fiscal del receptor');
   }
 
   async createInvoice(companyId: string, userId: string, data: any) {
@@ -271,6 +372,40 @@ export class InvoicesService {
         }).returning();
       }
 
+      // Nor feedback item 4: resolve and snapshot the receiver fiscal identity.
+      // When the resolved source is 'customer' with its own CUIT/razon_social,
+      // store that on the invoice so Libro IVA / PDF / AFIP use the correct
+      // identity. When source is 'enterprise' (no per-customer identity), we
+      // still snapshot so historical name changes on the enterprise don't
+      // silently rewrite past invoices. If neither resolves (Consumidor Final
+      // with no customer and no enterprise), leave the snapshot NULL and fall
+      // back via the PDF/Libro IVA cascades.
+      //
+      // Re-throw ONLY invalid-CUIT errors (which would otherwise hit AFIP
+      // with a bad payload). "No se pudo resolver" is swallowed so legacy
+      // flows (Consumidor Final, unlinked invoices) continue to work.
+      let receiverCuit: string | null = null;
+      let receiverRazonSocial: string | null = null;
+      if (data.customer_id || enterpriseId) {
+        try {
+          const identity = await this.resolveInvoiceFiscalIdentity(
+            { customer_id: data.customer_id || null, enterprise_id: enterpriseId || null },
+            companyId,
+          );
+          receiverCuit = identity.cuit;
+          receiverRazonSocial = identity.razon_social;
+          // resolveInvoiceFiscalIdentity may have resolved enterprise_id from
+          // the customer row — keep our local in sync for downstream UPDATE.
+          if (!enterpriseId && identity.enterprise_id) enterpriseId = identity.enterprise_id;
+        } catch (resolveErr) {
+          if (resolveErr instanceof ApiError && /cuit/i.test(resolveErr.message) && resolveErr.statusCode === 400) {
+            throw resolveErr;
+          }
+          // All other resolution failures → leave snapshot NULL, rely on PDF
+          // / Libro IVA COALESCE cascade to fill the receiver at read time.
+        }
+      }
+
       // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, currency, and retenciones_esperadas via raw SQL (columns added by migration)
       const currency = data.currency || 'ARS';
       const exchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
@@ -283,7 +418,9 @@ export class InvoicesService {
           fiscal_type = ${fiscalType}, business_unit_id = ${data.business_unit_id || null},
           related_invoice_id = ${data.related_invoice_id || null},
           currency = ${currency}, exchange_rate = ${exchangeRate},
-          retenciones_esperadas = ${retencionesEsperadas}::jsonb
+          retenciones_esperadas = ${retencionesEsperadas}::jsonb,
+          receiver_cuit = ${receiverCuit},
+          receiver_razon_social = ${receiverRazonSocial}
         WHERE id = ${invoiceId}
       `);
 
@@ -573,7 +710,8 @@ export class InvoicesService {
         whereClause = sql`${whereClause} AND (i.fiscal_type = 'fiscal' OR i.fiscal_type IS NULL)`;
       }
       if (business_unit_id) {
-        whereClause = sql`${whereClause} AND i.business_unit_id = ${business_unit_id}`;
+        // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+        whereClause = sql`${whereClause} AND (i.business_unit_id = ${business_unit_id} OR i.business_unit_id IS NULL)`;
       }
       if (enterprise_id) {
         whereClause = sql`${whereClause} AND (i.enterprise_id = ${enterprise_id} OR c.enterprise_id = ${enterprise_id})`;
@@ -1147,7 +1285,12 @@ export class InvoicesService {
         throw new ApiError(400, 'La factura no tiene importe. Verifique que los items tengan precios.');
       }
 
-      // Get customer CUIT and condicion_iva
+      // Get customer CUIT and condicion_iva.
+      // Nor feedback item 4: when the invoice was emitted under a customer's
+      // own fiscal identity (receiver_cuit snapshot set at creation), prefer
+      // that over the raw customer.cuit — ensures AFIP authorization uses
+      // the exact identity the user selected, even if the customer row
+      // changes later.
       let customerCuit = '';
       let customerCondicionIva: number | null = null;
       if (invoice.customer_id) {
@@ -1157,6 +1300,10 @@ export class InvoicesService {
           customerCuit = custData.cuit || '';
           customerCondicionIva = custData.condicion_iva ? parseInt(custData.condicion_iva) : null;
         }
+      }
+      // Override with the snapshot if present (source of truth for AFIP).
+      if ((invoice as any).receiver_cuit) {
+        customerCuit = (invoice as any).receiver_cuit;
       }
 
       // Get invoice items for IVA breakdown

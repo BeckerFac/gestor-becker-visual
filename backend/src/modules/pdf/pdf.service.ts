@@ -122,9 +122,12 @@ export class PdfService {
       if (invoice.fiscal_type === 'no_fiscal') {
         html = this.generateLunaComprobanteHtml({ invoice, items, customer, enterprise, company: input })
       } else if (invoice.fiscal_type === 'interno') {
-        html = this.generateInternalVoucherHtml({ invoice, items, customer, company: input })
+        html = this.generateInternalVoucherHtml({ invoice, items, customer, enterprise, company: input })
       } else {
-        html = this.generateInvoiceHtml({ invoice, items, customer, company: input, qrDataUrl })
+        // Nor feedback item 4: pass enterprise so the receiver block can
+        // fall back to enterprise.razon_social when a customer has no own
+        // fiscal identity.
+        html = this.generateInvoiceHtml({ invoice, items, customer, enterprise, company: input, qrDataUrl })
       }
 
       // Anulado watermark (soft-delete aware)
@@ -306,10 +309,38 @@ export class PdfService {
   }
 
   private generateInvoiceHtml(data: any): string {
-    const { invoice, items, customer, company, qrDataUrl } = data
+    const { invoice, items, customer, enterprise, company, qrDataUrl } = data
 
     // Escape all user-controlled strings to prevent HTML injection in PDFs
     const esc = this.escapeHtml.bind(this)
+
+    // Nor feedback item 4: resolve the receiver block with fallback cascade.
+    // Priority: invoice snapshot > customer own identity > enterprise > legacy.
+    // Every field is XSS-escaped via `esc` below.
+    const receiverRazonSocial =
+      invoice?.receiver_razon_social ||
+      (customer?.cuit && customer?.razon_social ? customer.razon_social : null) ||
+      enterprise?.razon_social ||
+      enterprise?.name ||
+      customer?.name ||
+      'Consumidor Final'
+    const receiverCuitRaw =
+      invoice?.receiver_cuit ||
+      (customer?.cuit && customer?.razon_social ? customer.cuit : null) ||
+      enterprise?.cuit ||
+      customer?.cuit ||
+      ''
+    const receiverTaxCondition =
+      (customer?.cuit && customer?.razon_social ? customer?.tax_condition : null) ||
+      enterprise?.tax_condition ||
+      customer?.tax_condition ||
+      'Consumidor Final'
+    const receiverAddress =
+      (customer?.cuit && customer?.razon_social ? (customer?.fiscal_address || customer?.address) : null) ||
+      enterprise?.fiscal_address ||
+      enterprise?.address ||
+      customer?.address ||
+      '-'
 
     // Extract punto de venta from AFIP response
     const puntoVenta = invoice.afip_response?.FeCabResp?.PtoVta || ''
@@ -495,15 +526,15 @@ export class PdfService {
   <div class="receptor">
     <div style="display: flex; gap: 40px;">
       <div style="flex: 1;">
-        <div class="info-row"><span class="info-label">Condición frente al IVA:</span> <span class="info-value">${esc(customer?.tax_condition || 'Consumidor Final')}</span></div>
-        <div class="info-row"><span class="info-label">Nombre / Razón Social:</span> <span class="info-value" style="font-weight: bold;">${esc(customer?.name || 'Consumidor Final')}</span></div>
+        <div class="info-row"><span class="info-label">Condición frente al IVA:</span> <span class="info-value">${esc(receiverTaxCondition)}</span></div>
+        <div class="info-row"><span class="info-label">Nombre / Razón Social:</span> <span class="info-value" style="font-weight: bold;">${esc(receiverRazonSocial)}</span></div>
       </div>
       <div style="flex: 1;">
-        ${customer?.cuit
-          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(customer.cuit))}</span></div>`
+        ${receiverCuitRaw
+          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(receiverCuitRaw))}</span></div>`
           : `<div class="info-row"><span class="info-label">Documento:</span> <span class="info-value">-</span></div>`
         }
-        <div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(customer?.address || '-')}</span></div>
+        <div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(receiverAddress)}</span></div>
       </div>
     </div>
   </div>
@@ -591,13 +622,33 @@ export class PdfService {
   }
 
   private generateInternalVoucherHtml(data: any): string {
-    const { invoice, items, customer, company } = data
+    const { invoice, items, customer, enterprise, company } = data
     const esc = this.escapeHtml.bind(this)
     const nroStr = String(invoice.invoice_number).padStart(6, '0')
     const invoiceDate = new Date(invoice.invoice_date).toLocaleDateString('es-AR')
     const companyCuit = this.formatCuit(company.companyCuit || '')
     const domicilio = [company.companyAddress, company.companyCity, company.companyProvince]
       .filter(Boolean).join(', ')
+    // Nor feedback item 4: same fallback cascade as fiscal invoices.
+    const receiverRazonSocial =
+      invoice?.receiver_razon_social ||
+      (customer?.cuit && customer?.razon_social ? customer.razon_social : null) ||
+      enterprise?.razon_social ||
+      enterprise?.name ||
+      customer?.name ||
+      'Sin especificar'
+    const receiverCuitRaw =
+      invoice?.receiver_cuit ||
+      (customer?.cuit && customer?.razon_social ? customer.cuit : null) ||
+      enterprise?.cuit ||
+      customer?.cuit ||
+      ''
+    const receiverAddress =
+      (customer?.cuit && customer?.razon_social ? (customer?.fiscal_address || customer?.address) : null) ||
+      enterprise?.fiscal_address ||
+      enterprise?.address ||
+      customer?.address ||
+      ''
 
     return `<!DOCTYPE html>
 <html>
@@ -673,14 +724,14 @@ export class PdfService {
   <div class="receptor">
     <div style="display: flex; gap: 40px;">
       <div style="flex: 1;">
-        <div class="info-row"><span class="info-label">Nombre / Razon Social:</span> <span class="info-value" style="font-weight: bold;">${esc(customer?.name || 'Sin especificar')}</span></div>
+        <div class="info-row"><span class="info-label">Nombre / Razon Social:</span> <span class="info-value" style="font-weight: bold;">${esc(receiverRazonSocial)}</span></div>
       </div>
       <div style="flex: 1;">
-        ${customer?.cuit
-          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(customer.cuit))}</span></div>`
+        ${receiverCuitRaw
+          ? `<div class="info-row"><span class="info-label">CUIT:</span> <span class="info-value">${esc(this.formatCuit(receiverCuitRaw))}</span></div>`
           : ''
         }
-        ${customer?.address ? `<div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(customer.address)}</span></div>` : ''}
+        ${receiverAddress ? `<div class="info-row"><span class="info-label">Domicilio:</span> <span class="info-value">${esc(receiverAddress)}</span></div>` : ''}
       </div>
     </div>
   </div>
@@ -748,10 +799,27 @@ export class PdfService {
     const domicilio = [company.companyAddress, company.companyCity, company.companyProvince]
       .filter(Boolean).join(', ')
 
-    // Client block: prefer enterprise, fall back to customer
-    const clientName = enterprise?.razon_social || enterprise?.name || customer?.name || 'Sin especificar'
-    const clientCuit = enterprise?.cuit || customer?.cuit || ''
-    const clientAddress = enterprise?.fiscal_address || enterprise?.address || customer?.address || ''
+    // Client block: Nor feedback item 4 — prefer the invoice's snapshotted
+    // receiver identity (customer-own RS or enterprise), fall back by cascade.
+    const clientName =
+      invoice?.receiver_razon_social ||
+      (customer?.cuit && customer?.razon_social ? customer.razon_social : null) ||
+      enterprise?.razon_social ||
+      enterprise?.name ||
+      customer?.name ||
+      'Sin especificar'
+    const clientCuit =
+      invoice?.receiver_cuit ||
+      (customer?.cuit && customer?.razon_social ? customer.cuit : null) ||
+      enterprise?.cuit ||
+      customer?.cuit ||
+      ''
+    const clientAddress =
+      (customer?.cuit && customer?.razon_social ? (customer?.fiscal_address || customer?.address) : null) ||
+      enterprise?.fiscal_address ||
+      enterprise?.address ||
+      customer?.address ||
+      ''
 
     let grandTotal = 0
     const rows = (items || []).map((item: any, idx: number) => {

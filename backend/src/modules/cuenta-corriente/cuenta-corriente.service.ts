@@ -32,11 +32,13 @@ export class CuentaCorrienteService {
       // PR7-T21: each subquery uses a different table alias, so we need
       // per-alias BU filters to avoid "column reference is ambiguous" error.
       // The axios interceptor in the frontend auto-injects business_unit_id on ALL GETs.
-      const buFilterI = businessUnitId ? sql` AND i.business_unit_id = ${businessUnitId}` : sql``;
-      const buFilterCo = businessUnitId ? sql` AND co.business_unit_id = ${businessUnitId}` : sql``;
-      const buFilterCs = businessUnitId ? sql` AND cs.business_unit_id = ${businessUnitId}` : sql``;
-      const buFilterPi = businessUnitId ? sql` AND pi.business_unit_id = ${businessUnitId}` : sql``;
-      const buFilterPa = businessUnitId ? sql` AND pa.business_unit_id = ${businessUnitId}` : sql``;
+      // Nor-fix (item 1): BU filter includes orphan rows (business_unit_id IS NULL)
+      // so Dashboard/CC remain consistent with listings after the NULL-visibility fix.
+      const buFilterI = businessUnitId ? sql` AND (i.business_unit_id = ${businessUnitId} OR i.business_unit_id IS NULL)` : sql``;
+      const buFilterCo = businessUnitId ? sql` AND (co.business_unit_id = ${businessUnitId} OR co.business_unit_id IS NULL)` : sql``;
+      const buFilterCs = businessUnitId ? sql` AND (cs.business_unit_id = ${businessUnitId} OR cs.business_unit_id IS NULL)` : sql``;
+      const buFilterPi = businessUnitId ? sql` AND (pi.business_unit_id = ${businessUnitId} OR pi.business_unit_id IS NULL)` : sql``;
+      const buFilterPa = businessUnitId ? sql` AND (pa.business_unit_id = ${businessUnitId} OR pa.business_unit_id IS NULL)` : sql``;
 
       // PR7-T16: defensive try/catch para migrations no aplicadas.
       // Verificar que las columnas/tablas criticas existan, sino loguear warning
@@ -81,7 +83,7 @@ export class CuentaCorrienteService {
         }
       }
       const ajustesBuFilter = businessUnitId && ajustesBusinessUnitExists
-        ? sql` AND aa.business_unit_id = ${businessUnitId}`
+        ? sql` AND (aa.business_unit_id = ${businessUnitId} OR aa.business_unit_id IS NULL)`
         : sql``;
 
       // C2: multi-currency detection. If purchase_invoices.currency exists and
@@ -339,7 +341,7 @@ export class CuentaCorrienteService {
               AND (r.cobro_id IS NULL OR rc.id IS NULL OR ${cobrosStatusExists ? sql`(rc.status IS NULL OR rc.status != 'anulado')` : sql`TRUE`})
               AND (r.cobro_id IS NULL OR COALESCE(rc.fiscal_type,'fiscal')='fiscal')
               ${businessUnitId
-                ? sql` AND (r.cobro_id IS NULL OR rc.business_unit_id = ${businessUnitId})`
+                ? sql` AND (r.cobro_id IS NULL OR rc.business_unit_id = ${businessUnitId} OR rc.business_unit_id IS NULL)`
                 : sql``}
           ), 0) as total_retenciones_sufridas_sol,
           -- Retenciones sufridas total (legacy field), Luna should remain 0 by design.
@@ -352,7 +354,7 @@ export class CuentaCorrienteService {
               AND r.direction = 'sufrida'
               AND (r.cobro_id IS NULL OR rc.id IS NULL OR ${cobrosStatusExists ? sql`(rc.status IS NULL OR rc.status != 'anulado')` : sql`TRUE`})
               ${businessUnitId
-                ? sql` AND (r.cobro_id IS NULL OR rc.business_unit_id = ${businessUnitId})`
+                ? sql` AND (r.cobro_id IS NULL OR rc.business_unit_id = ${businessUnitId} OR rc.business_unit_id IS NULL)`
                 : sql``}
           ), 0) as total_retenciones_sufridas,
 
@@ -367,7 +369,7 @@ export class CuentaCorrienteService {
               AND r.direction = 'practicada'
               AND (r.pago_id IS NULL OR rp.id IS NULL OR ${pagosStatusExists ? sql`(rp.status IS NULL OR rp.status != 'anulado')` : sql`TRUE`})
               ${businessUnitId
-                ? sql` AND (r.pago_id IS NULL OR rp.business_unit_id = ${businessUnitId})`
+                ? sql` AND (r.pago_id IS NULL OR rp.business_unit_id = ${businessUnitId} OR rp.business_unit_id IS NULL)`
                 : sql``}
           ), 0) as total_retenciones_practicadas,
 
@@ -575,7 +577,8 @@ export class CuentaCorrienteService {
       let buFilter = '';
       if (filters?.businessUnitId) {
         params.push(filters.businessUnitId);
-        buFilter = ` AND business_unit_id = $${params.length}`;
+        // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+        buFilter = ` AND (business_unit_id = $${params.length} OR business_unit_id IS NULL)`;
       }
 
       // CAT-6: fiscal_type param — applied to every UNION subquery that has
@@ -728,7 +731,7 @@ export class CuentaCorrienteService {
           WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'sufrida'
             ${cobrosStatusExists ? ` AND (r.cobro_id IS NULL OR rc.status IS NULL OR rc.status != 'anulado')` : ''}
             ${isSol ? '' : ' AND FALSE'}
-            ${buFilter ? ` AND (r.cobro_id IS NULL OR rc.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1})` : ''}
+            ${buFilter ? ` AND (r.cobro_id IS NULL OR rc.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1} OR rc.business_unit_id IS NULL)` : ''}
 
           UNION ALL
 
@@ -748,7 +751,7 @@ export class CuentaCorrienteService {
           WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'practicada'
             ${pagosStatusExists ? ` AND (r.pago_id IS NULL OR rp.status IS NULL OR rp.status != 'anulado')` : ''}
             ${isSol ? '' : ' AND FALSE'}
-            ${buFilter ? ` AND (r.pago_id IS NULL OR rp.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1})` : ''}
+            ${buFilter ? ` AND (r.pago_id IS NULL OR rp.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1} OR rp.business_unit_id IS NULL)` : ''}
       `;
 
       // H3: compute opening balance if dateFrom is set — sum of all movements BEFORE dateFrom.

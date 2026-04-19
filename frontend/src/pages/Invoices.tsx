@@ -69,7 +69,7 @@ interface Enterprise {
   address?: string | null
   fiscal_address?: string | null
 }
-interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
+interface Customer { id: string; name: string; cuit: string | null; enterprise_id?: string | null; razon_social?: string | null; tax_condition?: string | null; fiscal_address?: string | null }
 interface Product { id: string; sku: string; name: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string }
 
 
@@ -1252,6 +1252,33 @@ export const Invoices: React.FC = () => {
                   enterpriseLabel="Empresa emisora"
                   customerLabel="Cliente / Contacto"
                 />
+
+                {/* Nor feedback item 4: receiver fiscal identity indicator.
+                    Mirrors the backend resolveInvoiceFiscalIdentity cascade:
+                    customer own (if cuit+razon_social both set) > enterprise. */}
+                {(() => {
+                  const selCust = formCustomerId ? customers.find(c => c.id === formCustomerId) : null
+                  const selEnt = formEnterpriseId ? enterprises.find(e => e.id === formEnterpriseId) : null
+                  const usesCustomerIdentity = !!(selCust?.cuit && selCust?.razon_social)
+                  const rs = usesCustomerIdentity
+                    ? selCust!.razon_social
+                    : (selEnt?.razon_social || selEnt?.name || selCust?.name || '')
+                  const cuit = usesCustomerIdentity ? selCust!.cuit : (selEnt?.cuit || selCust?.cuit || '')
+                  if (!rs) return null
+                  return (
+                    <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-3 py-2">
+                      <span>{usesCustomerIdentity ? '👤' : '🏢'}</span>
+                      <span>
+                        <span className="font-medium">Facturará como:</span>{' '}
+                        {rs}
+                        {cuit ? <> (CUIT {cuit})</> : null}
+                      </span>
+                      {usesCustomerIdentity && (
+                        <span className="text-[10px] uppercase tracking-wide text-blue-600 ml-auto">RS propia del contacto</span>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Fiscal data warning */}
                 {selectedEnterprise && !isNcNdType(formInvoiceType) && !isExportType(formInvoiceType) && (() => {

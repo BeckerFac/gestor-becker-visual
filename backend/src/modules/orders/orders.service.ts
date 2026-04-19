@@ -84,7 +84,9 @@ export class OrdersService {
         whereClause = sql`${whereClause} AND o.fiscal_type = 'no_fiscal'`;
       }
       if (business_unit_id) {
-        whereClause = sql`${whereClause} AND o.business_unit_id = ${business_unit_id}`;
+        // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL) when filtering
+        // by BU so stale localStorage / freshly-created rows with no BU remain visible.
+        whereClause = sql`${whereClause} AND (o.business_unit_id = ${business_unit_id} OR o.business_unit_id IS NULL)`;
       }
 
       if (status && status !== 'todos') {

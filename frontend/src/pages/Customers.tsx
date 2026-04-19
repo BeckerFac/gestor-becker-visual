@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -11,11 +12,12 @@ import { ExportCSVButton } from '@/components/shared/ExportCSV'
 import { ExportExcelButton } from '@/components/shared/ExportExcel'
 import { TagBadges } from '@/components/shared/TagBadges'
 import { TagManager } from '@/components/shared/TagManager'
+import { PermissionGate } from '@/components/shared/PermissionGate'
 import { api } from '@/services/api'
 
 interface Customer {
   id: string
-  cuit: string
+  cuit: string | null
   name: string
   contact_name: string | null
   address: string | null
@@ -31,6 +33,11 @@ interface Customer {
   status: string
   access_code: string | null
   tags: { id: string; name: string; color: string }[]
+  // Nor feedback item 4: customer's own fiscal identity (optional).
+  // When razon_social + cuit are both set, invoices emitted to this contact
+  // use this identity instead of the parent enterprise's.
+  razon_social: string | null
+  fiscal_address: string | null
 }
 
 const CONDICION_IVA_OPTIONS = [
@@ -52,9 +59,14 @@ const emptyForm = {
   cuit: '', name: '', contact_name: '', address: '', city: '', province: '',
   phone: '', email: '', tax_condition: 'Responsable Inscripto', condicion_iva: '',
   credit_limit: '', payment_terms: '30', notes: '',
+  // Nor feedback item 4: customer's own fiscal identity (optional, collapsed
+  // by default). Empty strings are sent as NULL from the submit handler so
+  // the backend knows to "fall back to enterprise" for the receiver.
+  razon_social: '', fiscal_address: '',
 }
 
 export const Customers: React.FC = () => {
+  const navigate = useNavigate()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -67,6 +79,8 @@ export const Customers: React.FC = () => {
   const [deleting, setDeleting] = useState(false)
   const [availableTags, setAvailableTags] = useState<{ id: string; name: string; color: string }[]>([])
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null)
+  // Nor feedback item 4: collapsible "own fiscal identity" section in the form.
+  const [showOwnFiscal, setShowOwnFiscal] = useState(false)
 
   const loadTags = async () => {
     try {
@@ -91,14 +105,25 @@ export const Customers: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // Nor feedback item 2: CUIT is optional. Validate format only when present.
+    const cuitClean = form.cuit.trim().replace(/[-\s]/g, '')
+    if (cuitClean && !/^\d{11}$/.test(cuitClean)) {
+      toast.error('CUIT invalido')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       const payload = {
         ...form,
+        cuit: form.cuit.trim() || null,
         condicion_iva: form.condicion_iva ? parseInt(form.condicion_iva) : null,
         credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
         payment_terms: form.payment_terms ? parseInt(form.payment_terms) : null,
+        // Nor feedback item 4: empty string → NULL so backend falls back
+        // to enterprise for the receiver's fiscal identity.
+        razon_social: form.razon_social.trim() || null,
+        fiscal_address: form.fiscal_address.trim() || null,
       }
       if (editingId) {
         await api.updateCustomer(editingId, payload)
@@ -121,15 +146,19 @@ export const Customers: React.FC = () => {
 
   const handleEdit = (customer: Customer) => {
     setForm({
-      cuit: customer.cuit, name: customer.name, contact_name: customer.contact_name || '',
+      cuit: customer.cuit || '', name: customer.name, contact_name: customer.contact_name || '',
       address: customer.address || '', city: customer.city || '', province: customer.province || '',
       phone: customer.phone || '', email: customer.email || '',
       tax_condition: customer.tax_condition || 'Responsable Inscripto',
       condicion_iva: customer.condicion_iva?.toString() || '',
       credit_limit: customer.credit_limit || '', payment_terms: customer.payment_terms?.toString() || '30',
       notes: customer.notes || '',
+      razon_social: customer.razon_social || '',
+      fiscal_address: customer.fiscal_address || '',
     })
     setEditingId(customer.id)
+    // Auto-expand the fiscal section when editing a contact that already has its own identity.
+    setShowOwnFiscal(!!(customer.razon_social || customer.fiscal_address))
     setShowForm(true)
   }
 
@@ -172,12 +201,12 @@ export const Customers: React.FC = () => {
 
   const filtered = customers.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.cuit.includes(search) ||
+    (c.cuit || '').includes(search) ||
     (c.email || '').toLowerCase().includes(search.toLowerCase())
   )
 
   const columns = [
-    { key: 'cuit' as const, label: 'CUIT' },
+    { key: 'cuit' as const, label: 'CUIT', render: (v: any) => v || '-' },
     { key: 'name' as const, label: 'Razón Social', render: (v: any, row: Customer) => (
       <div className="flex items-center gap-2">
         <span>{v}</span>
@@ -203,6 +232,15 @@ export const Customers: React.FC = () => {
     )},
     { key: 'id' as const, label: 'Acciones', render: (_: any, row: Customer) => (
       <div className="flex gap-2">
+        {/* Nor feedback item 5: crear pedido directamente desde un contacto. */}
+        <PermissionGate module="orders" action="create">
+          <button
+            onClick={(e) => { e.stopPropagation(); navigate(`/orders?nuevo=true&customer_id=${row.id}`) }}
+            className="text-blue-600 hover:underline text-sm font-medium"
+          >
+            + Pedido
+          </button>
+        </PermissionGate>
         <button onClick={(e) => { e.stopPropagation(); setExpandedCustomerId(expandedCustomerId === row.id ? null : row.id) }} className="text-purple-600 hover:underline text-sm">Tags</button>
         <button onClick={(e) => { e.stopPropagation(); handleEdit(row) }} className="text-blue-600 hover:underline text-sm">Editar</button>
         <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row) }} className="text-red-600 hover:underline text-sm">Eliminar</button>
@@ -221,7 +259,7 @@ export const Customers: React.FC = () => {
           <ExportCSVButton
             data={filtered.map(c => ({
               nombre: c.name,
-              cuit: c.cuit,
+              cuit: c.cuit || '-',
               empresa: c.contact_name || '-',
               telefono: c.phone || '-',
               email: c.email || '-',
@@ -240,7 +278,7 @@ export const Customers: React.FC = () => {
           <ExportExcelButton
             data={filtered.map(c => ({
               nombre: c.name,
-              cuit: c.cuit,
+              cuit: c.cuit || '-',
               empresa: c.contact_name || '-',
               telefono: c.phone || '-',
               email: c.email || '-',
@@ -256,7 +294,7 @@ export const Customers: React.FC = () => {
             ]}
             filename="clientes"
           />
-          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(!showForm) }}>
+          <Button variant={showForm ? 'danger' : 'primary'} onClick={() => { setForm(emptyForm); setEditingId(null); setShowOwnFiscal(false); setShowForm(!showForm) }}>
             {showForm ? 'Cancelar' : '+ Nuevo Cliente'}
           </Button>
         </div>
@@ -274,7 +312,7 @@ export const Customers: React.FC = () => {
           <CardHeader><h3 className="text-lg font-semibold">{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</h3></CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Input label="CUIT *" placeholder="20-12345678-9" value={form.cuit} onChange={e => setForm({ ...form, cuit: e.target.value })} required />
+              <Input label="CUIT (opcional)" placeholder="20-12345678-9" value={form.cuit} onChange={e => setForm({ ...form, cuit: e.target.value })} />
               <Input label="Razón Social *" placeholder="Nombre de la empresa" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               <Input label="Contacto" placeholder="Nombre del contacto" value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} />
               <Input label="Teléfono" placeholder="+54 11 1234-5678" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
@@ -309,6 +347,54 @@ export const Customers: React.FC = () => {
                   value={form.notes}
                   onChange={e => setForm({ ...form, notes: e.target.value })}
                 />
+              </div>
+
+              {/* Nor feedback item 4: collapsible "own fiscal identity" section.
+                  When razon_social + cuit are both set here, invoices to this
+                  contact use THIS identity (not the parent enterprise's). */}
+              <div className="col-span-full border-t border-gray-200 dark:border-gray-700 pt-3 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOwnFiscal(s => !s)}
+                  className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2 hover:text-blue-600"
+                  aria-expanded={showOwnFiscal}
+                >
+                  <span className="text-xs">{showOwnFiscal ? '▼' : '▶'}</span>
+                  Identidad fiscal propia (opcional)
+                </button>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Dejá vacío para que las facturas usen los datos de la empresa padre.
+                  Completá solo si este contacto factura bajo su propio CUIT.
+                </p>
+                {showOwnFiscal && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-3">
+                    <Input
+                      label="Razón social propia"
+                      placeholder="Ej: Juan Pérez Servicios SA"
+                      value={form.razon_social}
+                      onChange={e => setForm({ ...form, razon_social: e.target.value })}
+                    />
+                    <div className="flex flex-col gap-1">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Condición IVA propia</label>
+                      <select
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-base bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={form.tax_condition}
+                        onChange={e => setForm({ ...form, tax_condition: e.target.value })}
+                      >
+                        <option>Responsable Inscripto</option>
+                        <option>Monotributo</option>
+                        <option>Exento</option>
+                        <option>Consumidor Final</option>
+                      </select>
+                    </div>
+                    <Input
+                      label="Dirección fiscal propia"
+                      placeholder="Av. Ejemplo 1234, CABA"
+                      value={form.fiscal_address}
+                      onChange={e => setForm({ ...form, fiscal_address: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex items-end">
                 <Button type="submit" variant="success" loading={saving} className="w-full">{editingId ? 'Guardar Cambios' : 'Crear Cliente'}</Button>

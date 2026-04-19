@@ -81,7 +81,8 @@ export class ChequesService {
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
       if (filters.business_unit_id) {
-        whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
+        // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+        whereClause = sql`${whereClause} AND (c.business_unit_id = ${filters.business_unit_id} OR c.business_unit_id IS NULL)`;
       }
       if (filters.direction) {
         whereClause = sql`${whereClause} AND c.direction = ${filters.direction}`;
@@ -627,7 +628,8 @@ export class ChequesService {
     await this.ensureMigrations();
     let whereClause = sql`c.company_id = ${companyId} AND c.status = 'a_cobrar' AND c.direction = 'recibido'`;
     if (businessUnitId) {
-      whereClause = sql`${whereClause} AND c.business_unit_id = ${businessUnitId}`;
+      // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+      whereClause = sql`${whereClause} AND (c.business_unit_id = ${businessUnitId} OR c.business_unit_id IS NULL)`;
     }
 
     const result = await db.execute(sql`

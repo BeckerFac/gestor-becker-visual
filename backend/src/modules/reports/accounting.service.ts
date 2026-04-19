@@ -107,9 +107,13 @@ export class AccountingService {
       const dates = validateDateRange(dateFrom, dateTo);
 
       // Build optional business_unit filter
-      // Libro IVA only includes fiscal invoices from fiscal business units
+      // Libro IVA only includes fiscal invoices from fiscal business units.
+      // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL) so
+      // rows created without a BU remain visible in the Libro IVA when a BU
+      // filter is active (the is_fiscal=true OR business_unit_id IS NULL
+      // clause below already whitelists NULL, so this stays consistent).
       const buFilter = businessUnitId
-        ? sql`AND i.business_unit_id = ${businessUnitId}`
+        ? sql`AND (i.business_unit_id = ${businessUnitId} OR i.business_unit_id IS NULL)`
         : sql``;
 
       const result = await db.execute(sql`
@@ -119,8 +123,28 @@ export class AccountingService {
           i.invoice_number,
           COALESCE((i.afip_response->'FeCabResp'->>'PtoVta')::int, 3) as punto_venta,
           i.afip_response,
-          COALESCE(c.name, 'Consumidor Final') as customer_name,
-          COALESCE(c.cuit, '') as customer_cuit,
+          -- Nor feedback item 4: receiver name/CUIT cascade.
+          -- invoice.receiver_* snapshot (if emitted under customer own RS)
+          -- > customer.razon_social/cuit (when customer has its own identity)
+          -- > enterprise.razon_social/cuit > customer.name fallback.
+          -- This puts 2 contacts of the same enterprise as separate Libro IVA
+          -- rows when they have different CUITs — which is the correct AFIP
+          -- semantics.
+          COALESCE(
+            NULLIF(i.receiver_razon_social, ''),
+            CASE WHEN c.cuit IS NOT NULL AND c.razon_social IS NOT NULL THEN c.razon_social END,
+            e.razon_social,
+            e.name,
+            c.name,
+            'Consumidor Final'
+          ) as customer_name,
+          COALESCE(
+            NULLIF(i.receiver_cuit, ''),
+            CASE WHEN c.cuit IS NOT NULL AND c.razon_social IS NOT NULL THEN c.cuit END,
+            e.cuit,
+            c.cuit,
+            ''
+          ) as customer_cuit,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) > 0 THEN COALESCE(CAST(ii.subtotal AS decimal), 0) ELSE 0 END), 0) as neto_gravado,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 0 THEN COALESCE(CAST(ii.subtotal AS decimal), 0) ELSE 0 END), 0) as neto_no_gravado,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 27 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.27, 2) ELSE 0 END), 0) as iva_27,
@@ -133,6 +157,7 @@ export class AccountingService {
           COALESCE(CAST(i.total_amount AS decimal), 0) as total
         FROM invoices i
         LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN enterprises e ON COALESCE(i.enterprise_id, c.enterprise_id) = e.id
         JOIN invoice_items ii ON ii.invoice_id = i.id
         LEFT JOIN business_units bu ON i.business_unit_id = bu.id
         WHERE i.company_id = ${companyId}
@@ -142,7 +167,7 @@ export class AccountingService {
           AND (i.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${dates.dateFrom}::date
           AND (i.invoice_date AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${dates.dateTo}::date
           ${buFilter}
-        GROUP BY i.id, i.invoice_date, i.invoice_type, i.invoice_number, i.vat_amount, i.total_amount, i.afip_response, c.name, c.cuit
+        GROUP BY i.id, i.invoice_date, i.invoice_type, i.invoice_number, i.vat_amount, i.total_amount, i.afip_response, i.receiver_cuit, i.receiver_razon_social, c.name, c.cuit, c.razon_social, e.name, e.cuit, e.razon_social
         ORDER BY i.invoice_date ASC, i.invoice_number ASC
         LIMIT ${LIBRO_MAX_ROWS}
       `);
@@ -223,8 +248,9 @@ export class AccountingService {
     try {
       const dates = validateDateRange(dateFrom, dateTo);
 
+      // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
       const buFilter = businessUnitId
-        ? sql`AND pi.business_unit_id = ${businessUnitId}`
+        ? sql`AND (pi.business_unit_id = ${businessUnitId} OR pi.business_unit_id IS NULL)`
         : sql``;
 
       // Use purchase_invoices table (facturas de compra) instead of purchases

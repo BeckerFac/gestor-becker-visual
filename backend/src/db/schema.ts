@@ -180,7 +180,9 @@ export const price_list_items = pgTable('price_list_items', {
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
   company_id: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
-  cuit: varchar('cuit', { length: 20 }).notNull(),
+  // CUIT is optional (Nor feedback item 2). Unique when present; multiple NULLs allowed
+  // by Postgres default. NOT NULL is dropped at runtime via runCriticalMigrations.
+  cuit: varchar('cuit', { length: 20 }),
   name: varchar('name', { length: 255 }).notNull(),
   contact_name: varchar('contact_name', { length: 255 }),
   address: text('address'),

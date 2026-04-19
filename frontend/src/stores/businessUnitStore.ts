@@ -35,7 +35,8 @@ export const useBusinessUnitStore = create<BusinessUnitStore>((set, get) => ({
 
   setUnits: (units) => {
     const state = get()
-    let activeId = state.activeUnitId
+    const prevActiveId = state.activeUnitId
+    let activeId = prevActiveId
 
     // If current active doesn't exist in units, pick first
     if (!activeId || !units.find(u => u.id === activeId)) {
@@ -44,6 +45,11 @@ export const useBusinessUnitStore = create<BusinessUnitStore>((set, get) => ({
 
     if (activeId) {
       localStorage.setItem(STORAGE_KEY, activeId)
+    } else {
+      // Nor-fix (item 1): when the backend returns zero units and we used to
+      // have a stale id saved, wipe localStorage so the axios interceptor
+      // stops injecting a business_unit_id that excludes everything.
+      localStorage.removeItem(STORAGE_KEY)
     }
 
     set({ units, activeUnitId: activeId, loaded: true })

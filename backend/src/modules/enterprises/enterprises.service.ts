@@ -4,6 +4,18 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { generateAccessCode, ACCESS_CODE_MIN_LENGTH } from '../../utils/access-code';
 
+// Nor feedback item 3: whitelist of accepted default_fiscal_type values.
+// Sol = 'fiscal' (default); Luna = 'no_fiscal'. Anything else is a 400.
+const VALID_DEFAULT_FISCAL_TYPES = ['fiscal', 'no_fiscal'] as const;
+
+function normalizeDefaultFiscalType(value: unknown): 'fiscal' | 'no_fiscal' {
+  if (value === undefined || value === null || value === '') return 'fiscal';
+  if (typeof value !== 'string' || !(VALID_DEFAULT_FISCAL_TYPES as readonly string[]).includes(value)) {
+    throw new ApiError(400, `default_fiscal_type invalido. Debe ser uno de: ${VALID_DEFAULT_FISCAL_TYPES.join(', ')}`);
+  }
+  return value as 'fiscal' | 'no_fiscal';
+}
+
 export class EnterprisesService {
   private tablesEnsured = false;
 
@@ -39,6 +51,8 @@ export class EnterprisesService {
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS fiscal_province VARCHAR(100)`).catch(() => {});
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS fiscal_postal_code VARCHAR(10)`).catch(() => {});
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_discount DECIMAL(5,2) DEFAULT 0`).catch(() => {});
+      // Nor feedback item 3: default Sol/Luna circuit per enterprise.
+      await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_fiscal_type VARCHAR(20) DEFAULT 'fiscal'`).catch(() => {});
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure enterprises tables error:', error);
@@ -131,10 +145,14 @@ export class EnterprisesService {
         if (rows.length > 0) throw new ApiError(409, 'Enterprise with this CUIT already exists');
       }
 
+      // Nor feedback item 3: validate + default Sol/Luna circuit.
+      // Throws 400 on unknown values; missing/empty -> 'fiscal'.
+      const defaultFiscalType = normalizeDefaultFiscalType(data.default_fiscal_type);
+
       const enterpriseId = uuid();
       await db.execute(sql`
-        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount)
-        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${cuitNormalized}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0})
+        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount, default_fiscal_type)
+        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${cuitNormalized}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0}, ${defaultFiscalType})
       `);
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
@@ -185,27 +203,59 @@ export class EnterprisesService {
 
       // Update other fields only if name is provided (full update vs partial)
       if (data.name !== undefined) {
-        await db.execute(sql`
-          UPDATE enterprises SET
-            name = ${data.name},
-            razon_social = ${data.razon_social || null},
-            cuit = ${data.cuit || null},
-            address = ${data.address || null},
-            city = ${data.city || null},
-            province = ${data.province || null},
-            postal_code = ${data.postal_code || null},
-            fiscal_address = ${data.fiscal_address || null},
-            fiscal_city = ${data.fiscal_city || null},
-            fiscal_province = ${data.fiscal_province || null},
-            fiscal_postal_code = ${data.fiscal_postal_code || null},
-            phone = ${data.phone || null},
-            email = ${data.email || null},
-            tax_condition = ${data.tax_condition || null},
-            notes = ${data.notes || null},
-            default_discount = ${data.default_discount ?? 0},
-            updated_at = NOW()
-          WHERE id = ${enterpriseId} AND company_id = ${companyId}
-        `);
+        // Nor feedback item 3: validate default_fiscal_type if sent.
+        // When the field is not sent on update, keep whatever is stored (no overwrite).
+        const hasDefaultFiscalType = data.default_fiscal_type !== undefined;
+        const nextDefaultFiscalType = hasDefaultFiscalType
+          ? normalizeDefaultFiscalType(data.default_fiscal_type)
+          : null;
+
+        if (hasDefaultFiscalType) {
+          await db.execute(sql`
+            UPDATE enterprises SET
+              name = ${data.name},
+              razon_social = ${data.razon_social || null},
+              cuit = ${data.cuit || null},
+              address = ${data.address || null},
+              city = ${data.city || null},
+              province = ${data.province || null},
+              postal_code = ${data.postal_code || null},
+              fiscal_address = ${data.fiscal_address || null},
+              fiscal_city = ${data.fiscal_city || null},
+              fiscal_province = ${data.fiscal_province || null},
+              fiscal_postal_code = ${data.fiscal_postal_code || null},
+              phone = ${data.phone || null},
+              email = ${data.email || null},
+              tax_condition = ${data.tax_condition || null},
+              notes = ${data.notes || null},
+              default_discount = ${data.default_discount ?? 0},
+              default_fiscal_type = ${nextDefaultFiscalType},
+              updated_at = NOW()
+            WHERE id = ${enterpriseId} AND company_id = ${companyId}
+          `);
+        } else {
+          await db.execute(sql`
+            UPDATE enterprises SET
+              name = ${data.name},
+              razon_social = ${data.razon_social || null},
+              cuit = ${data.cuit || null},
+              address = ${data.address || null},
+              city = ${data.city || null},
+              province = ${data.province || null},
+              postal_code = ${data.postal_code || null},
+              fiscal_address = ${data.fiscal_address || null},
+              fiscal_city = ${data.fiscal_city || null},
+              fiscal_province = ${data.fiscal_province || null},
+              fiscal_postal_code = ${data.fiscal_postal_code || null},
+              phone = ${data.phone || null},
+              email = ${data.email || null},
+              tax_condition = ${data.tax_condition || null},
+              notes = ${data.notes || null},
+              default_discount = ${data.default_discount ?? 0},
+              updated_at = NOW()
+            WHERE id = ${enterpriseId} AND company_id = ${companyId}
+          `);
+        }
       }
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);

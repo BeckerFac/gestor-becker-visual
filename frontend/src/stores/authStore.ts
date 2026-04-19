@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { SUB_ACTIONS } from '@/shared/permissions.constants'
+import { useBusinessUnitStore } from './businessUnitStore'
 
 export interface User {
   id: string
@@ -116,6 +117,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (user.enabled_modules) {
       localStorage.setItem('enabledModules', JSON.stringify(user.enabled_modules))
     }
+    // Nor-fix (item 1 + 8): wipe any stale business_unit_id from a previous
+    // account so the new user does not inherit a BU id that does not belong
+    // to their company (would cause listings to return 0 rows).
+    useBusinessUnitStore.getState().reset()
     set({
       user, company, accessToken, refreshToken, permissions, error: null,
       onboardingCompleted: user.onboarding_completed ?? false,
@@ -135,6 +140,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     localStorage.removeItem('permissions')
     localStorage.removeItem('onboardingCompleted')
     localStorage.removeItem('enabledModules')
+    // Nor-fix (item 1 + 8): drop BU state so the next login starts clean.
+    useBusinessUnitStore.getState().reset()
     set({ user: null, company: null, accessToken: null, refreshToken: null, permissions: null, onboardingCompleted: false, enabledModules: ALL_MODULES })
   },
   setError: (error) => set({ error }),

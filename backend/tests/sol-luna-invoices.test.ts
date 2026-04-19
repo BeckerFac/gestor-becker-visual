@@ -22,9 +22,10 @@ vi.mock('../src/modules/accounting/accounting-entries.service', () => ({
 import { InvoicesService } from '../src/modules/invoices/invoices.service'
 import { PdfService } from '../src/modules/pdf/pdf.service'
 
-// Helper: prime the 33 no-op migration calls that ensureMigrations burns through.
+// Helper: prime the no-op migration calls that ensureMigrations burns through.
+// Count updated when new ALTER TABLEs are added to invoices.service ensureMigrations.
 function primeMigrations() {
-  for (let i = 0; i < 33; i++) mockDbVoid()
+  for (let i = 0; i < 35; i++) mockDbVoid()
 }
 
 describe('Sol/Luna Invoices (CAT-4)', () => {

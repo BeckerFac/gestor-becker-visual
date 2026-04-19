@@ -127,6 +127,33 @@ export async function runCriticalMigrations() {
     // CAT-6: account_adjustments fiscal_type for Sol/Luna dual CC
     [`ALTER TABLE account_adjustments ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'account_adjustments.fiscal_type'],
 
+    // Nor feedback item 3: default Sol/Luna circuit per enterprise.
+    // Pre-fills orders.fiscal_type when the enterprise is selected in the
+    // order form. Independent from (and compatible with) the per-order
+    // hard-lock: orders keep their own fiscal_type that's locked after
+    // comprobante emission.
+    [`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'enterprises.default_fiscal_type'],
+    [`UPDATE enterprises SET default_fiscal_type = 'fiscal' WHERE default_fiscal_type IS NULL`, 'enterprises.default_fiscal_type backfill'],
+
+    // Nor feedback item 2: CUIT on customers is optional (contacts without a
+    // CUIT bill under the parent enterprise's CUIT). Drop NOT NULL; uniqueness
+    // on (company_id, cuit) already tolerates multiple NULLs by default.
+    [`ALTER TABLE customers ALTER COLUMN cuit DROP NOT NULL`, 'customers.cuit drop not null'],
+
+    // Nor feedback item 4: multi-razon-social per Empresa via Contact fiscal
+    // identity. A customer with its own (cuit + razon_social) issues invoices
+    // under its OWN CUIT for AFIP; enterprise is still the CC grouping entity.
+    // tax_condition already exists on customers (added at schema level).
+    [`ALTER TABLE customers ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)`, 'customers.razon_social'],
+    [`ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_condition VARCHAR(50)`, 'customers.tax_condition'],
+    [`ALTER TABLE customers ADD COLUMN IF NOT EXISTS fiscal_address TEXT`, 'customers.fiscal_address'],
+    // Snapshot the resolved receiver identity on the invoice so Libro IVA
+    // and PDF show the EXACT identity used at emission time (even if the
+    // customer record changes later). Historical rows stay NULL and fall
+    // back via COALESCE(receiver_cuit, customer.cuit, enterprise.cuit).
+    [`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_cuit VARCHAR(20)`, 'invoices.receiver_cuit'],
+    [`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_razon_social VARCHAR(255)`, 'invoices.receiver_razon_social'],
+
     // ════════════════════════════════════════════════════════════════
     // Backfills — idempotent, zero-risk UPDATEs
     // ════════════════════════════════════════════════════════════════
@@ -140,6 +167,46 @@ export async function runCriticalMigrations() {
   ];
   for (const [sql, label] of criticalAlters) {
     await tryMig(sql, `critical: ${label}`);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Nor-fix (item 1): ensure every company has at least one business_unit,
+  // and backfill NULL business_unit_id on transactional tables so rows
+  // created before any BU existed still get a default assignment.
+  // Each statement is idempotent and tryMig'd independently — Postgres
+  // does not run multi-statement SQL through parameterized queries, so we
+  // cannot combine these.
+  // ════════════════════════════════════════════════════════════════
+  await tryMig(
+    `INSERT INTO business_units (id, company_id, name, is_fiscal, sort_order, active, created_at, updated_at)
+     SELECT gen_random_uuid(), c.id, 'Principal', TRUE, 0, TRUE, NOW(), NOW()
+     FROM companies c
+     WHERE NOT EXISTS (SELECT 1 FROM business_units b WHERE b.company_id = c.id)`,
+    'nor-fix: seed default business_unit per company'
+  );
+  const orphanBackfillTables = [
+    'orders',
+    'invoices',
+    'remitos',
+    'cobros',
+    'pagos',
+    'purchases',
+    'purchase_invoices',
+    'cheques',
+    'account_adjustments',
+  ];
+  for (const tbl of orphanBackfillTables) {
+    await tryMig(
+      `UPDATE ${tbl} SET business_unit_id = (
+         SELECT b.id FROM business_units b
+         WHERE b.company_id = ${tbl}.company_id
+         ORDER BY b.sort_order, b.created_at
+         LIMIT 1
+       )
+       WHERE business_unit_id IS NULL
+         AND EXISTS (SELECT 1 FROM business_units b WHERE b.company_id = ${tbl}.company_id)`,
+      `nor-fix: backfill ${tbl}.business_unit_id`
+    );
   }
 
   // ════════════════════════════════════════════════════════════════

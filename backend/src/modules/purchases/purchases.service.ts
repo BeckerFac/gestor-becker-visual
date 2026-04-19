@@ -209,7 +209,8 @@ export class PurchasesService {
     try {
       let whereClause = sql`p.company_id = ${companyId}`;
       if (filters.business_unit_id) {
-        whereClause = sql`${whereClause} AND p.business_unit_id = ${filters.business_unit_id}`;
+        // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+        whereClause = sql`${whereClause} AND (p.business_unit_id = ${filters.business_unit_id} OR p.business_unit_id IS NULL)`;
       }
       if (filters.enterprise_id) {
         whereClause = sql`${whereClause} AND p.enterprise_id = ${filters.enterprise_id}`;

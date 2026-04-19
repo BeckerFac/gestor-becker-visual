@@ -552,7 +552,8 @@ export class CobroApplicationsService {
       whereClause = sql`${whereClause} AND c.enterprise_id = ${filters.enterprise_id}`;
     }
     if (filters.business_unit_id) {
-      whereClause = sql`${whereClause} AND c.business_unit_id = ${filters.business_unit_id}`;
+      // Nor-fix (item 1): include orphan rows (business_unit_id IS NULL).
+      whereClause = sql`${whereClause} AND (c.business_unit_id = ${filters.business_unit_id} OR c.business_unit_id IS NULL)`;
     }
 
     const result = await db.execute(sql`

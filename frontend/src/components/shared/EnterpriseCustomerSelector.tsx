@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { HelpTip } from '@/components/shared/HelpTip'
 
 interface Enterprise { id: string; name: string; cuit?: string | null }
-interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
+interface Customer { id: string; name: string; cuit: string | null; enterprise_id?: string | null }
 
 interface EnterpriseCustomerSelectorProps {
   enterprises: Enterprise[]

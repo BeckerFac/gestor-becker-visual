@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -60,9 +60,9 @@ interface Order {
   created_at: string
 }
 
-interface Customer { id: string; name: string; cuit: string; enterprise_id?: string | null }
+interface Customer { id: string; name: string; cuit: string | null; enterprise_id?: string | null; razon_social?: string | null; tax_condition?: string | null; fiscal_address?: string | null }
 interface Product { id: string; name: string; sku: string; pricing?: { cost: string; final_price: string; vat_rate: string }; category?: string; category_id?: string | null; product_type?: string | null }
-interface Enterprise { id: string; name: string; cuit?: string | null; price_list_id?: string | null; default_discount?: number | string | null }
+interface Enterprise { id: string; name: string; cuit?: string | null; razon_social?: string | null; price_list_id?: string | null; default_discount?: number | string | null; default_fiscal_type?: 'fiscal' | 'no_fiscal' | null }
 interface Bank { id: string; bank_name: string }
 interface Category { id: string; name: string; parent_id: string | null; color?: string | null; product_count?: number; child_product_count?: number }
 
@@ -153,7 +153,8 @@ const emptyFormItem = (): FormItem => ({
   unit_price: 0,
   cost: 0,
   product_type: 'otro',
-  deduct_stock: true,
+  // Readonly in order form; auto-set from product.controls_stock when picked, false for manual items
+  deduct_stock: false,
   category_ids: [],
   vat_rate: 21,
 })
@@ -162,10 +163,19 @@ const ORDER_DRAFT_KEY = 'bv_order_draft'
 
 export const Orders: React.FC = () => {
   const navigate = useNavigate()
+  // Nor feedback item 5: pre-fill form when navegando desde /empresas o /clientes.
+  const [searchParams, setSearchParams] = useSearchParams()
   // Sol/Luna dual-circuit access
   const { canAccessLuna } = useCircuitAccess()
   // Form-level circuit selection (default Sol). Immutable after create.
   const [formFiscalType, setFormFiscalType] = useState<'fiscal' | 'no_fiscal'>('fiscal')
+  // Track whether the user has manually clicked the Sol/Luna toggle in this
+  // session. When true, we stop auto-pre-filling from the enterprise default
+  // on enterprise change (to avoid stomping on the user's explicit choice).
+  const [userManuallyChoseFiscal, setUserManuallyChoseFiscal] = useState(false)
+  // Track whether the current formFiscalType value came from enterprise
+  // pre-fill (so we can surface the "Default de la empresa" hint).
+  const [fiscalTypePrefilled, setFiscalTypePrefilled] = useState(false)
   // List-level filter: 'all' | 'fiscal' | 'no_fiscal'. Non-Luna users always see only fiscal.
   const [filterFiscalType, setFilterFiscalType] = useState<'all' | 'fiscal' | 'no_fiscal'>('all')
   const [orders, setOrders] = useState<Order[]>([])
@@ -268,6 +278,29 @@ export const Orders: React.FC = () => {
     setHasDraft(!!localStorage.getItem(ORDER_DRAFT_KEY))
   }, [])
 
+  // Pre-fill Sol/Luna toggle from enterprise.default_fiscal_type when the
+  // selected enterprise changes (item 7). Fires regardless of whether the
+  // enterprise was chosen via the selector, a URL param (item 5) or draft
+  // restore. Skipped when editing (order.fiscal_type is locked) or when the
+  // user already manually clicked the toggle in this session.
+  useEffect(() => {
+    if (editingOrderId) return
+    if (userManuallyChoseFiscal) return
+    if (!formEnterpriseId) {
+      // Clearing the enterprise reverts to default Sol without the hint.
+      setFormFiscalType('fiscal')
+      setFiscalTypePrefilled(false)
+      return
+    }
+    const ent = enterprises.find(e => e.id === formEnterpriseId)
+    // Enterprise list may not be loaded yet, or field missing on legacy rows:
+    // fall back to 'fiscal'. Non-Luna users are forced to 'fiscal' regardless.
+    const rawDefault = ent?.default_fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal'
+    const nextFiscal: 'fiscal' | 'no_fiscal' = canAccessLuna ? rawDefault : 'fiscal'
+    setFormFiscalType(nextFiscal)
+    setFiscalTypePrefilled(true)
+  }, [formEnterpriseId, enterprises, canAccessLuna, editingOrderId, userManuallyChoseFiscal])
+
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
@@ -275,6 +308,8 @@ export const Orders: React.FC = () => {
     setFormItems([emptyFormItem()])
     setFormEnterpriseId('')
     setFormTitle('')
+    setUserManuallyChoseFiscal(false)
+    setFiscalTypePrefilled(false)
   }
 
   const loadData = useCallback(async () => {
@@ -322,6 +357,56 @@ export const Orders: React.FC = () => {
   }, [filterStatus, filterType, filterEnterprise, filterInvoice, filterFiscalType, canAccessLuna])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Nor feedback item 5: pre-fill create form when navegando desde /empresas o /clientes.
+  // Espera a que enterprises y customers esten cargados para poder resolver IDs.
+  // Los params se limpian una sola vez despues de consumirlos (ref evita re-ejecucion).
+  const prefillConsumedRef = useRef(false)
+  useEffect(() => {
+    if (prefillConsumedRef.current) return
+    if (loading) return // esperar carga inicial de enterprises + customers
+    const isNew = searchParams.get('nuevo') === 'true'
+    if (!isNew) return
+
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const rawEntId = searchParams.get('enterprise_id') || ''
+    const rawCustId = searchParams.get('customer_id') || ''
+    const entIdParam = UUID_REGEX.test(rawEntId) ? rawEntId : ''
+    const custIdParam = UUID_REGEX.test(rawCustId) ? rawCustId : ''
+
+    setShowForm(true)
+
+    if (entIdParam) {
+      const ent = enterprises.find(e => e.id === entIdParam)
+      if (ent) {
+        setFormEnterpriseId(entIdParam)
+        if (ent.default_discount) {
+          setForm(prev => ({ ...prev, discount_percent: parseFloat(String(ent.default_discount)) || 0 }))
+        }
+      }
+    }
+
+    if (custIdParam) {
+      const cust = customers.find(c => c.id === custIdParam)
+      if (cust) {
+        setForm(prev => ({ ...prev, customer_id: custIdParam }))
+        // Resolve enterprise from customer if no explicit enterprise param was provided.
+        if (!entIdParam && cust.enterprise_id) {
+          const ent = enterprises.find(e => e.id === cust.enterprise_id)
+          if (ent) {
+            setFormEnterpriseId(ent.id)
+            if (ent.default_discount) {
+              setForm(prev => ({ ...prev, discount_percent: parseFloat(String(ent.default_discount)) || 0 }))
+            }
+          }
+        }
+      }
+    }
+
+    prefillConsumedRef.current = true
+    // Limpiar params para que un refresh no re-abra el form.
+    setSearchParams({}, { replace: true })
+  }, [loading, enterprises, customers, searchParams, setSearchParams])
 
   // Close category dropdown on click outside
   useEffect(() => {
@@ -399,6 +484,8 @@ export const Orders: React.FC = () => {
             item.cost = parseFloat(product.pricing?.cost || '0') || 0
             item.product_type = (product as any).category_name || (product as any).product_type || 'otro'
             item.vat_rate = 21 // Default IVA, editable per item in the order
+            // Auto-derive stock tracking from product.controls_stock (read-only in order form)
+            item.deduct_stock = !!(product as any).controls_stock
             setManualPriceOverride(prev => ({ ...prev, [idx]: false }))
 
             // If a price criteria is selected, try to use criteria price
@@ -442,6 +529,8 @@ export const Orders: React.FC = () => {
           item.product_name = ''
           item.unit_price = 0
           item.cost = 0
+          // Manual items default to no stock tracking
+          item.deduct_stock = false
           setQuantityTiers(prev => { const next = { ...prev }; delete next[idx]; return next })
         }
       } else if (field === 'quantity') {
@@ -570,6 +659,8 @@ export const Orders: React.FC = () => {
       setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
       setFormItems([emptyFormItem()])
       setFormFiscalType('fiscal')
+      setUserManuallyChoseFiscal(false)
+      setFiscalTypePrefilled(false)
       await loadData()
     } catch (e: any) {
       toast.error(e.message)
@@ -661,6 +752,11 @@ export const Orders: React.FC = () => {
       })
       setFormEnterpriseId(order.enterprise?.id || '')
       setFormFiscalType((order.fiscal_type as any) || 'fiscal')
+      // Duplicated order: preserve the source order's fiscal_type as if the
+      // user had chosen it manually, so the enterprise-default pre-fill
+      // effect does not overwrite it on mount.
+      setUserManuallyChoseFiscal(true)
+      setFiscalTypePrefilled(false)
       setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
       setShowForm(true)
       toast.info('Pedido duplicado — modificá lo que necesites y tocá "Crear Pedido"')
@@ -1309,13 +1405,21 @@ export const Orders: React.FC = () => {
 
               {/* Sol/Luna circuit toggle — compact pill buttons */}
               {canAccessLuna && !editingOrderId && (
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => setFormFiscalType('fiscal')}
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'fiscal' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'}`}
-                  >☀️</button>
-                  <button type="button" onClick={() => setFormFiscalType('no_fiscal')}
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'no_fiscal' ? 'bg-indigo-200 text-indigo-900' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'}`}
-                  >🌙</button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => { setFormFiscalType('fiscal'); setUserManuallyChoseFiscal(true); setFiscalTypePrefilled(false) }}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'fiscal' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                    >☀️</button>
+                    <button type="button" onClick={() => { setFormFiscalType('no_fiscal'); setUserManuallyChoseFiscal(true); setFiscalTypePrefilled(false) }}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${formFiscalType === 'no_fiscal' ? 'bg-indigo-200 text-indigo-900' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                    >🌙</button>
+                  </div>
+                  {formEnterpriseId && fiscalTypePrefilled && !userManuallyChoseFiscal && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Default de la empresa</span>
+                  )}
+                  {userManuallyChoseFiscal && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Manual</span>
+                  )}
                 </div>
               )}
 
@@ -1340,6 +1444,34 @@ export const Orders: React.FC = () => {
                 customerLabel="Cliente / Contacto"
                 enterpriseHelpText="Selecciona la empresa cliente. Si no aparece, creala desde Empresas."
               />
+
+              {/* Nor feedback item 4: indicate which fiscal identity will be
+                  used when invoices are emitted for this order. Mirrors the
+                  backend resolveInvoiceFiscalIdentity cascade: customer own
+                  (if cuit+razon_social both set) > enterprise > fallback. */}
+              {(() => {
+                const selCust = form.customer_id ? customers.find(c => c.id === form.customer_id) : null
+                const selEnt = formEnterpriseId ? enterprises.find(e => e.id === formEnterpriseId) : null
+                const usesCustomerIdentity = !!(selCust?.cuit && selCust?.razon_social)
+                const rs = usesCustomerIdentity
+                  ? selCust!.razon_social
+                  : (selEnt?.razon_social || selEnt?.name || selCust?.name || '')
+                const cuit = usesCustomerIdentity ? selCust!.cuit : (selEnt?.cuit || selCust?.cuit || '')
+                if (!rs) return null
+                return (
+                  <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-3 py-2">
+                    <span>{usesCustomerIdentity ? '👤' : '🏢'}</span>
+                    <span>
+                      <span className="font-medium">Facturará como:</span>{' '}
+                      {rs}
+                      {cuit ? <> (CUIT {cuit})</> : null}
+                    </span>
+                    {usesCustomerIdentity && (
+                      <span className="text-[10px] uppercase tracking-wide text-blue-600 ml-auto">RS propia</span>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Title + Price Criteria */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1663,21 +1795,18 @@ export const Orders: React.FC = () => {
                           value={item.description}
                           onChange={e => updateFormItem(idx, 'description', e.target.value)}
                         />
-                        <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
-                          <input
-                            type="checkbox"
-                            checked={item.deduct_stock}
-                            onChange={e => {
-                              setFormItems(prev => {
-                                const updated = [...prev]
-                                updated[idx] = { ...updated[idx], deduct_stock: e.target.checked }
-                                return updated
-                              })
-                            }}
-                            className="rounded border-gray-300"
-                          />
-                          <span className="text-xs text-gray-500">Descontar stock<HelpTip text="Si esta activo, al crear el pedido se descuentan los materiales del inventario automaticamente." /></span>
-                        </label>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                          {item.deduct_stock ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-700">
+                              Afecta stock
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
+                              No afecta stock
+                            </span>
+                          )}
+                          <HelpTip text="Se define al cargar el producto. En el pedido es solo informativo." />
+                        </div>
                       </div>
                     </div>
                   ))}

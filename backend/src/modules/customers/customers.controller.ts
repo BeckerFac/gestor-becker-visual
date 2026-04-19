@@ -6,7 +6,7 @@ import { ApiError } from '../../middlewares/errorHandler';
 export class CustomersController {
   async createCustomer(req: AuthRequest, res: Response) {
     try {
-      if (!req.user?.company_id || !req.body.cuit || !req.body.name) {
+      if (!req.user?.company_id || !req.body.name) {
         throw new ApiError(400, 'Missing required fields');
       }
       const customer = await customersService.createCustomer(req.user.company_id, req.body);

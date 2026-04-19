@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -15,6 +16,7 @@ import { formatCurrency } from '@/lib/utils'
 import { PermissionGate } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { checkEnterpriseFiscalData } from '@/utils/fiscal'
+import { useCircuitAccess } from '@/hooks/useCircuitAccess'
 
 interface Enterprise {
   id: string
@@ -37,6 +39,7 @@ interface Enterprise {
   contact_count: number
   tags: { id: string; name: string; color: string }[]
   access_code?: string | null
+  default_fiscal_type?: 'fiscal' | 'no_fiscal' | null
 }
 
 interface Contact {
@@ -60,6 +63,8 @@ const emptyEnterpriseForm = {
   phone: '', email: '', tax_condition: 'Responsable Inscripto', notes: '',
   price_list_id: '',
   default_discount: '',
+  // Nor feedback item 3: default Sol/Luna circuit per enterprise.
+  default_fiscal_type: 'fiscal' as 'fiscal' | 'no_fiscal',
 }
 
 const emptyContactForm = {
@@ -69,6 +74,10 @@ const emptyContactForm = {
 }
 
 export const Enterprises: React.FC = () => {
+  const navigate = useNavigate()
+  // Nor feedback item 3: gate Sol/Luna UI behind circuit access.
+  // Non-Luna users never see Luna surfaces (pill toggle, chip, etc.).
+  const { canAccessLuna } = useCircuitAccess()
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
@@ -187,6 +196,9 @@ export const Enterprises: React.FC = () => {
       const payload = {
         ...formData,
         default_discount: parseFloat(default_discount) || 0,
+        // Nor feedback item 3: force 'fiscal' for non-Luna users regardless
+        // of form state. Prevents ever persisting 'no_fiscal' without access.
+        default_fiscal_type: canAccessLuna ? formData.default_fiscal_type : 'fiscal',
         fiscal_address: same_fiscal_address ? null : formData.fiscal_address,
         fiscal_city: same_fiscal_address ? null : formData.fiscal_city,
         fiscal_province: same_fiscal_address ? null : formData.fiscal_province,
@@ -261,6 +273,7 @@ export const Enterprises: React.FC = () => {
       tax_condition: ent.tax_condition || 'Responsable Inscripto', notes: ent.notes || '',
       price_list_id: (ent as any).price_list_id || '',
       default_discount: (ent as any).default_discount || '',
+      default_fiscal_type: ent.default_fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal',
     })
     setEditingEnterpriseId(ent.id)
     setOriginalPriceListId((ent as any).price_list_id || '')
@@ -507,6 +520,33 @@ export const Enterprises: React.FC = () => {
                 </div>
               </div>
 
+              {/* Nor feedback item 3: circuit default per enterprise.
+                  Hidden for non-Luna users (they implicitly use 'fiscal'). */}
+              {canAccessLuna && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Circuito default para facturar
+                    <HelpTip text="Al crear un pedido para esta empresa, el circuito (Sol/Luna) se pre-selecciona con este valor. Podes cambiarlo por pedido." />
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setEnterpriseForm({ ...enterpriseForm, default_fiscal_type: 'fiscal' })}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${enterpriseForm.default_fiscal_type === 'fiscal' ? 'bg-amber-200 text-amber-900' : 'bg-gray-100 text-gray-400 hover:bg-amber-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                      aria-label="Sol (fiscal)"
+                      aria-pressed={enterpriseForm.default_fiscal_type === 'fiscal'}
+                    >☀️ Sol</button>
+                    <button
+                      type="button"
+                      onClick={() => setEnterpriseForm({ ...enterpriseForm, default_fiscal_type: 'no_fiscal' })}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${enterpriseForm.default_fiscal_type === 'no_fiscal' ? 'bg-indigo-200 text-indigo-900' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 dark:bg-gray-700 dark:text-gray-500'}`}
+                      aria-label="Luna (no fiscal)"
+                      aria-pressed={enterpriseForm.default_fiscal_type === 'no_fiscal'}
+                    >🌙 Luna</button>
+                  </div>
+                </div>
+              )}
+
               {/* Direccion de la empresa */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Direccion de la Empresa</h4>
@@ -637,6 +677,16 @@ export const Enterprises: React.FC = () => {
                         <span className="text-xs text-gray-400">({ent.razon_social})</span>
                       )}
                       <TagBadges tags={ent.tags} />
+                      {/* Nor feedback item 3: circuit default chip.
+                          Only visible for Luna-enabled users. */}
+                      {canAccessLuna && (
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${ent.default_fiscal_type === 'no_fiscal' ? 'bg-indigo-100 text-indigo-800' : 'bg-amber-100 text-amber-900'}`}
+                          title={ent.default_fiscal_type === 'no_fiscal' ? 'Circuito default: Luna (no fiscal)' : 'Circuito default: Sol (fiscal)'}
+                        >
+                          {ent.default_fiscal_type === 'no_fiscal' ? '🌙 Luna' : '☀️ Sol'}
+                        </span>
+                      )}
                       {/* AFIP fiscal data warning badge */}
                       {(() => {
                         const fiscal = checkEnterpriseFiscalData(ent as any)
@@ -680,6 +730,15 @@ export const Enterprises: React.FC = () => {
                     {ent.status === 'active' ? 'Activa' : 'Inactiva'}
                   </span>
                   <div className="flex gap-2 items-center" onClick={e => e.stopPropagation()}>
+                    {/* Nor feedback item 5: crear pedido directamente desde la empresa. */}
+                    <PermissionGate module="orders" action="create">
+                      <button
+                        onClick={() => navigate(`/orders?nuevo=true&enterprise_id=${ent.id}`)}
+                        className="text-blue-600 hover:underline text-sm font-medium"
+                      >
+                        + Nuevo Pedido
+                      </button>
+                    </PermissionGate>
                     <PermissionGate module="enterprises" action="create">
                       <button onClick={() => handleAddContact(ent.id)} className="text-green-600 hover:underline text-sm">+ Contacto</button>
                     </PermissionGate>
@@ -730,6 +789,15 @@ export const Enterprises: React.FC = () => {
                             <td className="py-2 text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
                             <td className="py-2">
                               <div className="flex gap-2">
+                                {/* Nor feedback item 5: crear pedido desde un contacto. */}
+                                <PermissionGate module="orders" action="create">
+                                  <button
+                                    onClick={() => navigate(`/orders?nuevo=true&customer_id=${c.id}`)}
+                                    className="text-blue-600 hover:underline font-medium"
+                                  >
+                                    + Pedido
+                                  </button>
+                                </PermissionGate>
                                 <PermissionGate module="enterprises" action="edit">
                                   <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
                                 </PermissionGate>
@@ -775,6 +843,15 @@ export const Enterprises: React.FC = () => {
                         <td className="py-2 text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
                         <td className="py-2">
                           <div className="flex gap-2">
+                            {/* Nor feedback item 5: crear pedido desde contacto sin empresa. */}
+                            <PermissionGate module="orders" action="create">
+                              <button
+                                onClick={() => navigate(`/orders?nuevo=true&customer_id=${c.id}`)}
+                                className="text-blue-600 hover:underline font-medium"
+                              >
+                                + Pedido
+                              </button>
+                            </PermissionGate>
                             <PermissionGate module="enterprises" action="edit">
                               <button onClick={() => handleEditContact(c)} className="text-blue-600 hover:underline">Editar</button>
                             </PermissionGate>
