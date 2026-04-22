@@ -69,7 +69,6 @@ const navSections: NavSection[] = [
       { href: '/retenciones', label: 'Retenciones', icon: '📎', module: 'retenciones' },
       { href: '/cuenta-corriente', label: 'Cuenta Corriente', icon: '📒', module: 'cuenta_corriente' },
       { href: '/cheques', label: 'Cheques', icon: '📝', module: 'cheques' },
-      { href: '/conciliacion', label: 'Conciliacion', icon: '🏦', module: 'cobros' },
       { href: '/contabilidad', label: 'Contabilidad', icon: '📕', module: 'accounting' },
       { href: '/reportes', label: 'Reportes', icon: '📈', module: 'reports' },
     ],
