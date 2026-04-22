@@ -396,18 +396,8 @@ export class CobrosService {
     try {
       const cobroId = uuid();
       // Check if invoice_items are provided (N:N linking to invoices)
-      const hasInvoiceItems = data.invoice_items && Array.isArray(data.invoice_items) && data.invoice_items.length > 0;
+      const hasInvoiceItems = Array.isArray(data.invoice_items) && data.invoice_items.length > 0;
       const pendingStatus = (data.invoice_id || hasInvoiceItems) ? null : 'pending_invoice';
-
-      // Auto-generate receipt_number (sequential per company)
-      const nextNumResult = await db.execute(sql`
-        SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = ${companyId}
-      `);
-      const receiptNumber = parseInt(((nextNumResult as any).rows || [])[0]?.next_number || '1');
-
-      // Transaction: all inserts succeed or all rollback
-      await db.execute(sql`BEGIN`);
-      try {
 
       const cobroCurrency = data.currency || 'ARS';
       let cobroExchangeRate: number | null = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
@@ -431,201 +421,243 @@ export class CobrosService {
       const receiptAmount = pmTotal; // Use payment methods sum, not data.amount
       const totalAmount = receiptAmount + totalRetenciones;
 
-      await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate, fiscal_type)
-        VALUES (${cobroId}, ${companyId}, ${data.enterprise_id || null}, ${data.order_id || null}, ${data.invoice_id || null}, ${receiptAmount.toString()}, ${totalAmount.toString()}, ${summaryMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${data.receipt_image || null}, ${data.business_unit_id || null}, ${pendingStatus}, ${receiptNumber}, ${userId}, ${cobroCurrency}, ${cobroExchangeRate}, ${cobroFiscalType})
-      `);
+      // Wave 3A: REAL transaction on a pooled client. Previously
+      // `db.execute(sql\`BEGIN\`)` + subsequent db.execute calls picked
+      // different connections from the pool each time, so the advisory lock
+      // and the SELECT ... FOR UPDATE had no effect — under concurrent load
+      // two receipts could be assigned the same receipt_number, and two
+      // cobros could together over-pay the same invoice. We now issue
+      // BEGIN + advisory lock + MAX + INSERTs + FOR UPDATE on the SAME
+      // client, then COMMIT on that client.
+      let receiptNumber: number;
+      const invoiceIdsToRecalc: string[] = [];
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // B.1.4: Insert receipt_payment_methods for each payment method
-      for (const pm of paymentMethods) {
-        await db.execute(sql`
-          INSERT INTO receipt_payment_methods (cobro_id, method, amount, bank_id, reference, cheque_data)
-          VALUES (${cobroId}, ${pm.method}, ${pm.amount}, ${pm.bank_id || null}, ${pm.reference || null},
-                  ${pm.cheque_data ? JSON.stringify(pm.cheque_data) : null}::jsonb)
-        `);
-      }
+        // Advisory lock: serialize receipt_number generation per company.
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`receipt_num:${companyId}`]
+        );
 
-      // Create retenciones sufridas linked to this cobro
-      if (data.retenciones_sufridas && Array.isArray(data.retenciones_sufridas) && data.retenciones_sufridas.length > 0) {
-        const enterpriseId = data.enterprise_id || null;
-        const retencionDate = data.payment_date || new Date().toISOString();
-        for (const ret of data.retenciones_sufridas) {
-          // C8: sanity check para retenciones (IIBB / Ganancias / IVA).
-          // Rates tipicos AR: IIBB 0-5%, Ganancias 0-6%, IVA 0-21%.
-          // Si rate > 30% o base_amount <= 0, algo esta mal — loguear warning.
-          // La tabla por jurisdiccion queda diferida a futuro PR.
-          const rate = parseFloat(ret.rate || '0');
-          const baseAmount = parseFloat(ret.base_amount || '0');
-          const amount = parseFloat(ret.amount || '0');
-          if (!Number.isFinite(rate) || rate < 0 || rate > 30) {
-            console.warn(`[retencion ${ret.type}] rate fuera de rango esperado [0-30%]: ${rate}% — cobroId=${cobroId}`);
-          }
-          if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
-            throw new ApiError(400, `Retencion ${ret.type}: base_amount invalido (${ret.base_amount})`);
-          }
-          if (!Number.isFinite(amount) || amount < 0) {
-            throw new ApiError(400, `Retencion ${ret.type}: amount invalido (${ret.amount})`);
-          }
-          // Sanity: amount no deberia exceder base_amount * 1.1 (10% margen por redondeo)
-          if (amount > baseAmount * 1.1) {
-            throw new ApiError(
-              400,
-              `Retencion ${ret.type}: el amount ($${amount}) excede el base_amount ($${baseAmount})`
-            );
-          }
+        // Auto-generate receipt_number (sequential per company) INSIDE the tx.
+        const nextNumRes = await client.query(
+          `SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = $1`,
+          [companyId]
+        );
+        receiptNumber = parseInt(nextNumRes.rows[0]?.next_number || '1');
 
-          await db.execute(sql`
-            INSERT INTO retenciones (id, company_id, type, enterprise_id, cobro_id, base_amount, rate, amount, certificate_file, date, created_by, direction)
-            VALUES (gen_random_uuid(), ${companyId}, ${ret.type}, ${enterpriseId}, ${cobroId}, ${baseAmount.toString()}, ${rate.toString()}, ${amount.toString()}, ${ret.certificate_file || null}, ${retencionDate}, ${userId}, 'sufrida')
-          `);
-        }
-      }
+        await client.query(
+          `INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, total_amount, payment_method, bank_id, reference, payment_date, notes, receipt_image, business_unit_id, pending_status, receipt_number, created_by, currency, exchange_rate, fiscal_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+          [
+            cobroId, companyId, data.enterprise_id || null, data.order_id || null,
+            data.invoice_id || null, receiptAmount.toString(), totalAmount.toString(),
+            summaryMethod, data.bank_id || null, data.reference || null,
+            data.payment_date || new Date().toISOString(), data.notes || null,
+            data.receipt_image || null, data.business_unit_id || null, pendingStatus,
+            receiptNumber, userId, cobroCurrency, cobroExchangeRate, cobroFiscalType,
+          ]
+        );
 
-      // B.1.5: Create cheques for each payment method that is cheque.
-      // Bug A fix: usar las columnas reales de la tabla cheques (number, bank, drawer,
-      // drawer_cuit, cheque_type, due_date) en vez de los nombres legacy inexistentes
-      // (cheque_number, bank_name, issuer_name, issuer_cuit, payment_date, tipo).
-      // Mirror del INSERT correcto en receipts.service.ts:280.
-      for (const pm of paymentMethods) {
-        if (pm.method === 'cheque' && pm.cheque_data) {
-          const cd = pm.cheque_data;
-          await db.execute(sql`
-            INSERT INTO cheques (
-              id, company_id, number, bank, drawer, drawer_cuit, cheque_type,
-              amount, issue_date, due_date, status, cobro_id, business_unit_id, created_by
-            )
-            VALUES (
-              ${uuid()}, ${companyId}, ${cd.number}, ${cd.bank}, ${cd.drawer},
-              ${cd.drawer_cuit || null}, ${cd.cheque_type || 'comun'},
-              ${pm.amount.toString()},
-              ${new Date(cd.issue_date)}, ${new Date(cd.due_date)},
-              'a_cobrar', ${cobroId}, ${data.business_unit_id || null}, ${userId}
-            )
-          `);
-        }
-      }
-
-      // Create cobro_invoice_applications entries (N:N cobro↔invoice)
-      if (hasInvoiceItems) {
-        // Group by invoice_id to calculate total per invoice
-        const invoiceTotals = new Map<string, number>();
-
-        for (const item of data.invoice_items) {
-          if (!item.invoice_id) continue;
-
-          if (item.amount && parseFloat(item.amount) > 0) {
-            const current = invoiceTotals.get(item.invoice_id) || 0;
-            invoiceTotals.set(item.invoice_id, current + parseFloat(item.amount));
-          }
+        // B.1.4: Insert receipt_payment_methods for each payment method
+        for (const pm of paymentMethods) {
+          await client.query(
+            `INSERT INTO receipt_payment_methods (cobro_id, method, amount, bank_id, reference, cheque_data)
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+            [
+              cobroId, pm.method, pm.amount,
+              pm.bank_id || null, pm.reference || null,
+              pm.cheque_data ? JSON.stringify(pm.cheque_data) : null,
+            ]
+          );
         }
 
-        // Bug B fix: validar cada factura DENTRO de la transaccion con FOR UPDATE.
-        // Esto previene la race condition donde dos cobros concurrentes pagaban
-        // la misma factura dos veces. Tambien valida tenant, status, NC, balance.
-        const NC_TYPES = ['NC_A', 'NC_B', 'NC_C', 'NC_E'];
-        for (const [invoiceId, applyAmount] of invoiceTotals.entries()) {
-          const invCheck = await db.execute(sql`
-            SELECT id, enterprise_id, business_unit_id, status, payment_status,
-                   invoice_type, invoice_number, total_amount, currency
-            FROM invoices
-            WHERE id = ${invoiceId} AND company_id = ${companyId}
-            FOR UPDATE
-          `);
-          const invRow = ((invCheck as any).rows || [])[0];
-          if (!invRow) {
-            throw new ApiError(404, `Factura ${invoiceId} no encontrada`);
-          }
+        // Create retenciones sufridas linked to this cobro
+        if (data.retenciones_sufridas && Array.isArray(data.retenciones_sufridas) && data.retenciones_sufridas.length > 0) {
+          const enterpriseIdRet = data.enterprise_id || null;
+          const retencionDate = data.payment_date || new Date().toISOString();
+          for (const ret of data.retenciones_sufridas) {
+            const rate = parseFloat(ret.rate || '0');
+            const baseAmount = parseFloat(ret.base_amount || '0');
+            const amount = parseFloat(ret.amount || '0');
+            // Wave 3D D5: hard-reject rates > 30%.
+            if (!Number.isFinite(rate) || rate < 0 || rate > 30) {
+              throw new ApiError(
+                400,
+                `Retencion ${ret.type}: rate ${rate}% excede el maximo permitido (30%). Revisar.`
+              );
+            }
+            if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+              throw new ApiError(400, `Retencion ${ret.type}: base_amount invalido (${ret.base_amount})`);
+            }
+            if (!Number.isFinite(amount) || amount < 0) {
+              throw new ApiError(400, `Retencion ${ret.type}: amount invalido (${ret.amount})`);
+            }
+            // Wave 3D D5: enforce amount ~= base * rate / 100.
+            const expectedRet = baseAmount * rate / 100;
+            const toleranceRet = Math.max(0.01, expectedRet * 0.01);
+            if (Math.abs(amount - expectedRet) > toleranceRet) {
+              throw new ApiError(
+                400,
+                `Retencion ${ret.type}: amount inconsistente. Esperado ~${expectedRet.toFixed(2)}, recibido ${amount.toFixed(2)} (base=${baseAmount}, rate=${rate}%)`
+              );
+            }
+            if (amount > baseAmount * 1.1) {
+              throw new ApiError(
+                400,
+                `Retencion ${ret.type}: el amount ($${amount}) excede el base_amount ($${baseAmount})`
+              );
+            }
 
-          // V1: invoice not cancelled
-          if (invRow.status === 'cancelled') {
-            throw new ApiError(400, `No se puede vincular cobro a factura cancelada (${invRow.invoice_number})`);
-          }
-
-          // V2: not a credit note
-          if (invRow.invoice_type && NC_TYPES.includes(invRow.invoice_type)) {
-            throw new ApiError(400, `No se pueden aplicar cobros a Notas de Credito (${invRow.invoice_type} ${invRow.invoice_number})`);
-          }
-
-          // V3: same enterprise (tenant + IDOR)
-          if (data.enterprise_id && invRow.enterprise_id && invRow.enterprise_id !== data.enterprise_id) {
-            throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otro cliente`);
-          }
-
-          // V4: same business unit
-          if (data.business_unit_id && invRow.business_unit_id && invRow.business_unit_id !== data.business_unit_id) {
-            throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otra razon social`);
-          }
-
-          // V5: not already fully paid
-          if (invRow.payment_status === 'pagado') {
-            throw new ApiError(
-              400,
-              `La factura ${invRow.invoice_type} ${invRow.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
-            );
-          }
-
-          // V6: do not exceed remaining balance.
-          // remaining = total - sum(applied de cobros NO anulados) - sum(retenciones sufridas NO anuladas)
-          const balanceRes = await db.execute(sql`
-            SELECT
-              CAST(${invRow.total_amount} AS decimal) as total,
-              COALESCE((
-                SELECT SUM(CAST(cia.amount_applied AS decimal))
-                FROM cobro_invoice_applications cia
-                JOIN cobros c ON c.id = cia.cobro_id
-                WHERE cia.invoice_id = ${invoiceId}
-                  AND (c.status IS NULL OR c.status != 'anulado')
-              ), 0) as applied_cash,
-              COALESCE((
-                SELECT SUM(CAST(r.amount AS decimal))
-                FROM retenciones r
-                LEFT JOIN cobros c2 ON c2.id = r.cobro_id
-                WHERE r.invoice_id = ${invoiceId}
-                  AND r.direction = 'sufrida'
-                  AND (c2.status IS NULL OR c2.status != 'anulado')
-              ), 0) as retenciones_total
-          `);
-          const balRow = ((balanceRes as any).rows || [])[0];
-          const totalInv = parseFloat(balRow?.total || '0');
-          const alreadyApplied = parseFloat(balRow?.applied_cash || '0') + parseFloat(balRow?.retenciones_total || '0');
-          const remaining = totalInv - alreadyApplied;
-          if (applyAmount > remaining + 0.01) {
-            throw new ApiError(
-              400,
-              `La factura ${invRow.invoice_number} solo tiene $${remaining.toFixed(2)} pendiente. Estas intentando aplicar $${applyAmount.toFixed(2)}.`
+            await client.query(
+              `INSERT INTO retenciones (id, company_id, type, enterprise_id, cobro_id, base_amount, rate, amount, certificate_file, date, created_by, direction)
+               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'sufrida')`,
+              [
+                companyId, ret.type, enterpriseIdRet, cobroId,
+                baseAmount.toString(), rate.toString(), amount.toString(),
+                ret.certificate_file || null, retencionDate, userId,
+              ]
             );
           }
         }
 
-        // Create invoice-level applications from totals + cascade to orders.
-        // Bug B fix: removido ON CONFLICT DO NOTHING — silenciaba re-bindings.
-        // Las validaciones de arriba previenen duplicados legitimos.
-        for (const [invoiceId, totalAmount] of invoiceTotals.entries()) {
-          await db.execute(sql`
-            INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
-            VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${totalAmount.toString()}, ${userId})
-          `);
-          // Cascade: recalculate invoice → then order
-          await this.recalculateInvoicePaymentStatus(invoiceId);
-          await this.recalculateOrderStatusFromInvoice(invoiceId);
+        // B.1.5: Create cheques for each payment method that is cheque.
+        for (const pm of paymentMethods) {
+          if (pm.method === 'cheque' && pm.cheque_data) {
+            const cd = pm.cheque_data;
+            await client.query(
+              `INSERT INTO cheques (
+                 id, company_id, number, bank, drawer, drawer_cuit, cheque_type,
+                 amount, issue_date, due_date, status, cobro_id, business_unit_id, created_by
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'a_cobrar',$11,$12,$13)`,
+              [
+                uuid(), companyId, cd.number, cd.bank, cd.drawer,
+                cd.drawer_cuit || null, cd.cheque_type || 'comun',
+                pm.amount.toString(),
+                new Date(cd.issue_date), new Date(cd.due_date),
+                cobroId, data.business_unit_id || null, userId,
+              ]
+            );
+          }
         }
-      }
 
-      // Legacy: insert cobro_items for partial payments by order_item
-      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-        for (const item of data.items) {
-          if (!item.order_item_id || !item.amount_paid || Number(item.amount_paid) <= 0) continue;
-          await db.execute(sql`
-            INSERT INTO cobro_items (id, cobro_id, order_item_id, amount_paid)
-            VALUES (${uuid()}, ${cobroId}, ${item.order_item_id}, ${Number(item.amount_paid).toString()})
-          `);
+        // Create cobro_invoice_applications entries (N:N cobro↔invoice)
+        if (hasInvoiceItems) {
+          const invoiceTotals = new Map<string, number>();
+          for (const item of data.invoice_items) {
+            if (!item.invoice_id) continue;
+            if (item.amount && parseFloat(item.amount) > 0) {
+              const current = invoiceTotals.get(item.invoice_id) || 0;
+              invoiceTotals.set(item.invoice_id, current + parseFloat(item.amount));
+            }
+          }
+
+          // Bug B fix: validar cada factura con FOR UPDATE en el mismo client.
+          // Ahora el lock efectivamente serializa cobros concurrentes sobre la misma factura.
+          const NC_TYPES = ['NC_A', 'NC_B', 'NC_C', 'NC_E'];
+          for (const [invoiceId, applyAmount] of invoiceTotals.entries()) {
+            const invCheck = await client.query(
+              `SELECT id, enterprise_id, business_unit_id, status, payment_status,
+                      invoice_type, invoice_number, total_amount, currency
+                 FROM invoices
+                WHERE id = $1 AND company_id = $2
+                  FOR UPDATE`,
+              [invoiceId, companyId]
+            );
+            const invRow = invCheck.rows[0];
+            if (!invRow) {
+              throw new ApiError(404, `Factura ${invoiceId} no encontrada`);
+            }
+            if (invRow.status === 'cancelled') {
+              throw new ApiError(400, `No se puede vincular cobro a factura cancelada (${invRow.invoice_number})`);
+            }
+            if (invRow.invoice_type && NC_TYPES.includes(invRow.invoice_type)) {
+              throw new ApiError(400, `No se pueden aplicar cobros a Notas de Credito (${invRow.invoice_type} ${invRow.invoice_number})`);
+            }
+            if (data.enterprise_id && invRow.enterprise_id && invRow.enterprise_id !== data.enterprise_id) {
+              throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otro cliente`);
+            }
+            if (data.business_unit_id && invRow.business_unit_id && invRow.business_unit_id !== data.business_unit_id) {
+              throw new ApiError(400, `La factura ${invRow.invoice_number} pertenece a otra razon social`);
+            }
+            if (invRow.payment_status === 'pagado') {
+              throw new ApiError(
+                400,
+                `La factura ${invRow.invoice_type} ${invRow.invoice_number} ya esta completamente pagada. No se pueden vincular mas cobros.`
+              );
+            }
+
+            // V6: balance check on same client — SUM reflects committed rows
+            // under the FOR UPDATE snapshot, so over-payment is prevented.
+            const balanceRes = await client.query(
+              `SELECT
+                 CAST($1 AS decimal) as total,
+                 COALESCE((
+                   SELECT SUM(CAST(cia.amount_applied AS decimal))
+                   FROM cobro_invoice_applications cia
+                   JOIN cobros c ON c.id = cia.cobro_id
+                   WHERE cia.invoice_id = $2
+                     AND (c.status IS NULL OR c.status != 'anulado')
+                 ), 0) as applied_cash,
+                 COALESCE((
+                   SELECT SUM(CAST(r.amount AS decimal))
+                   FROM retenciones r
+                   LEFT JOIN cobros c2 ON c2.id = r.cobro_id
+                   WHERE r.invoice_id = $2
+                     AND r.direction = 'sufrida'
+                     AND (c2.status IS NULL OR c2.status != 'anulado')
+                 ), 0) as retenciones_total`,
+              [invRow.total_amount, invoiceId]
+            );
+            const balRow = balanceRes.rows[0];
+            const totalInv = parseFloat(balRow?.total || '0');
+            const alreadyApplied = parseFloat(balRow?.applied_cash || '0') + parseFloat(balRow?.retenciones_total || '0');
+            const remaining = totalInv - alreadyApplied;
+            if (applyAmount > remaining + 0.01) {
+              throw new ApiError(
+                400,
+                `La factura ${invRow.invoice_number} solo tiene $${remaining.toFixed(2)} pendiente. Estas intentando aplicar $${applyAmount.toFixed(2)}.`
+              );
+            }
+          }
+
+          for (const [invoiceId, totalAmt] of invoiceTotals.entries()) {
+            await client.query(
+              `INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [uuid(), cobroId, invoiceId, totalAmt.toString(), userId]
+            );
+            invoiceIdsToRecalc.push(invoiceId);
+          }
         }
-      }
 
-      await db.execute(sql`COMMIT`);
+        // Legacy: insert cobro_items for partial payments by order_item
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          for (const item of data.items) {
+            if (!item.order_item_id || !item.amount_paid || Number(item.amount_paid) <= 0) continue;
+            await client.query(
+              `INSERT INTO cobro_items (id, cobro_id, order_item_id, amount_paid)
+               VALUES ($1, $2, $3, $4)`,
+              [uuid(), cobroId, item.order_item_id, Number(item.amount_paid).toString()]
+            );
+          }
+        }
+
+        await client.query('COMMIT');
       } catch (txError) {
-        try { await db.execute(sql`ROLLBACK`); } catch (e) { /* rollback best-effort */ }
+        await client.query('ROLLBACK').catch(() => {});
         throw txError;
+      } finally {
+        client.release();
+      }
+
+      // Cascade recalcs AFTER commit — they issue their own db.execute calls
+      // and shouldn't hold the pooled client while running.
+      for (const invoiceId of invoiceIdsToRecalc) {
+        await this.recalculateInvoicePaymentStatus(invoiceId);
+        await this.recalculateOrderStatusFromInvoice(invoiceId);
       }
 
       // Sol/Luna: lock every unique order derived from applied invoices.

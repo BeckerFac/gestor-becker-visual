@@ -5,6 +5,45 @@ import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 import { activityService } from '../activity/activity.service';
 
+// Wave 3D D2: centralized item validator — same rules as createOrder's block
+// at lines 339-356 (quantity > 0, unit_price >= 0, vat_rate 0-100). Extracted
+// so updateOrder also enforces them. DECIMAL(12,2) overflow guard added on
+// unit_price (99_999_999.99 is the max that fits).
+export const MAX_ITEM_UNIT_PRICE = 99_999_999.99;
+
+export function validateOrderItem(item: any): void {
+  if (!item.product_name || !String(item.product_name).trim()) {
+    throw new ApiError(400, 'Todos los items deben tener product_name');
+  }
+  const qty = Number(item.quantity);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    throw new ApiError(400, `Cantidad invalida en "${item.product_name}". Debe ser > 0`);
+  }
+  const price = Number(item.unit_price);
+  if (!Number.isFinite(price) || price < 0) {
+    throw new ApiError(400, `Precio unitario invalido en "${item.product_name}". Debe ser >= 0`);
+  }
+  if (price > MAX_ITEM_UNIT_PRICE) {
+    throw new ApiError(400, `Precio unitario en "${item.product_name}" excede el maximo permitido ($${MAX_ITEM_UNIT_PRICE})`);
+  }
+  const vat = Number(item.vat_rate ?? 21);
+  if (!Number.isFinite(vat) || vat < 0 || vat > 100) {
+    throw new ApiError(400, `IVA invalido en "${item.product_name}". Debe estar entre 0 y 100`);
+  }
+}
+
+// Wave 3D D6: state machine for order.status. Each current status lists the
+// allowed next states. Terminal states (entregado / cancelado) reject any
+// further transition; cancelar is allowed from every non-terminal state so
+// operators can back out of mistakes.
+export const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
+  pendiente: ['en_produccion', 'cancelado'],
+  en_produccion: ['terminado', 'cancelado'],
+  terminado: ['entregado', 'cancelado'],
+  entregado: [],
+  cancelado: [],
+};
+
 export class OrdersService {
   private migrationsRun = false;
 
@@ -334,25 +373,11 @@ export class OrdersService {
         throw new ApiError(400, `Prioridad invalida. Valores: ${VALID_PRIORITIES.join(', ')}`);
       }
 
-      // BUG #3: validate items have positive qty/price
-      // BUG #4: validate vat_rate 0-100
+      // BUG #3/#4 + Wave 3D D2: validate items via shared helper
+      // (positive qty, non-negative price under DECIMAL(12,2) cap, vat 0-100).
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
-          if (!item.product_name || !String(item.product_name).trim()) {
-            throw new ApiError(400, 'Todos los items deben tener product_name');
-          }
-          const qty = Number(item.quantity);
-          if (!Number.isFinite(qty) || qty <= 0) {
-            throw new ApiError(400, `Cantidad invalida en "${item.product_name}". Debe ser > 0`);
-          }
-          const price = Number(item.unit_price);
-          if (!Number.isFinite(price) || price < 0) {
-            throw new ApiError(400, `Precio unitario invalido en "${item.product_name}". Debe ser >= 0`);
-          }
-          const vat = Number(item.vat_rate ?? 21);
-          if (!Number.isFinite(vat) || vat < 0 || vat > 100) {
-            throw new ApiError(400, `IVA invalido en "${item.product_name}". Debe estar entre 0 y 100`);
-          }
+          validateOrderItem(item);
         }
       }
 
@@ -574,15 +599,36 @@ export class OrdersService {
 
   async updateOrderStatus(companyId: string, userId: string, orderId: string, data: { status: string; notes?: string }) {
     try {
-      // Verify order belongs to company
+      // Verify order belongs to company (also pull locked_at for Wave 3D D6 guard)
       const orderResult = await db.execute(sql`
-        SELECT id, status FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
+        SELECT id, status, locked_at FROM orders WHERE id = ${orderId} AND company_id = ${companyId}
       `);
       const orderRows = (orderResult as any).rows || orderResult || [];
       if (orderRows.length === 0) throw new ApiError(404, 'Order not found');
 
       const oldStatus = orderRows[0].status;
       const newStatus = data.status;
+
+      // Wave 3D D6: mismatch-with-other-mutations fix. updateOrder refuses
+      // to touch a locked order; updateOrderStatus used to silently allow
+      // any status change on a locked order, so cancelling a pedido with
+      // facturas emitidas bypassed the lock. Enforce the same 423 here.
+      if (orderRows[0].locked_at != null) {
+        throw new ApiError(423, 'Pedido bloqueado: hay comprobantes emitidos. Anular comprobantes para editar.');
+      }
+
+      // Wave 3D D6: enforce state machine. Terminal states (entregado,
+      // cancelado) reject any outgoing transition; non-terminal states
+      // limit targets to a whitelist. Catches accidental re-entry
+      // (entregado → pendiente) and invalid forward jumps (pendiente →
+      // entregado) that skipped en_produccion / terminado.
+      const allowed = VALID_ORDER_TRANSITIONS[oldStatus] || [];
+      if (oldStatus !== newStatus && !allowed.includes(newStatus)) {
+        throw new ApiError(
+          400,
+          `Transicion invalida: ${oldStatus} -> ${newStatus}. Permitidas: ${allowed.join(', ') || 'ninguna (estado terminal)'}`
+        );
+      }
 
       await db.execute(sql`
         UPDATE orders SET status = ${newStatus}, updated_at = NOW()
@@ -902,6 +948,13 @@ export class OrdersService {
 
           const validItems = data.items.filter((it: any) => it.product_name && String(it.product_name).trim());
           if (validItems.length === 0) throw new ApiError(400, 'At least one item with a product name is required');
+
+          // Wave 3D D2: numeric validation — same rules as createOrder.
+          // Previously updateOrder accepted NaN / negative / unbounded prices
+          // because it used `Number(x || 0)` / `Number(y || 1)` with no guard.
+          for (const item of validItems) {
+            validateOrderItem(item);
+          }
 
           let subtotal = 0;
           let totalVat = 0;

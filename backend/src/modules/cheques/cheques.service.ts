@@ -77,7 +77,7 @@ export class ChequesService {
     }
   }
 
-  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string; business_unit_id?: string; direction?: 'recibido' | 'emitido' } = {}) {
+  async getCheques(companyId: string, filters: { status?: string; search?: string; due_from?: string; due_to?: string; business_unit_id?: string; direction?: 'recibido' | 'emitido'; canAccessLuna?: boolean } = {}) {
     await this.ensureMigrations();
     try {
       let whereClause = sql`c.company_id = ${companyId}`;
@@ -100,6 +100,14 @@ export class ChequesService {
       }
       if (filters.due_to) {
         whereClause = sql`${whereClause} AND c.due_date <= ${filters.due_to}`;
+      }
+      // Sol/Luna: cheques has no fiscal_type column, so we route the filter
+      // through the linked cobro (recibido cheques always stem from a cobro
+      // when recorded via the normal flow). Emitido cheques / legacy orphan
+      // recibidos without a cobro are treated as Sol. Non-Luna users therefore
+      // never see a recibido cheque linked to a Luna cobro.
+      if (!filters.canAccessLuna) {
+        whereClause = sql`${whereClause} AND (c.direction = 'emitido' OR COALESCE(co.fiscal_type, 'fiscal') = 'fiscal')`;
       }
 
       const result = await db.execute(sql`

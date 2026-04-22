@@ -133,7 +133,7 @@ export class EnterprisesService {
     }
   }
 
-  async getEnterprise(companyId: string, enterpriseId: string) {
+  async getEnterprise(companyId: string, enterpriseId: string, userCanAccessLuna: boolean = true) {
     await this.ensureTables();
     try {
       const result = await db.execute(sql`
@@ -152,7 +152,14 @@ export class EnterprisesService {
       `);
       const contacts = (contactsResult as any).rows || contactsResult || [];
 
-      return { ...rows[0], contacts };
+      const row = { ...rows[0], contacts };
+      // Sol/Luna: hide the circuit metadata from users without Luna access.
+      // Leaking `default_fiscal_type` tells them Luna exists (and which clients
+      // prefer it), even if they can't read Luna transactions.
+      if (!userCanAccessLuna) {
+        delete (row as any).default_fiscal_type;
+      }
+      return row;
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get enterprise');
@@ -162,6 +169,25 @@ export class EnterprisesService {
   async createEnterprise(companyId: string, data: any, userId?: string) {
     await this.ensureTables();
     try {
+      // Wave 3D D8/D9: input length + numeric caps. Prevents:
+      //  - DB truncation / mojibake from 10k-char "names" via paste accidents
+      //  - default_discount out of 0-100 rewriting later checkout math
+      if (data.name !== undefined && String(data.name).length > 255) {
+        throw new ApiError(400, 'El nombre no puede exceder 255 caracteres');
+      }
+      if (data.razon_social !== undefined && data.razon_social !== null && String(data.razon_social).length > 255) {
+        throw new ApiError(400, 'La razon social no puede exceder 255 caracteres');
+      }
+      if (data.notes !== undefined && data.notes !== null && String(data.notes).length > 2000) {
+        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+      }
+      if (data.default_discount !== undefined && data.default_discount !== null && data.default_discount !== '') {
+        const dd = Number(data.default_discount);
+        if (!Number.isFinite(dd) || dd < 0 || dd > 100) {
+          throw new ApiError(400, 'Descuento invalido. Debe ser un numero entre 0 y 100');
+        }
+      }
+
       // PR7-T14: normalizar CUIT al inicio para evitar inconsistencias de whitespace
       // (un "  " pasaba el trim-check pero fallaba regex; un "20-12345678-9" entraba con guiones).
       const cuitNormalized = (data.cuit || '').replace(/[-\s]/g, '').trim() || null;
@@ -242,6 +268,23 @@ export class EnterprisesService {
       `);
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
+
+      // Wave 3D D8/D9: mirror create-time validations on partial updates.
+      if ('name' in data && data.name !== null && data.name !== undefined && String(data.name).length > 255) {
+        throw new ApiError(400, 'El nombre no puede exceder 255 caracteres');
+      }
+      if ('razon_social' in data && data.razon_social && String(data.razon_social).length > 255) {
+        throw new ApiError(400, 'La razon social no puede exceder 255 caracteres');
+      }
+      if ('notes' in data && data.notes && String(data.notes).length > 2000) {
+        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+      }
+      if ('default_discount' in data && data.default_discount !== null && data.default_discount !== undefined && data.default_discount !== '') {
+        const dd = Number(data.default_discount);
+        if (!Number.isFinite(dd) || dd < 0 || dd > 100) {
+          throw new ApiError(400, 'Descuento invalido. Debe ser un numero entre 0 y 100');
+        }
+      }
 
       // Wave 2A-1 H12: MERGE semantics. Only UPDATE columns explicitly present
       // in the payload; never overwrite unsent fields with NULL. The previous

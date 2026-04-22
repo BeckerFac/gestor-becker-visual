@@ -50,13 +50,13 @@ export class ReportsController {
 
   async getSalesReport(req: AuthRequest, res: Response) {
     const days = parseInt(req.query.days as string) || 7;
-    const data = await reportsService.getSalesReport(req.user!.company_id, days);
+    const data = await reportsService.getSalesReport(req.user!.company_id, days, getCircuitOpts(req));
     res.json(data);
   }
 
   async getTopProducts(req: AuthRequest, res: Response) {
     const limit = parseInt(req.query.limit as string) || 5;
-    const data = await reportsService.getTopProducts(req.user!.company_id, limit);
+    const data = await reportsService.getTopProducts(req.user!.company_id, limit, getCircuitOpts(req));
     res.json(data);
   }
   async getInsights(req: AuthRequest, res: Response) {
@@ -73,7 +73,7 @@ export class ReportsController {
   async globalSearch(req: AuthRequest, res: Response) {
     const query = (req.query.q as string) || '';
     const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
-    const data = await reportsService.globalSearch(req.user!.company_id, query, userPermissions);
+    const data = await reportsService.globalSearch(req.user!.company_id, query, userPermissions, getCircuitOpts(req));
     res.json(data);
   }
   async getLibroIVAVentas(req: AuthRequest, res: Response) {

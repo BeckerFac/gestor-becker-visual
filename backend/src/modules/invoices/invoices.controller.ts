@@ -45,7 +45,11 @@ export class InvoicesController {
   async getInvoiceDetail(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
-      const detail = await invoicesService.getInvoiceDetail(req.user.company_id, req.params.id);
+      const detail = await invoicesService.getInvoiceDetail(
+        req.user.company_id,
+        req.params.id,
+        Boolean(req.user.can_access_luna),
+      );
       if (!detail) return res.status(404).json({ error: 'Factura no encontrada' });
       res.json(detail);
     } catch (error) {

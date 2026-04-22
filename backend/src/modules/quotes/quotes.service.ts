@@ -135,10 +135,21 @@ export class QuotesService {
   }
 
   async updateQuoteStatus(companyId: string, quoteId: string, newStatus: string) {
-    const validStatuses = ['draft', 'sent', 'accepted', 'rejected'];
+    const validStatuses = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'];
     if (!validStatuses.includes(newStatus)) {
       throw new ApiError(400, 'Invalid status');
     }
+    // Wave 3D D7: enforce quote state machine. 'accepted' and 'cancelled' are
+    // terminal (accepted already triggered order creation; cancelled is a
+    // hard stop). 'rejected' can only be re-opened to 'sent'. Prevents
+    // resurrecting rejected quotes directly into accepted and double-accepting.
+    const QUOTE_TRANSITIONS: Record<string, string[]> = {
+      draft: ['sent', 'rejected', 'accepted', 'cancelled'],
+      sent: ['accepted', 'rejected', 'cancelled'],
+      accepted: [],
+      rejected: ['sent'],
+      cancelled: [],
+    };
 
     // Bug A: wrap status update + order creation in a single transaction so
     // a failure inside convertQuoteToOrder rolls back the quote status update.
@@ -171,6 +182,16 @@ export class QuotesService {
         }
         await client.query('COMMIT');
       } else {
+        // Wave 3D D7: validate transition (only when status actually changes).
+        const allowedQuote = QUOTE_TRANSITIONS[currentQuote.status] || [];
+        if (!allowedQuote.includes(newStatus)) {
+          await client.query('ROLLBACK').catch(() => {});
+          client.release();
+          throw new ApiError(
+            400,
+            `Transicion de cotizacion invalida: ${currentQuote.status} -> ${newStatus}. Permitidas: ${allowedQuote.join(', ') || 'ninguna (estado terminal)'}`
+          );
+        }
         await client.query(
           `UPDATE quotes SET status = $1, updated_at = NOW() WHERE id = $2`,
           [newStatus, quoteId]

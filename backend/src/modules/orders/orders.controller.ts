@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { ordersService } from './orders.service';
 import { pdfService } from '../pdf/pdf.service';
+import { ApiError } from '../../middlewares/errorHandler';
 
 export class OrdersController {
   async getOrders(req: AuthRequest, res: Response) {
@@ -107,6 +108,20 @@ export class OrdersController {
   async getOrderPdf(req: AuthRequest, res: Response) {
     try {
       const businessUnitId = (req.query.business_unit_id as string) || undefined;
+      // Sol/Luna gate: reuse the existing row-level 404 guard from ordersService.
+      // A non-Luna user requesting a Luna order PDF must be treated as "order
+      // doesn't exist" — same 404 the JSON endpoint returns. The PDF service
+      // itself performs no circuit check; calling getOrder first short-circuits
+      // the leak before any rendering happens.
+      const userCanAccessLuna = !!(req.user as any)?.can_access_luna;
+      try {
+        await ordersService.getOrder(req.user!.company_id, req.params.id, { userCanAccessLuna });
+      } catch (gateErr) {
+        if (gateErr instanceof ApiError && gateErr.statusCode === 404) {
+          return res.status(404).json({ error: 'Pedido no encontrado' });
+        }
+        throw gateErr;
+      }
       const pdf = await pdfService.generateOrderPdf(
         req.params.id,
         req.user!.company_id,

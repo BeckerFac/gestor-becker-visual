@@ -190,7 +190,11 @@ export class ReportsService {
     }
   }
 
-  async getSalesReport(companyId: string, days: number = 7) {
+  async getSalesReport(companyId: string, days: number = 7, circuitOpts?: CircuitOpts) {
+    // Sol/Luna: apply the same resolution rules as the rest of the dashboard.
+    // Default -> Sol only; non-Luna users silently downgraded.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
     try {
       const result = await db.execute(sql`
         SELECT
@@ -200,6 +204,7 @@ export class ReportsService {
         FROM invoices i
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
+          ${fiscalClause}
           AND i.invoice_date >= NOW() - INTERVAL '1 day' * ${days}
         GROUP BY DATE(i.invoice_date)
         ORDER BY DATE(i.invoice_date) ASC
@@ -237,7 +242,10 @@ export class ReportsService {
     }
   }
 
-  async getTopProducts(companyId: string, limit: number = 5) {
+  async getTopProducts(companyId: string, limit: number = 5, circuitOpts?: CircuitOpts) {
+    // Sol/Luna: inherit caller's circuit. Default -> Sol only.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const fiscalClause = buildFiscalClause(fiscalTypes, 'i');
     try {
       const result = await db.execute(sql`
         SELECT
@@ -248,6 +256,7 @@ export class ReportsService {
         JOIN invoices i ON ii.invoice_id = i.id
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
+          ${fiscalClause}
         GROUP BY ii.product_name
         ORDER BY SUM(CAST(ii.subtotal AS decimal)) DESC
         LIMIT ${limit}
@@ -270,10 +279,30 @@ export class ReportsService {
     companyId: string,
     query: string,
     userPermissions?: Map<string, Set<string>>,
+    circuitOpts?: CircuitOpts,
   ) {
     if (!query || query.trim().length < 2) return { enterprises: [], customers: [], orders: [], purchases: [], products: [], invoices: [] };
 
     const q = `%${query.trim()}%`;
+    // Sol/Luna: resolve fiscal circuit. Non-Luna users are silently downgraded
+    // to ['fiscal'] so the search never returns Luna rows. Even module rows
+    // without a fiscal_type column (enterprises) must be filtered to avoid
+    // leaking the existence of no_fiscal default metadata.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const canLuna = !!circuitOpts?.userCanAccessLuna;
+    const invoicesFiscalClause = buildFiscalClause(fiscalTypes, 'i');
+    const ordersFiscalClause = buildFiscalClause(fiscalTypes, 'o');
+    // Enterprises: no fiscal_type on transactions, but the row has a
+    // default_fiscal_type metadata hint. Hide "no_fiscal" enterprises from
+    // non-Luna users so Luna-only clients never surface in search. Luna users
+    // see everything regardless of the fiscal_types filter.
+    const enterpriseLunaClause = canLuna
+      ? sql.raw('')
+      : sql.raw(` AND COALESCE(default_fiscal_type, 'fiscal') = 'fiscal'`);
+    // Purchases carry a fiscal_type column mirroring invoices. Filter so
+    // purchase invoices from Luna circuit don't appear for Sol-only users.
+    const purchasesFiscalClause = buildFiscalClause(fiscalTypes, 'p');
+
     try {
       // Build queries only for modules the user can access
       const queries: Record<string, Promise<any>> = {};
@@ -282,12 +311,17 @@ export class ReportsService {
         queries.enterprises = db.execute(sql`
           SELECT id, name, cuit, 'enterprise' as _type FROM enterprises
           WHERE company_id = ${companyId} AND (name ILIKE ${q} OR cuit ILIKE ${q})
+            ${enterpriseLunaClause}
           ORDER BY name LIMIT 5
         `);
         queries.customers = db.execute(sql`
-          SELECT id, name, email, cuit, 'customer' as _type FROM customers
-          WHERE company_id = ${companyId} AND (name ILIKE ${q} OR email ILIKE ${q} OR cuit ILIKE ${q})
-          ORDER BY name LIMIT 5
+          SELECT cu.id, cu.name, cu.email, cu.cuit, 'customer' as _type
+          FROM customers cu
+          LEFT JOIN enterprises en ON cu.enterprise_id = en.id
+          WHERE cu.company_id = ${companyId}
+            AND (cu.name ILIKE ${q} OR cu.email ILIKE ${q} OR cu.cuit ILIKE ${q})
+            ${canLuna ? sql.raw('') : sql.raw(` AND (en.id IS NULL OR COALESCE(en.default_fiscal_type, 'fiscal') = 'fiscal')`)}
+          ORDER BY cu.name LIMIT 5
         `);
       }
 
@@ -296,6 +330,7 @@ export class ReportsService {
           SELECT o.id, o.order_number, o.title, o.total_amount, o.status, c.name as customer_name, 'order' as _type
           FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
           WHERE o.company_id = ${companyId} AND (o.title ILIKE ${q} OR CAST(o.order_number AS TEXT) ILIKE ${q} OR c.name ILIKE ${q})
+            ${ordersFiscalClause}
           ORDER BY o.created_at DESC LIMIT 5
         `);
       }
@@ -305,6 +340,7 @@ export class ReportsService {
           SELECT p.id, p.purchase_number, p.total_amount, p.status, e.name as enterprise_name, 'purchase' as _type
           FROM purchases p LEFT JOIN enterprises e ON p.enterprise_id = e.id
           WHERE p.company_id = ${companyId} AND (CAST(p.purchase_number AS TEXT) ILIKE ${q} OR e.name ILIKE ${q})
+            ${purchasesFiscalClause}
           ORDER BY p.created_at DESC LIMIT 5
         `);
       }
@@ -322,6 +358,7 @@ export class ReportsService {
           SELECT i.id, i.invoice_number, i.invoice_type, i.total_amount, i.status, c.name as customer_name, 'invoice' as _type
           FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
           WHERE i.company_id = ${companyId} AND (CAST(i.invoice_number AS TEXT) ILIKE ${q} OR c.name ILIKE ${q})
+            ${invoicesFiscalClause}
           ORDER BY i.created_at DESC LIMIT 5
         `);
       }

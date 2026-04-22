@@ -290,8 +290,32 @@ export class PurchaseInvoicesService {
       }
 
       const piId = uuid();
-      const piCurrency = (data as any).currency || 'ARS';
-      const piExchangeRate = (data as any).exchange_rate ? parseFloat((data as any).exchange_rate) : null;
+      const piCurrency = ((data as any).currency || 'ARS').toUpperCase();
+      // Wave 3C C3: exchange_rate is MANDATORY for non-ARS purchase invoices.
+      // Without this, Libro IVA Compras' ARS-equivalent column (used for
+      // matching-retenciones / DSO-style supplier reports) gets silently
+      // stored as NULL.
+      let piExchangeRate: number | null = null;
+      {
+        const raw = (data as any).exchange_rate;
+        if (piCurrency === 'ARS') {
+          piExchangeRate = raw != null && raw !== ''
+            ? (Number.isFinite(parseFloat(String(raw))) && parseFloat(String(raw)) > 0 ? parseFloat(String(raw)) : null)
+            : null;
+        } else {
+          if (raw == null || raw === '') {
+            throw new ApiError(400, `exchange_rate requerido y > 0 para moneda ${piCurrency}`);
+          }
+          const r = parseFloat(String(raw));
+          if (!Number.isFinite(r) || r <= 0) {
+            throw new ApiError(400, `exchange_rate requerido y > 0 para moneda ${piCurrency}`);
+          }
+          if (r > 1_000_000) {
+            throw new ApiError(400, 'exchange_rate invalido (fuera de rango razonable)');
+          }
+          piExchangeRate = r;
+        }
+      }
       const retencionesPrevistas = JSON.stringify(data.retenciones_previstas || []);
 
       // ===== INSERT header =====

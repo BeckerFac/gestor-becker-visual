@@ -726,7 +726,11 @@ export class BusinessService {
             COUNT(*) as cantidad,
             COALESCE(SUM(
               CAST(i.total_amount AS decimal) - COALESCE(
-                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+                (SELECT SUM(CAST(cia.amount_applied AS decimal))
+                 FROM cobro_invoice_applications cia
+                 JOIN cobros cb ON cia.cobro_id = cb.id
+                 WHERE cia.invoice_id = i.id
+                   AND (cb.status IS NULL OR cb.status != 'anulado')), 0
               )
             ), 0) as monto
           FROM invoices i
@@ -735,7 +739,11 @@ export class BusinessService {
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              (SELECT SUM(CAST(cia.amount_applied AS decimal))
+               FROM cobro_invoice_applications cia
+               JOIN cobros cb ON cia.cobro_id = cb.id
+               WHERE cia.invoice_id = i.id
+                 AND (cb.status IS NULL OR cb.status != 'anulado')), 0
             )
           GROUP BY 1
         `);
@@ -785,16 +793,18 @@ export class BusinessService {
       async () => {
         const dsoResult = await db.execute(sql`
           SELECT AVG(
-            EXTRACT(DAY FROM p.payment_date - i.invoice_date)
+            EXTRACT(DAY FROM cb.payment_date - i.invoice_date)
           )::integer as dso_promedio
-          FROM payments p
-          JOIN invoices i ON p.invoice_id = i.id
+          FROM cobro_invoice_applications cia
+          JOIN cobros cb ON cia.cobro_id = cb.id
+          JOIN invoices i ON cia.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            AND (cb.status IS NULL OR cb.status != 'anulado')
             ${fiscalClause}
-            AND p.payment_date::date >= ${dates.dateFrom}::date
-            AND p.payment_date::date <= ${dates.dateTo}::date
+            AND cb.payment_date::date >= ${dates.dateFrom}::date
+            AND cb.payment_date::date <= ${dates.dateTo}::date
         `);
         return round2(parseFloat(extractRows(dsoResult)[0]?.dso_promedio) || 0);
       },
@@ -807,16 +817,18 @@ export class BusinessService {
       async () => {
         const prevDsoResult = await db.execute(sql`
           SELECT AVG(
-            EXTRACT(DAY FROM p.payment_date - i.invoice_date)
+            EXTRACT(DAY FROM cb.payment_date - i.invoice_date)
           )::integer as dso_promedio
-          FROM payments p
-          JOIN invoices i ON p.invoice_id = i.id
+          FROM cobro_invoice_applications cia
+          JOIN cobros cb ON cia.cobro_id = cb.id
+          JOIN invoices i ON cia.invoice_id = i.id
           WHERE i.company_id = ${companyId}
             AND i.status != 'cancelled'
             AND i.invoice_type::text NOT LIKE 'NC%'
+            AND (cb.status IS NULL OR cb.status != 'anulado')
             ${fiscalClause}
-            AND p.payment_date::date >= ${prev.dateFrom}::date
-            AND p.payment_date::date <= ${prev.dateTo}::date
+            AND cb.payment_date::date >= ${prev.dateFrom}::date
+            AND cb.payment_date::date <= ${prev.dateTo}::date
         `);
         return round2(parseFloat(extractRows(prevDsoResult)[0]?.dso_promedio) || 0);
       },
@@ -846,8 +858,9 @@ export class BusinessService {
       async () => {
         const prevCobrosResult = await db.execute(sql`
           SELECT COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-          FROM payments
+          FROM cobros
           WHERE company_id = ${companyId}
+            AND (status IS NULL OR status != 'anulado')
             AND payment_date::date >= ${prev.dateFrom}::date
             AND payment_date::date <= ${prev.dateTo}::date
         `);
@@ -866,7 +879,11 @@ export class BusinessService {
             COALESCE(e.name, c.name, 'Sin cliente') as nombre,
             SUM(
               CAST(i.total_amount AS decimal) - COALESCE(
-                (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+                (SELECT SUM(CAST(cia.amount_applied AS decimal))
+                 FROM cobro_invoice_applications cia
+                 JOIN cobros cb ON cia.cobro_id = cb.id
+                 WHERE cia.invoice_id = i.id
+                   AND (cb.status IS NULL OR cb.status != 'anulado')), 0
               )
             ) as monto_pendiente,
             COUNT(*) as facturas_pendientes,
@@ -879,7 +896,11 @@ export class BusinessService {
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalClause}
             AND CAST(i.total_amount AS decimal) > COALESCE(
-              (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
+              (SELECT SUM(CAST(cia.amount_applied AS decimal))
+               FROM cobro_invoice_applications cia
+               JOIN cobros cb ON cia.cobro_id = cb.id
+               WHERE cia.invoice_id = i.id
+                 AND (cb.status IS NULL OR cb.status != 'anulado')), 0
             )
             AND (i.enterprise_id IS NOT NULL OR i.customer_id IS NOT NULL)
           GROUP BY COALESCE(e.name, c.name, 'Sin cliente')
