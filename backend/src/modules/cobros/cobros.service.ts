@@ -201,6 +201,41 @@ export class CobrosService {
     return rows[0];
   }
 
+  /**
+   * Sol/Luna cross-circuit guard shared by legacy invoice_id and new
+   * invoice_items[] paths.
+   *
+   * Verifies every invoice in `invoiceIds` belongs to `companyId` and
+   * shares `cobroFiscalType`. NULL fiscal_type is treated as 'fiscal'
+   * (legacy rows). Throws ApiError(400) on any mismatch.
+   *
+   * Uses pool.query with ANY($1::uuid[]) because drizzle's sql`` tag
+   * does NOT coerce JS arrays to PG uuid[] literals.
+   */
+  private async validateInvoiceCircuit(
+    invoiceIds: string[],
+    cobroFiscalType: 'fiscal' | 'no_fiscal',
+    companyId: string,
+  ): Promise<void> {
+    if (!invoiceIds || invoiceIds.length === 0) return;
+    const ftRes = await pool.query(
+      `SELECT id, COALESCE(fiscal_type, 'fiscal') AS fiscal_type
+       FROM invoices
+       WHERE id = ANY($1::uuid[]) AND company_id = $2`,
+      [invoiceIds, companyId]
+    );
+    const ftRows = ftRes.rows || [];
+    for (const r of ftRows) {
+      const invFt = r.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
+      if (invFt !== cobroFiscalType) {
+        throw new ApiError(
+          400,
+          'No se puede aplicar un cobro a comprobantes de otro circuito'
+        );
+      }
+    }
+  }
+
   async createCobro(companyId: string, userId: string, data: any, opts: { userCanAccessLuna?: boolean } = {}) {
     await this.ensureTables();
 
@@ -227,34 +262,24 @@ export class CobrosService {
     }
 
     // Sol/Luna: cross-circuit invoice application check.
-    // Every invoice referenced in invoice_items must share the cobro's circuit.
+    // Every invoice referenced must share the cobro's circuit (both
+    // legacy invoice_id and new invoice_items[] paths).
+    // Bug fix: previously only invoice_items[] was validated, letting
+    // legacy invoice_id bypass the circuit guard and corrupt CC.
+    const circuitInvoiceIds: string[] = [];
+    if (typeof data.invoice_id === 'string' && data.invoice_id.length > 0) {
+      circuitInvoiceIds.push(data.invoice_id);
+    }
     if (Array.isArray(data.invoice_items) && data.invoice_items.length > 0) {
-      const invoiceIds = [...new Set(
-        data.invoice_items
-          .map((it: any) => it?.invoice_id)
-          .filter((x: any) => typeof x === 'string' && x.length > 0)
-      )] as string[];
-      if (invoiceIds.length > 0) {
-        // Use pool.query for ANY($1::uuid[]) — drizzle's sql`` tag does NOT
-        // coerce JS arrays to PG uuid[] literals, causing "malformed array literal" errors.
-        // node-postgres handles JS array → PG array conversion natively.
-        const ftRes = await pool.query(
-          `SELECT id, COALESCE(fiscal_type, 'fiscal') AS fiscal_type
-           FROM invoices
-           WHERE company_id = $1 AND id = ANY($2::uuid[])`,
-          [companyId, invoiceIds]
-        );
-        const ftRows = (ftRes.rows || []);
-        for (const r of ftRows) {
-          const invFt = r.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
-          if (invFt !== cobroFiscalType) {
-            throw new ApiError(
-              400,
-              'No se puede aplicar un cobro a comprobantes de otro circuito'
-            );
-          }
+      for (const it of data.invoice_items) {
+        if (typeof it?.invoice_id === 'string' && it.invoice_id.length > 0) {
+          circuitInvoiceIds.push(it.invoice_id);
         }
       }
+    }
+    if (circuitInvoiceIds.length > 0) {
+      const uniqueIds = [...new Set(circuitInvoiceIds)];
+      await this.validateInvoiceCircuit(uniqueIds, cobroFiscalType, companyId);
     }
 
     // Auto-assign default business_unit_id if not provided
