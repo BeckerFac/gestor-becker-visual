@@ -196,13 +196,15 @@ describe('Wave 2C: audit log coverage', () => {
     mockDbExecute.mockImplementation((...args: any[]) => {
       const tpl = args[0];
       const s = tpl?.strings ? tpl.strings.join('') : '';
-      if (s.includes('SELECT id, status FROM orders WHERE id')) {
-        return Promise.resolve({ rows: [{ id: 'o-1', status: 'pendiente' }] });
+      // Wave 3D D6: SELECT now also pulls locked_at for the lock-guard check.
+      if (s.includes('SELECT id, status') && s.includes('FROM orders WHERE id')) {
+        return Promise.resolve({ rows: [{ id: 'o-1', status: 'pendiente', locked_at: null }] });
       }
       return Promise.resolve({ rows: [] });
     });
 
-    await service.updateOrderStatus('company-1', 'user-5', 'o-1', { status: 'entregado' });
+    // Wave 3D D6: pendiente -> en_produccion is the only valid first transition.
+    await service.updateOrderStatus('company-1', 'user-5', 'o-1', { status: 'en_produccion' });
 
     const calls = auditCalls();
     expect(calls.length).toBe(1);

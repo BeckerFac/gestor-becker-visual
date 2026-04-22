@@ -402,6 +402,8 @@ describe('ProductsService', () => {
 
   describe('bulkUpdatePrice', () => {
     it('applies percentage increase correctly preserving margin', async () => {
+      // Wave 3D D1: IDOR pre-check returns all ids as belonging to company.
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'p1' }, { id: 'p2' }] })
       mockDbVoid() // UPDATE product_pricing
       mockDbVoid()
 
@@ -412,6 +414,7 @@ describe('ProductsService', () => {
     })
 
     it('applies negative percentage (decrease)', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'p1' }] })
       mockDbVoid()
 
       const result = await service.bulkUpdatePrice('company-1', ['p1'], -15)
@@ -432,6 +435,7 @@ describe('ProductsService', () => {
     })
 
     it('preserves margin formula: new_price = new_cost * (1+margin/100) * (1+vat/100)', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'p1' }] })
       mockDbVoid() // UPDATE product_pricing for p1
 
       await service.bulkUpdatePrice('company-1', ['p1'], 20)
