@@ -48,6 +48,8 @@ describe('Seccion 9 BUG #3: customer_id IDOR en createInvoice', () => {
       fiscal_type: 'fiscal',
       invoice_type: 'B',
       customer_id: 'cust-of-other-company',
+      // Wave 3D D11: items are now required.
+      items: [{ product_name: 'X', unit_price: 100, quantity: 1, vat_rate: 21 }],
     })).rejects.toThrow(/no pertenece/i);
   });
 
@@ -57,6 +59,8 @@ describe('Seccion 9 BUG #3: customer_id IDOR en createInvoice', () => {
       fiscal_type: 'fiscal',
       invoice_type: 'B',
       enterprise_id: 'ent-of-other-company',
+      // Wave 3D D11: items are now required.
+      items: [{ product_name: 'X', unit_price: 100, quantity: 1, vat_rate: 21 }],
     })).rejects.toThrow(/no pertenece|La empresa/i);
   });
 });
