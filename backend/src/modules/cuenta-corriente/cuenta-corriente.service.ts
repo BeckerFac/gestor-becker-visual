@@ -649,16 +649,69 @@ export class CuentaCorrienteService {
 
           UNION ALL
 
+          -- Wave 2B-2 (H20): split cobros into APPLIED + ADELANTO, mirroring
+          -- getResumen's semantics. Previously detalle counted c.total_amount
+          -- in full for every non-anulado cobro (regardless of where applied),
+          -- while resumen summed cobro_invoice_applications per invoice.fiscal_type
+          -- plus a pending_invoice adelanto bucket. That mismatch produced the
+          -- 1000 divergence on orphan mis-posted cobros.
+          --
+          -- RULE (matches getResumen saldo_sol formula):
+          --   - APPLIED portion: sum of cia.amount_applied where invoice matches
+          --     fiscal_type and is NOT an NC. One row per cobro, aggregated.
+          --   - ADELANTO portion: for cobros with pending_status='pending_invoice',
+          --     emit (total_amount - sum(applications)) as the not-yet-applied
+          --     remainder. Cobros without pending_invoice don't emit an adelanto,
+          --     so orphan applications to NCs or cross-circuit invoices never
+          --     count toward the client balance.
+          --   - Both buckets filter cobro.fiscal_type=$circuit AND non-anulado.
           SELECT
-            COALESCE(c.payment_date, c.created_at),
-            'recibo',
-            CAST(c.receipt_number AS text),
-            0::decimal,
-            CAST(COALESCE(c.total_amount, c.amount) AS decimal),
-            'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text),
-            c.id
+            COALESCE(c.payment_date, c.created_at) as fecha,
+            'recibo' as tipo,
+            CAST(c.receipt_number AS text) as nro_comprobante,
+            0::decimal as debe,
+            COALESCE((
+              SELECT SUM(CAST(cia.amount_applied AS decimal))
+              FROM cobro_invoice_applications cia
+              JOIN invoices cia_inv ON cia.invoice_id = cia_inv.id
+              WHERE cia.cobro_id = c.id
+                AND cia_inv.invoice_type::text NOT LIKE 'NC%'
+                AND COALESCE(cia_inv.fiscal_type,'fiscal') = $${circuitParamIdx}
+            ), 0) as haber,
+            'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
+            c.id as reference_id
           FROM cobros c
           WHERE c.enterprise_id = $1 AND c.company_id = $2
+            ${cobrosAnuladoFilterC}
+            ${fiscalFilter('c')}
+            ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
+            AND EXISTS (
+              SELECT 1 FROM cobro_invoice_applications cia2
+              JOIN invoices cia2_inv ON cia2.invoice_id = cia2_inv.id
+              WHERE cia2.cobro_id = c.id
+                AND cia2_inv.invoice_type::text NOT LIKE 'NC%'
+                AND COALESCE(cia2_inv.fiscal_type,'fiscal') = $${circuitParamIdx}
+            )
+
+          UNION ALL
+
+          -- Adelanto (unapplied portion) for pending_invoice cobros.
+          -- Mirrors the total_adelantos_cobros_sol/luna subquery in getResumen.
+          SELECT
+            COALESCE(c.payment_date, c.created_at) as fecha,
+            'adelanto_cobro' as tipo,
+            CAST(c.receipt_number AS text) as nro_comprobante,
+            0::decimal as debe,
+            CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE((
+              SELECT SUM(CAST(cia.amount_applied AS decimal))
+              FROM cobro_invoice_applications cia
+              WHERE cia.cobro_id = c.id
+            ), 0) as haber,
+            'Recibo (sin factura) #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
+            c.id as reference_id
+          FROM cobros c
+          WHERE c.enterprise_id = $1 AND c.company_id = $2
+            AND c.pending_status = 'pending_invoice'
             ${cobrosAnuladoFilterC}
             ${fiscalFilter('c')}
             ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
