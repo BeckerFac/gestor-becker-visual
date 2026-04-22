@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -54,6 +55,8 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 export const Global: React.FC = () => {
+  // Wave B: support ?enterprise_id=<id> (deep link from /empresas context menu).
+  const [searchParams, setSearchParams] = useSearchParams()
   const [searchTerm, setSearchTerm] = useState('')
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [filteredEnterprises, setFilteredEnterprises] = useState<Enterprise[]>([])
@@ -63,6 +66,7 @@ export const Global: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [tabLoading, setTabLoading] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const prefillConsumedRef = useRef(false)
 
   // Tab data
   const [contacts, setContacts] = useState<any[]>([])
@@ -137,6 +141,21 @@ export const Global: React.FC = () => {
       setLoading(false)
     }
   }, [])
+
+  // Wave B: auto-select enterprise when navegando desde /empresas with ?enterprise_id=<id>.
+  // Consume the param once per mount so a refresh doesn't re-trigger.
+  useEffect(() => {
+    if (prefillConsumedRef.current) return
+    if (enterprises.length === 0) return
+    const entId = searchParams.get('enterprise_id')
+    if (!entId) return
+    const ent = enterprises.find(e => e.id === entId)
+    if (ent) {
+      selectEnterprise(ent)
+    }
+    prefillConsumedRef.current = true
+    setSearchParams({}, { replace: true })
+  }, [enterprises, searchParams, setSearchParams, selectEnterprise])
 
   const loadTabData = useCallback(async (tab: TabKey, enterpriseId: string) => {
     setTabLoading(true)

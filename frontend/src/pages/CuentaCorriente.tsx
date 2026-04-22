@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -218,6 +218,9 @@ const AdjustmentForm: React.FC<AdjustmentFormProps> = ({ enterpriseId, fiscalTyp
 
 export const CuentaCorriente: React.FC = () => {
   const { canAccessLuna } = useCircuitAccess()
+  // Wave B: support ?enterprise_id=<id> (deep link from /empresas context menu).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const prefillConsumedRef = useRef(false)
   const [resumen, setResumen] = useState<EnterpriseSaldo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -311,6 +314,24 @@ export const CuentaCorriente: React.FC = () => {
     setActiveCircuit('fiscal')
     await loadDetalleFor(enterpriseId, 'fiscal')
   }
+
+  // Wave B: auto-open drawer when navegando desde /empresas with ?enterprise_id=<id>.
+  // Consume once per mount so a refresh doesn't re-trigger.
+  useEffect(() => {
+    if (prefillConsumedRef.current) return
+    if (resumen.length === 0) return
+    const entId = searchParams.get('enterprise_id')
+    if (!entId) return
+    const exists = resumen.some(r => r.id === entId)
+    if (exists) {
+      setSelectedEnterprise(entId)
+      setActiveCircuit('fiscal')
+      loadDetalleFor(entId, 'fiscal')
+    }
+    prefillConsumedRef.current = true
+    setSearchParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumen, searchParams, setSearchParams])
 
   // Reload detalle whenever the user switches tabs.
   useEffect(() => {

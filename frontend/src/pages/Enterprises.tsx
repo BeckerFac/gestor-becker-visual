@@ -13,10 +13,12 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { TagManager } from '@/components/shared/TagManager'
 import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
-import { PermissionGate } from '@/components/shared/PermissionGate'
+import { PermissionGate, useCan } from '@/components/shared/PermissionGate'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { checkEnterpriseFiscalData } from '@/utils/fiscal'
 import { useCircuitAccess } from '@/hooks/useCircuitAccess'
+import { ContextMenuBase, type ContextMenuItem } from '@/components/ui/ContextMenuBase'
+import { useContextMenu } from '@/hooks/useContextMenu'
 
 interface Enterprise {
   id: string
@@ -81,6 +83,10 @@ export const Enterprises: React.FC = () => {
   // Nor feedback item 3: gate Sol/Luna UI behind circuit access.
   // Non-Luna users never see Luna surfaces (pill toggle, chip, etc.).
   const { canAccessLuna } = useCircuitAccess()
+  // Right-click context menu (Crear Pedido / Vista Global / Cuenta Corriente).
+  const contextMenu = useContextMenu<Enterprise>()
+  const canCreateOrder = useCan('orders', 'create')
+  const canViewCC = useCan('cuenta_corriente', 'view')
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
@@ -726,6 +732,7 @@ export const Enterprises: React.FC = () => {
               <div
                 className="px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 onClick={() => handleExpandEnterprise(ent.id)}
+                onContextMenu={(e) => contextMenu.openMenu(e, ent)}
               >
                 <div className="flex items-center gap-4">
                   <span className="text-2xl">{expandedId === ent.id ? '▼' : '▶'}</span>
@@ -833,6 +840,16 @@ export const Enterprises: React.FC = () => {
                     <PermissionGate module="enterprises" action="delete">
                       <button onClick={() => handleDeleteEnterprise(ent)} className="text-red-600 hover:underline text-sm">Eliminar</button>
                     </PermissionGate>
+                    {/* Kebab menu: same actions as right-click context menu (Crear Pedido / Vista Global / Cuenta Corriente). */}
+                    <button
+                      type="button"
+                      onClick={(e) => contextMenu.openMenu(e, ent)}
+                      aria-label="Más acciones"
+                      title="Más acciones"
+                      className="ml-1 px-2 py-1 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-base leading-none"
+                    >
+                      ⋮
+                    </button>
                   </div>
                 </div>
               </div>
@@ -971,6 +988,47 @@ export const Enterprises: React.FC = () => {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Right-click / kebab menu: quick jump to Crear Pedido / Vista Global / Cuenta Corriente. */}
+      {contextMenu.menu && (() => {
+        const ent = contextMenu.menu.item
+        const items: ContextMenuItem[] = []
+        if (canCreateOrder) {
+          items.push({
+            id: 'create-order',
+            label: 'Crear pedido',
+            icon: <span>➕</span>,
+            onClick: () => navigate(`/orders?nuevo=true&enterprise_id=${ent.id}`),
+          })
+        }
+        items.push({
+          id: 'global-view',
+          label: 'Vista global',
+          icon: <span>🔍</span>,
+          onClick: () => navigate(`/global?enterprise_id=${ent.id}`),
+        })
+        if (canViewCC) {
+          items.push({
+            id: 'cuenta-corriente',
+            label: 'Cuenta corriente',
+            icon: <span>📒</span>,
+            onClick: () => navigate(`/cuenta-corriente?enterprise_id=${ent.id}`),
+          })
+        }
+        if (items.length === 0) return null
+        return (
+          <ContextMenuBase
+            x={contextMenu.menu.x}
+            y={contextMenu.menu.y}
+            header={{
+              title: ent.name,
+              subtitle: ent.cuit || ent.razon_social || undefined,
+            }}
+            items={items}
+            onClose={contextMenu.closeMenu}
+          />
+        )
+      })()}
     </div>
   )
 }
