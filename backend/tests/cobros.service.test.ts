@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, mockPoolQuery, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockPoolQuery, mockClientQuery, resetMocks } from './helpers/setup'
 
 import { CobrosService } from '../src/modules/cobros/cobros.service'
 
@@ -76,11 +76,11 @@ describe('CobrosService - critical bug fixes', () => {
         ],
       })
 
-      // Find the cheques INSERT call
-      const calls = mockDbExecute.mock.calls
-      const chequeInsert = calls.find((c: any) => sqlOf(c).includes('INSERT INTO cheques'))
+      // Wave 3A: cheques INSERT now runs on the pooled client (not db.execute).
+      const clientCalls = mockClientQuery.mock.calls
+      const chequeInsert = clientCalls.find((c: any) => String(c[0] || '').includes('INSERT INTO cheques'))
       expect(chequeInsert, 'cheques INSERT must have been called').toBeTruthy()
-      const sqlStr = sqlOf(chequeInsert)
+      const sqlStr = String(chequeInsert?.[0] || '')
       // Must contain real column names
       expect(sqlStr).toContain('number')
       expect(sqlStr).toContain('bank')
@@ -105,28 +105,32 @@ describe('CobrosService - critical bug fixes', () => {
         const s = sqlOf(args)
         if (s.includes('FROM business_units')) return Promise.resolve({ rows: [{ id: businessUnitId }] })
         if (s.includes('FROM banks WHERE id')) return Promise.resolve({ rows: [{ id: 'b' }] })
-        if (s.includes('MAX(receipt_number)')) return Promise.resolve({ rows: [{ next_number: 1 }] })
         // Pre-tx legacy direct invoice_id check (data.invoice_id path)
         if (s.includes('FROM invoices WHERE id') && s.includes('payment_status') && !s.includes('FOR UPDATE')) {
           return Promise.resolve({ rows: [] })
-        }
-        // The new FOR UPDATE inside-tx invoice lock
-        if (s.includes('FROM invoices') && s.includes('FOR UPDATE')) {
-          return Promise.resolve({ rows: invoiceRow ? [invoiceRow] : [] })
-        }
-        // Balance subquery (uses retenciones_total)
-        if (s.includes('retenciones_total') || (s.includes('applied_cash') && s.includes('SELECT'))) {
-          return Promise.resolve({
-            rows: [{ total: invoiceRow?.total_amount || '0', applied_cash: '0', retenciones_total: '0' }],
-          })
         }
         if (s.includes('FROM cobros c') && s.includes('LEFT JOIN enterprises')) {
           return Promise.resolve({ rows: [{ id: 'cobro-x' }] })
         }
         return Promise.resolve({ rows: [] })
       })
+      // Wave 3A: MAX(receipt_number), FOR UPDATE, balance subquery — all moved to mockClientQuery.
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) {
+          return Promise.resolve({ rows: [{ next_number: '1' }] })
+        }
+        if (/FROM invoices/.test(s) && /FOR UPDATE/.test(s)) {
+          return Promise.resolve({ rows: invoiceRow ? [invoiceRow] : [] })
+        }
+        if (/retenciones_total/.test(s) || (/applied_cash/.test(s) && /SELECT/i.test(s))) {
+          return Promise.resolve({
+            rows: [{ total: invoiceRow?.total_amount || '0', applied_cash: '0', retenciones_total: '0' }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
       // pool.query is used for the cross-circuit ANY(uuid[]) fiscal_type lookup.
-      // Return the invoice's fiscal_type so the cross-circuit validator passes.
       mockPoolQuery.mockImplementation((sqlStr: string, _params: any[]) => {
         if (typeof sqlStr === 'string' && sqlStr.includes('FROM invoices') && sqlStr.includes('fiscal_type')) {
           return Promise.resolve({
@@ -199,12 +203,12 @@ describe('CobrosService - critical bug fixes', () => {
         total_amount: '5000',
       })
       await service.createCobro(companyId, userId, baseData)
-      const calls = mockDbExecute.mock.calls
-      const lockCall = calls.find((c: any) => {
-        const s = sqlOf(c)
+      // Wave 3A: FOR UPDATE now runs on the pooled client (not db.execute).
+      const lockCall = mockClientQuery.mock.calls.find((c: any) => {
+        const s = String(c[0] || '')
         return s.includes('FROM invoices') && s.includes('FOR UPDATE')
       })
-      expect(lockCall, 'must lock invoice with FOR UPDATE').toBeTruthy()
+      expect(lockCall, 'must lock invoice with FOR UPDATE on pooled client').toBeTruthy()
     })
 
     it('rejects bank_id that does not belong to the company (IDOR)', async () => {

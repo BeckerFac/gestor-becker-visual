@@ -292,11 +292,24 @@ describe('Sol/Luna CobrosService (CAT-5)', () => {
       if (s.includes('FROM invoices WHERE id') && s.includes('payment_status')) {
         return Promise.resolve({ rows: [] })
       }
-      // next receipt number
-      if (s.includes('COALESCE(MAX(receipt_number)')) {
+      // SELECT ... FROM invoices ... UNION invoice_orders (lockOrder derivation, post-commit)
+      if (s.includes('FROM invoices WHERE id = ANY') || s.includes('FROM invoice_orders WHERE invoice_id = ANY')) {
+        return Promise.resolve({ rows: [{ order_id: 'ord-1' }] })
+      }
+      // Final fetch row (post-commit)
+      if (s.includes('FROM cobros c') && s.includes('LEFT JOIN enterprises e')) {
+        return Promise.resolve({ rows: [opts.cobroFinalRow || { id: 'cob-1', fiscal_type: 'fiscal' }] })
+      }
+      // All other queries — succeed empty.
+      return Promise.resolve({ rows: [] })
+    })
+    // Wave 3A: MAX(receipt_number), FOR UPDATE invoice lock, and balance check
+    // all run on the pooled client now.
+    mockClientQuery.mockImplementation((sqlStr: string) => {
+      const s = String(sqlStr || '')
+      if (/COALESCE\(MAX\(receipt_number/.test(s)) {
         return Promise.resolve({ rows: [{ next_number: '1' }] })
       }
-      // Invoice FOR UPDATE check (per-invoice validation)
       if (s.includes('SELECT id, enterprise_id, business_unit_id, status, payment_status')) {
         return Promise.resolve({
           rows: [{
@@ -312,19 +325,9 @@ describe('Sol/Luna CobrosService (CAT-5)', () => {
           }],
         })
       }
-      // Invoice balance check
       if (s.includes('applied_cash') && s.includes('retenciones_total')) {
         return Promise.resolve({ rows: [{ total: '1000', applied_cash: '0', retenciones_total: '0' }] })
       }
-      // SELECT ... FROM invoices ... UNION invoice_orders (lockOrder derivation)
-      if (s.includes('FROM invoices WHERE id = ANY') || s.includes('FROM invoice_orders WHERE invoice_id = ANY')) {
-        return Promise.resolve({ rows: [{ order_id: 'ord-1' }] })
-      }
-      // Final fetch row
-      if (s.includes('FROM cobros c') && s.includes('LEFT JOIN enterprises e')) {
-        return Promise.resolve({ rows: [opts.cobroFinalRow || { id: 'cob-1', fiscal_type: 'fiscal' }] })
-      }
-      // All other queries — BEGIN/COMMIT/INSERT/etc — succeed empty.
       return Promise.resolve({ rows: [] })
     })
   }
@@ -356,13 +359,13 @@ describe('Sol/Luna CobrosService (CAT-5)', () => {
         { userCanAccessLuna: true },
       )
       expect(out?.fiscal_type).toBe('no_fiscal')
-      // Check the INSERT used 'no_fiscal' at the end.
-      const insertCall = mockDbExecute.mock.calls.find((c: any[]) =>
-        (c[0]?.strings?.join('') || '').includes('INSERT INTO cobros')
+      // Wave 3A: INSERT INTO cobros now runs on the pooled client with $N params.
+      const insertCall = mockClientQuery.mock.calls.find((c: any[]) =>
+        String(c[0] || '').includes('INSERT INTO cobros')
       )
       expect(insertCall).toBeDefined()
-      const insertedValues = insertCall?.[0]?.values || []
-      expect(insertedValues).toContain('no_fiscal')
+      const insertedParams = insertCall?.[1] || []
+      expect(insertedParams).toContain('no_fiscal')
     })
 
     it('C2: Luna cobro applying a Sol invoice → 400', async () => {

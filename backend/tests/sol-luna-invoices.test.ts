@@ -47,9 +47,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('creates a Sol invoice in draft status (regression)', async () => {
       primeMigrations()
       mockDbVoid() // auto-assign business_unit_id lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '10' }]) // next sequential fiscal number
       mockDbRows([{ id: 'cust-1' }]) // customer IDOR check
       mockDbEmpty() // customer enterprise lookup
       mockDbVoid() // UPDATE order_id / enterprise_id / fiscal_type
@@ -69,9 +66,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('forces invoice_type=LUN and status=emitido', async () => {
       primeMigrations()
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }]) // Luna sequence
       mockDbRows([{ id: 'cust-1' }]) // customer IDOR check
       mockDbEmpty() // customer enterprise lookup
       mockDbVoid() // INSERT raw
@@ -101,9 +95,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('calculates Luna totals with IVA=0 and precio final per line', async () => {
       primeMigrations()
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // no customer lookup
       mockDbVoid() // INSERT raw
       mockDbVoid() // UPDATE order_id etc
@@ -126,9 +117,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('forces retenciones_esperadas=[] for Luna', async () => {
       primeMigrations()
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // customer lookup
       mockDbVoid() // INSERT raw
       // Capture the UPDATE that sets retenciones_esperadas to verify the param.
@@ -153,9 +141,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('uses dedicated Luna advisory lock key', async () => {
       primeMigrations()
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
       mockDbEmpty()
       mockDbVoid()
       mockDbVoid()
@@ -176,9 +161,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     it('uses LUN-scoped next_number query', async () => {
       primeMigrations()
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '42' }])
       mockDbEmpty()
       mockDbVoid()
       mockDbVoid()
@@ -226,9 +208,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
       primeMigrations()
       mockDbRows([{ fiscal_type: 'no_fiscal' }]) // order says Luna
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
       mockDbEmpty() // customer
       mockDbVoid() // INSERT
       mockDbVoid() // UPDATE
@@ -248,9 +227,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
       primeMigrations()
       mockDbRows([{ fiscal_type: 'fiscal' }]) // order lookup
       mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '5' }])
       mockDbEmpty() // customer
       mockDbVoid() // INSERT (drizzle chain actually — BU lookup uses .execute; INSERT uses db.insert)
       mockDbVoid() // UPDATE order_id

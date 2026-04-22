@@ -245,6 +245,31 @@ export function resetMocks() {
   mockPoolQuery.mockReset()
   mockClientQuery.mockReset()
   mockClientRelease.mockReset()
+  // Wave 3A: many services now take a pool connection and issue BEGIN / advisory
+  // lock / MAX / INSERT / COMMIT via client.query. Tests that don't care about
+  // this transaction plumbing get a benign default that returns an empty row
+  // set. Individual tests can still override with mockClientQuery.mockImplementation.
+  mockClientQuery.mockImplementation((sqlStr: string) => {
+    const s = String(sqlStr || '');
+    // COALESCE(MAX(...) + 1) → default to a benign sequential number.
+    if (/COALESCE\(MAX\(.*\)\s*,\s*0\)\s*\+\s*1/i.test(s)) {
+      return Promise.resolve({ rows: [{ next_number: '1' }] });
+    }
+    // Wave 3A: FOR UPDATE row locks — return a generic draft-authorized row
+    // so tests that don't care about row-lock semantics don't have to mock it.
+    if (/FOR UPDATE/i.test(s)) {
+      return Promise.resolve({
+        rows: [{
+          id: 'test-id',
+          status: 'draft',
+          total_amount: '0',
+          payment_status: 'pendiente',
+          fiscal_type: 'fiscal',
+        }],
+      });
+    }
+    return Promise.resolve({ rows: [] });
+  });
   uuidCounter = 0
 }
 

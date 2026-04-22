@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -41,82 +41,118 @@ export class CollectionsService {
   }
 
   async registerPayment(companyId: string, userId: string, invoiceId: string, data: any) {
+    // Validate payment amount up front (cheap, fast-fail before acquiring a pool
+    // connection). Balance check is performed inside the tx against the locked
+    // row so concurrent callers can't both pass when combined payments would
+    // exceed the invoice total.
+    const paymentAmount = parseFloat(data.amount);
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      throw new ApiError(400, 'Payment amount must be positive');
+    }
+
+    const cobroId = uuid();
+    const paymentMethod = data.method || 'transferencia';
+    let invoiceOrderId: string | null = null;
+    let balance: number;
+
+    // Wave 3A: registerPayment previously ran NO transaction at all — SELECT
+    // invoice → SELECT SUM(applied) → INSERT cobro → INSERT cia could interleave
+    // with another request producing over-payment. Now we wrap the whole flow
+    // in a single-client tx with an advisory lock on the receipt-number
+    // sequence (shared with cobros.service.ts) and FOR UPDATE on the invoice.
+    const client = await pool.connect();
     try {
-      // Verify invoice belongs to company
-      const invoice = await db.execute(sql`
-        SELECT id, total_amount, status, customer_id, enterprise_id, order_id FROM invoices
-        WHERE id = ${invoiceId} AND company_id = ${companyId}
-      `);
-      const invoiceRows = (invoice as any).rows || invoice || [];
-      if (invoiceRows.length === 0) {
+      await client.query('BEGIN');
+
+      // Shared advisory lock key with cobros.service.ts so receipt_number
+      // generation is serialized across BOTH paths (same pool, same hashtext).
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1))`,
+        [`receipt_num:${companyId}`]
+      );
+
+      // Lock the invoice row so balance arithmetic is stable across applications.
+      const invRes = await client.query(
+        `SELECT id, total_amount, status, customer_id, enterprise_id, order_id
+           FROM invoices
+          WHERE id = $1 AND company_id = $2
+          FOR UPDATE`,
+        [invoiceId, companyId]
+      );
+      if (invRes.rows.length === 0) {
         throw new ApiError(404, 'Invoice not found');
       }
-
-      if (invoiceRows[0].status !== 'authorized') {
+      const invRow = invRes.rows[0];
+      if (invRow.status !== 'authorized') {
         throw new ApiError(400, 'Only authorized invoices can receive payments');
       }
+      invoiceOrderId = invRow.order_id;
 
-      // Check current balance using cobro_invoice_applications (new system)
-      const appliedResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CAST(amount_applied AS decimal)), 0) as total_applied
-        FROM cobro_invoice_applications WHERE invoice_id = ${invoiceId}
-      `);
-      const appliedRows = (appliedResult as any).rows || appliedResult || [];
-      const totalApplied = parseFloat(appliedRows[0]?.total_applied || '0');
-      const invoiceTotal = parseFloat(invoiceRows[0].total_amount);
-      const balance = invoiceTotal - totalApplied;
+      // Re-read SUM(applied) inside the tx (the FOR UPDATE has already serialized us).
+      const appliedRes = await client.query(
+        `SELECT COALESCE(SUM(CAST(amount_applied AS decimal)), 0) as total_applied
+           FROM cobro_invoice_applications
+          WHERE invoice_id = $1`,
+        [invoiceId]
+      );
+      const totalApplied = parseFloat(appliedRes.rows[0]?.total_applied || '0');
+      const invoiceTotal = parseFloat(invRow.total_amount);
+      balance = invoiceTotal - totalApplied;
 
-      const paymentAmount = parseFloat(data.amount);
-      if (paymentAmount <= 0) {
-        throw new ApiError(400, 'Payment amount must be positive');
-      }
       if (paymentAmount > balance + 0.01) {
         throw new ApiError(400, `Payment amount ($${paymentAmount}) exceeds balance ($${balance.toFixed(2)})`);
       }
 
-      // Auto-generate receipt_number (sequential per company)
-      const nextNumResult = await db.execute(sql`
-        SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = ${companyId}
-      `);
-      const receiptNumber = parseInt(((nextNumResult as any).rows || [])[0]?.next_number || '1');
+      // Receipt number (shared sequence with cobros.service.ts createCobro).
+      const nextNumRes = await client.query(
+        `SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number FROM cobros WHERE company_id = $1`,
+        [companyId]
+      );
+      const receiptNumber = parseInt(nextNumRes.rows[0]?.next_number || '1');
 
-      // Create cobro
-      const cobroId = uuid();
-      const paymentMethod = data.method || 'transferencia';
-      await db.execute(sql`
-        INSERT INTO cobros (id, company_id, enterprise_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_number, created_by)
-        VALUES (${cobroId}, ${companyId}, ${invoiceRows[0].enterprise_id || null}, ${invoiceId}, ${paymentAmount.toString()}, ${paymentMethod}, ${data.bank_id || null}, ${data.reference || null}, ${data.payment_date || new Date().toISOString()}, ${data.notes || null}, ${receiptNumber}, ${userId})
-      `);
+      await client.query(
+        `INSERT INTO cobros (id, company_id, enterprise_id, invoice_id, amount, payment_method, bank_id, reference, payment_date, notes, receipt_number, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          cobroId, companyId, invRow.enterprise_id || null, invoiceId,
+          paymentAmount.toString(), paymentMethod,
+          data.bank_id || null, data.reference || null,
+          data.payment_date || new Date().toISOString(),
+          data.notes || null, receiptNumber, userId,
+        ]
+      );
 
-      // Create cobro_invoice_application linking cobro to invoice
-      await db.execute(sql`
-        INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
-        VALUES (${uuid()}, ${cobroId}, ${invoiceId}, ${paymentAmount.toString()}, ${userId})
-      `);
+      await client.query(
+        `INSERT INTO cobro_invoice_applications (id, cobro_id, invoice_id, amount_applied, created_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [uuid(), cobroId, invoiceId, paymentAmount.toString(), userId]
+      );
 
-      // Recalculate invoice payment status
-      await this.recalculateInvoicePaymentStatus(invoiceId);
-
-      // Recalculate order status if invoice is linked to an order
-      const invoiceOrderId = invoiceRows[0].order_id;
-      if (invoiceOrderId) {
-        await this.recalculateOrderStatusFromInvoice(invoiceId);
-      }
-
-      const remainingBalance = Math.max(0, balance - paymentAmount);
-
-      return {
-        id: cobroId,
-        invoice_id: invoiceId,
-        amount: paymentAmount,
-        method: paymentMethod,
-        remaining_balance: remainingBalance,
-      };
+      await client.query('COMMIT');
     } catch (error) {
-      console.error('Register payment error:', error);
+      await client.query('ROLLBACK').catch(() => {});
       if (error instanceof ApiError) throw error;
+      console.error('Register payment error:', error);
       throw new ApiError(500, 'Failed to register payment');
+    } finally {
+      client.release();
     }
+
+    // Recalcs run outside the tx (they each start their own short transactions
+    // on separate pool connections via db.execute).
+    await this.recalculateInvoicePaymentStatus(invoiceId);
+    if (invoiceOrderId) {
+      await this.recalculateOrderStatusFromInvoice(invoiceId);
+    }
+
+    const remainingBalance = Math.max(0, balance - paymentAmount);
+    return {
+      id: cobroId,
+      invoice_id: invoiceId,
+      amount: paymentAmount,
+      method: paymentMethod,
+      remaining_balance: remainingBalance,
+    };
   }
 
   async getPendingOrders(companyId: string) {
