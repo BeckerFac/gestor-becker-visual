@@ -16,6 +16,20 @@ function normalizeDefaultFiscalType(value: unknown): 'fiscal' | 'no_fiscal' {
   return value as 'fiscal' | 'no_fiscal';
 }
 
+// Wave 2B-1 H22: enterprise role (client / supplier / both). Distinguishes
+// customer accounts from vendor accounts. 'client' is the default for both
+// new rows and legacy (NULL) rows. Filters treat NULL as 'client' for BC.
+export const VALID_ENTERPRISE_ROLES = ['client', 'supplier', 'both'] as const;
+export type EnterpriseRole = typeof VALID_ENTERPRISE_ROLES[number];
+
+function normalizeEnterpriseRole(value: unknown): EnterpriseRole {
+  if (value === undefined || value === null || value === '') return 'client';
+  if (typeof value !== 'string' || !(VALID_ENTERPRISE_ROLES as readonly string[]).includes(value)) {
+    throw new ApiError(400, `role invalido. Debe ser uno de: ${VALID_ENTERPRISE_ROLES.join(', ')}`);
+  }
+  return value as EnterpriseRole;
+}
+
 export class EnterprisesService {
   private tablesEnsured = false;
 
@@ -53,28 +67,65 @@ export class EnterprisesService {
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_discount DECIMAL(5,2) DEFAULT 0`).catch(() => {});
       // Nor feedback item 3: default Sol/Luna circuit per enterprise.
       await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS default_fiscal_type VARCHAR(20) DEFAULT 'fiscal'`).catch(() => {});
+      // Wave 2B-1 H22: client/supplier/both role.
+      await db.execute(sql`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'client'`).catch(() => {});
       this.tablesEnsured = true;
     } catch (error) {
       console.error('Ensure enterprises tables error:', error);
     }
   }
 
-  async getEnterprises(companyId: string) {
+  async getEnterprises(companyId: string, roleFilter?: string) {
     await this.ensureTables();
     try {
-      const result = await db.execute(sql`
-        SELECT e.*,
-          COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count,
-          COALESCE(
-            (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
-             FROM entity_tags et JOIN tags t ON et.tag_id = t.id
-             WHERE et.entity_id = e.id AND et.entity_type = 'enterprise'),
-            '[]'::json
-          ) as tags
-        FROM enterprises e
-        WHERE e.company_id = ${companyId}
-        ORDER BY e.name ASC
-      `);
+      // Wave 2B-1 H22: optional role filter.
+      //   ?role=supplier  → role IN ('supplier','both')
+      //   ?role=client    → role IN ('client','both') OR role IS NULL (BC for legacy rows)
+      //   (omitted)       → all roles
+      let result: any;
+      if (roleFilter === 'supplier') {
+        result = await db.execute(sql`
+          SELECT e.*,
+            COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count,
+            COALESCE(
+              (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+               FROM entity_tags et JOIN tags t ON et.tag_id = t.id
+               WHERE et.entity_id = e.id AND et.entity_type = 'enterprise'),
+              '[]'::json
+            ) as tags
+          FROM enterprises e
+          WHERE e.company_id = ${companyId} AND e.role IN ('supplier', 'both')
+          ORDER BY e.name ASC
+        `);
+      } else if (roleFilter === 'client') {
+        result = await db.execute(sql`
+          SELECT e.*,
+            COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count,
+            COALESCE(
+              (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+               FROM entity_tags et JOIN tags t ON et.tag_id = t.id
+               WHERE et.entity_id = e.id AND et.entity_type = 'enterprise'),
+              '[]'::json
+            ) as tags
+          FROM enterprises e
+          WHERE e.company_id = ${companyId} AND (e.role IN ('client', 'both') OR e.role IS NULL)
+          ORDER BY e.name ASC
+        `);
+      } else {
+        result = await db.execute(sql`
+          SELECT e.*,
+            COALESCE((SELECT COUNT(*) FROM customers c WHERE c.enterprise_id = e.id), 0) as contact_count,
+            COALESCE(
+              (SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color))
+               FROM entity_tags et JOIN tags t ON et.tag_id = t.id
+               WHERE et.entity_id = e.id AND et.entity_type = 'enterprise'),
+              '[]'::json
+            ) as tags
+          FROM enterprises e
+          WHERE e.company_id = ${companyId}
+          ORDER BY e.name ASC
+        `);
+      }
       return (result as any).rows || result || [];
     } catch (error) {
       throw new ApiError(500, 'Failed to get enterprises');
@@ -148,11 +199,13 @@ export class EnterprisesService {
       // Nor feedback item 3: validate + default Sol/Luna circuit.
       // Throws 400 on unknown values; missing/empty -> 'fiscal'.
       const defaultFiscalType = normalizeDefaultFiscalType(data.default_fiscal_type);
+      // Wave 2B-1 H22: validate + default client/supplier/both role.
+      const role = normalizeEnterpriseRole(data.role);
 
       const enterpriseId = uuid();
       await db.execute(sql`
-        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount, default_fiscal_type)
-        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${cuitNormalized}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0}, ${defaultFiscalType})
+        INSERT INTO enterprises (id, company_id, name, razon_social, cuit, address, city, province, postal_code, fiscal_address, fiscal_city, fiscal_province, fiscal_postal_code, phone, email, tax_condition, notes, default_discount, default_fiscal_type, role)
+        VALUES (${enterpriseId}, ${companyId}, ${data.name}, ${data.razon_social || null}, ${cuitNormalized}, ${data.address || null}, ${data.city || null}, ${data.province || null}, ${data.postal_code || null}, ${data.fiscal_address || null}, ${data.fiscal_city || null}, ${data.fiscal_province || null}, ${data.fiscal_postal_code || null}, ${data.phone || null}, ${data.email || null}, ${data.tax_condition || null}, ${data.notes || null}, ${data.default_discount || 0}, ${defaultFiscalType}, ${role})
       `);
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
@@ -230,6 +283,10 @@ export class EnterprisesService {
       if ('default_discount' in data) push('default_discount', data.default_discount ?? 0);
       if ('default_fiscal_type' in data) {
         push('default_fiscal_type', normalizeDefaultFiscalType(data.default_fiscal_type));
+      }
+      if ('role' in data) {
+        // Wave 2B-1 H22: validate role on update; 400 on invalid, default 'client' for empty.
+        push('role', normalizeEnterpriseRole(data.role));
       }
 
       if (setClauses.length > 0) {

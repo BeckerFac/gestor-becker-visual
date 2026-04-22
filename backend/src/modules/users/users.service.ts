@@ -548,22 +548,46 @@ export class UsersService {
     return { message: 'Todas las sesiones revocadas' };
   }
   async getRoleTemplates(companyId: string) {
-    // Ensure role_templates exist for this company (seed from constants if empty)
+    // Wave 2B-1 H14: seed SYSTEM templates (company_id IS NULL) once per app.
+    // These are shared across companies and serve as the canonical permission
+    // baselines for owner/admin/gerente/vendedor/contable/viewer.
+    const roleDescriptions: Record<string, string> = {
+      viewer: 'Solo lectura. Puede ver informacion pero no modificar.',
+      vendedor: 'Gestiona ventas: pedidos, cotizaciones y clientes.',
+      contable: 'Gestiona facturas, cobros, pagos y reportes financieros.',
+      editor: 'Edicion general de la mayoria de modulos.',
+      stock_manager: 'Gestiona productos, inventario y compras.',
+      gerente: 'Acceso casi total. Gestiona usuarios y reportes.',
+      admin: 'Acceso completo a todas las funciones.',
+      owner: 'Propietario de la cuenta. Control total.',
+    };
+
+    // Seed system templates (company_id IS NULL) if missing. Owner/admin/full-access
+    // roles get an empty permissions object because FULL_ACCESS_ROLES bypass permission
+    // checks entirely; they exist here so the UI can list them as selectable roles.
+    const systemCount = await pool.query(
+      'SELECT COUNT(*)::int as cnt FROM role_templates WHERE company_id IS NULL'
+    );
+    if (parseInt(systemCount.rows[0]?.cnt || '0') === 0) {
+      const allSystemRoles: Array<[string, Record<string, string[]>]> = [
+        ['owner', {}],
+        ['admin', {}],
+        ...Object.entries(ROLE_TEMPLATES),
+      ];
+      for (const [roleName, perms] of allSystemRoles) {
+        await pool.query(
+          `INSERT INTO role_templates (company_id, role_name, description, permissions, is_system)
+           VALUES (NULL, $1, $2, $3, TRUE) ON CONFLICT (company_id, role_name) DO NOTHING`,
+          [roleName, roleDescriptions[roleName] || '', JSON.stringify(perms)]
+        );
+      }
+    }
+
+    // Ensure per-company role_templates exist (seed from constants if empty)
     const existingResult = await pool.query(
       'SELECT COUNT(*)::int as cnt FROM role_templates WHERE company_id = $1', [companyId]
     );
     if (parseInt(existingResult.rows[0]?.cnt || '0') === 0) {
-      // Seed from ROLE_TEMPLATES constant
-      const roleDescriptions: Record<string, string> = {
-        viewer: 'Solo lectura. Puede ver informacion pero no modificar.',
-        vendedor: 'Gestiona ventas: pedidos, cotizaciones y clientes.',
-        contable: 'Gestiona facturas, cobros, pagos y reportes financieros.',
-        editor: 'Edicion general de la mayoria de modulos.',
-        stock_manager: 'Gestiona productos, inventario y compras.',
-        gerente: 'Acceso casi total. Gestiona usuarios y reportes.',
-        admin: 'Acceso completo a todas las funciones.',
-        owner: 'Propietario de la cuenta. Control total.',
-      };
       for (const [roleName, perms] of Object.entries(ROLE_TEMPLATES)) {
         const isSystem = ['owner', 'admin'].includes(roleName);
         await pool.query(
@@ -574,18 +598,22 @@ export class UsersService {
       }
     }
 
-    // Get templates with user count
+    // Return SYSTEM templates + this company's templates. user_count is only
+    // meaningful for company-scoped rows (system rows get 0).
     const result = await pool.query(`
       SELECT rt.*,
-        (SELECT COUNT(*)::int FROM users u WHERE u.company_id = rt.company_id AND u.role = rt.role_name AND u.active = true) as user_count
+        COALESCE((SELECT COUNT(*)::int FROM users u
+                  WHERE u.company_id = $1 AND u.role = rt.role_name AND u.active = true
+                  AND rt.company_id IS NOT NULL), 0) as user_count
       FROM role_templates rt
-      WHERE rt.company_id = $1
+      WHERE rt.company_id = $1 OR rt.company_id IS NULL
       ORDER BY
         CASE rt.role_name
           WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'gerente' THEN 3
           WHEN 'editor' THEN 4 WHEN 'vendedor' THEN 5 WHEN 'contable' THEN 6
           WHEN 'stock_manager' THEN 7 WHEN 'viewer' THEN 8 ELSE 9
-        END
+        END,
+        CASE WHEN rt.company_id IS NULL THEN 0 ELSE 1 END
     `, [companyId]);
     return result.rows;
   }

@@ -40,6 +40,7 @@ interface Enterprise {
   tags: { id: string; name: string; color: string }[]
   access_code?: string | null
   default_fiscal_type?: 'fiscal' | 'no_fiscal' | null
+  role?: 'client' | 'supplier' | 'both' | null
 }
 
 interface Contact {
@@ -65,6 +66,8 @@ const emptyEnterpriseForm = {
   default_discount: '',
   // Nor feedback item 3: default Sol/Luna circuit per enterprise.
   default_fiscal_type: 'fiscal' as 'fiscal' | 'no_fiscal',
+  // Wave 2B-1 H22: client / supplier / both.
+  role: 'client' as 'client' | 'supplier' | 'both',
 }
 
 const emptyContactForm = {
@@ -105,6 +108,7 @@ export const Enterprises: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<'all' | 'client' | 'supplier'>('all')
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'enterprise'; item: Enterprise } | { type: 'contact'; item: Contact } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [availableTags, setAvailableTags] = useState<{ id: string; name: string; color: string }[]>([])
@@ -274,6 +278,7 @@ export const Enterprises: React.FC = () => {
       price_list_id: (ent as any).price_list_id || '',
       default_discount: (ent as any).default_discount || '',
       default_fiscal_type: ent.default_fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal',
+      role: (ent.role === 'supplier' || ent.role === 'both') ? ent.role : 'client',
     })
     setEditingEnterpriseId(ent.id)
     setOriginalPriceListId((ent as any).price_list_id || '')
@@ -372,10 +377,14 @@ export const Enterprises: React.FC = () => {
   }
 
   const unassignedContacts = contacts.filter(c => !c.enterprise_id)
-  const filteredEnterprises = enterprises.filter(e =>
-    e.name.toLowerCase().includes(search.toLowerCase()) ||
-    (e.cuit || '').includes(search)
-  )
+  const filteredEnterprises = enterprises.filter(e => {
+    const matchSearch = e.name.toLowerCase().includes(search.toLowerCase()) || (e.cuit || '').includes(search)
+    if (!matchSearch) return false
+    if (roleFilter === 'all') return true
+    if (roleFilter === 'supplier') return e.role === 'supplier' || e.role === 'both'
+    // 'client' — treat NULL/undefined as 'client' for backward compat.
+    return !e.role || e.role === 'client' || e.role === 'both'
+  })
 
   return (
     <div className="space-y-6">
@@ -518,6 +527,44 @@ export const Enterprises: React.FC = () => {
                     onChange={e => setEnterpriseForm({ ...enterpriseForm, default_discount: e.target.value })}
                   />
                 </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Tipo de empresa
+                    <HelpTip text="Cliente = le vendes. Proveedor = le compras. Ambos = ambas cosas." />
+                  </label>
+                  <div className="flex items-center gap-3 pt-2">
+                    <label className="inline-flex items-center gap-1 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="enterprise_role"
+                        value="client"
+                        checked={enterpriseForm.role === 'client'}
+                        onChange={() => setEnterpriseForm({ ...enterpriseForm, role: 'client' })}
+                      />
+                      <span>Cliente</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="enterprise_role"
+                        value="supplier"
+                        checked={enterpriseForm.role === 'supplier'}
+                        onChange={() => setEnterpriseForm({ ...enterpriseForm, role: 'supplier' })}
+                      />
+                      <span>Proveedor</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="enterprise_role"
+                        value="both"
+                        checked={enterpriseForm.role === 'both'}
+                        onChange={() => setEnterpriseForm({ ...enterpriseForm, role: 'both' })}
+                      />
+                      <span>Ambos</span>
+                    </label>
+                  </div>
+                </div>
               </div>
 
               {/* Nor feedback item 3: circuit default per enterprise.
@@ -638,6 +685,27 @@ export const Enterprises: React.FC = () => {
 
       <Input placeholder="Buscar empresa por nombre o CUIT..." value={search} onChange={e => setSearch(e.target.value)} />
 
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setRoleFilter('all')}
+          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${roleFilter === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200'}`}
+          aria-pressed={roleFilter === 'all'}
+        >Todos</button>
+        <button
+          type="button"
+          onClick={() => setRoleFilter('client')}
+          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${roleFilter === 'client' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200'}`}
+          aria-pressed={roleFilter === 'client'}
+        >Clientes</button>
+        <button
+          type="button"
+          onClick={() => setRoleFilter('supplier')}
+          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${roleFilter === 'supplier' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200'}`}
+          aria-pressed={roleFilter === 'supplier'}
+        >Proveedores</button>
+      </div>
+
       {loading ? (
         <Card><CardContent><SkeletonTable rows={5} cols={4} /></CardContent></Card>
       ) : filteredEnterprises.length === 0 ? (
@@ -677,6 +745,21 @@ export const Enterprises: React.FC = () => {
                         <span className="text-xs text-gray-400">({ent.razon_social})</span>
                       )}
                       <TagBadges tags={ent.tags} />
+                      {/* Wave 2B-1 H22: client / supplier / both badge. */}
+                      {(() => {
+                        const role = ent.role || 'client'
+                        const cfg: Record<string, { label: string; cls: string }> = {
+                          client: { label: 'Cliente', cls: 'bg-blue-100 text-blue-800' },
+                          supplier: { label: 'Proveedor', cls: 'bg-purple-100 text-purple-800' },
+                          both: { label: 'Cliente + Proveedor', cls: 'bg-emerald-100 text-emerald-800' },
+                        }
+                        const c = cfg[role] || cfg.client
+                        return (
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${c.cls}`} title={`Tipo: ${c.label}`}>
+                            {c.label}
+                          </span>
+                        )
+                      })()}
                       {/* Nor feedback item 3: circuit default chip.
                           Only visible for Luna-enabled users. */}
                       {canAccessLuna && (

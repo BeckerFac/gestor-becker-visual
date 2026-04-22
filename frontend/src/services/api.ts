@@ -441,8 +441,11 @@ export const api = {
   },
 
   // Enterprises
-  getEnterprises: async () => {
-    const { data } = await client.get('/enterprises')
+  getEnterprises: async (filters?: { role?: 'client' | 'supplier' }) => {
+    const params = new URLSearchParams()
+    if (filters?.role) params.set('role', filters.role)
+    const qs = params.toString()
+    const { data } = await client.get(`/enterprises${qs ? `?${qs}` : ''}`)
     return data
   },
   getEnterprise: async (id: string) => {

@@ -4,7 +4,9 @@ import { enterprisesService } from './enterprises.service';
 
 export class EnterprisesController {
   async getEnterprises(req: AuthRequest, res: Response) {
-    const data = await enterprisesService.getEnterprises(req.user!.company_id);
+    // Wave 2B-1 H22: optional ?role=client|supplier filter.
+    const roleFilter = typeof req.query.role === 'string' ? req.query.role : undefined;
+    const data = await enterprisesService.getEnterprises(req.user!.company_id, roleFilter);
     res.json(data);
   }
 

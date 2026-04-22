@@ -214,6 +214,35 @@ export async function runCriticalMigrations() {
        credit DECIMAL(12,2) DEFAULT 0,
        description TEXT
      )`, 'journal_entry_lines table'],
+
+    // ════════════════════════════════════════════════════════════════
+    // Wave 2B-1 H14: role_templates table. GET /api/users/roles 500's
+    // with "Error al obtener roles" when this table is missing because
+    // runAutoMigrations aborts early on unrelated failures. Promoting
+    // it to runCriticalMigrations ensures it runs independently.
+    // company_id is nullable to allow SYSTEM templates (company_id IS NULL).
+    // ════════════════════════════════════════════════════════════════
+    [`CREATE TABLE IF NOT EXISTS role_templates (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+       role_name VARCHAR(50) NOT NULL,
+       description TEXT,
+       permissions JSONB DEFAULT '[]'::jsonb,
+       is_system BOOLEAN DEFAULT FALSE,
+       created_at TIMESTAMPTZ DEFAULT NOW(),
+       updated_at TIMESTAMPTZ DEFAULT NOW(),
+       UNIQUE (company_id, role_name)
+     )`, 'role_templates table'],
+    // Ensure company_id is nullable on legacy schemas that had NOT NULL.
+    [`ALTER TABLE role_templates ALTER COLUMN company_id DROP NOT NULL`, 'role_templates.company_id drop not null'],
+
+    // ════════════════════════════════════════════════════════════════
+    // Wave 2B-1 H22: enterprises.role (client/supplier/both) to
+    // distinguish customer accounts from vendor accounts. NULL is
+    // backfilled to 'client' for backward compat.
+    // ════════════════════════════════════════════════════════════════
+    [`ALTER TABLE enterprises ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'client'`, 'enterprises.role'],
+    [`UPDATE enterprises SET role = 'client' WHERE role IS NULL`, 'enterprises.role backfill'],
   ];
   for (const [sql, label] of criticalAlters) {
     await tryMig(sql, `critical: ${label}`);

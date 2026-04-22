@@ -76,7 +76,7 @@ describe('EnterprisesService - default_fiscal_type (Nor feedback item 3)', () =>
       const insert = calls.find(c => c.sql.includes('INSERT INTO enterprises'))
       expect(insert).toBeDefined()
       // default_fiscal_type is the last interpolated value in the INSERT.
-      expect(insert!.values[insert!.values.length - 1]).toBe('fiscal')
+      expect(insert!.values[insert!.values.length - 2]).toBe('fiscal')
     })
 
     it('persists default_fiscal_type="no_fiscal" when explicitly provided', async () => {
@@ -93,7 +93,7 @@ describe('EnterprisesService - default_fiscal_type (Nor feedback item 3)', () =>
 
       const insert = calls.find(c => c.sql.includes('INSERT INTO enterprises'))
       expect(insert).toBeDefined()
-      expect(insert!.values[insert!.values.length - 1]).toBe('no_fiscal')
+      expect(insert!.values[insert!.values.length - 2]).toBe('no_fiscal')
     })
 
     it('rejects invalid default_fiscal_type with 400', async () => {
