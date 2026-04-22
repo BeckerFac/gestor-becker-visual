@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, mockClientQuery, resetMocks } from './helpers/setup'
 
 import { InvoicesService } from '../src/modules/invoices/invoices.service'
 
@@ -10,9 +10,9 @@ describe('InvoicesService', () => {
   let service: InvoicesService
 
   beforeEach(() => {
+    vi.clearAllMocks()
     resetMocks()
     service = new InvoicesService()
-    vi.clearAllMocks()
   })
 
   describe('createInvoice', () => {
@@ -148,6 +148,8 @@ describe('InvoicesService', () => {
         fiscal_type: 'fiscal',
         invoice_type: 'B',
         customer_id: 'cust-1',
+        // Wave 3D D11: items required.
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1, vat_rate: 21 }],
       })
 
       expect(result.enterprise_id).toBe('resolved-ent')
@@ -210,7 +212,15 @@ describe('InvoicesService', () => {
 
   describe('authorizeInvoice', () => {
     it('blocks no_fiscal invoices from AFIP authorization', async () => {
-      mockDbRows([{ fiscal_type: 'no_fiscal' }])
+      // Wave 3A: authorize uses a pooled client with FOR UPDATE.  Force the
+      // locked row to come back as Luna so the service hits the fiscal_type
+      // guard before any db.execute path.
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        if (/FOR UPDATE/i.test(String(sqlStr))) {
+          return Promise.resolve({ rows: [{ id: 'inv-1', status: 'draft', fiscal_type: 'no_fiscal' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       await expect(
         service.authorizeInvoice('company-1', 'inv-1')
@@ -218,7 +228,12 @@ describe('InvoicesService', () => {
     })
 
     it('blocks interno invoices from AFIP authorization', async () => {
-      mockDbRows([{ fiscal_type: 'interno' }])
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        if (/FOR UPDATE/i.test(String(sqlStr))) {
+          return Promise.resolve({ rows: [{ id: 'inv-1', status: 'draft', fiscal_type: 'interno' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       await expect(
         service.authorizeInvoice('company-1', 'inv-1')
@@ -267,9 +282,10 @@ describe('InvoicesService', () => {
       mockDbRows([{ id: 'inv-1', status: 'draft' }])
       // total=10, invoiced_elsewhere=4 => available=6, requesting=6 OK
       mockDbRows([{ total_qty: '10', invoiced_elsewhere: '4' }])
-      mockDbVoid() // BEGIN
-      mockDbVoid() // UPDATE invoice_items SET order_item_id (one item)
-      mockDbVoid() // COMMIT
+      // Wave 3C C4: order discount_percent lookup before items are replaced.
+      mockDbRows([{ dp: '0' }])
+      // Wave 3A: resolveProductCost is skipped for product_id=null;
+      //          DELETE/INSERT/UPDATE moved to pool.connect client.
       // getInvoice: main + items
       mockDbRows([{ id: 'inv-1', status: 'draft' }])
       mockDbRows([])
@@ -288,9 +304,10 @@ describe('InvoicesService', () => {
       // The SQL excludes i.id != invoiceId. Mock returns the value as-if its
       // contribution was already excluded. total=10, elsewhere=0 => available=10
       mockDbRows([{ total_qty: '10', invoiced_elsewhere: '0' }])
-      mockDbVoid() // BEGIN
-      mockDbVoid() // UPDATE order_item_id
-      mockDbVoid() // COMMIT
+      // Wave 3C C4: order discount_percent lookup.
+      mockDbRows([{ dp: '0' }])
+      // Wave 3A: resolveProductCost skipped (product_id=null); DELETE/INSERT/UPDATE
+      // moved to pool.connect client — no longer consume db.execute queue.
       mockDbRows([{ id: 'inv-1' }])
       mockDbRows([])
 
