@@ -90,6 +90,10 @@ export async function runCriticalMigrations() {
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS regime VARCHAR(100)', 'retenciones.regime'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS base_amount DECIMAL(12,2) DEFAULT 0', 'retenciones.base_amount'],
     ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS rate DECIMAL(5,2) DEFAULT 0', 'retenciones.rate'],
+    // created_by: referenced by INSERTs in retenciones/cobros/pagos/purchases
+    // services. Without it, POST /api/retenciones and the cascade inserts from
+    // cobros/pagos/purchases fail with "column does not exist" → 500.
+    ['ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS created_by UUID', 'retenciones.created_by'],
     // backfill: date from created_at for existing rows
     ['UPDATE retenciones SET date = created_at WHERE date IS NULL AND created_at IS NOT NULL', 'retenciones.date backfill'],
 
@@ -1537,6 +1541,14 @@ async function runAutoMigrations() {
     await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL`, 'retenciones.invoice_id');
     await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS certificate_file TEXT`, 'retenciones.certificate_file');
     await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR(50)`, 'retenciones.jurisdiction');
+
+    // -- Retenciones: created_by (audit column referenced by service INSERTs) --
+    // Root cause of 500 on POST /api/retenciones and retenciones cascades from
+    // cobros/pagos/purchases: table was created in prod BEFORE `created_by` was
+    // added to CREATE TABLE statement, so the column was missing. All 4
+    // INSERT INTO retenciones paths (retenciones.service, cobros.service,
+    // pagos.service, purchases.service) reference it.
+    await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS created_by UUID`, 'retenciones.created_by');
 
     // -- Retenciones: soft-delete + audit (H6) --
     await tryMig(`ALTER TABLE retenciones ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activa'`, 'retenciones.status');

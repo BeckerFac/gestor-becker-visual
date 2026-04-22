@@ -148,6 +148,45 @@ describe('RetencionesService - hardening H1-H8', () => {
     })
   })
 
+  // ============ Manual POST /api/retenciones (regression: 500 on prod) ============
+  // Root cause: retenciones.created_by column missing in prod DB. The INSERT
+  // SQL references it; when the column doesn't exist, Postgres throws 42703
+  // and the service returns 500 "Error al crear la retencion".
+  // This test asserts the structural shape the service uses so the contract
+  // with the schema (created_by present) can't regress silently.
+  describe('Manual POST /api/retenciones — structural', () => {
+    it('INSERT references created_by + status and passes userId', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] }) // dup check
+      mockDbExecute.mockResolvedValueOnce({ rows: [] }) // insert
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ id: 'ret-manual' }] }) // select
+
+      const res = await service.createRetention(companyId, userId, {
+        type: 'iibb',
+        jurisdiction: 'caba',
+        base_amount: 100000,
+        rate: 3,
+        amount: 3000,
+        certificate_number: '12345',
+        date: new Date().toISOString(),
+        direction: 'sufrida',
+      })
+      expect(res).toEqual({ id: 'ret-manual' })
+
+      // Second mock call is the INSERT (first was dup check).
+      const insertCall = mockDbExecute.mock.calls[1]
+      const combined = sqlOf(insertCall)
+      expect(combined).toContain('INSERT INTO retenciones')
+      expect(combined).toContain('created_by')
+      expect(combined).toContain('status')
+      const dump = JSON.stringify(valuesOf(insertCall))
+      expect(dump).toContain(userId)
+      expect(dump).toContain('iibb')
+      expect(dump).toContain('caba')
+      // Literal 'activa' is embedded in the SQL template (not a value).
+      expect(combined).toContain("'activa'")
+    })
+  })
+
   // ============ H5: minimum base check ============
   describe('H5 - minimum no imponible', () => {
     it('rejects ganancias retention with base below $60k', async () => {
