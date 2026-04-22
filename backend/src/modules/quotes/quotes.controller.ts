@@ -38,6 +38,17 @@ export class QuotesController {
     res.json(data);
   }
 
+  async deleteQuote(req: AuthRequest, res: Response) {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+    const data = await quotesService.deleteQuote(
+      req.user!.company_id,
+      req.params.id,
+      req.user!.id,
+      reason
+    );
+    res.json(data);
+  }
+
   async downloadPdf(req: AuthRequest, res: Response) {
     const template = (req.query.template as string) || 'clasico';
     const bannerUrl = (req.query.banner_url as string) || undefined;

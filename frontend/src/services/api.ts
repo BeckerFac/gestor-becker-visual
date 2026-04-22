@@ -1269,6 +1269,10 @@ export const api = {
     const { data } = await client.put(`/quotes/${id}/status`, { status })
     return data
   },
+  deleteQuote: async (id: string, reason?: string) => {
+    const { data } = await client.delete(`/quotes/${id}`, { data: { reason: reason || null } })
+    return data
+  },
   uploadQuoteBanner: async (base64: string, mimeType: string) => {
     const { data } = await client.post('/quotes/banner', { base64, mime_type: mimeType })
     return data

@@ -271,6 +271,17 @@ describe('Sol/Luna CobrosService (CAT-5)', () => {
     invoiceFiscalTypes?: Record<string, 'fiscal' | 'no_fiscal'>
     cobroFinalRow?: any
   }) {
+    // Cross-circuit fiscal_type lookup now runs via pool.query because
+    // drizzle's sql`` tag cannot coerce JS arrays to PG uuid[].
+    mockPoolQuery.mockImplementation((sqlStr: any, _params?: any[]) => {
+      if (typeof sqlStr === 'string' && sqlStr.includes('FROM invoices') && sqlStr.includes('fiscal_type')) {
+        const ids = Object.keys(opts.invoiceFiscalTypes || {})
+        return Promise.resolve({
+          rows: ids.map(id => ({ id, fiscal_type: opts.invoiceFiscalTypes![id] })),
+        })
+      }
+      return Promise.resolve({ rows: [] })
+    })
     mockDbExecute.mockImplementation((...args: any[]) => {
       const tpl = args[0]
       const s = tpl?.strings ? tpl.strings.join('') : ''
@@ -280,13 +291,6 @@ describe('Sol/Luna CobrosService (CAT-5)', () => {
       // Invoice pre-check (legacy direct binding)
       if (s.includes('FROM invoices WHERE id') && s.includes('payment_status')) {
         return Promise.resolve({ rows: [] })
-      }
-      // Cross-circuit invoice lookup (uses ANY)
-      if (s.includes('SELECT id, COALESCE(fiscal_type')) {
-        const ids = Object.keys(opts.invoiceFiscalTypes || {})
-        return Promise.resolve({
-          rows: ids.map(id => ({ id, fiscal_type: opts.invoiceFiscalTypes![id] })),
-        })
       }
       // next receipt number
       if (s.includes('COALESCE(MAX(receipt_number)')) {

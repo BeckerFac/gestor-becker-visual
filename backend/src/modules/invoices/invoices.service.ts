@@ -608,12 +608,13 @@ export class InvoicesService {
           await ordersService.lockOrder(data.order_id, lockReason, userId);
         }
         // Also lock any orders linked through invoice_items.order_item_id (N:N).
+        // PR7-T22: pool.query handles JS array → PG uuid[] binding via node-postgres.
         if (collectedOrderItemIds.length > 0) {
-          const ordsRes = await db.execute(sql`
-            SELECT DISTINCT order_id FROM order_items WHERE id = ANY(${collectedOrderItemIds as any}::uuid[])
-          `);
-          const ordRows = (ordsRes as any).rows || [];
-          for (const r of ordRows) {
+          const ordsRes = await pool.query(
+            'SELECT DISTINCT order_id FROM order_items WHERE id = ANY($1::uuid[])',
+            [collectedOrderItemIds]
+          );
+          for (const r of ordsRes.rows) {
             if (r.order_id) await ordersService.lockOrder(r.order_id, lockReason, userId);
           }
         }

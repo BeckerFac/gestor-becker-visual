@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockPoolQuery, resetMocks } from './helpers/setup'
 
 import { CobrosService } from '../src/modules/cobros/cobros.service'
 
@@ -122,6 +122,16 @@ describe('CobrosService - critical bug fixes', () => {
         }
         if (s.includes('FROM cobros c') && s.includes('LEFT JOIN enterprises')) {
           return Promise.resolve({ rows: [{ id: 'cobro-x' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+      // pool.query is used for the cross-circuit ANY(uuid[]) fiscal_type lookup.
+      // Return the invoice's fiscal_type so the cross-circuit validator passes.
+      mockPoolQuery.mockImplementation((sqlStr: string, _params: any[]) => {
+        if (typeof sqlStr === 'string' && sqlStr.includes('FROM invoices') && sqlStr.includes('fiscal_type')) {
+          return Promise.resolve({
+            rows: invoiceRow ? [{ id: invoiceRow.id, fiscal_type: invoiceRow.fiscal_type || 'fiscal' }] : [],
+          })
         }
         return Promise.resolve({ rows: [] })
       })

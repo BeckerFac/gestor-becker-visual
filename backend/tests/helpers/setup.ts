@@ -71,6 +71,11 @@ vi.mock('../../src/config/db', () => ({
             returning: vi.fn(() => [{ id: 'test-id', sku: 'TEST-001', name: 'Test Product' }]),
           })),
         })),
+        // Raw SQL inside the transaction (used by createProduct's single-shot
+        // INSERT that covers columns not in the Drizzle schema).
+        execute: vi.fn(async () => ({
+          rows: [{ id: 'test-id', sku: 'TEST-001', name: 'Test Product' }],
+        })),
       }
       return fn(txMock)
     }),

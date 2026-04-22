@@ -154,9 +154,8 @@ describe('QuotesService', () => {
     })
 
     it('rejects product_id from another company', async () => {
-      mockDbExecute.mockImplementation((...args: any[]) => {
-        const tpl = args[0]
-        const sqlStr = tpl?.strings ? tpl.strings.join('') : ''
+      // PR7-T22: products tenant check now uses pool.query (drizzle ANY(uuid[]) bug fix).
+      mockPoolQuery.mockImplementation((sqlStr: string) => {
         if (sqlStr.includes('FROM products WHERE id = ANY')) return Promise.resolve({ rows: [] })
         return Promise.resolve({ rows: [] })
       })
@@ -227,6 +226,110 @@ describe('QuotesService', () => {
       expect(deletedItems).toBeTruthy()
       // Empty items => totals zeroed (intentional clear)
       expect(result.total_amount).toBe(0)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // DELETE /api/quotes/:id — soft-delete
+  // -------------------------------------------------------------------------
+  // Double-delete semantics: second call is a no-op and returns { already: true }.
+  // We intentionally do NOT return 404 on the second call because the caller has
+  // already observed the row (it's still in the table as 'cancelled'); a 404
+  // would be misleading. An "already cancelled" state is idempotent on purpose.
+  describe('deleteQuote (soft-delete)', () => {
+    type DeleteOpts = { status?: string; hasOrder?: boolean; missing?: boolean }
+
+    function buildDeleteImpl(opts: DeleteOpts = {}): ClientImpl {
+      const status = opts.status ?? 'draft'
+      return (sqlStr: string, _params: any[]) => {
+        if (/^BEGIN|^COMMIT|^ROLLBACK/i.test(sqlStr.trim())) return { rows: [] }
+        if (sqlStr.includes('FOR UPDATE')) {
+          if (opts.missing) return { rows: [] }
+          return { rows: [{ id: 'q1', status }] }
+        }
+        if (sqlStr.includes('FROM orders WHERE quote_id')) {
+          return { rows: opts.hasOrder ? [{ id: 'order-1' }] : [] }
+        }
+        if (sqlStr.includes("UPDATE quotes") && sqlStr.includes("cancelled_at")) {
+          return { rows: [] }
+        }
+        return { rows: [] }
+      }
+    }
+
+    it('soft-deletes an active (draft) quote -> status=cancelled and records audit fields', async () => {
+      const { client, calls } = makeClient(buildDeleteImpl({ status: 'draft' }))
+      installPoolConnect(client)
+
+      const res = await service.deleteQuote('c1', 'q1', 'u1', 'cliente canceló')
+      expect(res).toMatchObject({ quote_id: 'q1', status: 'cancelled', already: false })
+
+      // UPDATE must include cancelled_at, cancelled_by, cancellation_reason
+      const updateCall = calls.find(c => c.sql.includes('UPDATE quotes') && c.sql.includes('cancelled_at'))
+      expect(updateCall).toBeTruthy()
+      // Params: [userId, reason, quoteId, companyId]
+      expect(updateCall!.params).toEqual(['u1', 'cliente canceló', 'q1', 'c1'])
+
+      // COMMIT ran, no ROLLBACK
+      expect(calls.find(c => /^COMMIT/i.test(c.sql.trim()))).toBeTruthy()
+      expect(calls.find(c => /^ROLLBACK/i.test(c.sql.trim()))).toBeFalsy()
+      expect(client.release).toHaveBeenCalled()
+    })
+
+    it('blocks delete of an accepted quote with a linked order (400)', async () => {
+      const { client, calls } = makeClient(buildDeleteImpl({ status: 'accepted', hasOrder: true }))
+      installPoolConnect(client)
+
+      await expect(service.deleteQuote('c1', 'q1', 'u1')).rejects.toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('pedido vinculado'),
+      })
+
+      // Must ROLLBACK (we opened BEGIN) and NOT issue the UPDATE
+      expect(calls.find(c => /^ROLLBACK/i.test(c.sql.trim()))).toBeTruthy()
+      expect(calls.find(c => /^COMMIT/i.test(c.sql.trim()))).toBeFalsy()
+      expect(calls.find(c => c.sql.includes('UPDATE quotes') && c.sql.includes('cancelled_at'))).toBeFalsy()
+      expect(client.release).toHaveBeenCalled()
+    })
+
+    it('allows delete of accepted quote WITHOUT a linked order (data-shape anomaly recovery)', async () => {
+      const { client, calls } = makeClient(buildDeleteImpl({ status: 'accepted', hasOrder: false }))
+      installPoolConnect(client)
+
+      const res = await service.deleteQuote('c1', 'q1', 'u1')
+      expect(res.status).toBe('cancelled')
+      expect(calls.find(c => c.sql.includes('UPDATE quotes') && c.sql.includes('cancelled_at'))).toBeTruthy()
+    })
+
+    it('404 when quote does not exist', async () => {
+      const { client } = makeClient(buildDeleteImpl({ missing: true }))
+      installPoolConnect(client)
+
+      await expect(service.deleteQuote('c1', 'missing', 'u1')).rejects.toMatchObject({ statusCode: 404 })
+      expect(client.release).toHaveBeenCalled()
+    })
+
+    it('second delete is an idempotent no-op (already=true, no UPDATE issued)', async () => {
+      const { client, calls } = makeClient(buildDeleteImpl({ status: 'cancelled' }))
+      installPoolConnect(client)
+
+      const res = await service.deleteQuote('c1', 'q1', 'u1', 'ignored')
+      expect(res).toMatchObject({ quote_id: 'q1', status: 'cancelled', already: true })
+      // Must NOT re-issue the UPDATE (preserves original cancelled_at / by / reason)
+      expect(calls.find(c => c.sql.includes('UPDATE quotes') && c.sql.includes('cancelled_at'))).toBeFalsy()
+      // Still commits the transaction cleanly (SELECT FOR UPDATE took a row lock)
+      expect(calls.find(c => /^COMMIT/i.test(c.sql.trim()))).toBeTruthy()
+    })
+
+    it('tenant isolation: SELECT FOR UPDATE uses (id, company_id) tuple', async () => {
+      const { client, calls } = makeClient(buildDeleteImpl({ status: 'draft' }))
+      installPoolConnect(client)
+
+      await service.deleteQuote('c1', 'q1', 'u1')
+      const lockCall = calls.find(c => c.sql.includes('FOR UPDATE'))
+      expect(lockCall).toBeTruthy()
+      // quoteId is $1, companyId is $2
+      expect(lockCall!.params).toEqual(['q1', 'c1'])
     })
   })
 })

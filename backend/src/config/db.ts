@@ -103,6 +103,11 @@ export async function runCriticalMigrations() {
     // Every change idempotent; all tryMig'd; non-fatal.
     // ════════════════════════════════════════════════════════════════
 
+    // quotes: soft-delete / cancellation audit fields (DELETE /api/quotes/:id)
+    ['ALTER TABLE quotes ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE', 'quotes.cancelled_at'],
+    ['ALTER TABLE quotes ADD COLUMN IF NOT EXISTS cancelled_by UUID', 'quotes.cancelled_by'],
+    ['ALTER TABLE quotes ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', 'quotes.cancellation_reason'],
+
     // orders: fiscal_type + lock fields (for closing a period / immutability)
     [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'orders.fiscal_type'],
     ['ALTER TABLE orders ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP WITH TIME ZONE', 'orders.locked_at'],

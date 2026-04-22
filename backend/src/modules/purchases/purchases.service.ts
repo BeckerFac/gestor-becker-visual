@@ -156,10 +156,14 @@ export class PurchasesService {
         .map((i: any) => i.product_id)
         .filter((pid: any) => pid && pid !== 'custom');
       if (productIds.length > 0) {
-        const r = await db.execute(sql`
-          SELECT id FROM products WHERE id = ANY(${productIds}::uuid[]) AND company_id = ${companyId}
-        `);
-        const found = new Set(getRows(r).map((x: any) => x.id));
+        // Use pool.query for ANY($1::uuid[]) — drizzle's sql`` tag does NOT
+        // coerce JS arrays to PG uuid[] literals, causing "malformed array literal" errors.
+        // node-postgres handles JS array → PG array conversion natively.
+        const r = await pool.query(
+          `SELECT id FROM products WHERE id = ANY($1::uuid[]) AND company_id = $2`,
+          [productIds, companyId]
+        );
+        const found = new Set((r.rows || []).map((x: any) => x.id));
         for (const pid of productIds) {
           if (!found.has(pid)) {
             throw new ApiError(400, `Producto ${pid} no encontrado en tu empresa`);

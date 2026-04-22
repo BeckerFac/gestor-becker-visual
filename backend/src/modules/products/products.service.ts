@@ -34,52 +34,83 @@ export class ProductsService {
       });
       if (existingSku) throw new ApiError(409, 'SKU already exists');
 
-      return await db.transaction(async (tx) => {
-        const product = await tx.insert(products).values({
-          id: uuid(),
-          company_id: companyId,
-          sku: data.sku,
-          name: data.name,
-          description: data.description || null,
-          barcode: data.barcode || null,
-          category_id: data.category_id || null,
-          brand_id: data.brand_id || null,
-        }).returning();
+      // Precompute pricing outside the tx so overflow errors abort cleanly.
+      let pricing: { cost: string; margin_percent: string; vat_rate: string; final_price: string } | null = null;
+      if (data.cost !== undefined && data.margin_percent !== undefined) {
+        const cost = Number(data.cost);
+        const margin = Number(data.margin_percent);
+        const vat_rate = Number(data.vat_rate || 21);
+        const final_price = cost * (1 + margin / 100) * (1 + vat_rate / 100);
 
-        if (data.cost !== undefined && data.margin_percent !== undefined) {
-          const cost = Number(data.cost);
-          const margin = Number(data.margin_percent);
-          const vat_rate = Number(data.vat_rate || 21);
-          const final_price = cost * (1 + margin / 100) * (1 + vat_rate / 100);
+        if (final_price > 9999999999.99) {
+          throw new ApiError(400, 'El precio final excede el maximo permitido');
+        }
 
-          // Validate values fit in decimal(12,2)
-          if (final_price > 9999999999.99) {
-            throw new ApiError(400, 'El precio final excede el maximo permitido');
-          }
+        pricing = {
+          cost: cost.toFixed(2),
+          margin_percent: margin.toFixed(2),
+          vat_rate: vat_rate.toFixed(2),
+          final_price: final_price.toFixed(2),
+        };
+      }
 
+      const productId = uuid();
+      const product_type = data.product_type ? String(data.product_type) : 'otro';
+      const controls_stock = !!data.controls_stock;
+      const low_stock_threshold = data.low_stock_threshold !== undefined
+        ? Number(data.low_stock_threshold) || 0
+        : 0;
+
+      const created = await db.transaction(async (tx) => {
+        // Single INSERT with ALL columns (including ones not in the Drizzle schema).
+        // Previously we split this into an INSERT + N pool.query UPDATEs, but
+        // pool.query runs on a separate connection that can't see the uncommitted
+        // INSERT, so the UPDATEs silently affected 0 rows. Fix: do it in one shot
+        // via tx.execute so the transaction owns the whole write.
+        const insertRes: any = await tx.execute(sql`
+          INSERT INTO products (
+            id, company_id, sku, name, description, barcode,
+            category_id, brand_id, product_type, controls_stock, low_stock_threshold
+          ) VALUES (
+            ${productId}, ${companyId}, ${data.sku}, ${data.name},
+            ${data.description || null}, ${data.barcode || null},
+            ${data.category_id || null}, ${data.brand_id || null},
+            ${product_type}, ${controls_stock}, ${low_stock_threshold}
+          )
+          RETURNING *
+        `);
+        const row = insertRes.rows?.[0] || insertRes[0] || { id: productId };
+
+        if (pricing) {
           await tx.insert(product_pricing).values({
             id: uuid(),
-            product_id: product[0].id,
-            cost: cost.toFixed(2),
-            margin_percent: margin.toFixed(2),
-            vat_rate: vat_rate.toFixed(2),
-            final_price: final_price.toFixed(2),
+            product_id: productId,
+            ...pricing,
           });
         }
 
-        // Save product_type, controls_stock, low_stock_threshold via raw SQL (not in drizzle schema)
-        if (data.product_type) {
-          await pool.query('UPDATE products SET product_type = $1 WHERE id = $2', [data.product_type, product[0].id]);
-        }
-        if (data.controls_stock !== undefined) {
-          await pool.query('UPDATE products SET controls_stock = $1 WHERE id = $2', [!!data.controls_stock, product[0].id]);
-        }
-        if (data.low_stock_threshold !== undefined) {
-          await pool.query('UPDATE products SET low_stock_threshold = $1 WHERE id = $2', [Number(data.low_stock_threshold) || 0, product[0].id]);
-        }
-
-        return product[0];
+        return row;
       });
+
+      // Echo full shape (product + pricing + stock defaults) so callers
+      // get a complete record on create, matching what list endpoints return.
+      return {
+        ...created,
+        id: created.id || productId,
+        product_type,
+        controls_stock,
+        low_stock_threshold,
+        pricing: pricing
+          ? {
+              cost: pricing.cost,
+              margin_percent: pricing.margin_percent,
+              vat_rate: pricing.vat_rate,
+              final_price: pricing.final_price,
+            }
+          : null,
+        stock_quantity: 0,
+        stock_min_level: 0,
+      };
     } catch (error: any) {
       if (error instanceof ApiError) throw error;
       console.error('Create product error:', error);
@@ -196,9 +227,34 @@ export class ProductsService {
 
   async getProduct(companyId: string, productId: string) {
     try {
-      const product = await db.query.products.findFirst({
-        where: and(eq(products.company_id, companyId), eq(products.id, productId)),
-      });
+      // Use raw SQL so we can join pricing/stock and include columns
+      // (product_type, controls_stock, low_stock_threshold) that aren't in
+      // the Drizzle schema. Echoes the same shape as getProducts list rows.
+      const result = await pool.query(
+        `
+        SELECT p.*,
+          CASE WHEN pp.id IS NOT NULL THEN
+            json_build_object(
+              'cost', pp.cost,
+              'margin_percent', pp.margin_percent,
+              'vat_rate', pp.vat_rate,
+              'final_price', pp.final_price
+            )
+          ELSE NULL END as pricing,
+          COALESCE(CAST(s.quantity AS decimal), 0) as stock_quantity,
+          COALESCE(CAST(s.min_level AS decimal), 0) as stock_min_level,
+          c.name as category_name
+        FROM products p
+        LEFT JOIN product_pricing pp ON pp.product_id = p.id
+        LEFT JOIN stock s ON s.product_id = p.id
+        LEFT JOIN categories c ON c.id = p.category_id
+        WHERE p.company_id = $1 AND p.id = $2
+        LIMIT 1
+        `,
+        [companyId, productId]
+      );
+
+      const product = result.rows?.[0];
       if (!product) throw new ApiError(404, 'Product not found');
       return product;
     } catch (error) {

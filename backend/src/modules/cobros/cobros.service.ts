@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -235,12 +235,16 @@ export class CobrosService {
           .filter((x: any) => typeof x === 'string' && x.length > 0)
       )] as string[];
       if (invoiceIds.length > 0) {
-        const ftRes = await db.execute(sql`
-          SELECT id, COALESCE(fiscal_type, 'fiscal') AS fiscal_type
-          FROM invoices
-          WHERE company_id = ${companyId} AND id = ANY(${invoiceIds as any})
-        `);
-        const ftRows = ((ftRes as any).rows || []);
+        // Use pool.query for ANY($1::uuid[]) — drizzle's sql`` tag does NOT
+        // coerce JS arrays to PG uuid[] literals, causing "malformed array literal" errors.
+        // node-postgres handles JS array → PG array conversion natively.
+        const ftRes = await pool.query(
+          `SELECT id, COALESCE(fiscal_type, 'fiscal') AS fiscal_type
+           FROM invoices
+           WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+          [companyId, invoiceIds]
+        );
+        const ftRows = (ftRes.rows || []);
         for (const r of ftRows) {
           const invFt = r.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal';
           if (invFt !== cobroFiscalType) {

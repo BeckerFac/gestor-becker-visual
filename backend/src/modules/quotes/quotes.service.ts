@@ -329,10 +329,13 @@ export class QuotesService {
         .map((i: any) => i?.product_id)
         .filter((pid: any) => typeof pid === 'string' && pid.length > 0);
       if (productIds.length > 0) {
-        const prods = await db.execute(sql`
-          SELECT id FROM products WHERE id = ANY(${productIds}::uuid[]) AND company_id = ${companyId}
-        `);
-        const found = new Set(getRows(prods).map((r: any) => r.id));
+        // PR7-T22: drizzle sql`${array}` does not coerce JS arrays to PG uuid[].
+        // Use pool.query with node-postgres driver that handles array binding.
+        const prods = await pool.query(
+          'SELECT id FROM products WHERE id = ANY($1::uuid[]) AND company_id = $2',
+          [productIds, companyId]
+        );
+        const found = new Set(prods.rows.map((r: any) => r.id));
         for (const pid of productIds) {
           if (!found.has(pid)) {
             throw new ApiError(400, `Producto ${pid} no encontrado en tu cuenta`);
@@ -514,6 +517,73 @@ export class QuotesService {
       console.error('Update quote error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update quote');
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Soft-delete a quote. Blocks if the quote is accepted AND has a linked order,
+   * preserving fiscal audit trail. Otherwise flips status to 'cancelled' and
+   * records who/when/why.
+   *
+   * Semantics on double-delete: second call is a no-op (returns { already: true }).
+   * The quote stays 'cancelled' and the audit fields are not overwritten.
+   */
+  async deleteQuote(companyId: string, quoteId: string, userId: string, reason?: string) {
+    await this.ensureMigrations();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const lockRes = await client.query(
+        `SELECT id, status FROM quotes WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+        [quoteId, companyId]
+      );
+      if (lockRes.rows.length === 0) {
+        throw new ApiError(404, 'Quote not found');
+      }
+      const current = lockRes.rows[0];
+
+      // Idempotent short-circuit: already cancelled -> no-op.
+      if (current.status === 'cancelled') {
+        await client.query('COMMIT');
+        return { quote_id: quoteId, status: 'cancelled', already: true };
+      }
+
+      // If accepted, block only when a linked order exists. An accepted quote
+      // with no order is a data-shape anomaly and safe to cancel.
+      if (current.status === 'accepted') {
+        const orderRes = await client.query(
+          `SELECT id FROM orders WHERE quote_id = $1 AND company_id = $2 LIMIT 1`,
+          [quoteId, companyId]
+        );
+        if (orderRes.rows.length > 0) {
+          throw new ApiError(
+            400,
+            'No se puede eliminar una cotizacion aceptada con pedido vinculado. Anule el pedido primero.'
+          );
+        }
+      }
+
+      await client.query(
+        `UPDATE quotes
+           SET status = 'cancelled',
+               cancelled_at = NOW(),
+               cancelled_by = $1,
+               cancellation_reason = $2,
+               updated_at = NOW()
+         WHERE id = $3 AND company_id = $4`,
+        [userId || null, reason || null, quoteId, companyId]
+      );
+
+      await client.query('COMMIT');
+      return { quote_id: quoteId, status: 'cancelled', already: false };
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (e instanceof ApiError) throw e;
+      console.error('deleteQuote error:', e);
+      throw new ApiError(500, 'Failed to delete quote');
     } finally {
       client.release();
     }

@@ -53,18 +53,9 @@ describe('ProductsService', () => {
       mockDbVoid()
       ;(db.query.products.findFirst as any).mockResolvedValueOnce(null)
 
-      // Mock transaction to throw on overflow
-      ;(db.transaction as any).mockImplementationOnce(async (fn: any) => {
-        const txMock = {
-          insert: vi.fn(() => ({
-            values: vi.fn(() => ({
-              returning: vi.fn(() => [{ id: 'test-id', sku: 'EXP-001', name: 'Expensive' }]),
-            })),
-          })),
-        }
-        return fn(txMock)
-      })
-
+      // Overflow is now detected BEFORE the transaction opens, so no tx mock
+      // override is needed. Registering one here would leak into the next test
+      // because mockImplementationOnce queues past the test boundary.
       await expect(
         service.createProduct('company-1', {
           sku: 'EXP-001',
@@ -76,21 +67,59 @@ describe('ProductsService', () => {
       ).rejects.toThrow('El precio final excede el maximo permitido')
     })
 
-    it('saves controls_stock and low_stock_threshold via pool.query', async () => {
-      mockDbVoid()
-      mockDbVoid()
-      ;(db.query.products.findFirst as any).mockResolvedValueOnce(null)
-      mockPoolQuery.mockResolvedValue({ rows: [] })
+    it('createProduct persists controls_stock, product_type, low_stock_threshold', async () => {
+      mockDbVoid() // ensureMigrations - controls_stock ALTER
+      mockDbVoid() // ensureMigrations - low_stock_threshold ALTER
+      mockDbVoid() // ensureMigrations - default_vat_rate ALTER
+      mockDbVoid() // ensureMigrations - default_margin_percent ALTER
+      mockDbVoid() // ensureMigrations - default_supplier_id ALTER
+      mockDbVoid() // ensureMigrations - sort_order ALTER
+      mockDbVoid() // ensureMigrations - color ALTER
 
-      await service.createProduct('company-1', {
+      ;(db.query.products.findFirst as any).mockResolvedValueOnce(null)
+
+      // Capture the INSERT happening inside the transaction via tx.execute.
+      let capturedInsertValues: any[] | null = null
+      ;(db.transaction as any).mockImplementationOnce(async (fn: any) => {
+        const txMock = {
+          execute: vi.fn(async (stmt: any) => {
+            // drizzle sql template produces { strings, values } under our mock.
+            if (stmt?.values) capturedInsertValues = stmt.values
+            return { rows: [{ id: 'new-prod-id', sku: 'STOCK-001', name: 'Stock Product' }] }
+          }),
+          insert: vi.fn(() => ({
+            values: vi.fn(() => ({ returning: vi.fn(() => [{ id: 'pricing-id' }]) })),
+          })),
+        }
+        return fn(txMock)
+      })
+
+      const result = await service.createProduct('company-1', {
         sku: 'STOCK-001',
         name: 'Stock Product',
         controls_stock: true,
-        low_stock_threshold: 10,
+        product_type: 'producto',
+        low_stock_threshold: 5,
       })
 
-      // pool.query should be called for controls_stock and low_stock_threshold
-      expect(mockPoolQuery).toHaveBeenCalled()
+      // The three flagged fields must flow into the single INSERT statement, not
+      // a follow-up pool.query UPDATE (which runs on a different connection and
+      // can't see the in-flight tx).
+      expect(capturedInsertValues).toBeTruthy()
+      expect(capturedInsertValues).toContain('producto')
+      expect(capturedInsertValues).toContain(true)
+      expect(capturedInsertValues).toContain(5)
+
+      // Response must echo the requested values, not table defaults.
+      expect(result.product_type).toBe('producto')
+      expect(result.controls_stock).toBe(true)
+      expect(result.low_stock_threshold).toBe(5)
+
+      // Sanity: no pool.query updates inside the tx path.
+      expect(mockPoolQuery).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE products SET controls_stock'),
+        expect.anything()
+      )
     })
 
     it('calculates final_price correctly: cost * (1+margin/100) * (1+vat/100)', async () => {
@@ -101,9 +130,12 @@ describe('ProductsService', () => {
       let savedPricing: any = null
       ;(db.transaction as any).mockImplementationOnce(async (fn: any) => {
         const txMock = {
+          execute: vi.fn(async () => ({
+            rows: [{ id: 'prod-id', sku: 'PRICE-001', name: 'Price Test' }],
+          })),
           insert: vi.fn(() => ({
             values: vi.fn((vals: any) => {
-              // Capture pricing values from the second insert (product_pricing)
+              // Capture pricing values from the product_pricing insert.
               if (vals.cost !== undefined) {
                 savedPricing = vals
               }
@@ -345,13 +377,14 @@ describe('ProductsService', () => {
 
   describe('updateProduct', () => {
     it('updates controls_stock and low_stock_threshold', async () => {
-      // getProduct internals
-      ;(db.query.products.findFirst as any).mockResolvedValueOnce({
-        id: 'p1', sku: 'TEST', name: 'Test', company_id: 'company-1',
+      // getProduct internals (now pool.query based, with join columns).
+      mockPoolQuery.mockResolvedValueOnce({
+        rows: [{ id: 'p1', sku: 'TEST', name: 'Test', company_id: 'company-1' }],
       })
+      // Remaining pool.query calls for the raw UPDATEs.
       mockPoolQuery.mockResolvedValue({ rows: [] })
 
-      const result = await service.updateProduct('company-1', 'p1', {
+      await service.updateProduct('company-1', 'p1', {
         controls_stock: true,
         low_stock_threshold: 5,
       })
@@ -503,14 +536,15 @@ describe('ProductsService', () => {
 
   describe('deleteProduct', () => {
     it('deletes existing product', async () => {
-      ;(db.query.products.findFirst as any).mockResolvedValueOnce({ id: 'p1', sku: 'DEL', name: 'Delete Me' })
+      // getProduct now uses pool.query with a join.
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: 'p1', sku: 'DEL', name: 'Delete Me' }] })
 
       const result = await service.deleteProduct('company-1', 'p1')
       expect(result.success).toBe(true)
     })
 
     it('throws 404 when product not found', async () => {
-      ;(db.query.products.findFirst as any).mockResolvedValueOnce(null)
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] })
 
       await expect(
         service.deleteProduct('company-1', 'nonexistent')

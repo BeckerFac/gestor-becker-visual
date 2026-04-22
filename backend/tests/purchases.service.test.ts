@@ -5,6 +5,7 @@ import {
   mockDbEmpty,
   mockDbVoid,
   mockClientQuery,
+  mockPoolQuery,
   resetMocks,
 } from './helpers/setup'
 
@@ -61,7 +62,9 @@ describe('PurchasesService', () => {
       drainEnsureTables()
       mockDbRows([{ id: 'enterprise-ok' }]) // enterprise
       // no bank_id, no business_unit_id
-      mockDbRows([]) // products lookup: returns no matching product ids
+      // products lookup now uses pool.query (was drizzle sql`` which broke
+      // JS array → PG uuid[] coercion). Returns no matching product ids.
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] })
       // Note: the service then iterates productIds and throws for the first missing.
 
       await expect(
