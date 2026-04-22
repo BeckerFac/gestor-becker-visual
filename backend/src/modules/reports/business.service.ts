@@ -914,9 +914,15 @@ export class BusinessService {
   }
 
   /**
-   * Inventario Report: stock value, low stock, dead stock, rotation
+   * Inventario Report: stock value, low stock, dead stock, rotation.
+   *
+   * Sol/Luna: stock is physical and shared across circuits, so no fiscal_type
+   * filter is applied here. The `opts` parameter is accepted for API symmetry
+   * with the other business reports (the controller always passes it) and
+   * future-proofing — but currently resolves to a no-op.
    */
-  async getInventarioReport(companyId: string) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async getInventarioReport(companyId: string, _opts?: CircuitOpts) {
     const warnings: string[] = [];
 
     // Stock value per product
@@ -1022,12 +1028,21 @@ export class BusinessService {
   }
 
   /**
-   * Conversion Report: quotes issued vs converted to orders, rate, values, avg time
+   * Conversion Report: quotes issued vs converted to orders, rate, values, avg time.
+   *
+   * Sol/Luna: the `quotes` table does NOT carry a fiscal_type column today, so
+   * the circuit filter is routed through the `orders` side of the funnel
+   * (order.fiscal_type exists and is locked at creation). `opts` is resolved
+   * here so the behaviour is identical to the other business reports:
+   * default -> Sol, non-Luna users silently downgraded. The filter is applied
+   * only on quote->order conversion metrics where an order row is available.
    */
-  async getConversionReport(companyId: string, dateFrom?: string, dateTo?: string) {
+  async getConversionReport(companyId: string, dateFrom?: string, dateTo?: string, opts?: CircuitOpts) {
     const warnings: string[] = [];
     const dates = validateDateRange(dateFrom, dateTo);
     const prev = getPreviousPeriod(dates.dateFrom, dates.dateTo);
+    const fiscalTypes = resolveFiscalTypes(opts);
+    const orderFiscalClause = buildFiscalClause(fiscalTypes, 'o');
 
     const quotesExists = await this.tableExists('quotes');
     if (!quotesExists) {
@@ -1122,6 +1137,7 @@ export class BusinessService {
             AND q.created_at::date >= ${dates.dateFrom}::date
             AND q.created_at::date <= ${dates.dateTo}::date
             AND (q.status = 'aceptada' OR q.status = 'accepted')
+            ${orderFiscalClause}
         `);
         return round2(parseFloat(extractRows(timeResult)[0]?.dias_promedio) || 0);
       },

@@ -103,12 +103,17 @@ export class ReportsService {
         recentInvoicesList = (recentInvoicesResult as any).rows || recentInvoicesResult || [];
       }
 
-      // Cheques pending - requires cheques view
+      // Cheques pending - requires cheques view.
+      // Sol/Luna: cheques table has no fiscal_type column; derive the circuit
+      // through the linked cobro (falling back to 'fiscal' when the cheque
+      // isn't tied to a cobro — legacy / standalone cheques default to Sol).
       if (canView(userPermissions, 'cheques')) {
         const chequesPendingResult = await db.execute(sql`
-          SELECT COUNT(*) as count, COALESCE(SUM(CAST(amount AS decimal)), 0) as total
-          FROM cheques
-          WHERE company_id = ${companyId} AND status = 'a_cobrar'
+          SELECT COUNT(*) as count, COALESCE(SUM(CAST(ch.amount AS decimal)), 0) as total
+          FROM cheques ch
+          LEFT JOIN cobros co ON ch.cobro_id = co.id
+          WHERE ch.company_id = ${companyId} AND ch.status = 'a_cobrar'
+            ${buildFiscalClause(fiscalTypes, 'co')}
         `);
 
         const chequesRows = (chequesPendingResult as any).rows || chequesPendingResult || [];
@@ -122,6 +127,7 @@ export class ReportsService {
           SELECT COUNT(*) as count, COALESCE(SUM(CAST(total_amount AS decimal)), 0) as total
           FROM orders
           WHERE company_id = ${companyId} AND payment_status = 'pendiente'
+            ${buildFiscalClause(fiscalTypes, '')}
         `);
 
         const ordersRows = (ordersUnpaidResult as any).rows || ordersUnpaidResult || [];
@@ -140,6 +146,7 @@ export class ReportsService {
             FROM orders o
             WHERE o.company_id = ${companyId}
               AND o.status != 'cancelado'
+              ${buildFiscalClause(fiscalTypes, 'o')}
               AND CAST(o.total_amount AS decimal) > COALESCE(
                 (SELECT SUM(CAST(i.total_amount AS decimal)) FROM invoices i WHERE i.order_id = o.id AND i.status != 'cancelled' AND i.invoice_type::text NOT LIKE 'NC%' ${buildFiscalClause(fiscalTypes, 'i')}), 0
               )
@@ -156,6 +163,7 @@ export class ReportsService {
           FROM orders o
           LEFT JOIN customers c ON o.customer_id = c.id
           WHERE o.company_id = ${companyId}
+            ${buildFiscalClause(fiscalTypes, 'o')}
           ORDER BY o.created_at DESC
           LIMIT 5
         `);

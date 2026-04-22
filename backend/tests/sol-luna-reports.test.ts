@@ -322,4 +322,118 @@ describe('CAT-8 Sol/Luna — business reports + dashboard', () => {
       expect(joined).not.toMatch(LUNA_FRAGMENT)
     })
   })
+
+  // ══════════════════════════════════════════════════════════════════
+  // REGRESSION GUARD — Dashboard orders + cheques KPIs leaked Luna rows.
+  // Bug: the orders_unpaid / orders_uninvoiced / recent_orders sub-queries
+  // in getDashboard never applied buildFiscalClause, so a Sol view aggregated
+  // Luna orders. Same for the cheques_pending KPI (cheques table has no
+  // fiscal_type, filter is routed through the linked cobro).
+  // ══════════════════════════════════════════════════════════════════
+  describe('Dashboard orders+cheques fiscal filter (regression guard)', () => {
+    it('getDashboard default (no opts) -> orders queries carry the Sol fragment', async () => {
+      queueDashboardMocks()
+      await reports.getDashboard('c', '2026-04-01', '2026-04-30', undefined, undefined)
+
+      const orderQueries = allCallsJoined().filter(s =>
+        /\borders\b/i.test(s) && !/\binvoices\b/i.test(s),
+      )
+      // At minimum: orders_unpaid + recent_orders are pure orders queries.
+      expect(orderQueries.length).toBeGreaterThan(0)
+      for (const q of orderQueries) {
+        expect(q).toMatch(SOL_FRAGMENT)
+        expect(q).not.toMatch(LUNA_FRAGMENT)
+      }
+    })
+
+    it('getDashboard Luna user + [no_fiscal] -> orders queries carry the Luna fragment only', async () => {
+      queueDashboardMocks()
+      await reports.getDashboard('c', '2026-04-01', '2026-04-30', undefined, {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: true,
+      })
+      const orderQueries = allCallsJoined().filter(s =>
+        /\borders\b/i.test(s) && !/\binvoices\b/i.test(s),
+      )
+      expect(orderQueries.length).toBeGreaterThan(0)
+      for (const q of orderQueries) {
+        expect(q).toMatch(LUNA_FRAGMENT)
+        expect(q).not.toMatch(/ARRAY\['fiscal'\]::text\[\]/)
+      }
+    })
+
+    it('getDashboard non-Luna user + [no_fiscal] -> orders queries downgraded to Sol', async () => {
+      queueDashboardMocks()
+      await reports.getDashboard('c', '2026-04-01', '2026-04-30', undefined, {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: false,
+      })
+      const orderQueries = allCallsJoined().filter(s =>
+        /\borders\b/i.test(s) && !/\binvoices\b/i.test(s),
+      )
+      expect(orderQueries.length).toBeGreaterThan(0)
+      for (const q of orderQueries) {
+        expect(q).toMatch(SOL_FRAGMENT)
+        expect(q).not.toMatch(LUNA_FRAGMENT)
+      }
+    })
+
+    it('getDashboard cheques_pending KPI applies fiscal filter via cobros alias', async () => {
+      queueDashboardMocks()
+      await reports.getDashboard('c', '2026-04-01', '2026-04-30', undefined, {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: true,
+      })
+      const chequeQueries = allCallsJoined().filter(s => /FROM cheques/i.test(s))
+      expect(chequeQueries.length).toBeGreaterThan(0)
+      for (const q of chequeQueries) {
+        // Routed through LEFT JOIN cobros + COALESCE(co.fiscal_type, 'fiscal')
+        expect(q).toMatch(/LEFT JOIN cobros co/i)
+        expect(q).toMatch(/COALESCE\(co\.fiscal_type, 'fiscal'\)/)
+        expect(q).toMatch(LUNA_FRAGMENT)
+      }
+    })
+
+    it('getDashboard cheques default (no opts) falls back to Sol only', async () => {
+      queueDashboardMocks()
+      await reports.getDashboard('c', '2026-04-01', '2026-04-30', undefined, undefined)
+      const chequeQueries = allCallsJoined().filter(s => /FROM cheques/i.test(s))
+      expect(chequeQueries.length).toBeGreaterThan(0)
+      for (const q of chequeQueries) {
+        expect(q).toMatch(SOL_FRAGMENT)
+        expect(q).not.toMatch(LUNA_FRAGMENT)
+      }
+    })
+  })
+
+  describe('getConversionReport fiscal filter wiring', () => {
+    // Conversion report queues a quotesExists check + up to 5 sub-queries.
+    function queueConversionMocks() {
+      // tableExists('quotes')
+      mockDbExecute.mockResolvedValueOnce({ rows: [{ exists: true }] })
+      // 5 safe empty responses for the funnel sub-queries
+      for (let i = 0; i < 6; i++) mockDbExecute.mockResolvedValueOnce({ rows: [] })
+    }
+
+    it('Luna user + [no_fiscal] -> time-to-conversion query carries Luna fragment on orders', async () => {
+      queueConversionMocks()
+      await business.getConversionReport('c', '2026-04-01', '2026-04-30', {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: true,
+      })
+      const joined = allCallsJoined()
+      const timeQuery = joined.find(s => /JOIN orders o ON o\.quote_id/.test(s))
+      expect(timeQuery).toBeDefined()
+      expect(timeQuery!).toMatch(LUNA_FRAGMENT)
+    })
+
+    it('default opts -> time-to-conversion query carries Sol fragment', async () => {
+      queueConversionMocks()
+      await business.getConversionReport('c', '2026-04-01', '2026-04-30')
+      const timeQuery = allCallsJoined().find(s => /JOIN orders o ON o\.quote_id/.test(s))
+      expect(timeQuery).toBeDefined()
+      expect(timeQuery!).toMatch(SOL_FRAGMENT)
+      expect(timeQuery!).not.toMatch(LUNA_FRAGMENT)
+    })
+  })
 })

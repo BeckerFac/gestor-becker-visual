@@ -231,7 +231,7 @@ export class ReportsController {
 
   async getBusinessInventario(req: AuthRequest, res: Response) {
     try {
-      const data = await businessService.getInventarioReport(req.user!.company_id);
+      const data = await businessService.getInventarioReport(req.user!.company_id, getCircuitOpts(req));
       res.json(data);
     } catch (error) {
       console.error('Controller getBusinessInventario error:', error);
@@ -245,7 +245,7 @@ export class ReportsController {
     try {
       const dateFrom = (req.query.date_from as string) || undefined;
       const dateTo = (req.query.date_to as string) || undefined;
-      const data = await businessService.getConversionReport(req.user!.company_id, dateFrom, dateTo);
+      const data = await businessService.getConversionReport(req.user!.company_id, dateFrom, dateTo, getCircuitOpts(req));
       res.json(data);
     } catch (error) {
       console.error('Controller getBusinessConversion error:', error);
