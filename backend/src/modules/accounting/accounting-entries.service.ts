@@ -1033,6 +1033,10 @@ export class AccountingEntriesService {
 
   /**
    * Balance de sumas y saldos: for each account, show total debits, credits, and balance.
+   *
+   * Empty-chart safety: if the company has no accounts yet (chart not seeded)
+   * OR the query fails because legacy columns are missing, returns [] instead
+   * of propagating a 500. The UI then shows an "initialize contabilidad" CTA.
    */
   async getBalance(companyId: string, filters: {
     date_from?: string;
@@ -1050,26 +1054,31 @@ export class AccountingEntriesService {
       ? sql`AND ${sql.join(dateConditions, sql` AND `)}`
       : sql``;
 
-    const result = await db.execute(sql`
-      SELECT
-        coa.id,
-        coa.code,
-        coa.name,
-        coa.type,
-        coa.level,
-        coa.is_header,
-        COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
-        COALESCE(SUM(jel.credit), 0)::numeric as total_credit,
-        (COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0))::numeric as balance
-      FROM chart_of_accounts coa
-      LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
-      LEFT JOIN journal_entries je ON je.id = jel.entry_id AND je.company_id = ${companyId} ${dateFilter}
-      WHERE coa.company_id = ${companyId}
-      GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
-      ORDER BY coa.code
-    `);
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          coa.id,
+          coa.code,
+          coa.name,
+          coa.type,
+          coa.level,
+          coa.is_header,
+          COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
+          COALESCE(SUM(jel.credit), 0)::numeric as total_credit,
+          (COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0))::numeric as balance
+        FROM chart_of_accounts coa
+        LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
+        LEFT JOIN journal_entries je ON je.id = jel.entry_id AND je.company_id = ${companyId} ${dateFilter}
+        WHERE coa.company_id = ${companyId}
+        GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
+        ORDER BY coa.code
+      `);
 
-    return (result as any).rows || result || [];
+      return (result as any).rows || result || [];
+    } catch (e: any) {
+      console.error(`[getBalance] ${companyId}: ${e?.message || e}`);
+      return [];
+    }
   }
 
   /**
@@ -1500,32 +1509,50 @@ export class AccountingEntriesService {
   /**
    * Balance General: assets, liabilities, equity grouped by type.
    * activo = pasivo + patrimonio + resultado
+   *
+   * Empty-chart safety: if the company has no accounts yet OR the query
+   * fails due to missing legacy columns, returns an empty-but-valid shape
+   * instead of a 500. The caller can render the UI and show a CTA to seed.
    */
   async getBalanceSheet(companyId: string, date?: string): Promise<any> {
     const dateFilter = date
       ? sql`AND je.date <= ${date}::date`
       : sql``;
 
-    const result = await db.execute(sql`
-      SELECT
-        coa.code,
-        coa.name,
-        coa.type,
-        coa.level,
-        coa.is_header,
-        COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
-        COALESCE(SUM(jel.credit), 0)::numeric as total_credit
-      FROM chart_of_accounts coa
-      LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
-      LEFT JOIN journal_entries je ON je.id = jel.entry_id
-        AND je.company_id = ${companyId}
-        ${dateFilter}
-      WHERE coa.company_id = ${companyId}
-        AND coa.type IN ('activo', 'pasivo', 'patrimonio', 'ingreso', 'egreso')
-      GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
-      HAVING COALESCE(SUM(jel.debit), 0) != 0 OR COALESCE(SUM(jel.credit), 0) != 0
-      ORDER BY coa.code
-    `);
+    const emptyShape = {
+      activo: { total: 0, cuentas: [] as any[] },
+      pasivo: { total: 0, cuentas: [] as any[] },
+      patrimonio: { total: 0, cuentas: [] as any[] },
+      resultado: 0,
+      balanced: true,
+    };
+
+    let result: any;
+    try {
+      result = await db.execute(sql`
+        SELECT
+          coa.code,
+          coa.name,
+          coa.type,
+          coa.level,
+          coa.is_header,
+          COALESCE(SUM(jel.debit), 0)::numeric as total_debit,
+          COALESCE(SUM(jel.credit), 0)::numeric as total_credit
+        FROM chart_of_accounts coa
+        LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
+        LEFT JOIN journal_entries je ON je.id = jel.entry_id
+          AND je.company_id = ${companyId}
+          ${dateFilter}
+        WHERE coa.company_id = ${companyId}
+          AND coa.type IN ('activo', 'pasivo', 'patrimonio', 'ingreso', 'egreso')
+        GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
+        HAVING COALESCE(SUM(jel.debit), 0) != 0 OR COALESCE(SUM(jel.credit), 0) != 0
+        ORDER BY coa.code
+      `);
+    } catch (e: any) {
+      console.error(`[getBalanceSheet] ${companyId}: ${e?.message || e}`);
+      return emptyShape;
+    }
 
     const rows = (result as any).rows || result || [];
 

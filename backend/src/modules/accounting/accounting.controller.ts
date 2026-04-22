@@ -112,8 +112,19 @@ export class AccountingController {
   }
 
   async seedChart(req: AuthRequest, res: Response) {
-    const data = await seedChartOfAccounts(req.user!.company_id);
-    res.json(data);
+    try {
+      const companyId = req.user!.company_id;
+      const data = await seedChartOfAccounts(companyId);
+      const statusCode = data.created > 0 ? 201 : 200;
+      res.status(statusCode).json({ success: true, ...data });
+    } catch (err: any) {
+      console.error('[seedChart]', req.user!.company_id, err?.message || err);
+      res.status(500).json({
+        success: false,
+        error: 'seed_failed',
+        detail: err?.message || String(err),
+      });
+    }
   }
 
   async createOpeningEntry(req: AuthRequest, res: Response) {

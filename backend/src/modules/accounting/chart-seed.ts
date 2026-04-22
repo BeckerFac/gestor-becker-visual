@@ -103,10 +103,38 @@ export const BASE_ACCOUNTS: SeedAccount[] = [
 ];
 
 /**
+ * Ensure the columns seed/balance depend on actually exist on
+ * chart_of_accounts. Legacy prod deployments created the table from an older
+ * schema without is_header / level / UNIQUE(company_id, code). Calling this
+ * before the INSERT loop makes seed resilient even if the startup migrations
+ * did not run (e.g. a new company calling /seed before a restart).
+ *
+ * Each statement is independent and non-fatal: we log and continue.
+ */
+async function ensureChartOfAccountsSchema(): Promise<void> {
+  const statements: string[] = [
+    `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS is_header BOOLEAN DEFAULT false`,
+    `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_chart_of_accounts_company_code ON chart_of_accounts(company_id, code)`,
+  ];
+  for (const stmt of statements) {
+    try {
+      await db.execute(sql.raw(stmt));
+    } catch (e: any) {
+      console.error(`[seed.ensureChartOfAccountsSchema] ${stmt.slice(0, 60)}: ${e?.message || e}`);
+    }
+  }
+}
+
+/**
  * Seed the base Argentine chart of accounts for a company.
- * Skips accounts that already exist (idempotent).
+ * Skips accounts that already exist (idempotent): calling this on a company
+ * that is already seeded returns { created: 0, skipped: N } without error.
  */
 export async function seedChartOfAccounts(companyId: string): Promise<{ created: number; skipped: number }> {
+  // Make the operation self-healing on legacy schemas.
+  await ensureChartOfAccountsSchema();
+
   let created = 0;
   let skipped = 0;
 
@@ -131,18 +159,35 @@ export async function seedChartOfAccounts(companyId: string): Promise<{ created:
 
     const parentId = account.parentCode ? codeToId[account.parentCode] : null;
 
-    const result = await db.execute(sql`
-      INSERT INTO chart_of_accounts (company_id, code, name, type, parent_id, level, is_header)
-      VALUES (${companyId}, ${account.code}, ${account.name}, ${account.type}, ${parentId}, ${account.level}, ${account.isHeader})
-      ON CONFLICT (company_id, code) DO NOTHING
-      RETURNING id
-    `);
+    try {
+      const result = await db.execute(sql`
+        INSERT INTO chart_of_accounts (company_id, code, name, type, parent_id, level, is_header)
+        VALUES (${companyId}, ${account.code}, ${account.name}, ${account.type}, ${parentId}, ${account.level}, ${account.isHeader})
+        ON CONFLICT (company_id, code) DO NOTHING
+        RETURNING id
+      `);
 
-    const rows = (result as any).rows || result || [];
-    if (rows.length > 0) {
-      codeToId[account.code] = rows[0].id;
-      created++;
-    } else {
+      const rows = (result as any).rows || result || [];
+      if (rows.length > 0) {
+        codeToId[account.code] = rows[0].id;
+        created++;
+      } else {
+        // Conflict: account already exists — resolve its ID for subsequent
+        // children. Without this, later inserts that reference this parent
+        // lose the link.
+        const lookup = await db.execute(sql`
+          SELECT id FROM chart_of_accounts
+          WHERE company_id = ${companyId} AND code = ${account.code}
+          LIMIT 1
+        `);
+        const lookupRows = (lookup as any).rows || [];
+        if (lookupRows[0]?.id) codeToId[account.code] = lookupRows[0].id;
+        skipped++;
+      }
+    } catch (e: any) {
+      // Non-fatal: log and continue. An individual row failure should not
+      // take down the whole seed endpoint with a 500.
+      console.error(`[seedChartOfAccounts] ${companyId} ${account.code}: ${e?.message || e}`);
       skipped++;
     }
   }
