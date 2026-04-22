@@ -14,9 +14,11 @@ import { TagBadges } from '@/components/shared/TagBadges'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/services/api'
 import { toast } from '@/hooks/useToast'
-import { PermissionGate } from '@/components/shared/PermissionGate'
+import { PermissionGate, useCan } from '@/components/shared/PermissionGate'
 import { QuotePreviewModal } from '@/components/shared/QuotePreviewModal'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { ContextMenuBase, type ContextMenuItem } from '@/components/ui/ContextMenuBase'
+import { useContextMenu } from '@/hooks/useContextMenu'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -120,6 +122,14 @@ export const Quotes: React.FC = () => {
 
   // Preview modal state
   const [previewQuoteId, setPreviewQuoteId] = useState<string | null>(null)
+
+  // Row context menu
+  const contextMenu = useContextMenu<Quote>()
+  const canEdit = useCan('quotes', 'edit')
+  const canCreate = useCan('quotes', 'create')
+
+  // Duplicating flag (avoid double-click)
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
 
   // Delete modal state
   const [deleteQuoteTarget, setDeleteQuoteTarget] = useState<Quote | null>(null)
@@ -379,6 +389,38 @@ export const Quotes: React.FC = () => {
       setError(e.message)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleDownloadPdf = async (quote: Quote) => {
+    try {
+      const blob = await api.getQuotePdf(quote.id)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const num = String(quote.quote_number || 0).padStart(4, '0')
+      a.download = `cotizacion-${num}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('PDF descargado')
+    } catch (e: any) {
+      toast.error(e?.message || 'Error al descargar PDF')
+    }
+  }
+
+  const handleDuplicateQuote = async (quote: Quote) => {
+    if (duplicatingId) return
+    setDuplicatingId(quote.id)
+    try {
+      const res = await api.duplicateQuote(quote.id)
+      toast.success(`Cotizacion duplicada: ${res.title || 'nueva copia'}`)
+      await loadQuotes(currentPage)
+    } catch (e: any) {
+      toast.error(e?.message || 'Error al duplicar cotizacion')
+    } finally {
+      setDuplicatingId(null)
     }
   }
 
@@ -852,7 +894,11 @@ export const Quotes: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                 {quotes.map(quote => (
-                  <tr key={quote.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                  <tr
+                    key={quote.id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                    onContextMenu={e => contextMenu.openMenu(e, quote)}
+                  >
                     <td className="px-4 py-3">
                       <span className="font-mono font-bold text-blue-700 text-sm">
                         #{String(quote.quote_number || 0).padStart(4, '0')}
@@ -897,20 +943,18 @@ export const Quotes: React.FC = () => {
                         <button
                           onClick={() => openPreviewModal(quote.id)}
                           className="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 transition-colors"
+                          title="Ver detalle"
                         >
                           Ver
                         </button>
-                        <PermissionGate module="quotes" action="edit">
-                          {quote.status !== 'cancelled' && (
-                            <button
-                              onClick={() => openDeleteModal(quote)}
-                              className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 transition-colors"
-                              title="Eliminar cotizacion"
-                            >
-                              Eliminar
-                            </button>
-                          )}
-                        </PermissionGate>
+                        <button
+                          onClick={e => contextMenu.openMenu(e, quote)}
+                          className="px-2 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                          title="Mas acciones"
+                          aria-label="Mas acciones"
+                        >
+                          {'⋮'}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -971,6 +1015,83 @@ export const Quotes: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Row context menu */}
+      {contextMenu.menu && (() => {
+        const quote = contextMenu.menu.item
+        const isCancelled = quote.status === 'cancelled'
+        const items: ContextMenuItem[] = [
+          {
+            id: 'view',
+            label: 'Ver detalle',
+            icon: (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            ),
+            onClick: () => openPreviewModal(quote.id),
+          },
+          {
+            id: 'download-pdf',
+            label: 'Descargar PDF',
+            icon: (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+              </svg>
+            ),
+            onClick: () => handleDownloadPdf(quote),
+          },
+          {
+            id: 'duplicate',
+            label: duplicatingId === quote.id ? 'Duplicando...' : 'Duplicar',
+            icon: (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            ),
+            disabled: !canCreate || duplicatingId === quote.id,
+            onClick: () => handleDuplicateQuote(quote),
+          },
+          {
+            id: 'edit',
+            label: 'Editar',
+            icon: (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            ),
+            disabled: !canEdit || isCancelled,
+            onClick: () => openPreviewModal(quote.id),
+          },
+          { id: 'sep-delete', label: '', separator: true },
+          {
+            id: 'delete',
+            label: isCancelled ? 'Eliminada' : 'Eliminar',
+            icon: (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            ),
+            danger: !isCancelled,
+            disabled: !canEdit || isCancelled,
+            onClick: () => { if (!isCancelled) openDeleteModal(quote) },
+          },
+        ]
+
+        return (
+          <ContextMenuBase
+            x={contextMenu.menu.x}
+            y={contextMenu.menu.y}
+            header={{
+              title: `Cotizacion #${String(quote.quote_number || 0).padStart(4, '0')}`,
+              subtitle: quote.customer?.name || quote.enterprise?.name || quote.title || undefined,
+            }}
+            items={items}
+            onClose={contextMenu.closeMenu}
+          />
+        )
+      })()}
     </div>
   )
 }

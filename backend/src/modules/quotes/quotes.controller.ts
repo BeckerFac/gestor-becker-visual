@@ -38,6 +38,15 @@ export class QuotesController {
     res.json(data);
   }
 
+  async duplicateQuote(req: AuthRequest, res: Response) {
+    const data = await quotesService.duplicateQuote(
+      req.user!.company_id,
+      req.params.id,
+      req.user!.id
+    );
+    res.status(201).json(data);
+  }
+
   async deleteQuote(req: AuthRequest, res: Response) {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
     const data = await quotesService.deleteQuote(

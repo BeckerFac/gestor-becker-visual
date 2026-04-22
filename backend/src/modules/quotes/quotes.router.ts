@@ -12,5 +12,6 @@ quotesRouter.delete('/banner', authorize('quotes', 'edit'), (req, res) => quotes
 quotesRouter.get('/:id', authorize('quotes', 'view'), (req, res) => quotesController.getQuote(req as any, res));
 quotesRouter.put('/:id', authorize('quotes', 'edit'), (req, res) => quotesController.updateQuote(req as any, res));
 quotesRouter.put('/:id/status', authorize('quotes', 'edit'), (req, res) => quotesController.updateStatus(req as any, res));
+quotesRouter.post('/:id/duplicate', authorize('quotes', 'create'), (req, res) => quotesController.duplicateQuote(req as any, res));
 quotesRouter.delete('/:id', authorize('quotes', 'edit'), (req, res) => quotesController.deleteQuote(req as any, res));
 quotesRouter.get('/:id/pdf', authorize('quotes', 'view'), (req, res) => quotesController.downloadPdf(req as any, res));

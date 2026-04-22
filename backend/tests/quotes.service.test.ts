@@ -332,4 +332,152 @@ describe('QuotesService', () => {
       expect(lockCall!.params).toEqual(['q1', 'c1'])
     })
   })
+
+  // -------------------------------------------------------------------------
+  // POST /api/quotes/:id/duplicate — duplicate endpoint
+  // -------------------------------------------------------------------------
+  describe('duplicateQuote', () => {
+    type DupOpts = { missing?: boolean; items?: any[]; source?: any }
+
+    function buildDuplicateImpl(opts: DupOpts = {}): ClientImpl {
+      const source = opts.source ?? {
+        id: 'q-src',
+        company_id: 'c1',
+        customer_id: 'cust-1',
+        enterprise_id: 'ent-1',
+        title: 'Original',
+        notes: 'Cliente requiere entrega urgente',
+        custom_company_name: 'BV-Alt',
+        subtotal: '1000',
+        vat_amount: '210',
+        total_amount: '1210',
+        status: 'sent',
+      }
+      const items = opts.items ?? [
+        { id: 'qi-1', product_id: 'p1', product_name: 'Banner', description: 'Vinilo', quantity: 2, unit_price: '500', vat_rate: '21', subtotal: '1000' },
+        { id: 'qi-2', product_id: null, product_name: 'Servicio', description: null, quantity: 1, unit_price: '300', vat_rate: '10.5', subtotal: '300' },
+      ]
+      return (sqlStr: string, _params: any[]) => {
+        if (/^BEGIN|^COMMIT|^ROLLBACK/i.test(sqlStr.trim())) return { rows: [] }
+        if (sqlStr.includes('SELECT * FROM quotes WHERE id')) {
+          return { rows: opts.missing ? [] : [source] }
+        }
+        if (sqlStr.includes('FROM quote_items')) {
+          return { rows: items }
+        }
+        if (sqlStr.startsWith('INSERT INTO quotes')) return { rows: [] }
+        if (sqlStr.startsWith('INSERT INTO quote_items')) return { rows: [] }
+        return { rows: [] }
+      }
+    }
+
+    it('creates a new draft quote preserving enterprise, customer, notes and items', async () => {
+      const { client, calls } = makeClient(buildDuplicateImpl())
+      installPoolConnect(client)
+
+      const res = await service.duplicateQuote('c1', 'q-src', 'u1')
+
+      // New id is a fresh uuid (different from source)
+      expect(res.id).toBeTruthy()
+      expect(res.id).not.toBe('q-src')
+      expect(res.status).toBe('draft')
+      expect(res.title).toBe('Original (copia)')
+
+      // INSERT INTO quotes: check values by parameters.
+      // Params order in service: [newId, companyId, customer_id, enterprise_id, title, valid_until,
+      //                           subtotal, vat, total, notes, custom_company_name, created_by]
+      const quoteInsert = calls.find(c => c.sql.startsWith('INSERT INTO quotes'))
+      expect(quoteInsert).toBeTruthy()
+      const p = quoteInsert!.params
+      expect(p[1]).toBe('c1')            // companyId
+      expect(p[2]).toBe('cust-1')        // customer_id preserved
+      expect(p[3]).toBe('ent-1')         // enterprise_id preserved
+      expect(p[4]).toBe('Original (copia)') // title + " (copia)"
+      expect(p[5]).toMatch(/^\d{4}-\d{2}-\d{2}$/) // valid_until ISO date
+      expect(p[9]).toBe('Cliente requiere entrega urgente') // notes preserved
+      expect(p[10]).toBe('BV-Alt')       // custom_company_name preserved
+      expect(p[11]).toBe('u1')           // created_by = caller
+
+      // All source items copied (2 inserts into quote_items)
+      const itemInserts = calls.filter(c => c.sql.startsWith('INSERT INTO quote_items'))
+      expect(itemInserts.length).toBe(2)
+      // First item params: [id, quoteId, product_id, product_name, description, qty, unit_price, vat, subtotal]
+      expect(itemInserts[0].params[2]).toBe('p1')
+      expect(itemInserts[0].params[3]).toBe('Banner')
+      expect(itemInserts[0].params[5]).toBe(2) // quantity preserved
+      expect(itemInserts[1].params[2]).toBeNull() // null product_id preserved
+      expect(itemInserts[1].params[7]).toBe('10.5') // vat_rate preserved
+
+      // COMMIT (no rollback)
+      expect(calls.find(c => /^COMMIT/i.test(c.sql.trim()))).toBeTruthy()
+      expect(calls.find(c => /^ROLLBACK/i.test(c.sql.trim()))).toBeFalsy()
+      expect(client.release).toHaveBeenCalled()
+    })
+
+    it('resets valid_until to 30 days from today', async () => {
+      const { client, calls } = makeClient(buildDuplicateImpl())
+      installPoolConnect(client)
+
+      await service.duplicateQuote('c1', 'q-src', 'u1')
+
+      const quoteInsert = calls.find(c => c.sql.startsWith('INSERT INTO quotes'))
+      const validUntilStr = quoteInsert!.params[5] as string
+      const validUntil = new Date(validUntilStr + 'T00:00:00')
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const diffDays = Math.round((validUntil.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      expect(diffDays).toBe(30)
+    })
+
+    it('recalculates totals from source items (does not trust stored aggregates)', async () => {
+      // Source has stored total_amount '9999' but items would recalc to 1000 + 300 with their own VAT
+      const { client } = makeClient(buildDuplicateImpl({
+        source: {
+          id: 'q-src', company_id: 'c1', customer_id: null, enterprise_id: null,
+          title: 'X', notes: null, custom_company_name: null,
+          subtotal: '9999', vat_amount: '9999', total_amount: '9999',
+        },
+      }))
+      installPoolConnect(client)
+
+      const res = await service.duplicateQuote('c1', 'q-src', 'u1')
+      // items recalc: 2*500=1000 @21% = 210 vat; 1*300=300 @10.5% = 31.5 vat
+      // subtotal = 1300, vat = 241.5, total = 1541.5
+      expect(res.total_amount).toBeCloseTo(1541.5, 2)
+    })
+
+    it('returns 404 when source quote does not exist', async () => {
+      const { client } = makeClient(buildDuplicateImpl({ missing: true }))
+      installPoolConnect(client)
+
+      await expect(service.duplicateQuote('c1', 'missing', 'u1')).rejects.toMatchObject({
+        statusCode: 404,
+      })
+      expect(client.release).toHaveBeenCalled()
+    })
+
+    it('rolls back on insert failure and does not leak half-populated quote', async () => {
+      const { client, calls } = makeClient((sqlStr: string, _params: any[]) => {
+        if (/^BEGIN|^COMMIT|^ROLLBACK/i.test(sqlStr.trim())) return { rows: [] }
+        if (sqlStr.includes('SELECT * FROM quotes WHERE id')) {
+          return { rows: [{
+            id: 'q-src', company_id: 'c1', customer_id: 'cust-1', enterprise_id: 'ent-1',
+            title: 'T', notes: null, custom_company_name: null,
+          }] }
+        }
+        if (sqlStr.includes('FROM quote_items')) return { rows: [] }
+        if (sqlStr.startsWith('INSERT INTO quotes')) {
+          throw new Error('boom: insert failed')
+        }
+        return { rows: [] }
+      })
+      installPoolConnect(client)
+
+      await expect(service.duplicateQuote('c1', 'q-src', 'u1')).rejects.toThrow()
+
+      expect(calls.find(c => /^ROLLBACK/i.test(c.sql.trim()))).toBeTruthy()
+      expect(calls.find(c => /^COMMIT/i.test(c.sql.trim()))).toBeFalsy()
+      expect(client.release).toHaveBeenCalled()
+    })
+  })
 })

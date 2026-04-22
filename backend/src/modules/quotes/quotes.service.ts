@@ -523,6 +523,134 @@ export class QuotesService {
   }
 
   /**
+   * Duplicate a quote: copies title (+ " (copia)"), enterprise, customer, items,
+   * notes and custom_company_name into a new draft quote. valid_until is reset
+   * to 30 days from today. The new quote gets a fresh quote_number and 'draft'
+   * status so it behaves exactly like a new creation.
+   */
+  async duplicateQuote(companyId: string, quoteId: string, userId: string) {
+    await this.ensureMigrations();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Load source quote (tenant-scoped)
+      const srcRes = await client.query(
+        `SELECT * FROM quotes WHERE id = $1 AND company_id = $2`,
+        [quoteId, companyId]
+      );
+      if (srcRes.rows.length === 0) {
+        throw new ApiError(404, 'Quote not found');
+      }
+      const src: any = srcRes.rows[0];
+
+      const itemsRes = await client.query(
+        `SELECT * FROM quote_items WHERE quote_id = $1 ORDER BY created_at ASC`,
+        [quoteId]
+      );
+      const items = itemsRes.rows || [];
+
+      // Recalculate totals from source items (defensive: do not trust stored aggregates)
+      let subtotal = 0;
+      let vatAmount = 0;
+      for (const it of items) {
+        const sub = Number(it.unit_price) * Number(it.quantity);
+        const rate = Number(it.vat_rate ?? 21);
+        subtotal += sub;
+        vatAmount += sub * (Number.isFinite(rate) ? rate : 21) / 100;
+      }
+      const totalAmount = subtotal + vatAmount;
+
+      // valid_until = today + 30 days
+      const validUntilDate = new Date();
+      validUntilDate.setDate(validUntilDate.getDate() + 30);
+      const validUntil = validUntilDate.toISOString().split('T')[0];
+
+      const newId = uuid();
+      const newTitle = `${src.title || 'Cotizacion'} (copia)`;
+
+      // Insert with atomic quote_number generation (same pattern as createQuote)
+      await client.query(
+        `INSERT INTO quotes
+           (id, company_id, customer_id, enterprise_id, quote_number, title,
+            valid_until, subtotal, vat_amount, total_amount, status, notes,
+            custom_company_name, created_by)
+         VALUES ($1, $2, $3, $4,
+           (SELECT COALESCE(MAX(quote_number), 0) + 1 FROM quotes WHERE company_id = $2),
+           $5, $6, $7, $8, $9, 'draft', $10, $11, $12)`,
+        [
+          newId,
+          companyId,
+          src.customer_id || null,
+          src.enterprise_id || null,
+          newTitle,
+          validUntil,
+          subtotal.toString(),
+          vatAmount.toString(),
+          totalAmount.toString(),
+          src.notes || null,
+          src.custom_company_name || null,
+          userId || null,
+        ]
+      );
+
+      // Copy items
+      for (const it of items) {
+        const itemSubtotal = Number(it.unit_price) * Number(it.quantity);
+        await client.query(
+          `INSERT INTO quote_items
+             (id, quote_id, product_id, product_name, description, quantity,
+              unit_price, vat_rate, subtotal)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            uuid(),
+            newId,
+            it.product_id || null,
+            it.product_name,
+            it.description || null,
+            it.quantity,
+            (it.unit_price ?? 0).toString(),
+            (it.vat_rate ?? 21).toString(),
+            itemSubtotal.toString(),
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // CRM sync (best-effort, outside the transaction boundary)
+      try {
+        await crmSyncService.handleEvent({
+          companyId,
+          event: 'quote_created',
+          enterpriseId: src.enterprise_id || undefined,
+          customerId: src.customer_id || undefined,
+          documentId: newId,
+          documentType: 'quote',
+          metadata: { title: newTitle, amount: totalAmount },
+        });
+      } catch (e) {
+        console.error('CRM sync error (quote_duplicated):', e);
+      }
+
+      return {
+        id: newId,
+        title: newTitle,
+        status: 'draft',
+        total_amount: totalAmount,
+        valid_until: validUntil,
+      };
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (e instanceof ApiError) throw e;
+      console.error('duplicateQuote error:', e);
+      throw new ApiError(500, 'Failed to duplicate quote');
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Soft-delete a quote. Blocks if the quote is accepted AND has a linked order,
    * preserving fiscal audit trail. Otherwise flips status to 'cancelled' and
    * records who/when/why.
