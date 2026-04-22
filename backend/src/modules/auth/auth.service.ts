@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { users, sessions, companies } from '../../db/schema';
 import { env } from '../../config/env';
 import { eq, and, sql } from 'drizzle-orm';
@@ -73,6 +73,20 @@ export class AuthService {
 
       if (!company[0]) {
         throw new ApiError(500, 'Failed to create company');
+      }
+
+      // PR7-T22: auto-create a default "Principal" business_unit so that
+      // purchase invoices, CC filters and every BU-scoped flow works out of the box.
+      // Same pattern as the runCriticalMigrations backfill but for NEW companies.
+      try {
+        await pool.query(
+          `INSERT INTO business_units (id, company_id, name, is_fiscal, sort_order, active, created_at, updated_at)
+           VALUES (gen_random_uuid(), $1, 'Principal', TRUE, 0, TRUE, NOW(), NOW())
+           ON CONFLICT DO NOTHING`,
+          [company[0].id]
+        );
+      } catch (e: any) {
+        console.error('[register] default BU creation failed (non-fatal):', e?.message);
       }
 
       // Hash password with configurable rounds (default 12)
