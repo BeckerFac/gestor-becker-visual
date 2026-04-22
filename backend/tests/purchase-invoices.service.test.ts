@@ -139,8 +139,8 @@ describe('PurchaseInvoicesService - critical bug fixes', () => {
     await expect(
       service.updatePurchaseInvoice(companyId, 'pi-1', { total_amount: 999 }),
     ).rejects.toMatchObject({
-      statusCode: 409,
-      message: expect.stringContaining('bloqueados'),
+      statusCode: 423,
+      message: expect.stringContaining('bloqueado'),
     })
   })
 
@@ -161,6 +161,79 @@ describe('PurchaseInvoicesService - critical bug fixes', () => {
 
     const result = await service.updatePurchaseInvoice(companyId, 'pi-1', { notes: 'actualizado' })
     expect(result).toMatchObject({ id: 'pi-1' })
+  })
+
+  // ---------- C2 bis: fiscal lock fires on PENDING (no-pagos) invoices too ----------
+  it('C2-bis T1: PATCH total_amount on pending invoice (no pagos) → 423', async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{
+        id: 'pi-1', company_id: companyId, status: 'active',
+        total_amount: '121', invoice_type: 'A', invoice_number: '12345678',
+        punto_venta: '0001', invoice_date: '2024-01-10',
+      }],
+    })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ has_pagos: false }] })
+
+    await expect(
+      service.updatePurchaseInvoice(companyId, 'pi-1', { total_amount: 999 }),
+    ).rejects.toMatchObject({
+      statusCode: 423,
+      message: expect.stringContaining('bloqueado'),
+      details: { locked_fields: ['total_amount'] },
+    })
+  })
+
+  it('C2-bis T2: PATCH notes on pending invoice → 200', async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{
+        id: 'pi-1', company_id: companyId, status: 'active',
+        total_amount: '121', invoice_type: 'A', invoice_number: '12345678',
+        punto_venta: '0001', invoice_date: '2024-01-10',
+      }],
+    })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ has_pagos: false }] })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] }) // UPDATE
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: 'pi-1', notes: 'nota nueva' }],
+    })
+
+    const result = await service.updatePurchaseInvoice(companyId, 'pi-1', { notes: 'nota nueva' })
+    expect(result).toMatchObject({ id: 'pi-1', notes: 'nota nueva' })
+  })
+
+  it('C2-bis T3: PATCH status to cancelled on pending invoice → 200', async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{
+        id: 'pi-1', company_id: companyId, status: 'active',
+        total_amount: '121', invoice_type: 'A', invoice_number: '12345678',
+        punto_venta: '0001', invoice_date: '2024-01-10',
+      }],
+    })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ has_pagos: false }] })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] }) // UPDATE
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: 'pi-1', status: 'cancelled' }],
+    })
+
+    const result = await service.updatePurchaseInvoice(companyId, 'pi-1', { status: 'cancelled' })
+    expect(result).toMatchObject({ id: 'pi-1', status: 'cancelled' })
+  })
+
+  it('C2-bis T4: PATCH total_amount on fresh invoice w/ fields already set → 423 (always locked post-create)', async () => {
+    // Decision: safer stance. Once fiscal fields are set on the row (happens at create),
+    // they are locked. No "edit window".
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{
+        id: 'pi-1', company_id: companyId, status: 'active',
+        total_amount: '121', invoice_type: 'A', invoice_number: '12345678',
+        punto_venta: '0001', invoice_date: '2024-01-10',
+      }],
+    })
+    mockPoolQuery.mockResolvedValueOnce({ rows: [{ has_pagos: false }] })
+
+    await expect(
+      service.updatePurchaseInvoice(companyId, 'pi-1', { total_amount: 500 }),
+    ).rejects.toMatchObject({ statusCode: 423 })
   })
 
   // ---------- C3: IDOR on purchase_id ----------

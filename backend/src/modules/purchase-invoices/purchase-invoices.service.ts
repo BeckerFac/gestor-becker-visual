@@ -460,12 +460,36 @@ export class PurchaseInvoicesService {
     );
     const hasPagos = pagoCheck.rows[0]?.has_pagos === true;
 
-    // If payments exist, reject any attempt to change locked fiscal fields.
+    // AFIP-grade fiscal integrity: fiscal fields are LOCKED the moment the invoice
+    // is created with any of them set. Prior rule that only fired when pagos existed
+    // was a fiscal-integrity bug (pending invoices could be mutated before payment).
+    // To modify fiscal data, the user must cancel and re-issue the invoice.
+    const attemptedLockedFiscal: string[] = [];
+    for (const key of Object.keys(data)) {
+      if (!LOCKED_FISCAL_FIELDS.has(key) || data[key] === undefined) continue;
+      const existingVal = (existing as any)[key];
+      // Field is "set" on existing if it is not null/undefined/empty string.
+      const isSetOnExisting =
+        existingVal !== null && existingVal !== undefined && existingVal !== '';
+      if (!isSetOnExisting) continue;
+      // Allow no-op passes that resend the same value.
+      const newVal = String(data[key] ?? '');
+      const oldVal = String(existingVal ?? '');
+      if (newVal !== oldVal) attemptedLockedFiscal.push(key);
+    }
+    if (attemptedLockedFiscal.length > 0) {
+      throw new ApiError(
+        423,
+        `Campo fiscal bloqueado. Anular comprobante para modificar: ${attemptedLockedFiscal.join(', ')}`,
+        { locked_fields: attemptedLockedFiscal },
+      );
+    }
+
+    // Retain legacy pagos-specific guard for payment-linked fields (defense in depth).
     if (hasPagos) {
       const attemptedLocked: string[] = [];
       for (const key of Object.keys(data)) {
         if (LOCKED_FISCAL_FIELDS.has(key) && data[key] !== undefined) {
-          // Compare against existing to allow no-op passes.
           const newVal = String(data[key] ?? '');
           const oldVal = String((existing as any)[key] ?? '');
           if (newVal !== oldVal) attemptedLocked.push(key);
