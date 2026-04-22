@@ -98,7 +98,7 @@ export class InvoicesController {
   async updateDraftInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
-      const invoice = await invoicesService.updateDraftInvoice(req.user.company_id, req.params.id, req.body);
+      const invoice = await invoicesService.updateDraftInvoice(req.user.company_id, req.params.id, req.body, req.user.id);
       res.json(invoice);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -111,7 +111,7 @@ export class InvoicesController {
   async deleteDraftInvoice(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing invoice ID');
-      const result = await invoicesService.deleteDraftInvoice(req.user.company_id, req.params.id);
+      const result = await invoicesService.deleteDraftInvoice(req.user.company_id, req.params.id, req.user.id);
       res.json(result);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -154,7 +154,7 @@ export class InvoicesController {
       const puntoVenta = Number.isFinite(rawPv) && rawPv >= 1 && rawPv <= 99999 ? rawPv : 3;
       const rawCondIva = parseInt(req.body.condicion_iva_receptor_id);
       const condicionIvaReceptorId = Number.isFinite(rawCondIva) ? rawCondIva : undefined;
-      const invoice = await invoicesService.authorizeInvoice(req.user.company_id, req.params.id, puntoVenta, condicionIvaReceptorId);
+      const invoice = await invoicesService.authorizeInvoice(req.user.company_id, req.params.id, puntoVenta, condicionIvaReceptorId, req.user.id);
       res.json(invoice);
     } catch (error) {
       if (error instanceof ApiError) {

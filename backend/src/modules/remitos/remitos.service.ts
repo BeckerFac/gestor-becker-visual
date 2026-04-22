@@ -7,6 +7,7 @@ import { getRows, getFirstRow } from '../../lib/db-utils';
 import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape';
 import { validateBase64Upload } from '../../lib/upload-validation';
 import { ordersService } from '../orders/orders.service';
+import { activityService } from '../activity/activity.service';
 
 export class RemitosService {
   private tablesEnsured = false;
@@ -876,6 +877,20 @@ export class RemitosService {
         }
       }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'remitos',
+          action: 'create',
+          entityType: 'remito',
+          entityId: remitoId,
+          circuit: derivedFiscalType,
+          metadata: { remito_number: remitoNumber },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { id: remitoId, remito_number: remitoNumber, fiscal_type: derivedFiscalType };
     } catch (error) {
       await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));
@@ -1072,6 +1087,19 @@ export class RemitosService {
           console.warn('[anularRemito] unlockOrder failed for', orderId, (e as Error).message);
         }
       }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'remitos',
+          action: 'anular',
+          entityType: 'remito',
+          entityId: remitoId,
+          circuit: null,
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { id: remitoId, status: 'anulado' };
     } catch (error) {

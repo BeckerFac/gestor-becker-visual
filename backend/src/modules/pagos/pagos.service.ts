@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { retencionesService } from '../retenciones/retenciones.service';
+import { activityService } from '../activity/activity.service';
 
 interface PaymentMethodInput {
   method: string;
@@ -547,6 +548,24 @@ export class PagosService {
       console.warn('Accounting entry skipped (pago):', (accErr as Error).message);
     }
 
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId,
+        module: 'pagos',
+        action: 'create',
+        entityType: 'pago',
+        entityId: pagoId,
+        circuit: null,
+        metadata: {
+          amount: data.amount,
+          enterprise_id: data.enterprise_id,
+          purchase_id: data.purchase_id,
+        },
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     // Read-back the created row.
     try {
       const result = await db.execute(sql`
@@ -695,6 +714,20 @@ export class PagosService {
         console.warn('Accounting reversal skipped (pago):', (accErr as Error).message);
       }
     }
+
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId: userId || 'system',
+        module: 'pagos',
+        action: 'anular',
+        entityType: 'pago',
+        entityId: pagoId,
+        circuit: null,
+        metadata: { reason },
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
 
     return { id: pagoId, status: 'anulado', success: true };
   }

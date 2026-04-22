@@ -29,7 +29,7 @@ export class QuotesController {
   }
 
   async updateQuote(req: AuthRequest, res: Response) {
-    const data = await quotesService.updateQuote(req.user!.company_id, req.params.id, req.body);
+    const data = await quotesService.updateQuote(req.user!.company_id, req.params.id, req.body, req.user!.id);
     res.json(data);
   }
 

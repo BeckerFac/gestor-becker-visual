@@ -5,6 +5,7 @@ import { eq, and, ilike, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { priceListsService } from '../price-lists/price-lists.service';
+import { activityService } from '../activity/activity.service';
 
 export class ProductsService {
   private migrationsRun = false;
@@ -26,7 +27,7 @@ export class ProductsService {
     }
   }
 
-  async createProduct(companyId: string, data: any) {
+  async createProduct(companyId: string, data: any, userId?: string) {
     await this.ensureMigrations();
     try {
       const existingSku = await db.query.products.findFirst({
@@ -91,6 +92,20 @@ export class ProductsService {
 
         return row;
       });
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'products',
+          action: 'create',
+          entityType: 'product',
+          entityId: productId,
+          circuit: null,
+          metadata: { sku: data.sku, name: data.name, product_type },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       // Echo full shape (product + pricing + stock defaults) so callers
       // get a complete record on create, matching what list endpoints return.
@@ -263,7 +278,7 @@ export class ProductsService {
     }
   }
 
-  async updateProduct(companyId: string, productId: string, data: any) {
+  async updateProduct(companyId: string, productId: string, data: any, userId?: string) {
     try {
       const product = await this.getProduct(companyId, productId);
 
@@ -342,6 +357,20 @@ export class ProductsService {
           });
         }
       }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'products',
+          action: 'update',
+          entityType: 'product',
+          entityId: productId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return updated[0];
     } catch (error) {
@@ -1160,12 +1189,26 @@ export class ProductsService {
     }
   }
 
-  async deleteProduct(companyId: string, productId: string) {
+  async deleteProduct(companyId: string, productId: string, userId?: string) {
     try {
       const product = await this.getProduct(companyId, productId);
 
       await db.delete(products)
         .where(and(eq(products.company_id, companyId), eq(products.id, productId)));
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'products',
+          action: 'delete',
+          entityType: 'product',
+          entityId: productId,
+          circuit: null,
+          metadata: { sku: product?.sku, name: product?.name },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { success: true };
     } catch (error) {

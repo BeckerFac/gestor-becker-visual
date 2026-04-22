@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { generateAccessCode, ACCESS_CODE_MIN_LENGTH } from '../../utils/access-code';
+import { activityService } from '../activity/activity.service';
 
 // Nor feedback item 3: whitelist of accepted default_fiscal_type values.
 // Sol = 'fiscal' (default); Luna = 'no_fiscal'. Anything else is a 400.
@@ -158,7 +159,7 @@ export class EnterprisesService {
     }
   }
 
-  async createEnterprise(companyId: string, data: any) {
+  async createEnterprise(companyId: string, data: any, userId?: string) {
     await this.ensureTables();
     try {
       // PR7-T14: normalizar CUIT al inicio para evitar inconsistencias de whitespace
@@ -210,6 +211,21 @@ export class EnterprisesService {
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
       const rows = (result as any).rows || result || [];
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'enterprises',
+          action: 'create',
+          entityType: 'enterprise',
+          entityId: enterpriseId,
+          circuit: null,
+          metadata: { name: data.name, cuit: cuitNormalized, role },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return rows[0];
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -218,7 +234,7 @@ export class EnterprisesService {
     }
   }
 
-  async updateEnterprise(companyId: string, enterpriseId: string, data: any) {
+  async updateEnterprise(companyId: string, enterpriseId: string, data: any, userId?: string) {
     await this.ensureTables();
     try {
       const check = await db.execute(sql`
@@ -301,6 +317,21 @@ export class EnterprisesService {
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);
       const updated = (result as any).rows || result || [];
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'enterprises',
+          action: 'update',
+          entityType: 'enterprise',
+          entityId: enterpriseId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return updated[0];
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -308,7 +339,7 @@ export class EnterprisesService {
     }
   }
 
-  async deleteEnterprise(companyId: string, enterpriseId: string) {
+  async deleteEnterprise(companyId: string, enterpriseId: string, userId?: string) {
     await this.ensureTables();
     try {
       const check = await db.execute(sql`
@@ -320,6 +351,20 @@ export class EnterprisesService {
       // Unlink customers first
       await db.execute(sql`UPDATE customers SET enterprise_id = NULL WHERE enterprise_id = ${enterpriseId}`);
       await db.execute(sql`DELETE FROM enterprises WHERE id = ${enterpriseId} AND company_id = ${companyId}`);
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'enterprises',
+          action: 'delete',
+          entityType: 'enterprise',
+          entityId: enterpriseId,
+          circuit: null,
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { success: true };
     } catch (error) {
       if (error instanceof ApiError) throw error;

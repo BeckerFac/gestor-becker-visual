@@ -40,7 +40,7 @@ export class OrdersController {
   }
 
   async updateOrder(req: AuthRequest, res: Response) {
-    const data = await ordersService.updateOrder(req.user!.company_id, req.params.id, req.body);
+    const data = await ordersService.updateOrder(req.user!.company_id, req.params.id, req.body, req.user!.id);
     res.json(data);
   }
 

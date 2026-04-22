@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 import { getRows, getFirstRow } from '../../lib/db-utils';
 import { escapeHtml as sharedEscapeHtml } from '../../lib/html-escape';
+import { activityService } from '../activity/activity.service';
 
 export class QuotesService {
   private migrationsRun = false;
@@ -231,6 +232,22 @@ export class QuotesService {
       } catch (e) { console.error('CRM sync error (quote_status):', e); }
     }
 
+    // Wave 2C audit.
+    if (!alreadyInState) {
+      try {
+        await activityService.log({
+          companyId,
+          userId: 'system',
+          module: 'quotes',
+          action: 'transition',
+          entityType: 'quote',
+          entityId: quoteId,
+          circuit: null,
+          changes: { status: { new: newStatus } },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+    }
+
     return { quote_id: quoteId, status: newStatus, order, already: alreadyInState };
   }
 
@@ -405,6 +422,20 @@ export class QuotesService {
         });
       } catch (e) { console.error('CRM sync error (quote_created):', e); }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'quotes',
+          action: 'create',
+          entityType: 'quote',
+          entityId: quoteId,
+          circuit: null,
+          metadata: { total_amount: totalAmount, customer_id: data.customer_id },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { id: quoteId, total_amount: totalAmount };
     } catch (error) {
       console.error('Create quote error:', error);
@@ -413,7 +444,7 @@ export class QuotesService {
     }
   }
 
-  async updateQuote(companyId: string, quoteId: string, data: any) {
+  async updateQuote(companyId: string, quoteId: string, data: any, userId?: string) {
     await this.ensureMigrations();
     const client = await pool.connect();
     try {
@@ -511,6 +542,21 @@ export class QuotesService {
       }
 
       await client.query('COMMIT');
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'quotes',
+          action: 'update',
+          entityType: 'quote',
+          entityId: quoteId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { id: quoteId, total_amount: totalAmount };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
@@ -633,6 +679,20 @@ export class QuotesService {
         console.error('CRM sync error (quote_duplicated):', e);
       }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'quotes',
+          action: 'duplicate',
+          entityType: 'quote',
+          entityId: newId,
+          circuit: null,
+          metadata: { source_quote_id: quoteId },
+        });
+      } catch (auditErr) { console.error('[audit] failed:', auditErr); }
+
       return {
         id: newId,
         title: newTitle,
@@ -706,6 +766,21 @@ export class QuotesService {
       );
 
       await client.query('COMMIT');
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'quotes',
+          action: 'delete',
+          entityType: 'quote',
+          entityId: quoteId,
+          circuit: null,
+          metadata: { reason },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { quote_id: quoteId, status: 'cancelled', already: false };
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});

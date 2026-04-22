@@ -4,6 +4,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { generateAccessCode } from '../../utils/access-code';
+import { activityService } from '../activity/activity.service';
 
 // Wave 2A-1 H16: reject non-UUID strings for enterprise_id so silent coercion
 // to NULL (which unlinks the customer) never happens. The canonical UUIDv4
@@ -37,7 +38,7 @@ export class CustomersService {
     this.migrated = true;
   }
 
-  async createCustomer(companyId: string, data: any) {
+  async createCustomer(companyId: string, data: any, userId?: string) {
     try {
       await this.ensureMigrations();
 
@@ -111,6 +112,21 @@ export class CustomersService {
 
       const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId} AND company_id = ${companyId}`);
       const rows = (result as any).rows || result || [];
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'customers',
+          action: 'create',
+          entityType: 'customer',
+          entityId: customerId,
+          circuit: null,
+          metadata: { name: data.name, cuit: cuitToStore, enterprise_id: data.enterprise_id },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return rows[0] || customer[0];
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -176,7 +192,7 @@ export class CustomersService {
     }
   }
 
-  async updateCustomer(companyId: string, customerId: string, data: any) {
+  async updateCustomer(companyId: string, customerId: string, data: any, userId?: string) {
     try {
       await this.ensureMigrations();
       await this.getCustomer(companyId, customerId);
@@ -247,6 +263,21 @@ export class CustomersService {
       // Return updated customer via raw SQL — PR1-T5: scoped by company_id
       const result = await db.execute(sql`SELECT * FROM customers WHERE id = ${customerId} AND company_id = ${companyId}`);
       const rows = (result as any).rows || result || [];
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'customers',
+          action: 'update',
+          entityType: 'customer',
+          entityId: customerId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return rows[0];
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -254,11 +285,25 @@ export class CustomersService {
     }
   }
 
-  async deleteCustomer(companyId: string, customerId: string) {
+  async deleteCustomer(companyId: string, customerId: string, userId?: string) {
     try {
       await this.getCustomer(companyId, customerId);
       await db.delete(customers)
         .where(and(eq(customers.company_id, companyId), eq(customers.id, customerId)));
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'customers',
+          action: 'delete',
+          entityType: 'customer',
+          entityId: customerId,
+          circuit: null,
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { success: true };
     } catch (error) {
       if (error instanceof ApiError) throw error;

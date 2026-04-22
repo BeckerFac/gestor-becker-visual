@@ -5,6 +5,7 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { afipService, AfipService, AuthorizeInvoiceInput } from '../afip/afip.service';
 import { crmSyncService } from '../crm/crm-sync.service';
+import { activityService } from '../activity/activity.service';
 
 function validateNumeric(value: unknown, fieldName: string, { min = 0, max = Infinity, allowZero = true } = {}): number {
   const num = Number(value);
@@ -681,6 +682,20 @@ export class InvoicesService {
         } catch (accErr) { console.warn('Accounting entry skipped (non-fiscal invoice):', (accErr as Error).message); }
       }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'invoices',
+          action: 'create',
+          entityType: 'invoice',
+          entityId: invoiceId,
+          circuit: fiscalType === 'no_fiscal' ? 'no_fiscal' : 'fiscal',
+          metadata: { invoice_type: invoiceType, invoice_number: nextNumber, enterprise_id: enterpriseId },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return {
         id: invoiceId,
         order_id: data.order_id || null,
@@ -951,7 +966,7 @@ export class InvoicesService {
     }
   }
 
-  async updateDraftInvoice(companyId: string, invoiceId: string, data: any) {
+  async updateDraftInvoice(companyId: string, invoiceId: string, data: any, userId?: string) {
     await this.ensureMigrations();
     try {
       // Verify invoice exists and is draft
@@ -1086,6 +1101,20 @@ export class InvoicesService {
         await db.execute(sql`COMMIT`);
       }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'invoices',
+          action: 'update',
+          entityType: 'invoice',
+          entityId: invoiceId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return await this.getInvoice(companyId, invoiceId);
     } catch (error) {
       try { await db.execute(sql`ROLLBACK`); } catch { /* not in tx */ }
@@ -1099,7 +1128,7 @@ export class InvoicesService {
   // add: accountingEntriesService.createReverseEntry(companyId, 'invoice', invoiceId)
   // to generate the contra-entry that reverses the original accounting entry.
 
-  async deleteDraftInvoice(companyId: string, invoiceId: string) {
+  async deleteDraftInvoice(companyId: string, invoiceId: string, userId?: string) {
     await this.ensureMigrations();
     try {
       const invResult = await db.execute(sql`
@@ -1147,6 +1176,19 @@ export class InvoicesService {
           console.warn('[sol-luna] unlockOrder post-delete failed:', (unlockErr as Error).message);
         }
       }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'invoices',
+          action: 'delete',
+          entityType: 'invoice',
+          entityId: invoiceId,
+          circuit: null,
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { deleted: true };
     } catch (error) {
@@ -1299,7 +1341,7 @@ export class InvoicesService {
     }
   }
 
-  async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1, overrideCondicionIva?: number) {
+  async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1, overrideCondicionIva?: number, userId?: string) {
     try {
       // Block internal + Luna vouchers from AFIP authorization
       const ftCheck = await db.execute(sql`SELECT fiscal_type FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}`);
@@ -1651,6 +1693,25 @@ export class InvoicesService {
           items: itemsForAccounting,
         });
       } catch (accErr) { console.warn('Accounting entry skipped (invoice):', (accErr as Error).message); }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'invoices',
+          action: 'authorize',
+          entityType: 'invoice',
+          entityId: invoiceId,
+          circuit: 'fiscal',
+          metadata: {
+            invoice_type: invoiceType,
+            invoice_number: invoice.invoice_number,
+            cae: (updated as any).cae,
+            punto_venta: puntoVenta,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return updated;
     } catch (error) {

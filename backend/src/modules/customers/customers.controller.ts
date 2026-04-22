@@ -9,7 +9,7 @@ export class CustomersController {
       if (!req.user?.company_id || !req.body.name) {
         throw new ApiError(400, 'Missing required fields');
       }
-      const customer = await customersService.createCustomer(req.user.company_id, req.body);
+      const customer = await customersService.createCustomer(req.user.company_id, req.body, req.user.id);
       res.status(201).json(customer);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -52,7 +52,7 @@ export class CustomersController {
   async updateCustomer(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing customer ID');
-      const customer = await customersService.updateCustomer(req.user.company_id, req.params.id, req.body);
+      const customer = await customersService.updateCustomer(req.user.company_id, req.params.id, req.body, req.user.id);
       res.json(customer);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -65,7 +65,7 @@ export class CustomersController {
   async deleteCustomer(req: AuthRequest, res: Response) {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing customer ID');
-      await customersService.deleteCustomer(req.user.company_id, req.params.id);
+      await customersService.deleteCustomer(req.user.company_id, req.params.id, req.user.id);
       res.json({ success: true });
     } catch (error) {
       if (error instanceof ApiError) {

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
+import { activityService } from '../activity/activity.service';
 
 export class OrdersService {
   private migrationsRun = false;
@@ -543,6 +544,20 @@ export class OrdersService {
         });
       } catch (e) { console.error('CRM sync error (order_created):', e); }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'orders',
+          action: 'create',
+          entityType: 'order',
+          entityId: orderId,
+          circuit: fiscalType,
+          metadata: { order_number: orderNumber, total_amount: totalWithVat, customer_id: data.customer_id, enterprise_id: data.enterprise_id },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return {
         id: orderId,
         order_number: orderNumber,
@@ -614,6 +629,21 @@ export class OrdersService {
           }
         }
       } catch (e) { console.error('CRM sync error (order_status):', e); }
+
+      // Wave 2C audit — transition / status change.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'orders',
+          action: 'transition',
+          entityType: 'order',
+          entityId: orderId,
+          circuit: null,
+          changes: { status: { old: oldStatus, new: newStatus } },
+          metadata: { notes: data.notes },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { id: orderId, old_status: oldStatus, new_status: newStatus };
     } catch (error) {
@@ -795,7 +825,7 @@ export class OrdersService {
     }
   }
 
-  async updateOrder(companyId: string, orderId: string, data: any) {
+  async updateOrder(companyId: string, orderId: string, data: any, userId?: string) {
     await this.ensureMigrations();
     try {
       const orderResult = await db.execute(sql`
@@ -905,6 +935,20 @@ export class OrdersService {
         updateClient.release();
       }
       // --- END TRANSACTION ---
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'orders',
+          action: 'update',
+          entityType: 'order',
+          entityId: orderId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { id: orderId, updated: true };
     } catch (error) {
@@ -1073,6 +1117,19 @@ export class OrdersService {
         } finally {
           softClient.release();
         }
+        // Wave 2C audit — soft-delete / anular.
+        try {
+          await activityService.log({
+            companyId,
+            userId: userId || 'system',
+            module: 'orders',
+            action: 'anular',
+            entityType: 'order',
+            entityId: orderId,
+            circuit: null,
+            metadata: { mode: 'soft', reason: opts.reason || null },
+          });
+        } catch (e) { console.error('[audit] failed:', e); }
         return { id: orderId, cancelled: true, mode: 'soft' as const };
       }
 
@@ -1136,6 +1193,20 @@ export class OrdersService {
         hardClient.release();
       }
 
+      // Wave 2C audit — hard delete.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'orders',
+          action: 'delete',
+          entityType: 'order',
+          entityId: orderId,
+          circuit: null,
+          metadata: { mode: 'hard' },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { id: orderId, deleted: true, mode: 'hard' as const };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -1154,6 +1225,24 @@ export class OrdersService {
       SET locked_at = NOW(), locked_reason = ${reason}, locked_by = ${userId}
       WHERE id = ${orderId} AND locked_at IS NULL
     `);
+
+    // Wave 2C audit. Fetch company_id (lockOrder signature doesn't carry it).
+    try {
+      const res = await db.execute(sql`SELECT company_id FROM orders WHERE id = ${orderId}`);
+      const companyId = ((res as any).rows || [])[0]?.company_id;
+      if (companyId) {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'orders',
+          action: 'lock',
+          entityType: 'order',
+          entityId: orderId,
+          circuit: null,
+          metadata: { reason },
+        });
+      }
+    } catch (e) { console.error('[audit] failed:', e); }
   }
 
   /**
@@ -1220,7 +1309,22 @@ export class OrdersService {
       SET locked_at = NULL, locked_reason = NULL, locked_by = NULL
       WHERE id = ${orderId}
     `);
+
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId: 'system',
+        module: 'orders',
+        action: 'unlock',
+        entityType: 'order',
+        entityId: orderId,
+        circuit: null,
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
   }
+
+  // TODO(wave-2C): orders.duplicateOrder (not yet implemented).
 
   async getOrdersWithoutInvoice(companyId: string) {
     try {

@@ -2,6 +2,7 @@ import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { activityService } from '../activity/activity.service';
 
 // ===== Constants =====
 const VALID_INVOICE_TYPES = new Set([
@@ -366,6 +367,24 @@ export class PurchaseInvoicesService {
         console.warn('Accounting entry skipped (purchase_invoice):', (accErr as Error).message);
       }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'purchase-invoices',
+          action: 'create',
+          entityType: 'purchase_invoice',
+          entityId: piId,
+          circuit: null,
+          metadata: {
+            invoice_type: (data as any).invoice_type,
+            invoice_number: (data as any).invoice_number_full,
+            total,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return this.getPurchaseInvoice(companyId, piId);
     } catch (err) {
       await client.query('ROLLBACK').catch(e => console.error('ROLLBACK failed:', e.message));
@@ -433,7 +452,7 @@ export class PurchaseInvoicesService {
   /**
    * C2: Fiscal immutability. Blocks editing of locked fields when payments exist.
    */
-  async updatePurchaseInvoice(companyId: string, piId: string, data: any) {
+  async updatePurchaseInvoice(companyId: string, piId: string, data: any, userId?: string) {
     // Verify exists
     const existing = await this.getPurchaseInvoice(companyId, piId);
 
@@ -566,6 +585,20 @@ export class PurchaseInvoicesService {
       values,
     );
 
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId: userId || 'system',
+        module: 'purchase-invoices',
+        action: 'update',
+        entityType: 'purchase_invoice',
+        entityId: piId,
+        circuit: null,
+        changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     return this.getPurchaseInvoice(companyId, piId);
   }
 
@@ -622,10 +655,24 @@ export class PurchaseInvoicesService {
       console.warn('Reverse accounting entry skipped (purchase_invoice):', (accErr as Error).message);
     }
 
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId,
+        module: 'purchase-invoices',
+        action: 'cancel',
+        entityType: 'purchase_invoice',
+        entityId: piId,
+        circuit: null,
+        metadata: { reason },
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     return { cancelled: true, id: piId };
   }
 
-  async deletePurchaseInvoice(companyId: string, piId: string) {
+  async deletePurchaseInvoice(companyId: string, piId: string, userId?: string) {
     // Check for linked pagos
     const pagoCheck = await db.execute(sql`
       SELECT EXISTS(

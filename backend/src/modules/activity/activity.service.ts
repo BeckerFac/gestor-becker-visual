@@ -9,10 +9,12 @@ interface LogParams {
   module: string;
   entityType: string;
   entityId?: string;
-  description: string;
-  changes?: Record<string, { old: any; new: any }>;
+  description?: string;
+  changes?: Record<string, any>;
   ipAddress?: string;
   metadata?: Record<string, any>;
+  // Sol/Luna circuit: 'fiscal' | 'no_fiscal' | null. null for cross-circuit entities.
+  circuit?: string | null;
 }
 
 interface LogFilters {
@@ -27,15 +29,35 @@ interface LogFilters {
 }
 
 class ActivityService {
+  /**
+   * Fire-and-forget wrapper. Usage:
+   *   activityService.safeLog({ ... });  // don't await if caller doesn't care
+   *   await activityService.safeLog({ ... }); // safe to await; never throws
+   * Ensures an audit failure NEVER breaks the main flow.
+   */
+  async safeLog(params: LogParams): Promise<void> {
+    try {
+      await this.log(params);
+    } catch (e) {
+      // log() already swallows errors; this is a belt-and-suspenders guard.
+      // eslint-disable-next-line no-console
+      console.error('[audit] failed:', e);
+    }
+  }
+
   async log(params: LogParams): Promise<void> {
     try {
       const now = new Date();
       const checksumData = `${params.action}|${params.entityType}|${params.entityId || ''}|${now.toISOString()}|${params.userId}`;
       const checksum = createHash('sha256').update(checksumData).digest('hex');
 
+      // Build description fallback — many new callers skip this (action/entity suffice).
+      const description = params.description
+        || `${params.action} ${params.entityType}${params.entityId ? ` ${params.entityId}` : ''}`;
+
       await pool.query(
-        `INSERT INTO audit_log (company_id, user_id, action, entity_type, entity_id, details, ip_address, module, changes, metadata, checksum, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        `INSERT INTO audit_log (company_id, user_id, action, entity_type, entity_id, details, ip_address, module, changes, metadata, checksum, circuit, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
           params.companyId,
           params.userId || null,
@@ -43,7 +65,7 @@ class ActivityService {
           params.entityType,
           params.entityId || null,
           JSON.stringify({
-            description: params.description,
+            description,
             ...(params.metadata?.description_rich ? { description_rich: params.metadata.description_rich } : {}),
           }),
           params.ipAddress || null,
@@ -51,6 +73,7 @@ class ActivityService {
           params.changes ? JSON.stringify(params.changes) : null,
           params.metadata ? JSON.stringify(params.metadata) : null,
           checksum,
+          params.circuit || null,
           now,
         ]
       );

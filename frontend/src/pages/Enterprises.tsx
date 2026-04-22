@@ -343,8 +343,10 @@ export const Enterprises: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
+      const cuitClean = (contactForm.cuit || '').replace(/[-\s]/g, '').trim();
       const payload = {
         ...contactForm,
+        cuit: cuitClean || null,
         credit_limit: contactForm.credit_limit ? parseFloat(contactForm.credit_limit) : null,
         payment_terms: contactForm.payment_terms ? parseInt(contactForm.payment_terms) : null,
         enterprise_id: contactForm.enterprise_id || null,
@@ -664,7 +666,7 @@ export const Enterprises: React.FC = () => {
                   {enterprises.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
                 </select>
               </div>
-              <Input label="CUIT *" placeholder="20-12345678-9" value={contactForm.cuit} onChange={e => setContactForm({ ...contactForm, cuit: e.target.value })} required />
+              <Input label="CUIT (opcional)" placeholder="20-12345678-9" value={contactForm.cuit} onChange={e => setContactForm({ ...contactForm, cuit: e.target.value })} />
               <Input label="Nombre *" placeholder="Nombre del contacto" value={contactForm.name} onChange={e => setContactForm({ ...contactForm, name: e.target.value })} required />
               <Input label="Cargo / Contacto" placeholder="Nombre del referente" value={contactForm.contact_name} onChange={e => setContactForm({ ...contactForm, contact_name: e.target.value })} />
               <Input label="Rol" placeholder="Comprador, Gerente, etc." value={contactForm.role} onChange={e => setContactForm({ ...contactForm, role: e.target.value })} />

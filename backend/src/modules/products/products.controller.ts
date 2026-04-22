@@ -10,7 +10,7 @@ export class ProductsController {
         throw new ApiError(400, 'Missing required fields');
       }
 
-      const product = await productsService.createProduct(req.user.company_id, req.body);
+      const product = await productsService.createProduct(req.user.company_id, req.body, req.user.id);
       res.status(201).json(product);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -62,7 +62,7 @@ export class ProductsController {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');
 
-      const product = await productsService.updateProduct(req.user.company_id, req.params.id, req.body);
+      const product = await productsService.updateProduct(req.user.company_id, req.params.id, req.body, req.user.id);
       res.json(product);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -278,7 +278,7 @@ export class ProductsController {
     try {
       if (!req.user?.company_id || !req.params.id) throw new ApiError(400, 'Missing product ID');
 
-      await productsService.deleteProduct(req.user.company_id, req.params.id);
+      await productsService.deleteProduct(req.user.company_id, req.params.id, req.user.id);
       res.json({ success: true });
     } catch (error) {
       if (error instanceof ApiError) {

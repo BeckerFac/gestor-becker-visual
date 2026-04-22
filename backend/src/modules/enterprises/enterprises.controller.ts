@@ -16,17 +16,17 @@ export class EnterprisesController {
   }
 
   async createEnterprise(req: AuthRequest, res: Response) {
-    const data = await enterprisesService.createEnterprise(req.user!.company_id, req.body);
+    const data = await enterprisesService.createEnterprise(req.user!.company_id, req.body, req.user!.id);
     res.status(201).json(data);
   }
 
   async updateEnterprise(req: AuthRequest, res: Response) {
-    const data = await enterprisesService.updateEnterprise(req.user!.company_id, req.params.id, req.body);
+    const data = await enterprisesService.updateEnterprise(req.user!.company_id, req.params.id, req.body, req.user!.id);
     res.json(data);
   }
 
   async deleteEnterprise(req: AuthRequest, res: Response) {
-    const data = await enterprisesService.deleteEnterprise(req.user!.company_id, req.params.id);
+    const data = await enterprisesService.deleteEnterprise(req.user!.company_id, req.params.id, req.user!.id);
     res.json(data);
   }
 }

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { inventoryService } from '../inventory/inventory.service';
+import { activityService } from '../activity/activity.service';
 
 /**
  * PurchasesService handles purchase orders (compras).
@@ -484,6 +485,23 @@ export class PurchasesService {
       }
     }
 
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId,
+        module: 'purchases',
+        action: 'create',
+        entityType: 'purchase',
+        entityId: purchaseId!,
+        circuit: null,
+        metadata: {
+          total_amount: data.total_amount,
+          enterprise_id: data.enterprise_id,
+        },
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     return result;
   }
 
@@ -622,6 +640,20 @@ export class PurchasesService {
           (result as any).stock_error = 'No se pudo ajustar el stock automaticamente';
         }
       }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'purchases',
+          action: 'update',
+          entityType: 'purchase',
+          entityId: purchaseId,
+          circuit: null,
+          changes: Object.fromEntries(Object.keys(data || {}).map((k) => [k, { new: data[k] }])),
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return result;
     } catch (error) {
@@ -771,6 +803,20 @@ export class PurchasesService {
       await client.query(`DELETE FROM purchases WHERE id = $1 AND company_id = $2`, [purchaseId, companyId]);
 
       await client.query('COMMIT');
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'purchases',
+          action: 'delete',
+          entityType: 'purchase',
+          entityId: purchaseId,
+          circuit: null,
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { success: true };
     } catch (error) {
       await client.query('ROLLBACK').catch((e: any) => console.error('ROLLBACK failed:', e?.message));

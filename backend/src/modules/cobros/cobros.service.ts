@@ -4,6 +4,7 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { crmSyncService } from '../crm/crm-sync.service';
 import { ordersService } from '../orders/orders.service';
+import { activityService } from '../activity/activity.service';
 
 interface PaymentMethodInput {
   method: string;
@@ -745,6 +746,24 @@ export class CobrosService {
         }
       } catch (e) { console.error('CRM sync error (cobro_created):', e); }
 
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'cobros',
+          action: 'create',
+          entityType: 'cobro',
+          entityId: cobroId,
+          circuit: (cobro as any)?.fiscal_type || null,
+          metadata: {
+            amount: data.amount ?? (cobro as any)?.amount,
+            payment_method: data.payment_method,
+            enterprise_id: data.enterprise_id,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return cobro;
     } catch (error) {
       console.error('Create cobro error:', error);
@@ -855,6 +874,20 @@ export class CobrosService {
           await accountingEntriesService.createReverseEntry(cobroForAccounting.company_id, 'cobro', cobroId);
         } catch (accErr) { console.warn('Accounting reversal skipped (cobro):', (accErr as Error).message); }
       }
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'cobros',
+          action: 'anular',
+          entityType: 'cobro',
+          entityId: cobroId,
+          circuit: cobroForAccounting?.fiscal_type || null,
+          metadata: { reason: reason || null },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { success: true, status: 'anulado' };
     } catch (error) {
