@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockPoolQuery, resetMocks } from './helpers/setup'
 
 import { EnterprisesService } from '../src/modules/enterprises/enterprises.service'
 
@@ -33,6 +33,8 @@ describe('EnterprisesService - default_fiscal_type (Nor feedback item 3)', () =>
   }
 
   // Capture all execute calls so we can assert payload values.
+  // Wave 2A-1 H12: updateEnterprise now uses pool.query for the UPDATE, so we
+  // also record mockPoolQuery calls under the same shape.
   function captureExecutes() {
     const calls: Array<{ sql: string; values: any[] }> = []
     mockDbExecute.mockImplementation((...args: any[]) => {
@@ -50,6 +52,10 @@ describe('EnterprisesService - default_fiscal_type (Nor feedback item 3)', () =>
       if (sqlStr.includes('SELECT * FROM enterprises WHERE id')) {
         return Promise.resolve({ rows: [{ id: 'ent-1', name: 'X', default_fiscal_type: 'fiscal' }] })
       }
+      return Promise.resolve({ rows: [] })
+    })
+    mockPoolQuery.mockImplementation((sqlStr: string, values: any[]) => {
+      calls.push({ sql: sqlStr, values: values ?? [] })
       return Promise.resolve({ rows: [] })
     })
     return calls

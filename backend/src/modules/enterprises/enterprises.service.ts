@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -174,88 +174,72 @@ export class EnterprisesService {
       const rows = (check as any).rows || check || [];
       if (rows.length === 0) throw new ApiError(404, 'Enterprise not found');
 
-      // Validate CUIT format if updating
-      if (data.cuit) {
-        const cleanCuit = data.cuit.replace(/-/g, '');
-        if (!/^\d{11}$/.test(cleanCuit)) {
-          throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos (XX-XXXXXXXX-X)');
+      // Wave 2A-1 H12: MERGE semantics. Only UPDATE columns explicitly present
+      // in the payload; never overwrite unsent fields with NULL. The previous
+      // full-replace UPDATE destroyed razon_social/cuit/fiscal_address/etc. on
+      // every partial PUT from the UI edit modal.
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let i = 1;
+      const push = (col: string, val: any) => {
+        setClauses.push(`${col} = $${i++}`);
+        values.push(val);
+      };
+
+      // Validate CUIT format if sending (empty string → null, valid 11-digit required otherwise).
+      if ('cuit' in data) {
+        const raw = typeof data.cuit === 'string' ? data.cuit : (data.cuit == null ? '' : String(data.cuit));
+        const trimmed = raw.trim();
+        if (trimmed === '') {
+          push('cuit', null);
+        } else {
+          const cleanCuit = trimmed.replace(/[-\s]/g, '');
+          if (!/^\d{11}$/.test(cleanCuit)) {
+            throw new ApiError(400, 'CUIT invalido. Debe tener 11 digitos (XX-XXXXXXXX-X)');
+          }
+          push('cuit', trimmed);
         }
       }
 
-      // Handle access_code update separately (can be set to null to revoke)
-      if (data.access_code !== undefined) {
-        // HIGH-6: if the client sends an explicit code instead of null, enforce
-        // a minimum length so we don't downgrade to predictable values. If the
-        // client wants a fresh strong code they should pass null and call the
-        // regenerate flow (or we generate server-side).
+      // Handle access_code update (can be set to null to revoke).
+      if ('access_code' in data) {
+        // HIGH-6: enforce minimum length; weak codes auto-upgrade to a strong one.
         let nextCode = data.access_code;
         if (nextCode !== null) {
           if (typeof nextCode !== 'string' || nextCode.length < ACCESS_CODE_MIN_LENGTH) {
-            // Auto-upgrade: ignore weak client-provided code and generate a strong one.
             nextCode = generateAccessCode();
           }
         }
-        await db.execute(sql`
-          UPDATE enterprises SET access_code = ${nextCode}, updated_at = NOW()
-          WHERE id = ${enterpriseId} AND company_id = ${companyId}
-        `);
+        push('access_code', nextCode);
       }
 
-      // Update other fields only if name is provided (full update vs partial)
-      if (data.name !== undefined) {
-        // Nor feedback item 3: validate default_fiscal_type if sent.
-        // When the field is not sent on update, keep whatever is stored (no overwrite).
-        const hasDefaultFiscalType = data.default_fiscal_type !== undefined;
-        const nextDefaultFiscalType = hasDefaultFiscalType
-          ? normalizeDefaultFiscalType(data.default_fiscal_type)
-          : null;
+      if ('name' in data) push('name', data.name);
+      if ('razon_social' in data) push('razon_social', data.razon_social || null);
+      if ('address' in data) push('address', data.address || null);
+      if ('city' in data) push('city', data.city || null);
+      if ('province' in data) push('province', data.province || null);
+      if ('postal_code' in data) push('postal_code', data.postal_code || null);
+      if ('fiscal_address' in data) push('fiscal_address', data.fiscal_address || null);
+      if ('fiscal_city' in data) push('fiscal_city', data.fiscal_city || null);
+      if ('fiscal_province' in data) push('fiscal_province', data.fiscal_province || null);
+      if ('fiscal_postal_code' in data) push('fiscal_postal_code', data.fiscal_postal_code || null);
+      if ('phone' in data) push('phone', data.phone || null);
+      if ('email' in data) push('email', data.email || null);
+      if ('tax_condition' in data) push('tax_condition', data.tax_condition || null);
+      if ('notes' in data) push('notes', data.notes || null);
+      if ('default_discount' in data) push('default_discount', data.default_discount ?? 0);
+      if ('default_fiscal_type' in data) {
+        push('default_fiscal_type', normalizeDefaultFiscalType(data.default_fiscal_type));
+      }
 
-        if (hasDefaultFiscalType) {
-          await db.execute(sql`
-            UPDATE enterprises SET
-              name = ${data.name},
-              razon_social = ${data.razon_social || null},
-              cuit = ${data.cuit || null},
-              address = ${data.address || null},
-              city = ${data.city || null},
-              province = ${data.province || null},
-              postal_code = ${data.postal_code || null},
-              fiscal_address = ${data.fiscal_address || null},
-              fiscal_city = ${data.fiscal_city || null},
-              fiscal_province = ${data.fiscal_province || null},
-              fiscal_postal_code = ${data.fiscal_postal_code || null},
-              phone = ${data.phone || null},
-              email = ${data.email || null},
-              tax_condition = ${data.tax_condition || null},
-              notes = ${data.notes || null},
-              default_discount = ${data.default_discount ?? 0},
-              default_fiscal_type = ${nextDefaultFiscalType},
-              updated_at = NOW()
-            WHERE id = ${enterpriseId} AND company_id = ${companyId}
-          `);
-        } else {
-          await db.execute(sql`
-            UPDATE enterprises SET
-              name = ${data.name},
-              razon_social = ${data.razon_social || null},
-              cuit = ${data.cuit || null},
-              address = ${data.address || null},
-              city = ${data.city || null},
-              province = ${data.province || null},
-              postal_code = ${data.postal_code || null},
-              fiscal_address = ${data.fiscal_address || null},
-              fiscal_city = ${data.fiscal_city || null},
-              fiscal_province = ${data.fiscal_province || null},
-              fiscal_postal_code = ${data.fiscal_postal_code || null},
-              phone = ${data.phone || null},
-              email = ${data.email || null},
-              tax_condition = ${data.tax_condition || null},
-              notes = ${data.notes || null},
-              default_discount = ${data.default_discount ?? 0},
-              updated_at = NOW()
-            WHERE id = ${enterpriseId} AND company_id = ${companyId}
-          `);
-        }
+      if (setClauses.length > 0) {
+        const idIdx = i++;
+        const companyIdx = i++;
+        values.push(enterpriseId, companyId);
+        await pool.query(
+          `UPDATE enterprises SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${idIdx} AND company_id = $${companyIdx}`,
+          values
+        );
       }
 
       const result = await db.execute(sql`SELECT * FROM enterprises WHERE id = ${enterpriseId}`);

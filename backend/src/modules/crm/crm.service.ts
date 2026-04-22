@@ -589,6 +589,7 @@ export class CrmService {
     notes?: string | null;
     enterprise_id?: string | null;
     customer_id?: string | null;
+    stage_id?: string;
   }) {
     await this.ensureTables();
     try {
@@ -602,18 +603,51 @@ export class CrmService {
         throw new ApiError(400, `Prioridad invalida: ${data.priority}`);
       }
 
-      await db.execute(sql`
-        UPDATE crm_deals SET
-          title = COALESCE(${data.title || null}, title),
-          value = COALESCE(${data.value !== undefined ? data.value : null}, value),
-          priority = COALESCE(${data.priority || null}, priority),
-          expected_close_date = ${data.expected_close_date !== undefined ? (data.expected_close_date || null) : null},
-          notes = ${data.notes !== undefined ? (data.notes || null) : null},
-          enterprise_id = ${data.enterprise_id !== undefined ? (data.enterprise_id || null) : null},
-          customer_id = ${data.customer_id !== undefined ? (data.customer_id || null) : null},
-          updated_at = NOW()
-        WHERE id = ${dealId} AND company_id = ${companyId}
-      `);
+      // Wave 2A-1 H23: MERGE semantics. Previous code clobbered
+      // enterprise_id/customer_id/notes/date to NULL whenever the field was
+      // absent from the payload, and ignored stage_id entirely.
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let i = 1;
+      const push = (col: string, val: any) => {
+        setClauses.push(`${col} = $${i++}`);
+        values.push(val);
+      };
+
+      if ('title' in data && data.title !== undefined) push('title', data.title);
+      if ('value' in data && data.value !== undefined) push('value', data.value);
+      if ('priority' in data && data.priority !== undefined) push('priority', data.priority);
+      if ('expected_close_date' in data) push('expected_close_date', data.expected_close_date || null);
+      if ('notes' in data) push('notes', data.notes ?? null);
+      if ('enterprise_id' in data) push('enterprise_id', data.enterprise_id ?? null);
+      if ('customer_id' in data) push('customer_id', data.customer_id ?? null);
+
+      // Wave 2A-1 H23: stage_id must be validated against crm_stages for the
+      // same company. Valid → update both stage_id and the denormalized stage
+      // name. Invalid UUID or missing row → 400.
+      if ('stage_id' in data && data.stage_id !== undefined) {
+        const stageResult = await db.execute(sql`
+          SELECT id, name FROM crm_stages
+          WHERE id = ${data.stage_id} AND company_id = ${companyId}
+          LIMIT 1
+        `);
+        const stageRows = (stageResult as any).rows || stageResult || [];
+        if (stageRows.length === 0) {
+          throw new ApiError(400, 'stage_id invalido');
+        }
+        push('stage_id', stageRows[0].id);
+        push('stage', String(stageRows[0].name).toLowerCase());
+      }
+
+      if (setClauses.length > 0) {
+        const idIdx = i++;
+        const companyIdx = i++;
+        values.push(dealId, companyId);
+        await pool.query(
+          `UPDATE crm_deals SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${idIdx} AND company_id = $${companyIdx}`,
+          values
+        );
+      }
 
       const result = await db.execute(sql`
         SELECT d.*,

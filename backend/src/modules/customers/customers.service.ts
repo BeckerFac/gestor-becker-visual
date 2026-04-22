@@ -5,6 +5,20 @@ import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { generateAccessCode } from '../../utils/access-code';
 
+// Wave 2A-1 H16: reject non-UUID strings for enterprise_id so silent coercion
+// to NULL (which unlinks the customer) never happens. The canonical UUIDv4
+// format is enforced; `null` is accepted as an explicit "unset", and undefined
+// (field missing) means "do not touch".
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validateEnterpriseIdOrThrow(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !UUID_REGEX.test(value)) {
+    throw new ApiError(400, 'enterprise_id invalido');
+  }
+  return value;
+}
+
 export class CustomersService {
   private migrated = false;
 
@@ -26,6 +40,12 @@ export class CustomersService {
   async createCustomer(companyId: string, data: any) {
     try {
       await this.ensureMigrations();
+
+      // Wave 2A-1 H16: validate enterprise_id early so we never create a
+      // detached customer and then 500 on the follow-up UPDATE.
+      if (data.enterprise_id !== undefined) {
+        validateEnterpriseIdOrThrow(data.enterprise_id);
+      }
 
       // CUIT is optional (Nor feedback item 2). Validate format only if provided.
       // Accept "20-12345678-9" or "20123456789"; store normalized as NULL when empty.
@@ -68,7 +88,10 @@ export class CustomersService {
         await db.execute(sql`UPDATE customers SET notes = ${data.notes} WHERE id = ${customerId} AND company_id = ${companyId}`);
       }
       if (data.enterprise_id !== undefined) {
-        await db.execute(sql`UPDATE customers SET enterprise_id = ${data.enterprise_id || null} WHERE id = ${customerId} AND company_id = ${companyId}`);
+        // Wave 2A-1 H16: validate BEFORE writing. Empty string or malformed
+        // UUID used to coerce to NULL (silent unlink); now throws 400.
+        const validEnterpriseId = validateEnterpriseIdOrThrow(data.enterprise_id);
+        await db.execute(sql`UPDATE customers SET enterprise_id = ${validEnterpriseId} WHERE id = ${customerId} AND company_id = ${companyId}`);
       }
       if (data.role !== undefined) {
         await db.execute(sql`UPDATE customers SET role = ${data.role || null} WHERE id = ${customerId} AND company_id = ${companyId}`);
@@ -173,9 +196,12 @@ export class CustomersService {
         delete data.notes;
       }
 
-      // Handle enterprise_id separately (not in Drizzle schema)
+      // Handle enterprise_id separately (not in Drizzle schema).
+      // Wave 2A-1 H16: validate format — empty string or malformed UUID → 400.
+      // null is accepted as an explicit unlink.
       if (data.enterprise_id !== undefined) {
-        await db.execute(sql`UPDATE customers SET enterprise_id = ${data.enterprise_id || null} WHERE id = ${customerId} AND company_id = ${companyId}`);
+        const validEnterpriseId = validateEnterpriseIdOrThrow(data.enterprise_id);
+        await db.execute(sql`UPDATE customers SET enterprise_id = ${validEnterpriseId} WHERE id = ${customerId} AND company_id = ${companyId}`);
         delete data.enterprise_id;
       }
 
