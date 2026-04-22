@@ -209,9 +209,14 @@ export class InventoryService {
 
   async getStock(companyId: string) {
     try {
+      // NOTE: both `s.quantity` and `s.quantity_num` are NUMERIC columns
+      // (legacy comments calling `quantity` VARCHAR are stale). The regex
+      // operator `~` only works on text, so it used to throw on every call.
+      // Simple COALESCE suffices: prefer the new column, fall back to the
+      // legacy numeric column, then to 0.
       const result = await db.execute(sql`
         SELECT s.id,
-               COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) as quantity,
+               COALESCE(s.quantity_num, s.quantity, 0) as quantity,
                s.min_level, s.max_level,
                p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
@@ -237,9 +242,13 @@ export class InventoryService {
 
   async getLowStock(companyId: string) {
     try {
+      // See getStock above for the rationale on dropping the regex cast.
+      // Both `quantity` and `quantity_num` are NUMERIC; plain COALESCE works.
+      // `low_stock_threshold` and `min_level` may be NULL, hence the inner
+      // COALESCE chain for the comparison threshold.
       const result = await db.execute(sql`
         SELECT s.id,
-               COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) as quantity,
+               COALESCE(s.quantity_num, s.quantity, 0) as quantity,
                s.min_level, p.low_stock_threshold,
                json_build_object('id', p.id, 'name', p.name, 'sku', p.sku) as product,
                json_build_object('id', w.id, 'name', w.name) as warehouse
@@ -248,9 +257,9 @@ export class InventoryService {
         JOIN warehouses w ON s.warehouse_id = w.id
         WHERE p.company_id = ${companyId}
           AND p.controls_stock = true
-          AND COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) <= COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0)
-          AND COALESCE(CAST(p.low_stock_threshold AS decimal), CAST(s.min_level AS decimal), 0) > 0
-        ORDER BY COALESCE(s.quantity_num, (CASE WHEN s.quantity ~ '^-?[0-9.]+$' THEN CAST(s.quantity AS decimal) ELSE 0 END)) ASC
+          AND COALESCE(s.quantity_num, s.quantity, 0) <= COALESCE(CAST(p.low_stock_threshold AS decimal), s.min_level, 0)
+          AND COALESCE(CAST(p.low_stock_threshold AS decimal), s.min_level, 0) > 0
+        ORDER BY COALESCE(s.quantity_num, s.quantity, 0) ASC
       `);
 
       const rows = (result as any).rows || result || [];
