@@ -267,6 +267,10 @@ export const invoice_items = pgTable('invoice_items', {
   unit_price: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
   vat_rate: decimal('vat_rate', { precision: 5, scale: 2 }).notNull(),
   subtotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull(),
+  // Snapshot of product cost at emission time. Used by the Rentabilidad
+  // report to compute per-line margin. Defaulted to 0 for historical rows;
+  // createInvoice/updateInvoice resolve it from product_pricing.
+  cost: decimal('cost', { precision: 12, scale: 2 }).default('0'),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

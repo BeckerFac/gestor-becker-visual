@@ -15,6 +15,31 @@ function validateNumeric(value: unknown, fieldName: string, { min = 0, max = Inf
   return num;
 }
 
+/**
+ * Resolve the current product cost from product_pricing for snapshot on
+ * invoice_items.cost. Returns 0 when:
+ *  - productId is null (manual line item, no linked product),
+ *  - the product has no pricing row yet,
+ *  - the cost column is unreadable for any reason.
+ * Never throws — cost is a best-effort snapshot used only by reports.
+ */
+async function resolveProductCost(productId: string | null): Promise<string> {
+  if (!productId) return '0';
+  try {
+    const result = await db.execute(sql`
+      SELECT cost FROM product_pricing WHERE product_id = ${productId} LIMIT 1
+    `);
+    const rows = (result as any).rows || result || [];
+    if (rows.length === 0) return '0';
+    const cost = rows[0].cost;
+    if (cost == null) return '0';
+    const parsed = Number(cost);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed.toString() : '0';
+  } catch {
+    return '0';
+  }
+}
+
 export class InvoicesService {
   private migrationsRun = false;
 
@@ -501,6 +526,9 @@ export class InvoicesService {
           vatAmount += itemVat;
 
           const itemId = uuid();
+          // Snapshot cost from product_pricing. Best-effort: returns '0' when
+          // no product_id / no pricing / on error. Used by Rentabilidad report.
+          const itemCost = await resolveProductCost(productId);
           await db.insert(invoice_items).values({
             id: itemId,
             invoice_id: invoiceId,
@@ -510,6 +538,7 @@ export class InvoicesService {
             unit_price: unitPrice.toString(),
             vat_rate: vatRate.toString(),
             subtotal: itemSubtotal.toString(),
+            cost: itemCost,
           });
 
           // Link invoice_item to order_item if provided
@@ -1023,6 +1052,8 @@ export class InvoicesService {
           vatAmount += itemVat;
 
           const itemId = uuid();
+          // Snapshot cost from product_pricing (updateInvoice path).
+          const itemCost = await resolveProductCost(item.product_id || null);
           await db.insert(invoice_items).values({
             id: itemId,
             invoice_id: invoiceId,
@@ -1032,6 +1063,7 @@ export class InvoicesService {
             unit_price: unitPrice.toString(),
             vat_rate: vatRate.toString(),
             subtotal: itemSubtotal.toString(),
+            cost: itemCost,
           });
 
           if (item.order_item_id) {
@@ -1238,6 +1270,8 @@ export class InvoicesService {
         const itemSubtotal = unitPrice * qty;
 
         const itemId = uuid();
+        // Snapshot cost from product_pricing (manual-import path).
+        const itemCost = await resolveProductCost(item.product_id || null);
         await db.insert(invoice_items).values({
           id: itemId,
           invoice_id: invoiceId,
@@ -1247,6 +1281,7 @@ export class InvoicesService {
           unit_price: unitPrice.toString(),
           vat_rate: vatRate.toString(),
           subtotal: itemSubtotal.toString(),
+          cost: itemCost,
         });
       }
 

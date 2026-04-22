@@ -130,6 +130,23 @@ export async function runCriticalMigrations() {
     // invoices: ensure fiscal_type exists (already added lazily by invoices.service, but belt-and-suspenders)
     [`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fiscal_type VARCHAR(20) DEFAULT 'fiscal'`, 'invoices.fiscal_type'],
 
+    // invoice_items.cost: per-line cost snapshot at emission time. Required by
+    // the Rentabilidad report (reports/business.service.getRentabilidadReport)
+    // which computes margin from ii.subtotal - ii.quantity * ii.cost.
+    // Without this column, the report returns warnings "column ii.cost does
+    // not exist" and zeroed margins. Snapshot pattern (not join to live
+    // product_pricing) so historical margins remain accurate even if costs
+    // are updated later.
+    [`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS cost DECIMAL(12,2) DEFAULT 0`, 'invoice_items.cost'],
+    // Backfill cost from product_pricing for existing rows where product_id
+    // is set. product_pricing.cost is the current live cost — it's an
+    // approximation for historical rows (the "perfect" value would be the
+    // cost at emission time, but we don't have it). Future inserts will
+    // snapshot cost at emission time via invoices.service.createInvoice.
+    [`UPDATE invoice_items ii
+      SET cost = COALESCE((SELECT pp.cost FROM product_pricing pp WHERE pp.product_id = ii.product_id LIMIT 1), 0)
+      WHERE (ii.cost IS NULL OR ii.cost = 0) AND ii.product_id IS NOT NULL`, 'invoice_items.cost backfill'],
+
     // audit_log: circuit tagging (sol/luna)
     [`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS circuit VARCHAR(20)`, 'audit_log.circuit'],
 
@@ -173,10 +190,45 @@ export async function runCriticalMigrations() {
     [`UPDATE account_adjustments SET fiscal_type='fiscal' WHERE fiscal_type IS NULL`, 'backfill: account_adjustments.fiscal_type'],
     [`UPDATE users SET can_access_luna=FALSE WHERE can_access_luna IS NULL`, 'backfill: users.can_access_luna null->false'],
     [`UPDATE users SET can_access_luna=TRUE WHERE role IN ('owner','admin') AND can_access_luna IS DISTINCT FROM TRUE`, 'backfill: users.can_access_luna admins=true'],
+
+    // ════════════════════════════════════════════════════════════════
+    // Accounting: bring legacy chart_of_accounts + journal_entries up to
+    // the current schema. Prod created these tables from the OLD definition
+    // (without is_header, without UNIQUE(company_id, code), without is_auto).
+    // Without these ALTERs: POST /seed + GET /balance + GET /balance-sheet
+    // all 500 with "column ... does not exist".
+    // ════════════════════════════════════════════════════════════════
+    ['ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS is_header BOOLEAN DEFAULT false', 'chart_of_accounts.is_header'],
+    ['UPDATE chart_of_accounts SET is_header = false WHERE is_header IS NULL', 'chart_of_accounts.is_header backfill'],
+    ['ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1', 'chart_of_accounts.level'],
+    ['UPDATE chart_of_accounts SET level = 1 WHERE level IS NULL', 'chart_of_accounts.level backfill'],
+    // journal_entries: columns referenced by INSERTs (is_auto) and service code.
+    ['ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS is_auto BOOLEAN DEFAULT true', 'journal_entries.is_auto'],
+    ['UPDATE journal_entries SET is_auto = true WHERE is_auto IS NULL', 'journal_entries.is_auto backfill'],
+    // journal_entry_lines table may not exist in the legacy schema; create it.
+    [`CREATE TABLE IF NOT EXISTS journal_entry_lines (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       entry_id UUID NOT NULL,
+       account_id UUID NOT NULL,
+       debit DECIMAL(12,2) DEFAULT 0,
+       credit DECIMAL(12,2) DEFAULT 0,
+       description TEXT
+     )`, 'journal_entry_lines table'],
   ];
   for (const [sql, label] of criticalAlters) {
     await tryMig(sql, `critical: ${label}`);
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // chart_of_accounts: UNIQUE(company_id, code) — required by seed's
+  // ON CONFLICT clause. Legacy schema omits this constraint, so seed
+  // crashes with "there is no unique or exclusion constraint matching".
+  // Must CREATE UNIQUE INDEX (IF NOT EXISTS) — a separate statement.
+  // ════════════════════════════════════════════════════════════════
+  await tryMig(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_chart_of_accounts_company_code ON chart_of_accounts(company_id, code)`,
+    'critical: chart_of_accounts UNIQUE(company_id, code)'
+  );
 
   // ════════════════════════════════════════════════════════════════
   // Nor-fix (item 1): ensure every company has at least one business_unit,
