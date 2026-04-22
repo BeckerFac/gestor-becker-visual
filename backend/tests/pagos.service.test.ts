@@ -189,6 +189,58 @@ describe('PagosService - FLOW 46 + bug-pack C1..C5 fixes', () => {
         })
       ).rejects.toThrow(/Transferencia requiere bank_id/)
     })
+
+    // H18: frontend sends 'cheque_emitido' for own cheques. Backend previously
+    // only matched 'cheque', so cheque_emitido rows were silently dropped and
+    // multi-method combos (transferencia + cheque_emitido) could 500. This
+    // test pins: multi-method POST creates 1 cheque + 2 pago_payment_methods.
+    it('multi-method (transferencia + cheque_emitido) creates exactly 1 cheque row + 2 pago_payment_methods', async () => {
+      setupDbExecute()
+      setupClientQuery()
+
+      const chequeInserts: string[] = []
+      const pmInserts: string[] = []
+      const origImpl = mockClientQuery.getMockImplementation()!
+      mockClientQuery.mockImplementation((...args: any[]) => {
+        const q = (args[0] || '').toString()
+        if (q.includes('INSERT INTO cheques')) chequeInserts.push(q)
+        if (q.includes('INSERT INTO pago_payment_methods')) pmInserts.push(q)
+        return origImpl(...args)
+      })
+
+      await service.createPago(companyId, userId, {
+        enterprise_id: enterpriseId,
+        business_unit_id: buId,
+        payment_methods: [
+          { method: 'transferencia', amount: 3000, bank_id: bankId, reference: 'TRF-1' },
+          {
+            method: 'cheque_emitido', amount: 2000,
+            cheque_data: {
+              number: '00077', bank: 'Galicia', drawer: 'Acme SA',
+              issue_date: '2026-04-01', due_date: '2026-05-01', cheque_type: 'propio',
+            },
+          },
+        ],
+      })
+
+      expect(pmInserts.length).toBe(2)
+      expect(chequeInserts.length).toBe(1)
+      expect(chequeInserts[0]).toContain("'emitido'")
+    })
+
+    it('cheque_emitido with missing cheque_data fails validation (400, not 500)', async () => {
+      setupDbExecute()
+      setupClientQuery()
+
+      await expect(
+        service.createPago(companyId, userId, {
+          enterprise_id: enterpriseId,
+          payment_methods: [
+            { method: 'cheque_emitido', amount: 1000, cheque_data: { number: '1' } },
+          ],
+        })
+      ).rejects.toThrow(/Cheque incompleto/)
+    })
   })
 
   describe('Bug B: IDOR + integrity validations', () => {

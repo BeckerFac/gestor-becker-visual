@@ -202,6 +202,70 @@ describe('ChequesService', () => {
       const result = await service.getCheques('company-1', { status: 'todos' })
       expect(result).toEqual([])
     })
+
+    // H19: direction filter must reach the SQL so /cheques?direction=recibido
+    // and /cheques?direction=emitido return different filtered sets.
+    it('passes different direction values through to produce distinct filters', async () => {
+      mockMigrations()
+      const seen: Array<{ direction?: string; values: any[] }> = []
+      mockDbExecute.mockImplementation((tpl: any) => {
+        // Recurse into nested sql template fragments to find the direction value.
+        const collected: any[] = []
+        const walk = (node: any) => {
+          if (!node || typeof node !== 'object') return
+          if (Array.isArray(node.values)) {
+            for (const v of node.values) {
+              if (v && typeof v === 'object' && Array.isArray(v.values)) walk(v)
+              else collected.push(v)
+            }
+          }
+        }
+        walk(tpl)
+        seen.push({ values: collected })
+        return Promise.resolve({ rows: [] })
+      })
+
+      await service.getCheques('company-1', { direction: 'recibido' })
+      await service.getCheques('company-1', { direction: 'emitido' })
+
+      const flat = seen.map(s => s.values.join('|'))
+      expect(flat[0]).toContain('recibido')
+      expect(flat[1]).toContain('emitido')
+      expect(flat[0]).not.toEqual(flat[1])
+    })
+  })
+
+  // H19: controller must forward req.query.direction to the service.
+  describe('ChequesController - direction query param (H19)', () => {
+    it('forwards req.query.direction to chequesService.getCheques', async () => {
+      const { chequesController } = await import('../src/modules/cheques/cheques.controller')
+
+      const captured: any[] = []
+      const origGet = (service as any).getCheques
+      const svcModule = await import('../src/modules/cheques/cheques.service')
+      const spy = (svcModule as any).chequesService
+      const orig = spy.getCheques
+      spy.getCheques = (...args: any[]) => {
+        captured.push(args)
+        return Promise.resolve([])
+      }
+
+      try {
+        const req: any = {
+          user: { company_id: 'company-1', id: 'user-1' },
+          query: { direction: 'emitido', status: 'a_cobrar' },
+        }
+        const res: any = { json: () => {} }
+        await chequesController.getCheques(req, res)
+
+        expect(captured.length).toBe(1)
+        const filters = captured[0][1]
+        expect(filters.direction).toBe('emitido')
+        expect(filters.status).toBe('a_cobrar')
+      } finally {
+        spy.getCheques = orig
+      }
+    })
   })
 
   describe('getSummary', () => {

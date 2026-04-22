@@ -353,6 +353,45 @@ describe('PurchasesService', () => {
   // ------------------------------------------------------------------
   // C7 — updatePurchase locked when linked to invoices/pagos
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // Wave 2A-3 / Bug 3 — POST purchase with retenciones[] succeeds (smoke).
+  // Regression after Wave 1C fixed the missing retenciones.created_by column.
+  // ------------------------------------------------------------------
+  describe('Wave 2A-3: POST purchase with retenciones smoke test', () => {
+    it('inserts retencion rows with created_by populated and does not 500', async () => {
+      drainEnsureTables()
+      mockDbRows([]) // default BU lookup
+
+      const captured: Array<{ sql: string; params: any[] }> = []
+      mockClientQuery.mockImplementation((sqlStr: string, params?: any[]) => {
+        const s = String(sqlStr)
+        captured.push({ sql: s, params: params || [] })
+        if (/COALESCE\(MAX\(purchase_number/.test(s)) {
+          return Promise.resolve({ rows: [{ next_number: '1' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+
+      mockDbRows([{ id: 'p-1', total_amount: '100' }])
+      mockDbRows([])
+
+      await service.createPurchase('company-A', 'user-42', {
+        items: [{ product_name: 'X', quantity: 1, unit_price: 100, vat_rate: 0 }],
+        retenciones: [
+          // base 100 * 2% = 2 — within tolerance
+          { type: 'ganancias', base_amount: 100, rate: 2, amount: 2 },
+        ],
+      })
+
+      const retInsert = captured.find(c => /INSERT INTO retenciones/.test(c.sql))
+      expect(retInsert).toBeDefined()
+      // Position of created_by in the INSERT params (see purchases.service.ts):
+      // [uuid, companyId, type, regime, enterprise_id, purchaseId,
+      //  base(6), rate(7), amount(8), cert(9), date(10), period(11), created_by(12), jurisdiction(13)]
+      expect(retInsert!.params[12]).toBe('user-42')
+    })
+  })
+
   describe('C7 — updatePurchase locked when invoiced/paid', () => {
     it('throws 409 when trying to change items on a purchase with linked invoice', async () => {
       drainEnsureTables()

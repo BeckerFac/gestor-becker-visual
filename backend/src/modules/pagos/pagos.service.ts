@@ -215,6 +215,11 @@ export class PagosService {
           cheque_data: data.cheque_data,
         }];
 
+    // H18 fix: the frontend sends 'cheque_emitido' for outgoing own cheques while
+    // older callers send plain 'cheque'. Treat both as the same emitido-cheque path
+    // here so validation + cheque-row insertion below both fire correctly.
+    const isChequeEmitidoMethod = (m: string) => m === 'cheque' || m === 'cheque_emitido';
+
     for (const pm of paymentMethods) {
       if (!pm.method) throw new ApiError(400, 'Cada metodo de pago requiere un campo "method"');
       if (!Number.isFinite(pm.amount) || pm.amount <= 0) {
@@ -223,7 +228,7 @@ export class PagosService {
       if (pm.method === 'transferencia' && !pm.bank_id) {
         throw new ApiError(400, 'Transferencia requiere bank_id');
       }
-      if (pm.method === 'cheque') {
+      if (isChequeEmitidoMethod(pm.method)) {
         if (!pm.cheque_data) throw new ApiError(400, 'Cheque requiere cheque_data');
         const cd = pm.cheque_data;
         if (!cd.bank || !cd.number || !cd.drawer) {
@@ -449,7 +454,7 @@ export class PagosService {
             pm.cheque_data ? JSON.stringify(pm.cheque_data) : null,
           ]
         );
-        if (pm.method === 'cheque' && pm.cheque_data) {
+        if (isChequeEmitidoMethod(pm.method) && pm.cheque_data) {
           await client.query(
             `INSERT INTO cheques (
                id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount,

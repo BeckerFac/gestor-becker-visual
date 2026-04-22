@@ -10,6 +10,7 @@ export class ChequesController {
       due_from: req.query.due_from as string,
       due_to: req.query.due_to as string,
       business_unit_id: req.query.business_unit_id as string,
+      direction: req.query.direction as 'recibido' | 'emitido' | undefined,
     });
     res.json(data);
   }
