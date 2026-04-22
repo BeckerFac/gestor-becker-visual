@@ -98,9 +98,14 @@ export const Dashboard: React.FC = () => {
   const [periodDates, setPeriodDates] = useState<{ from: string; to: string }>({ from: '', to: '' })
 
   // Sol/Luna dashboard circuit: 'fiscal' (Sol), 'no_fiscal' (Luna), or 'all' (both).
-  // Default 'fiscal'. Non-Luna users never see the toggle and backend enforces Sol.
+  // Default: mirror /pedidos behaviour. Non-Luna users are forced to 'fiscal'
+  // (they never see the toggle and the backend enforces Sol anyway). Luna
+  // users default to 'all' so Dashboard KPIs and "Ultimos Pedidos" match the
+  // list they see in /pedidos (whose default filter is also 'all').
   const { canAccessLuna } = useCircuitAccess()
-  const [dashboardCircuit, setDashboardCircuit] = useState<'fiscal' | 'no_fiscal' | 'all'>('fiscal')
+  const [dashboardCircuit, setDashboardCircuit] = useState<'fiscal' | 'no_fiscal' | 'all'>(
+    canAccessLuna ? 'all' : 'fiscal'
+  )
   const circuitFiscalTypes: Array<'fiscal' | 'no_fiscal'> =
     dashboardCircuit === 'all' ? ['fiscal', 'no_fiscal'] : [dashboardCircuit]
 
@@ -145,8 +150,8 @@ export const Dashboard: React.FC = () => {
               recent_orders: [],
             }
           }),
-          api.getInsights().catch(() => ({ actions: [], top_customers: [] })),
-          api.getAgingReport().catch(() => null),
+          api.getInsights(circuitFiscalTypes).catch(() => ({ actions: [], top_customers: [] })),
+          api.getAgingReport(circuitFiscalTypes).catch(() => null),
         ])
         setDashboard(dashRes)
         setInsights(insightsRes)

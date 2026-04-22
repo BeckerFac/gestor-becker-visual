@@ -61,12 +61,12 @@ export class ReportsController {
   }
   async getInsights(req: AuthRequest, res: Response) {
     const userPermissions: Map<string, Set<string>> | undefined = (req as any)._userPermissions;
-    const data = await reportsService.getInsights(req.user!.company_id, userPermissions);
+    const data = await reportsService.getInsights(req.user!.company_id, userPermissions, getCircuitOpts(req));
     res.json(data);
   }
 
   async getAgingReport(req: AuthRequest, res: Response) {
-    const data = await reportsService.getAgingReport(req.user!.company_id);
+    const data = await reportsService.getAgingReport(req.user!.company_id, getCircuitOpts(req));
     res.json(data);
   }
 

@@ -351,8 +351,17 @@ export class ReportsService {
   async getInsights(
     companyId: string,
     userPermissions?: Map<string, Set<string>>,
+    circuitOpts?: CircuitOpts,
   ) {
     const actions: Array<{ type: string; severity: 'critical' | 'warning' | 'info'; title: string; description: string; link: string; value?: string }> = [];
+
+    // Sol/Luna: applies the same resolution rules as getDashboard / getOrders so
+    // every count the UI shows in the "Atencion" panel matches what the user
+    // would see in /pedidos and /invoices with their current circuit selection.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const fiscalClauseInv = buildFiscalClause(fiscalTypes, 'i');
+    const fiscalClauseOrders = buildFiscalClause(fiscalTypes, '');
+    const fiscalClauseInvNoAlias = buildFiscalClause(fiscalTypes, '');
 
     // Each query wrapped independently so one failure doesn't break all
 
@@ -363,6 +372,7 @@ export class ReportsService {
           SELECT COUNT(*) as count
           FROM invoices
           WHERE company_id = ${companyId} AND status = 'draft'
+            ${fiscalClauseInvNoAlias}
         `);
         const draftRows = (draftsResult as any).rows || draftsResult || [];
         const draftCount = parseInt(draftRows[0]?.count || '0');
@@ -385,6 +395,7 @@ export class ReportsService {
           SELECT COUNT(*) as count
           FROM orders
           WHERE company_id = ${companyId} AND status = 'pendiente'
+            ${fiscalClauseOrders}
         `);
         const pendingRows = (pendingOrdersResult as any).rows || pendingOrdersResult || [];
         const pendingCount = parseInt(pendingRows[0]?.count || '0');
@@ -489,6 +500,7 @@ export class ReportsService {
           FROM invoices i
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            ${fiscalClauseInv}
             AND i.invoice_date < NOW() - INTERVAL '30 days'
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
@@ -519,6 +531,7 @@ export class ReportsService {
           WHERE company_id = ${companyId}
             AND status = 'entregado'
             AND invoice_id IS NULL
+            ${fiscalClauseOrders}
         `);
         const deliveredRows = (deliveredResult as any).rows || deliveredResult || [];
         const deliveredCount = parseInt(deliveredRows[0]?.count || '0');
@@ -544,6 +557,7 @@ export class ReportsService {
             AND status NOT IN ('entregado', 'cancelado')
             AND estimated_delivery IS NOT NULL
             AND estimated_delivery::date <= CURRENT_DATE + INTERVAL '1 day'
+            ${fiscalClauseOrders}
         `);
         const urgentRows = (urgentDeliveryResult as any).rows || urgentDeliveryResult || [];
         const urgentCount = parseInt(urgentRows[0]?.count || '0');
@@ -567,6 +581,7 @@ export class ReportsService {
             AND estimated_delivery IS NOT NULL
             AND estimated_delivery::date > CURRENT_DATE + INTERVAL '1 day'
             AND estimated_delivery::date <= CURRENT_DATE + INTERVAL '7 days'
+            ${fiscalClauseOrders}
         `);
         const soonRows = (soonDeliveryResult as any).rows || soonDeliveryResult || [];
         const soonCount = parseInt(soonRows[0]?.count || '0');
@@ -605,6 +620,7 @@ export class ReportsService {
             FROM invoices i
             WHERE i.company_id = ${companyId}
               AND i.status = 'authorized'
+              ${fiscalClauseInv}
               AND CAST(i.total_amount AS decimal) > COALESCE(
                 (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
               )
@@ -656,6 +672,7 @@ export class ReportsService {
           JOIN enterprises e ON c.enterprise_id = e.id
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            ${fiscalClauseInv}
             AND CAST(i.total_amount AS decimal) > COALESCE(
               (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
             )
@@ -695,6 +712,7 @@ export class ReportsService {
           FROM invoices i
           WHERE i.company_id = ${companyId}
             AND i.status = 'authorized'
+            ${fiscalClauseInv}
             AND i.due_date IS NOT NULL
             AND i.due_date >= NOW()
             AND i.due_date <= NOW() + INTERVAL '7 days'
@@ -725,7 +743,12 @@ export class ReportsService {
     return { actions };
   }
 
-  async getAgingReport(companyId: string) {
+  async getAgingReport(companyId: string, circuitOpts?: CircuitOpts) {
+    // Sol/Luna: filter aging data by the active circuit so Dashboard aging
+    // numbers match the visible pedidos/invoices list.
+    const fiscalTypes = resolveFiscalTypes(circuitOpts);
+    const fiscalClauseInv = buildFiscalClause(fiscalTypes, 'i');
+    const fiscalClauseOrders = buildFiscalClause(fiscalTypes, 'o');
     try {
       // 1. Get all unpaid invoices with aging data
       const detailsResult = await db.execute(sql`
@@ -749,6 +772,7 @@ export class ReportsService {
         LEFT JOIN enterprises e ON c.enterprise_id = e.id
         WHERE i.company_id = ${companyId}
           AND i.status = 'authorized'
+          ${fiscalClauseInv}
           AND CAST(i.total_amount AS decimal) > COALESCE(
             (SELECT SUM(CAST(p.amount AS decimal)) FROM payments p WHERE p.invoice_id = i.id), 0
           )
@@ -779,6 +803,7 @@ export class ReportsService {
           AND o.payment_status IN ('pendiente', 'parcial')
           AND o.status != 'cancelado'
           AND o.invoice_id IS NULL
+          ${fiscalClauseOrders}
           AND CAST(o.total_amount AS decimal) > COALESCE(
             (SELECT SUM(CAST(cb.amount AS decimal)) FROM cobros cb WHERE cb.order_id = o.id), 0
           )
@@ -868,6 +893,7 @@ export class ReportsService {
         WHERE i.company_id = ${companyId}
           AND p.payment_date >= NOW() - INTERVAL '90 days'
           AND i.status = 'authorized'
+          ${fiscalClauseInv}
       `);
       const dsoRows = (dsoResult as any).rows || dsoResult || [];
       const avgDso = parseInt(dsoRows[0]?.avg_dso || '0') || 0;

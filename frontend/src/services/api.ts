@@ -864,12 +864,18 @@ export const api = {
     const { data } = await client.get('/reports/top-products')
     return data
   },
-  getInsights: async () => {
-    const { data } = await client.get('/reports/insights')
+  getInsights: async (fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params = new URLSearchParams()
+    if (fiscalTypes && fiscalTypes.length > 0) params.set('fiscal_types', fiscalTypes.join(','))
+    const qs = params.toString()
+    const { data } = await client.get(`/reports/insights${qs ? `?${qs}` : ''}`)
     return data
   },
-  getAgingReport: async () => {
-    const { data } = await client.get('/reports/aging')
+  getAgingReport: async (fiscalTypes?: Array<'fiscal' | 'no_fiscal'>) => {
+    const params = new URLSearchParams()
+    if (fiscalTypes && fiscalTypes.length > 0) params.set('fiscal_types', fiscalTypes.join(','))
+    const qs = params.toString()
+    const { data } = await client.get(`/reports/aging${qs ? `?${qs}` : ''}`)
     return data
   },
   getLibroIVAVentas: async (dateFrom: string, dateTo: string) => {
