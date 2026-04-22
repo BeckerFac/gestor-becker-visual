@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
 import { materialsService } from '../materials/materials.service';
+import { activityService } from '../activity/activity.service';
 
 /**
  * PR2-T7: stock negativo reject + FOR UPDATE lock on every mutation path.
@@ -508,6 +509,28 @@ export class InventoryService {
           console.error('Material consumption warning (non-blocking):', matErr);
         }
       }
+
+      // Wave 2C audit — stock adjustment.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'inventory',
+          action: 'update',
+          entityType: 'stock_movement',
+          entityId: movementId,
+          circuit: null,
+          changes: {
+            quantity: { new: quantityChange },
+          },
+          metadata: {
+            product_id: data.product_id,
+            warehouse_id: warehouseId,
+            reason: data.reason,
+            new_quantity: newQty,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return {
         id: movementId,

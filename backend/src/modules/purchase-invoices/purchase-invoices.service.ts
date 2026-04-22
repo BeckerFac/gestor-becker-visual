@@ -698,6 +698,20 @@ export class PurchaseInvoicesService {
     if (((result as any).rows || []).length === 0) {
       throw new ApiError(404, 'Factura de compra no encontrada');
     }
+
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId: userId || 'system',
+        module: 'purchase-invoices',
+        action: 'delete',
+        entityType: 'purchase_invoice',
+        entityId: piId,
+        circuit: null,
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     return { deleted: true };
   }
 

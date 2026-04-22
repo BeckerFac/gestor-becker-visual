@@ -59,6 +59,7 @@ export class AccountingController {
     const data = await accountingEntriesService.deleteEntry(
       req.user!.company_id,
       req.params.id,
+      req.user!.id,
     );
     res.json(data);
   }

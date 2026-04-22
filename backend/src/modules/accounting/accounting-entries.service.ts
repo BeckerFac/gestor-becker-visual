@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { ensureNoFiscalAccounts } from './accounting-accounts.service';
+import { activityService } from '../activity/activity.service';
 
 /** Sol/Luna dual-circuit marker for journal entries. */
 export type CircuitType = 'fiscal' | 'no_fiscal';
@@ -279,6 +280,22 @@ export class AccountingEntriesService {
       `);
       const lineRows = (lineResult as any).rows || lineResult || [];
       entryLines.push(lineRows[0]);
+    }
+
+    // Wave 2C audit — manual entries only (isAuto=false).
+    if (!isAuto) {
+      try {
+        await activityService.log({
+          companyId,
+          userId: createdBy || 'system',
+          module: 'accounting-entries',
+          action: 'create',
+          entityType: 'journal_entry',
+          entityId: entry.id,
+          circuit,
+          metadata: { description, reference_type: referenceType, lines: lines.length },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
     }
 
     return { ...entry, lines: entryLines };
@@ -967,7 +984,7 @@ export class AccountingEntriesService {
   /**
    * Delete a journal entry (only manual ones).
    */
-  async deleteEntry(companyId: string, entryId: string): Promise<{ success: boolean }> {
+  async deleteEntry(companyId: string, entryId: string, userId?: string): Promise<{ success: boolean }> {
     const entry = await this.getEntryById(companyId, entryId);
     if (entry.is_auto) {
       throw new ApiError(400, 'No se pueden eliminar asientos automaticos');
@@ -976,6 +993,19 @@ export class AccountingEntriesService {
     await db.execute(sql`
       DELETE FROM journal_entries WHERE id = ${entryId} AND company_id = ${companyId}
     `);
+
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId: userId || 'system',
+        module: 'accounting-entries',
+        action: 'delete',
+        entityType: 'journal_entry',
+        entityId: entryId,
+        circuit: entry.circuit || null,
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
 
     return { success: true };
   }

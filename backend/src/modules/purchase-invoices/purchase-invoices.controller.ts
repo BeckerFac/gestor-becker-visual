@@ -32,13 +32,14 @@ export class PurchaseInvoicesController {
     const data = await purchaseInvoicesService.updatePurchaseInvoice(
       req.user!.company_id,
       req.params.id,
-      req.body
+      req.body,
+      req.user!.id
     );
     res.json(data);
   }
 
   async remove(req: AuthRequest, res: Response) {
-    const data = await purchaseInvoicesService.deletePurchaseInvoice(req.user!.company_id, req.params.id);
+    const data = await purchaseInvoicesService.deletePurchaseInvoice(req.user!.company_id, req.params.id, req.user!.id);
     res.json(data);
   }
 

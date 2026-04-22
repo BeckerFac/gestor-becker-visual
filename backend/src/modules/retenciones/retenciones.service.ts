@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { activityService } from '../activity/activity.service';
 
 // Default rates when padron entry has no specific rate
 const DEFAULT_RATES: Record<string, number> = {
@@ -240,6 +241,26 @@ export class RetencionesService {
         LEFT JOIN enterprises e ON r.enterprise_id = e.id
         WHERE r.id = ${id}
       `);
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'retenciones',
+          action: 'create',
+          entityType: 'retencion',
+          entityId: id,
+          circuit: null,
+          metadata: {
+            type: data.type,
+            amount: data.amount,
+            direction: data.direction,
+            enterprise_id: data.enterprise_id,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return getRows(result)[0];
     } catch (error: any) {
       // Catch DB-level unique constraint violation (defensive; app check above should catch it first).
@@ -506,6 +527,21 @@ export class RetencionesService {
     // to applied totals. Currently they only filter by cobro/pago status —
     // this works for the common case (anular cobro cascades), but an
     // orphan retencion anulada would still count. See follow-up list.
+
+    // Wave 2C audit.
+    try {
+      await activityService.log({
+        companyId,
+        userId,
+        module: 'retenciones',
+        action: 'anular',
+        entityType: 'retencion',
+        entityId: retencionId,
+        circuit: null,
+        metadata: { reason: reason.trim() },
+      });
+    } catch (e) { console.error('[audit] failed:', e); }
+
     return { success: true, id: retencionId, status: 'anulada' };
   }
 

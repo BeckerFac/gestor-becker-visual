@@ -2,6 +2,7 @@ import { db, pool, tryMig } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
+import { activityService } from '../activity/activity.service';
 
 // SECURITY: 'endosado' MUST NOT transition directly to 'a_cobrar'.
 // Reverting an endoso requires deleting the associated pago (see pagos.service.deletePago),
@@ -150,6 +151,21 @@ export class ChequesService {
         INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, direction, issuer_type, customer_id, order_id, notes, business_unit_id, created_by)
         VALUES (${chequeId}, ${companyId}, ${data.number}, ${data.bank}, ${data.drawer}, ${data.drawer_cuit || null}, ${data.cheque_type || 'comun'}, ${data.amount.toString()}, ${new Date(data.issue_date)}, ${new Date(data.due_date)}, ${initialStatus}, ${direction}, ${issuerType}, ${data.customer_id || null}, ${data.order_id || null}, ${data.notes || null}, ${data.business_unit_id || null}, ${userId})
       `);
+
+      // Wave 2C audit.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'cheques',
+          action: 'create',
+          entityType: 'cheque',
+          entityId: chequeId,
+          circuit: null,
+          metadata: { number: data.number, direction, amount: data.amount },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
+
       return { id: chequeId, status: initialStatus, direction };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -222,6 +238,21 @@ export class ChequesService {
           date: new Date().toISOString(),
         } as any);
       } catch (accErr) { console.warn('Accounting entry skipped (cheque):', (accErr as Error).message); }
+
+      // Wave 2C audit — state transition.
+      try {
+        await activityService.log({
+          companyId,
+          userId: userId || 'system',
+          module: 'cheques',
+          action: 'transition',
+          entityType: 'cheque',
+          entityId: chequeId,
+          circuit: null,
+          changes: { status: { old: currentStatus, new: newStatus } },
+          metadata: { notes },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return { id: chequeId, status: newStatus };
     } catch (error) {
@@ -603,6 +634,26 @@ export class ChequesService {
           direction: 'recibido',
         } as any);
       } catch (accErr) { console.warn('Accounting entry skipped (endorse):', (accErr as Error).message); }
+
+      // Wave 2C audit — endoso.
+      try {
+        await activityService.log({
+          companyId,
+          userId,
+          module: 'cheques',
+          action: 'endorse',
+          entityType: 'cheque',
+          entityId: chequeId,
+          circuit: null,
+          metadata: {
+            endorsed_to_enterprise_id: data.enterprise_id,
+            pago_id: pagoId,
+            amount_paid: data.amount,
+            cheque_amount: chequeAmount,
+            excess,
+          },
+        });
+      } catch (e) { console.error('[audit] failed:', e); }
 
       return {
         pago_id: pagoId,
