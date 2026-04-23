@@ -57,6 +57,7 @@ interface Order {
   discount_percent?: string
   fiscal_type?: 'fiscal' | 'no_fiscal'
   locked_at?: string | null
+  items?: any[]
   created_at: string
 }
 
@@ -77,6 +78,13 @@ interface FormItem {
   deduct_stock: boolean
   category_ids: string[]
   vat_rate: number
+  // Persistent order_items.id when editing an existing order (null for new items).
+  order_item_id?: string | null
+  // Qty already invoiced or shipped on this item — cannot be reduced, price/vat locked.
+  invoiced_qty?: number
+  shipped_qty?: number
+  // UI lock flag: true if any part of this item has a comprobante emitted.
+  locked?: boolean
 }
 
 interface InvoicingStatusData {
@@ -145,7 +153,7 @@ const VAT_RATE_OPTIONS = [
   { value: 27, label: '27%' },
 ]
 
-const emptyFormItem = (): FormItem => ({
+const emptyFormItem = (fiscalType: 'fiscal' | 'no_fiscal' = 'fiscal'): FormItem => ({
   product_id: '',
   product_name: '',
   description: '',
@@ -156,7 +164,12 @@ const emptyFormItem = (): FormItem => ({
   // Readonly in order form; auto-set from product.controls_stock when picked, false for manual items
   deduct_stock: false,
   category_ids: [],
-  vat_rate: 21,
+  // Luna (no_fiscal) comprobantes no discriminan IVA — los items nacen en 0%.
+  vat_rate: fiscalType === 'no_fiscal' ? 0 : 21,
+  order_item_id: null,
+  invoiced_qty: 0,
+  shipped_qty: 0,
+  locked: false,
 })
 
 const ORDER_DRAFT_KEY = 'bv_order_draft'
@@ -301,11 +314,24 @@ export const Orders: React.FC = () => {
     setFiscalTypePrefilled(true)
   }, [formEnterpriseId, enterprises, canAccessLuna, editingOrderId, userManuallyChoseFiscal])
 
+  // When the user toggles Sol<->Luna, align unlocked items with the new default
+  // VAT: 0% for Luna (no fiscal, no IVA discriminated), 21% for Sol. Locked items
+  // (already invoiced/shipped) keep their original vat_rate — we do not mutate them.
+  // Skipped when editing (toggle is not shown).
+  const prevFiscalTypeRef = useRef<'fiscal' | 'no_fiscal'>(formFiscalType)
+  useEffect(() => {
+    if (editingOrderId) { prevFiscalTypeRef.current = formFiscalType; return }
+    if (prevFiscalTypeRef.current === formFiscalType) return
+    const nextDefaultVat = formFiscalType === 'no_fiscal' ? 0 : 21
+    setFormItems(prev => prev.map(it => (it.locked ? it : { ...it, vat_rate: nextDefaultVat })))
+    prevFiscalTypeRef.current = formFiscalType
+  }, [formFiscalType, editingOrderId])
+
   const clearDraft = () => {
     localStorage.removeItem(ORDER_DRAFT_KEY)
     setHasDraft(false)
     setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
-    setFormItems([emptyFormItem()])
+    setFormItems([emptyFormItem(formFiscalType)])
     setFormEnterpriseId('')
     setFormTitle('')
     setUserManuallyChoseFiscal(false)
@@ -446,7 +472,7 @@ export const Orders: React.FC = () => {
   // --- Form items management ---
 
   const addFormItem = () => {
-    setFormItems(prev => [...prev, emptyFormItem()])
+    setFormItems(prev => [...prev, emptyFormItem(formFiscalType)])
   }
 
   // Track price resolution info per item
@@ -648,6 +674,9 @@ export const Orders: React.FC = () => {
         discount_percent: form.discount_percent || 0,
         notes: form.notes || null,
         items: formItems.map(item => ({
+          // On edit, send the existing order_item_id so backend can validate that
+          // locked items (invoiced/shipped) remain untouched and new ones are inserted.
+          order_item_id: editingOrderId ? (item.order_item_id || null) : null,
           product_id: item.product_id && item.product_id !== 'custom' ? item.product_id : null,
           product_name: item.product_name,
           description: item.description || null,
@@ -677,7 +706,7 @@ export const Orders: React.FC = () => {
       setFormEnterpriseId('')
       setFormTitle('')
       setForm({ description: '', customer_id: '', estimated_delivery: '', priority: 'normal', notes: '', payment_method: '', bank_id: '', discount_percent: 0 })
-      setFormItems([emptyFormItem()])
+      setFormItems([emptyFormItem('fiscal')])
       setFormFiscalType('fiscal')
       setUserManuallyChoseFiscal(false)
       setFiscalTypePrefilled(false)
@@ -708,22 +737,54 @@ export const Orders: React.FC = () => {
     }
   }
 
-  const handleEditOrder = (order: Order) => {
-    const status = invoicingStatus[order.id]
-    const orderItems: FormItem[] = (status?.items || []).map((item: any) => ({
-      product_id: item.product_id || 'custom',
-      product_name: item.product_name || '',
-      description: item.description || '',
-      quantity: Number(item.quantity) || 1,
-      unit_price: parseFloat(item.unit_price?.toString() || '0'),
-      cost: parseFloat(item.cost?.toString() || '0'),
-      product_type: item.product_type || 'otro',
-      deduct_stock: item.deduct_stock || false,
-      category_ids: [],
-      vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
-    }))
+  const handleEditOrder = async (order: Order) => {
+    // Always fetch fresh invoicing status — caches can be stale or missing when user
+    // clicks Editar without having expanded the row first. This also gives us the
+    // per-item invoiced_qty + shipped_qty flags we need for partial-edit locking.
+    let status: any = invoicingStatus[order.id]
+    try {
+      status = await api.getOrderInvoicingStatus(order.id)
+    } catch {
+      // Fall back to whatever we had cached; if nothing, we'll show an empty form.
+    }
+
+    // Determine the per-item lock state. An item is locked if any quantity of it
+    // was already invoiced OR shipped (remitado). Locked items cannot have their
+    // qty/unit_price/vat_rate changed. Items that are entirely unlocked are free.
+    const srcItems: any[] = Array.isArray(status?.items) && status.items.length > 0
+      ? status.items
+      : (Array.isArray(order.items) ? order.items : [])
+
+    const orderItems: FormItem[] = srcItems.map((item: any) => {
+      const invoicedQty = Number(item.invoiced_qty ?? 0) || 0
+      const shippedQty = Number(item.shipped_qty ?? item.remitado_qty ?? 0) || 0
+      return {
+        product_id: item.product_id || 'custom',
+        product_name: item.product_name || '',
+        description: item.description || '',
+        quantity: Number(item.quantity) || 1,
+        unit_price: parseFloat(item.unit_price?.toString() || '0'),
+        cost: parseFloat(item.cost?.toString() || '0'),
+        product_type: item.product_type || 'otro',
+        deduct_stock: !!item.deduct_stock,
+        category_ids: [],
+        vat_rate: parseFloat(item.vat_rate?.toString() || '21'),
+        order_item_id: item.id || null,
+        invoiced_qty: invoicedQty,
+        shipped_qty: shippedQty,
+        locked: invoicedQty > 0 || shippedQty > 0,
+      }
+    })
+
+    // Pre-fill fiscal_type from the order — preserves Luna/Sol identity on edit.
+    const orderFiscalType: 'fiscal' | 'no_fiscal' =
+      order.fiscal_type === 'no_fiscal' ? 'no_fiscal' : 'fiscal'
 
     setEditingOrderId(order.id)
+    setFormFiscalType(orderFiscalType)
+    // Mark as manually chosen so the enterprise default doesn't override on reselection.
+    setUserManuallyChoseFiscal(true)
+    setFiscalTypePrefilled(false)
     setFormTitle(order.title || '')
     setForm({
       description: order.description || '',
@@ -736,7 +797,7 @@ export const Orders: React.FC = () => {
       discount_percent: parseFloat(order.discount_percent || '0') || 0,
     })
     setFormEnterpriseId(order.enterprise?.id || '')
-    setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem()])
+    setFormItems(orderItems.length > 0 ? orderItems : [emptyFormItem(orderFiscalType)])
     setShowForm(true)
   }
 
@@ -1579,7 +1640,17 @@ export const Orders: React.FC = () => {
 
                 <div className="space-y-3">
                   {formItems.map((item, idx) => (
-                    <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                    <div key={idx} className={`bg-white dark:bg-gray-800 border rounded-lg p-3 ${item.locked ? 'border-amber-300 bg-amber-50/50 dark:bg-amber-900/10' : 'border-gray-200 dark:border-gray-600'}`}>
+                      {item.locked && (
+                        <div className="mb-2 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5 font-medium">
+                          <span>🔒</span>
+                          <span>
+                            Item bloqueado — facturado: {item.invoiced_qty || 0}
+                            {(item.shipped_qty || 0) > 0 && `, remitado: ${item.shipped_qty}`}.
+                            No se puede modificar cantidad, precio o IVA.
+                          </span>
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
                         {/* Product type / category filter */}
                         <div className="flex flex-col gap-1">
@@ -1677,9 +1748,10 @@ export const Orders: React.FC = () => {
                         <div className="md:col-span-2 flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Producto</label>
                           <select
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className={`px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${item.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                             value={item.product_id}
                             onChange={e => updateFormItem(idx, 'product_id', e.target.value)}
+                            disabled={!!item.locked}
                           >
                             <option value="">Seleccionar producto...</option>
                             {(() => {
@@ -1701,10 +1773,11 @@ export const Orders: React.FC = () => {
                           </select>
                           {(!item.product_id || item.product_id === 'custom') && (
                             <input
-                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className={`px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${item.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                               placeholder="Nombre del producto/servicio"
                               value={item.product_name}
                               onChange={e => updateFormItem(idx, 'product_name', e.target.value)}
+                              disabled={!!item.locked}
                               required
                             />
                           )}
@@ -1713,10 +1786,12 @@ export const Orders: React.FC = () => {
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-medium text-gray-500">Cantidad</label>
                           <input
-                            type="number" min="1"
-                            className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            type="number"
+                            min={item.locked ? Math.max(item.invoiced_qty || 0, item.shipped_qty || 0, 1) : 1}
+                            className={`px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${item.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                             value={item.quantity}
                             onChange={e => updateFormItem(idx, 'quantity', e.target.value)}
+                            disabled={!!item.locked}
                             required
                           />
                         </div>
@@ -1725,10 +1800,11 @@ export const Orders: React.FC = () => {
                           <label className="text-xs font-medium text-gray-500">{isLunaForm ? 'Precio Final' : 'Precio Unitario'}</label>
                           <input
                             type="number" step="0.01" min="0"
-                            className={`px-2 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${priceResolutions[idx]?.price_list_name ? 'border-blue-400 dark:border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}
+                            className={`px-2 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${priceResolutions[idx]?.price_list_name ? 'border-blue-400 dark:border-blue-600' : 'border-gray-300 dark:border-gray-600'} ${item.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                             placeholder="0.00"
                             value={item.unit_price || ''}
                             onChange={e => updateFormItem(idx, 'unit_price', e.target.value)}
+                            disabled={!!item.locked}
                             required
                           />
                           {selectedPriceCriteria && item.product_id && item.product_id !== 'custom' && !manualPriceOverride[idx] && (
@@ -1777,9 +1853,10 @@ export const Orders: React.FC = () => {
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-gray-500">IVA %</label>
                             <select
-                              className="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className={`px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${item.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                               value={item.vat_rate}
                               onChange={e => updateFormItem(idx, 'vat_rate', parseFloat(e.target.value))}
+                              disabled={!!item.locked}
                             >
                               {VAT_RATE_OPTIONS.map(opt => (
                                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1795,7 +1872,7 @@ export const Orders: React.FC = () => {
                               {formatCurrency(getFormItemSubtotal(item))}
                             </div>
                           </div>
-                          {formItems.length > 1 && (
+                          {formItems.length > 1 && !item.locked && (
                             <button
                               type="button"
                               onClick={() => removeFormItem(idx)}
@@ -2073,17 +2150,11 @@ export const Orders: React.FC = () => {
                             <button
                               onClick={e => {
                                 e.stopPropagation()
-                                if (order.locked_at) return
                                 handleEditOrder(order)
                               }}
-                              disabled={!!order.locked_at}
-                              className={`text-xs font-medium ${
-                                order.locked_at
-                                  ? 'text-gray-400 cursor-not-allowed'
-                                  : 'text-blue-500 hover:text-blue-700'
-                              }`}
+                              className="text-xs font-medium text-blue-500 hover:text-blue-700"
                               title={order.locked_at
-                                ? 'Pedido bloqueado: hay comprobantes emitidos. Anular para editar.'
+                                ? 'Editar pedido (los items ya facturados/remitados quedan bloqueados)'
                                 : 'Editar pedido'}
                             >
                               Editar
@@ -3035,14 +3106,14 @@ export const Orders: React.FC = () => {
           onClick: () => handleDuplicateOrder(order),
         })
 
-        // Sol/Luna: edit/delete disabled while the order is locked.
+        // Edit is always allowed — locked items get readonly flags in the form.
+        // Delete stays blocked when locked (anular comprobantes first).
         const isLocked = !!order.locked_at
         items.push({
           id: 'edit',
-          label: isLocked ? 'Editar Pedido (bloqueado)' : 'Editar Pedido',
+          label: isLocked ? 'Editar Pedido (items facturados bloqueados)' : 'Editar Pedido',
           icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-          disabled: isLocked,
-          onClick: () => { if (!isLocked) handleEditOrder(order) },
+          onClick: () => handleEditOrder(order),
         })
 
         items.push({
