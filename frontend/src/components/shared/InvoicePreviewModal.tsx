@@ -1085,19 +1085,32 @@ export function InvoicePreviewModal({
                   </>
                 ) : (
                   <>
-                    <button
-                      onClick={onClose}
-                      className="px-4 py-2 text-gray-600 dark:text-gray-400 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
-                    >
-                      Cerrar
-                    </button>
-                    <button
-                      onClick={() => onDownloadPdf(invoice.id, invoice)}
-                      disabled={downloadingPdf}
-                      className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {downloadingPdf ? 'Generando...' : 'Descargar PDF'}
-                    </button>
+                    {/* Manually-imported invoices can be deleted even when status='authorized'
+                        because the CAE was typed by the user, not obtained from AFIP. */}
+                    {invoice?.source === 'manual_import' ? (
+                      <button
+                        onClick={() => onDeleteDraft(invoice.id, orderId)}
+                        className="px-4 py-2 text-red-600 border border-red-200 rounded-lg text-sm hover:bg-red-50 transition-colors"
+                        title="Eliminar factura importada manualmente (no afecta AFIP)"
+                      >
+                        Eliminar importación
+                      </button>
+                    ) : <span />}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={onClose}
+                        className="px-4 py-2 text-gray-600 dark:text-gray-400 border border-gray-200 rounded-lg text-sm hover:bg-gray-100 transition-colors"
+                      >
+                        Cerrar
+                      </button>
+                      <button
+                        onClick={() => onDownloadPdf(invoice.id, invoice)}
+                        disabled={downloadingPdf}
+                        className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {downloadingPdf ? 'Generando...' : 'Descargar PDF'}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

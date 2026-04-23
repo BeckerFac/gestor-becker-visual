@@ -905,10 +905,15 @@ export const Invoices: React.FC = () => {
     }))
   }
 
+  // item.subtotal = unit_price * quantity = NETO (sin IVA), matching the backend.
+  // Total = sum(neto) + sum(neto * vat_rate / 100). The previous formula divided
+  // by (1 + vat) as if subtotal already included IVA — that produced an iva
+  // smaller than it should and a "double charge" surprise at save time because
+  // the backend then added the real iva on top.
   const importTotals = useMemo(() => {
-    const total = importItems.reduce((sum, item) => sum + item.subtotal, 0)
-    const neto = importItems.reduce((sum, item) => sum + item.subtotal / (1 + item.vat_rate / 100), 0)
-    const iva = total - neto
+    const neto = importItems.reduce((sum, item) => sum + item.subtotal, 0)
+    const iva = importItems.reduce((sum, item) => sum + item.subtotal * (item.vat_rate / 100), 0)
+    const total = neto + iva
     return { neto, iva, total }
   }, [importItems])
 
@@ -1894,7 +1899,17 @@ export const Invoices: React.FC = () => {
                   <select
                     className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
                     value={importData.enterprise_id}
-                    onChange={e => setImportData(prev => ({ ...prev, enterprise_id: e.target.value }))}
+                    onChange={e => {
+                      const entId = e.target.value
+                      const ent = enterprises.find(x => x.id === entId)
+                      // Auto-fill CUIT from selected enterprise. Always overwrite —
+                      // the user can still edit afterwards (e.g., distinct RS contact).
+                      setImportData(prev => ({
+                        ...prev,
+                        enterprise_id: entId,
+                        customer_cuit: ent?.cuit ? ent.cuit.replace(/[^\d-]/g, '') : prev.customer_cuit,
+                      }))
+                    }}
                   >
                     <option value="">Seleccionar...</option>
                     {enterprises.map(ent => (
