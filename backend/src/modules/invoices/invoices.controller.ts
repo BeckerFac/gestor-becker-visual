@@ -155,15 +155,50 @@ export class InvoicesController {
         allowedMimes: ['application/pdf'],
       });
 
+      // pdf-parse v2.x exports a { PDFParse } class (not a default function).
+      // We instantiate it with the PDF buffer and call getText(); the shape of
+      // the returned object varies across minor versions, so we probe both
+      // top-level .text and per-page .pages[].text.
       const pdfParseMod: any = await import('pdf-parse');
-      const pdfParse: any = pdfParseMod.default || pdfParseMod;
+      const PDFParseCls: any =
+        pdfParseMod.PDFParse ||
+        pdfParseMod.default?.PDFParse ||
+        (typeof pdfParseMod === 'function' ? pdfParseMod : null) ||
+        (typeof pdfParseMod.default === 'function' ? pdfParseMod.default : null);
+      if (!PDFParseCls) {
+        throw new ApiError(500, 'pdf-parse no expone PDFParse — revisar versión del paquete');
+      }
+
       const buf = Buffer.from(base64.split(',').pop() || base64, 'base64');
       let text = '';
       try {
-        const result = await pdfParse(buf);
-        text = String(result?.text || '');
+        // Class-style API (pdf-parse v2.x): new PDFParse({data}) + getText().
+        const parser = new PDFParseCls({ data: buf });
+        const result: any = await parser.getText();
+        if (typeof result === 'string') {
+          text = result;
+        } else if (result?.text) {
+          text = String(result.text);
+        } else if (Array.isArray(result?.pages)) {
+          text = result.pages.map((p: any) => p?.text || '').join('\n');
+        } else {
+          text = '';
+        }
+        try { parser.destroy?.(); } catch { /* best-effort */ }
       } catch (e: any) {
-        throw new ApiError(400, `No se pudo leer el PDF: ${e?.message || 'formato invalido'}`);
+        // Fallback to the legacy v1.x callable API in case the package was
+        // downgraded/aliased.
+        if (typeof pdfParseMod === 'function' || typeof pdfParseMod.default === 'function') {
+          try {
+            const legacy = typeof pdfParseMod === 'function' ? pdfParseMod : pdfParseMod.default;
+            const r = await legacy(buf);
+            text = String(r?.text || '');
+          } catch (e2: any) {
+            throw new ApiError(400, `No se pudo leer el PDF: ${e2?.message || 'formato invalido'}`);
+          }
+        } else {
+          throw new ApiError(400, `No se pudo leer el PDF: ${e?.message || 'formato invalido'}`);
+        }
       }
 
       const parsed = parseAfipInvoicePdfText(text);
