@@ -2390,11 +2390,14 @@ export const Invoices: React.FC = () => {
                               Link de pago
                             </button>
                           )}
-                          {/* Delete action visible in the row for drafts without CAE
-                              AND for manually-imported invoices (CAE was typed by
-                              the user, not AFIP). Backend enforces the same rules. */}
+                          {/* Delete action visible in the row whenever the backend
+                              would accept the deletion: any invoice without CAE
+                              (drafts + internal comprobantes emitidos) OR manually-
+                              imported invoices (CAE was typed by the user, not AFIP).
+                              Real AFIP-authorized invoices (cae!=null, non-import)
+                              still require a nota de crédito. */}
                           {(
-                            (invoice.status === 'draft' && !invoice.cae) ||
+                            (!invoice.cae && (invoice.status === 'draft' || invoice.status === 'emitido')) ||
                             (invoice as any).source === 'manual_import'
                           ) && (
                             <PermissionGate module="invoices" action="delete">
