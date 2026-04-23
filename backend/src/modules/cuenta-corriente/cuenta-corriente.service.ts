@@ -645,7 +645,7 @@ export class CuentaCorrienteService {
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text NOT LIKE 'NC%'
             ${fiscalFilter('i', invFiscalOk)}
-            ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'i.business_unit_id')}
 
           UNION ALL
 
@@ -673,7 +673,7 @@ export class CuentaCorrienteService {
             AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text LIKE 'NC%'
             ${fiscalFilter('i', invFiscalOk)}
-            ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'i.business_unit_id')}
 
           UNION ALL
 
@@ -712,7 +712,7 @@ export class CuentaCorrienteService {
           WHERE c.enterprise_id = $1 AND c.company_id = $2
             ${cobrosAnuladoFilterC}
             ${fiscalFilter('c', cobrosFiscalOk)}
-            ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'c.business_unit_id')}
             ${ciaTableOk ? `AND EXISTS (
               SELECT 1 FROM cobro_invoice_applications cia2
               JOIN invoices cia2_inv ON cia2.invoice_id = cia2_inv.id
@@ -742,7 +742,7 @@ export class CuentaCorrienteService {
             ${cobrosPendingOk ? `AND c.pending_status = 'pending_invoice'` : ' AND FALSE'}
             ${cobrosAnuladoFilterC}
             ${fiscalFilter('c', cobrosFiscalOk)}
-            ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'c.business_unit_id')}
 
           UNION ALL
 
@@ -761,7 +761,7 @@ export class CuentaCorrienteService {
             -- NCs excluded per PR7-T13 semantic: NCs neither inflate nor subtract from compras.
             -- NCs-as-credit (true reduction of supplier debt) is a separate feature TODO.
             ${isSol ? '' : ' AND FALSE'}
-            ${buFilter.replace('business_unit_id', 'pi.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'pi.business_unit_id')}
 
           UNION ALL
 
@@ -777,7 +777,7 @@ export class CuentaCorrienteService {
           WHERE p.enterprise_id = $1 AND p.company_id = $2
             ${pagosAnuladoFilterP}
             ${isSol ? '' : ' AND FALSE'}
-            ${buFilter.replace('business_unit_id', 'p.business_unit_id')}
+            ${buFilter.replace(/business_unit_id/g, 'p.business_unit_id')}
 
           UNION ALL
 
@@ -792,7 +792,7 @@ export class CuentaCorrienteService {
           FROM account_adjustments aa
           WHERE aa.enterprise_id = $1 AND aa.company_id = $2
             ${fiscalFilter('aa', ajFiscalOk)}
-            ${buFilter && ajustesBusinessUnitExists ? buFilter.replace('business_unit_id', 'aa.business_unit_id') : ''}
+            ${buFilter && ajustesBusinessUnitExists ? buFilter.replace(/business_unit_id/g, 'aa.business_unit_id') : ''}
 
           UNION ALL
 
