@@ -1471,6 +1471,8 @@ export class InvoicesService {
       `);
 
       // Add items
+      // Collect order_item_ids for N:N invoice_orders sync below.
+      const linkedOrderItemIds: string[] = [];
       for (const item of data.items) {
         const unitPrice = validateNumeric(item.unit_price || 0, 'Precio unitario', { min: 0, max: 999999999 });
         const vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
@@ -1480,6 +1482,23 @@ export class InvoicesService {
         const itemId = uuid();
         // Snapshot cost from product_pricing (manual-import path).
         const itemCost = await resolveProductCost(item.product_id || null);
+        // Accept optional order_item_id so the import can be associated with one
+        // or more pedidos of the same enterprise (T5). We validate ownership.
+        let orderItemId: string | null = null;
+        if (item.order_item_id) {
+          const chk: any = await pool.query(
+            `SELECT oi.id
+               FROM order_items oi
+               JOIN orders o ON o.id = oi.order_id
+              WHERE oi.id = $1 AND o.company_id = $2`,
+            [item.order_item_id, companyId]
+          );
+          if ((chk.rows || []).length === 0) {
+            throw new ApiError(400, 'order_item_id invalido o no pertenece a esta empresa');
+          }
+          orderItemId = item.order_item_id;
+          linkedOrderItemIds.push(orderItemId as string);
+        }
         await db.insert(invoice_items).values({
           id: itemId,
           invoice_id: invoiceId,
@@ -1490,7 +1509,43 @@ export class InvoicesService {
           vat_rate: vatRate.toString(),
           subtotal: itemSubtotal.toString(),
           cost: itemCost,
-        });
+          order_item_id: orderItemId,
+        } as any);
+      }
+
+      // Sync invoice_orders N:N table from collected order_item_ids (T5).
+      const orderIdSet = new Set<string>();
+      for (const oiId of linkedOrderItemIds) {
+        const oiResult: any = await db.execute(sql`SELECT order_id FROM order_items WHERE id = ${oiId}`);
+        const orderId = ((oiResult as any).rows || [])[0]?.order_id;
+        if (orderId) orderIdSet.add(orderId);
+      }
+      const linkedOrderIds = Array.from(orderIdSet);
+      for (const oid of linkedOrderIds) {
+        await db.execute(sql`
+          INSERT INTO invoice_orders (id, invoice_id, order_id)
+          VALUES (gen_random_uuid(), ${invoiceId}, ${oid})
+          ON CONFLICT (invoice_id, order_id) DO NOTHING
+        `);
+        await db.execute(sql`
+          UPDATE orders SET has_invoice = true, updated_at = NOW()
+          WHERE id = ${oid} AND company_id = ${companyId}
+        `);
+      }
+      if (linkedOrderIds.length > 0) {
+        // Set first order_id on the invoice row for backward compat with legacy queries.
+        await db.execute(sql`
+          UPDATE invoices SET order_id = ${linkedOrderIds[0]} WHERE id = ${invoiceId}
+        `);
+        // Lock linked orders (idempotent, non-critical on failure).
+        try {
+          const { ordersService } = await import('../orders/orders.service');
+          for (const oid of linkedOrderIds) {
+            await ordersService.lockOrder(oid, `factura importada ${data.invoice_type} ${invoiceNumber}`, userId);
+          }
+        } catch (lockErr) {
+          console.warn('[sol-luna] lockOrder post-import failed:', (lockErr as Error).message);
+        }
       }
 
       return {
