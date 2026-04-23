@@ -75,8 +75,10 @@ describe('PR2: deleteDraftInvoice con CAE rechaza', () => {
       require('path').join(__dirname, '../src/modules/invoices/invoices.service.ts'),
       'utf-8'
     );
-    expect(src).toMatch(/if \(invRows\[0\]\.cae\)/);
-    expect(src).toMatch(/PR2-T1/);
+    // Updated 2026-04-23: the check is now factored into a `hasCae` variable
+    // so that manual imports can bypass it while real AFIP invoices still can't.
+    expect(src).toMatch(/const hasCae = !!row\.cae/);
+    expect(src).toMatch(/No se puede eliminar una factura con CAE asignado/);
   });
 });
 

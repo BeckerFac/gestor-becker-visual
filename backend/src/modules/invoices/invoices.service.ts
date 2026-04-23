@@ -1270,20 +1270,48 @@ export class InvoicesService {
     await this.ensureMigrations();
     try {
       const invResult = await db.execute(sql`
-        SELECT id, status, order_id, cae FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
+        SELECT id, status, order_id, cae, source FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}
       `);
       const invRows = (invResult as any).rows || [];
       if (invRows.length === 0) throw new ApiError(404, 'Factura no encontrada');
-      const deletableStatuses = ['draft', 'emitido'];
-      if (!deletableStatuses.includes(invRows[0].status)) throw new ApiError(400, 'Solo se pueden eliminar facturas en borrador o comprobantes internos');
-      // PR2-T1: fiscal compliance — NUNCA eliminar facturas con CAE asignado
-      // (registro AFIP). Incluso si el status es 'draft' o 'emitido', si tiene
-      // CAE significa que fue transmitida a AFIP y no se puede borrar.
-      if (invRows[0].cae) {
-        throw new ApiError(400, 'No se puede eliminar una factura con CAE asignado (registro fiscal AFIP). Use nota de credito para revertir.');
+
+      const row = invRows[0];
+      const isManualImport = row.source === 'manual_import';
+      const isDraft = row.status === 'draft' || row.status === 'emitido';
+      const hasCae = !!row.cae;
+
+      // Rules:
+      // 1. Drafts without CAE → deletable (user can discard a draft before AFIP).
+      // 2. Manually-imported invoices (source='manual_import') → deletable even
+      //    with a CAE, because the CAE was typed by the user, not obtained from
+      //    AFIP. Deleting only reverts the local snapshot. User must not have
+      //    applied cobros yet (fiscal integrity).
+      // 3. Everything else (real AFIP auth) → blocked; use nota de crédito.
+      if (!isManualImport) {
+        if (!isDraft) {
+          throw new ApiError(400, 'Solo se pueden eliminar facturas en borrador o comprobantes internos. Use nota de credito para revertir una factura autorizada.');
+        }
+        if (hasCae) {
+          throw new ApiError(400, 'No se puede eliminar una factura con CAE asignado (registro fiscal AFIP). Use nota de credito para revertir.');
+        }
+      } else {
+        // Manually-imported: block if any cobro application exists.
+        try {
+          const appRes: any = await pool.query(
+            `SELECT 1 FROM cobro_invoice_applications WHERE invoice_id = $1 LIMIT 1`,
+            [invoiceId]
+          );
+          if ((appRes.rows || []).length > 0) {
+            throw new ApiError(400, 'No se puede eliminar una factura con cobros aplicados. Desaplicá los cobros antes de eliminar.');
+          }
+        } catch (e: any) {
+          if (e instanceof ApiError) throw e;
+          // Table may not exist in very old environments — continue.
+          console.warn('[deleteDraftInvoice] cobro_invoice_applications check warning:', e?.message);
+        }
       }
 
-      const orderId = invRows[0].order_id;
+      const orderId = row.order_id;
 
       // Delete items first
       await db.delete(invoice_items).where(eq(invoice_items.invoice_id, invoiceId));
