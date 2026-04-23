@@ -943,6 +943,7 @@ export const Invoices: React.FC = () => {
           quantity: item.quantity,
           unit_price: item.unit_price,
           vat_rate: item.vat_rate,
+          order_item_id: item.order_item_id || null,
         })),
       })
       toast.success('Factura importada correctamente')
@@ -2020,6 +2021,29 @@ export const Invoices: React.FC = () => {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
                   Items <span className="text-red-500">*</span>
                 </label>
+                {/* T5: allow linking the imported invoice to pedidos pendientes. */}
+                {importData.enterprise_id && (
+                  <OrderItemsImporter
+                    enterpriseId={importData.enterprise_id}
+                    existingOrderItemIds={importItems.filter(i => i.order_item_id).map(i => i.order_item_id!) as string[]}
+                    onImport={(newItems) => {
+                      const mapped: InvoiceItem[] = newItems.map((it: any) => ({
+                        product_id: it.product_id || undefined,
+                        product_name: it.product_name,
+                        quantity: Number(it.qty_to_invoice),
+                        unit_price: parseFloat(it.unit_price),
+                        vat_rate: parseFloat(it.vat_rate ?? '21'),
+                        subtotal: Number(it.qty_to_invoice) * parseFloat(it.unit_price),
+                        order_item_id: it.order_item_id,
+                      }))
+                      setImportItems(prev => {
+                        // Drop empty placeholder row if present.
+                        const cleaned = prev.filter(r => r.product_name.trim() || r.unit_price > 0 || (r.quantity || 0) > 1)
+                        return [...cleaned, ...mapped]
+                      })
+                    }}
+                  />
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
                     <thead>
