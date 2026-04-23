@@ -182,6 +182,24 @@ export const Enterprises: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enterprises])
 
+  // Deep-link ?expand=<enterpriseId> from Global Search (click on Contactos row).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const expandId = params.get('expand')
+    if (!expandId || enterprises.length === 0) return
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(expandId)) return
+    const ent = enterprises.find(e => e.id === expandId)
+    if (!ent) return
+    handleExpandEnterprise(expandId)
+    window.history.replaceState({}, '', window.location.pathname)
+    setTimeout(() => {
+      const el = document.getElementById(`enterprise-row-${expandId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enterprises])
+
   const handleExpandEnterprise = async (enterpriseId: string) => {
     if (expandedId === enterpriseId) {
       setExpandedId(null)
@@ -728,7 +746,7 @@ export const Enterprises: React.FC = () => {
       ) : (
         <div className="space-y-3">
           {filteredEnterprises.map(ent => (
-            <Card key={ent.id}>
+            <Card key={ent.id} id={`enterprise-row-${ent.id}`}>
               <div
                 className="px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                 onClick={() => handleExpandEnterprise(ent.id)}

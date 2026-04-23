@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -123,6 +124,10 @@ export const Quotes: React.FC = () => {
   // Preview modal state
   const [previewQuoteId, setPreviewQuoteId] = useState<string | null>(null)
 
+  // Deep-link from Global Search / other pages: ?expand=<quoteId>
+  const [searchParams, setSearchParams] = useSearchParams()
+  const expandConsumedRef = useRef(false)
+
   // Row context menu
   const contextMenu = useContextMenu<Quote>()
   const canEdit = useCan('quotes', 'edit')
@@ -194,6 +199,19 @@ export const Quotes: React.FC = () => {
       setLoading(false)
     }
   }, [filterEnterprise, filterStatus, filterSearch, filterDateFrom, filterDateTo])
+
+  // Deep-link ?expand=<quoteId> opens preview modal directly (modal fetches by id,
+  // so we don't need the quote to be in the current paginated list).
+  useEffect(() => {
+    if (expandConsumedRef.current) return
+    const expandId = searchParams.get('expand')
+    if (!expandId) return
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(expandId)) return
+    setPreviewQuoteId(expandId)
+    expandConsumedRef.current = true
+    setSearchParams(prev => { const np = new URLSearchParams(prev); np.delete('expand'); return np }, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const loadStaticData = useCallback(async () => {
     const [custRes, prodRes, entRes, criteriaRes, catRes] = await Promise.all([
