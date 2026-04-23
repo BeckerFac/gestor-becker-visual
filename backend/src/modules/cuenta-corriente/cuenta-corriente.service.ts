@@ -571,6 +571,26 @@ export class CuentaCorrienteService {
       try { await pool.query('SELECT business_unit_id FROM account_adjustments LIMIT 1'); }
       catch { ajustesBusinessUnitExists = false; }
 
+      // 2026-04-23 prod hotfix: detectar columnas de Sol/Luna y cobro applications
+      // defensivamente. En environments donde la migración no corrió, la query UNION
+      // fallaba con "column ... does not exist" y el frontend solo veía un 500.
+      const col = async (table: string, column: string): Promise<boolean> => {
+        try { await pool.query(`SELECT ${column} FROM ${table} LIMIT 1`); return true; }
+        catch { return false; }
+      };
+      const tbl = async (table: string): Promise<boolean> => {
+        try { await pool.query(`SELECT 1 FROM ${table} LIMIT 1`); return true; }
+        catch { return false; }
+      };
+      const invFiscalOk = await col('invoices', 'fiscal_type');
+      const cobrosFiscalOk = await col('cobros', 'fiscal_type');
+      const ajFiscalOk = await col('account_adjustments', 'fiscal_type');
+      const cobrosPendingOk = await col('cobros', 'pending_status');
+      const ciaTableOk = await tbl('cobro_invoice_applications');
+      const retencionesOk = await tbl('retenciones');
+      const retencionesDirOk = retencionesOk && await col('retenciones', 'direction');
+      const invRelatedOk = await col('invoices', 'related_invoice_id');
+
       // Build dynamic filters with numbered params
       // $1 = enterpriseId, $2 = companyId (used in ALL UNION subqueries)
       const params: (string | undefined)[] = [enterpriseId, companyId];
@@ -587,7 +607,15 @@ export class CuentaCorrienteService {
       // so under circuit='no_fiscal' we exclude them entirely by gating below.
       params.push(circuit);
       const circuitParamIdx = params.length;
-      const fiscalFilter = (alias: string) => ` AND COALESCE(${alias}.fiscal_type,'fiscal') = $${circuitParamIdx}`;
+      // Defensive fiscal filter: per-alias flag so migrations can be partial in
+      // production without crashing the whole detalle query. If the column
+      // doesn't exist, circuit='fiscal' is a no-op (rows default to fiscal);
+      // circuit='no_fiscal' excludes everything, matching the "legacy data"
+      // contract (nothing was ever stored as no_fiscal before the column existed).
+      const fiscalFilter = (alias: string, colExists: boolean) => {
+        if (!colExists) return circuit === 'fiscal' ? '' : ' AND FALSE';
+        return ` AND COALESCE(${alias}.fiscal_type,'fiscal') = $${circuitParamIdx}`;
+      };
       const isSol = circuit === 'fiscal';
 
       let dateFilter = '';
@@ -616,7 +644,7 @@ export class CuentaCorrienteService {
           FROM invoices i
           WHERE i.enterprise_id = $1 AND i.company_id = $2 AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text NOT LIKE 'NC%'
-            ${fiscalFilter('i')}
+            ${fiscalFilter('i', invFiscalOk)}
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -632,19 +660,19 @@ export class CuentaCorrienteService {
             COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number as nro_comprobante,
             0::decimal as debe,
             CAST(i.total_amount AS decimal) as haber,
-            CASE
+            ${invRelatedOk ? `CASE
               WHEN ri.id IS NOT NULL THEN
                 'NC ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number
                 || ' — anula ' || COALESCE(ri.invoice_type::text, '') || ' ' || ri.invoice_number
               ELSE 'NC ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number
-            END as descripcion,
+            END` : `'NC ' || COALESCE(i.invoice_type::text, '') || ' ' || i.invoice_number`} as descripcion,
             i.id as reference_id
           FROM invoices i
-          LEFT JOIN invoices ri ON ri.id = i.related_invoice_id
+          ${invRelatedOk ? 'LEFT JOIN invoices ri ON ri.id = i.related_invoice_id' : ''}
           WHERE i.enterprise_id = $1 AND i.company_id = $2
             AND i.status NOT IN ('cancelled', 'draft')
             AND i.invoice_type::text LIKE 'NC%'
-            ${fiscalFilter('i')}
+            ${fiscalFilter('i', invFiscalOk)}
             ${buFilter.replace('business_unit_id', 'i.business_unit_id')}
 
           UNION ALL
@@ -670,28 +698,28 @@ export class CuentaCorrienteService {
             'recibo' as tipo,
             CAST(c.receipt_number AS text) as nro_comprobante,
             0::decimal as debe,
-            COALESCE((
+            ${ciaTableOk ? `COALESCE((
               SELECT SUM(CAST(cia.amount_applied AS decimal))
               FROM cobro_invoice_applications cia
               JOIN invoices cia_inv ON cia.invoice_id = cia_inv.id
               WHERE cia.cobro_id = c.id
                 AND cia_inv.invoice_type::text NOT LIKE 'NC%'
-                AND COALESCE(cia_inv.fiscal_type,'fiscal') = $${circuitParamIdx}
-            ), 0) as haber,
+                ${invFiscalOk ? `AND COALESCE(cia_inv.fiscal_type,'fiscal') = $${circuitParamIdx}` : ''}
+            ), 0)` : `CAST(COALESCE(c.total_amount, c.amount) AS decimal)`} as haber,
             'Recibo #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
             c.id as reference_id
           FROM cobros c
           WHERE c.enterprise_id = $1 AND c.company_id = $2
             ${cobrosAnuladoFilterC}
-            ${fiscalFilter('c')}
+            ${fiscalFilter('c', cobrosFiscalOk)}
             ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
-            AND EXISTS (
+            ${ciaTableOk ? `AND EXISTS (
               SELECT 1 FROM cobro_invoice_applications cia2
               JOIN invoices cia2_inv ON cia2.invoice_id = cia2_inv.id
               WHERE cia2.cobro_id = c.id
                 AND cia2_inv.invoice_type::text NOT LIKE 'NC%'
-                AND COALESCE(cia2_inv.fiscal_type,'fiscal') = $${circuitParamIdx}
-            )
+                ${invFiscalOk ? `AND COALESCE(cia2_inv.fiscal_type,'fiscal') = $${circuitParamIdx}` : ''}
+            )` : ''}
 
           UNION ALL
 
@@ -702,18 +730,18 @@ export class CuentaCorrienteService {
             'adelanto_cobro' as tipo,
             CAST(c.receipt_number AS text) as nro_comprobante,
             0::decimal as debe,
-            CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE((
+            ${ciaTableOk ? `CAST(COALESCE(c.total_amount, c.amount) AS decimal) - COALESCE((
               SELECT SUM(CAST(cia.amount_applied AS decimal))
               FROM cobro_invoice_applications cia
               WHERE cia.cobro_id = c.id
-            ), 0) as haber,
+            ), 0)` : `CAST(COALESCE(c.total_amount, c.amount) AS decimal)`} as haber,
             'Recibo (sin factura) #' || COALESCE(CAST(c.receipt_number AS text), c.id::text) as descripcion,
             c.id as reference_id
           FROM cobros c
           WHERE c.enterprise_id = $1 AND c.company_id = $2
-            AND c.pending_status = 'pending_invoice'
+            ${cobrosPendingOk ? `AND c.pending_status = 'pending_invoice'` : ' AND FALSE'}
             ${cobrosAnuladoFilterC}
-            ${fiscalFilter('c')}
+            ${fiscalFilter('c', cobrosFiscalOk)}
             ${buFilter.replace('business_unit_id', 'c.business_unit_id')}
 
           UNION ALL
@@ -763,7 +791,7 @@ export class CuentaCorrienteService {
             aa.id
           FROM account_adjustments aa
           WHERE aa.enterprise_id = $1 AND aa.company_id = $2
-            ${fiscalFilter('aa')}
+            ${fiscalFilter('aa', ajFiscalOk)}
             ${buFilter && ajustesBusinessUnitExists ? buFilter.replace('business_unit_id', 'aa.business_unit_id') : ''}
 
           UNION ALL
@@ -781,7 +809,8 @@ export class CuentaCorrienteService {
             r.id as reference_id
           FROM retenciones r
           LEFT JOIN cobros rc ON rc.id = r.cobro_id
-          WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'sufrida'
+          WHERE r.enterprise_id = $1 AND r.company_id = $2
+            ${retencionesDirOk ? `AND r.direction = 'sufrida'` : ' AND FALSE'}
             ${cobrosStatusExists ? ` AND (r.cobro_id IS NULL OR rc.status IS NULL OR rc.status != 'anulado')` : ''}
             ${isSol ? '' : ' AND FALSE'}
             ${buFilter ? ` AND (r.cobro_id IS NULL OR rc.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1} OR rc.business_unit_id IS NULL)` : ''}
@@ -801,7 +830,8 @@ export class CuentaCorrienteService {
             r.id as reference_id
           FROM retenciones r
           LEFT JOIN pagos rp ON rp.id = r.pago_id
-          WHERE r.enterprise_id = $1 AND r.company_id = $2 AND r.direction = 'practicada'
+          WHERE r.enterprise_id = $1 AND r.company_id = $2
+            ${retencionesDirOk ? `AND r.direction = 'practicada'` : ' AND FALSE'}
             ${pagosStatusExists ? ` AND (r.pago_id IS NULL OR rp.status IS NULL OR rp.status != 'anulado')` : ''}
             ${isSol ? '' : ' AND FALSE'}
             ${buFilter ? ` AND (r.pago_id IS NULL OR rp.business_unit_id = $${params.indexOf(filters!.businessUnitId!) + 1} OR rp.business_unit_id IS NULL)` : ''}
@@ -862,8 +892,14 @@ export class CuentaCorrienteService {
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      console.error('CC getDetalle ERROR:', (error as Error).message, (error as Error).stack?.split('\n')[1]);
-      throw new ApiError(500, 'Failed to get cuenta corriente detalle');
+      const err = error as Error & { code?: string; detail?: string };
+      console.error('CC getDetalle ERROR:', err.message, err.code, err.detail, err.stack?.split('\n').slice(0, 4).join('\n'));
+      // Expose the Postgres error text to the caller so production issues
+      // (missing column, missing table, FK failure) can be diagnosed from the UI.
+      // The endpoint is authenticated + authorized; the risk of info leak is minimal
+      // compared to the cost of silent 500s like the one reported 2026-04-23.
+      const reason = [err.code, err.message, err.detail].filter(Boolean).join(' · ');
+      throw new ApiError(500, `Failed to get cuenta corriente detalle: ${reason || 'error desconocido'}`);
     }
   }
 
