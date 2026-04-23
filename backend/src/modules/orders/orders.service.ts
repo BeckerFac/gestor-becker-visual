@@ -880,15 +880,71 @@ export class OrdersService {
       const rows = (orderResult as any).rows || orderResult || [];
       if (rows.length === 0) throw new ApiError(404, 'Order not found');
 
-      // Sol/Luna lock: if any document (invoice/remito/cobro) has been emitted
-      // the order becomes read-only until those documents are cancelled.
-      if (rows[0].locked_at != null) {
-        throw new ApiError(423, 'Pedido bloqueado: hay comprobantes emitidos. Anular comprobantes para editar.');
-      }
+      const isLocked = rows[0].locked_at != null;
 
       // Circuit is IMMUTABLE after create: silently drop fiscal_type if present.
       if (data && Object.prototype.hasOwnProperty.call(data, 'fiscal_type')) {
         delete data.fiscal_type;
+      }
+
+      // Partial-edit: when the order is locked we allow editing only
+      // - header fields (notes, delivery, etc.) and
+      // - items that have NOT been invoiced or shipped yet.
+      // Locked items (invoiced_qty > 0 OR shipped_qty > 0) must keep their
+      // product_id/product_name/quantity/unit_price/vat_rate untouched,
+      // and cannot be removed.
+      let itemLockMap = new Map<string, { invoiced_qty: number; shipped_qty: number; product_id: string | null; product_name: string; quantity: number; unit_price: string; vat_rate: string }>();
+      if (isLocked && data.items && Array.isArray(data.items)) {
+        const lockRes: any = await pool.query(
+          `SELECT oi.id, oi.product_id, oi.product_name, oi.quantity, oi.unit_price, oi.vat_rate,
+                  COALESCE(SUM(ii.quantity), 0) AS invoiced_qty,
+                  COALESCE((SELECT SUM(ri.quantity) FROM remito_items ri WHERE ri.order_item_id = oi.id), 0) AS shipped_qty
+             FROM order_items oi
+             LEFT JOIN invoice_items ii ON ii.order_item_id = oi.id
+            WHERE oi.order_id = $1
+            GROUP BY oi.id`,
+          [orderId]
+        );
+        for (const r of (lockRes.rows || [])) {
+          itemLockMap.set(r.id, {
+            invoiced_qty: Number(r.invoiced_qty) || 0,
+            shipped_qty: Number(r.shipped_qty) || 0,
+            product_id: r.product_id,
+            product_name: r.product_name,
+            quantity: Number(r.quantity) || 0,
+            unit_price: String(r.unit_price ?? '0'),
+            vat_rate: String(r.vat_rate ?? '21'),
+          });
+        }
+        // Validate the payload BEFORE we mutate anything: ensure every locked item
+        // appears in the payload with unchanged sensitive fields.
+        const payloadIds = new Set(data.items.map((it: any) => it.order_item_id).filter(Boolean));
+        for (const [dbId, meta] of itemLockMap.entries()) {
+          const locked = meta.invoiced_qty > 0 || meta.shipped_qty > 0;
+          if (!locked) continue;
+          if (!payloadIds.has(dbId)) {
+            throw new ApiError(400, `No se puede eliminar un item que ya fue facturado o remitado.`);
+          }
+          const pItem = data.items.find((it: any) => it.order_item_id === dbId);
+          const newProductId = pItem.product_id || null;
+          if ((newProductId || null) !== (meta.product_id || null)) {
+            throw new ApiError(400, `No se puede cambiar el producto de un item ya facturado o remitado.`);
+          }
+          if (String(pItem.product_name || '').trim() !== String(meta.product_name || '').trim()) {
+            throw new ApiError(400, `No se puede cambiar el nombre de producto de un item ya facturado o remitado.`);
+          }
+          const newQty = Number(pItem.quantity);
+          const minQty = Math.max(meta.invoiced_qty, meta.shipped_qty);
+          if (!(newQty >= minQty)) {
+            throw new ApiError(400, `La cantidad del item no puede ser menor a lo ya facturado/remitado (${minQty}).`);
+          }
+          if (Math.abs(Number(pItem.unit_price) - Number(meta.unit_price)) > 0.0001) {
+            throw new ApiError(400, `No se puede cambiar el precio de un item ya facturado o remitado.`);
+          }
+          if (Math.abs(Number(pItem.vat_rate ?? 21) - Number(meta.vat_rate ?? 21)) > 0.0001) {
+            throw new ApiError(400, `No se puede cambiar el IVA de un item ya facturado o remitado.`);
+          }
+        }
       }
 
       // Helper: undefined = keep old value, '' = set null, value = set value
@@ -936,39 +992,101 @@ export class OrdersService {
           ]
         );
 
-        // Update items if provided (delete + re-insert)
+        // Update items if provided.
+        // - Unlocked order: DELETE+INSERT all (previous behavior, preserves IDs
+        //   for new items while freeing stale ones).
+        // - Locked order: UPSERT. Existing order_item_ids are kept (so invoice_items
+        //   relationships stay intact); unmatched rows are deleted only if unlocked.
         if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-          // Unlink invoice_items before deleting order_items (FK constraint)
-          await updateClient.query(
-            `UPDATE invoice_items SET order_item_id = NULL
-             WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = $1)`,
-            [orderId]
-          ).catch((err: Error) => console.warn('Unlink invoice_items (non-critical):', err.message));
-          await updateClient.query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
-
           const validItems = data.items.filter((it: any) => it.product_name && String(it.product_name).trim());
           if (validItems.length === 0) throw new ApiError(400, 'At least one item with a product name is required');
 
           // Wave 3D D2: numeric validation — same rules as createOrder.
-          // Previously updateOrder accepted NaN / negative / unbounded prices
-          // because it used `Number(x || 0)` / `Number(y || 1)` with no guard.
           for (const item of validItems) {
             validateOrderItem(item);
           }
 
           let subtotal = 0;
           let totalVat = 0;
-          for (const item of validItems) {
-            const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
-            subtotal += itemSubtotal;
-            const itemVatRate = Number(item.vat_rate ?? 21);
-            totalVat += itemSubtotal * itemVatRate / 100;
-            const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
-            await updateClient.query(
-              `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-              [uuid(), orderId, productId, item.product_name, item.description || null, item.quantity || 1, (item.unit_price || 0).toString(), (item.cost || 0).toString(), itemSubtotal.toString(), item.product_type || 'otro', item.deduct_stock || false, itemVatRate.toString()]
+
+          if (isLocked) {
+            // --- UPSERT path for locked orders ---
+            const payloadIdsKeep = new Set<string>(
+              validItems.map((it: any) => it.order_item_id).filter((x: any) => !!x)
             );
+            // Delete only rows that are unlocked and not in the payload.
+            for (const [dbId, meta] of itemLockMap.entries()) {
+              const locked = meta.invoiced_qty > 0 || meta.shipped_qty > 0;
+              if (payloadIdsKeep.has(dbId)) continue;
+              if (locked) {
+                // Defensive: already validated above, but double-check.
+                throw new ApiError(400, `No se puede eliminar un item que ya fue facturado o remitado.`);
+              }
+              await updateClient.query(
+                `UPDATE invoice_items SET order_item_id = NULL WHERE order_item_id = $1`, [dbId]
+              ).catch((err: Error) => console.warn('Unlink invoice_items (non-critical):', err.message));
+              await updateClient.query(`DELETE FROM order_items WHERE id = $1`, [dbId]);
+            }
+            // Upsert each payload item.
+            for (const item of validItems) {
+              const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
+              subtotal += itemSubtotal;
+              const itemVatRate = Number(item.vat_rate ?? 21);
+              totalVat += itemSubtotal * itemVatRate / 100;
+              const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
+              if (item.order_item_id && itemLockMap.has(item.order_item_id)) {
+                // Existing row — UPDATE in place (description is always safe to change).
+                await updateClient.query(
+                  `UPDATE order_items SET
+                     product_id = $1,
+                     product_name = $2,
+                     description = $3,
+                     quantity = $4,
+                     unit_price = $5,
+                     cost = $6,
+                     subtotal = $7,
+                     product_type = $8,
+                     deduct_stock = $9,
+                     vat_rate = $10
+                   WHERE id = $11`,
+                  [productId, item.product_name, item.description || null,
+                   item.quantity || 1, (item.unit_price || 0).toString(), (item.cost || 0).toString(),
+                   itemSubtotal.toString(), item.product_type || 'otro',
+                   item.deduct_stock || false, itemVatRate.toString(), item.order_item_id]
+                );
+              } else {
+                // New row.
+                await updateClient.query(
+                  `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+                  [uuid(), orderId, productId, item.product_name, item.description || null,
+                   item.quantity || 1, (item.unit_price || 0).toString(), (item.cost || 0).toString(),
+                   itemSubtotal.toString(), item.product_type || 'otro',
+                   item.deduct_stock || false, itemVatRate.toString()]
+                );
+              }
+            }
+          } else {
+            // --- DELETE+INSERT path for unlocked orders (preserves prior behavior) ---
+            await updateClient.query(
+              `UPDATE invoice_items SET order_item_id = NULL
+               WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = $1)`,
+              [orderId]
+            ).catch((err: Error) => console.warn('Unlink invoice_items (non-critical):', err.message));
+            await updateClient.query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
+
+            for (const item of validItems) {
+              const itemSubtotal = Number(item.unit_price || 0) * Number(item.quantity || 1);
+              subtotal += itemSubtotal;
+              const itemVatRate = Number(item.vat_rate ?? 21);
+              totalVat += itemSubtotal * itemVatRate / 100;
+              const productId = item.product_id && item.product_id !== 'custom' ? item.product_id : null;
+              await updateClient.query(
+                `INSERT INTO order_items (id, order_id, product_id, product_name, description, quantity, unit_price, cost, subtotal, product_type, deduct_stock, vat_rate)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+                [uuid(), orderId, productId, item.product_name, item.description || null, item.quantity || 1, (item.unit_price || 0).toString(), (item.cost || 0).toString(), itemSubtotal.toString(), item.product_type || 'otro', item.deduct_stock || false, itemVatRate.toString()]
+              );
+            }
           }
 
           // Recalculate totals (IVA per item)

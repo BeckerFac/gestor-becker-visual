@@ -150,7 +150,11 @@ describe('Sol/Luna OrdersService', () => {
   // ============================================================
 
   describe('updateOrder', () => {
-    it('T5: rejects update on locked order with 423', async () => {
+    it('T5: allows header-only update on locked order (partial edit)', async () => {
+      // Updated 2026-04-23: the order-level 423 was relaxed so the user can still
+      // edit header fields (notes, delivery, priority) and unlocked items even
+      // after a comprobante was emitted. Locked ITEMS are still protected
+      // (see orders-partial-edit.test.ts).
       mockDbExecute.mockImplementation((...args: any[]) => {
         const tpl = args[0]
         const s = tpl?.strings ? tpl.strings.join('') : ''
@@ -159,9 +163,10 @@ describe('Sol/Luna OrdersService', () => {
         }
         return Promise.resolve({ rows: [] })
       })
-      await expect(
-        service.updateOrder('company-1', 'order-1', { title: 'nuevo titulo' })
-      ).rejects.toMatchObject({ statusCode: 423 })
+      mockClientQuery.mockResolvedValue({ rows: [] })
+      // Title-only update — no items in payload, so no per-item validation runs.
+      const res = await service.updateOrder('company-1', 'order-1', { title: 'nuevo titulo' })
+      expect(res).toEqual({ id: 'order-1', updated: true })
     })
 
     it('T7: silently drops fiscal_type from update payload', async () => {
