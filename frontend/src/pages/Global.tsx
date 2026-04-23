@@ -95,6 +95,7 @@ export const Global: React.FC = () => {
   const [pagos, setPagos] = useState<any[]>([])
   const [cuentaCorriente, setCuentaCorriente] = useState<any>(null)
   const [cheques, setCheques] = useState<any[]>([])
+  const [tabError, setTabError] = useState<string | null>(null)
 
   // Load enterprises on mount
   useEffect(() => {
@@ -159,6 +160,7 @@ export const Global: React.FC = () => {
 
   const loadTabData = useCallback(async (tab: TabKey, enterpriseId: string) => {
     setTabLoading(true)
+    setTabError(null)
     try {
       switch (tab) {
         case 'contactos':
@@ -210,8 +212,13 @@ export const Global: React.FC = () => {
           break
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Failed to load ${tab} data`, e)
+      // Surface the real server error so the user/support can diagnose
+      // (previously the tab silently showed "No se pudo cargar").
+      const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Error desconocido'
+      const status = e?.response?.status ? ` (HTTP ${e.response.status})` : ''
+      setTabError(`${msg}${status}`)
     } finally {
       setTabLoading(false)
     }
@@ -441,7 +448,7 @@ export const Global: React.FC = () => {
                           {contacts.map((c: any) => (
                             <tr
                               key={c.id}
-                              onClick={() => selectedEnterprise && navigate(`/enterprises?expand=${selectedEnterprise.id}`)}
+                              onClick={() => selectedEnterprise && navigate(`/empresas?expand=${selectedEnterprise.id}`)}
                               className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
                               title="Ver contacto en Empresas"
                             >
@@ -799,10 +806,19 @@ export const Global: React.FC = () => {
               {/* Cuenta Corriente Tab */}
               {activeTab === 'cuenta_corriente' && (
                 <div className="space-y-4">
-                  {!cuentaCorriente ? (
+                  {tabError ? (
                     <Card>
                       <CardContent>
-                        <p className="text-center py-8 text-gray-500">No se pudo cargar la cuenta corriente</p>
+                        <div className="text-center py-8">
+                          <p className="text-red-600 font-medium mb-2">No se pudo cargar la cuenta corriente</p>
+                          <p className="text-sm text-gray-500">{tabError}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : !cuentaCorriente ? (
+                    <Card>
+                      <CardContent>
+                        <p className="text-center py-8 text-gray-500">Sin movimientos registrados</p>
                       </CardContent>
                     </Card>
                   ) : (
