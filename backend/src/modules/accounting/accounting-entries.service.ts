@@ -889,6 +889,11 @@ export class AccountingEntriesService {
 
   /**
    * Get all journal entries with lines for a company.
+   *
+   * Sol/Luna: non-Luna users never see Luna-circuit entries. The filter is
+   * applied at the SQL layer so counts and pagination stay consistent between
+   * the list and any downstream aggregates. Luna users get all entries;
+   * the UI's circuit selector drives the explicit filter (future enhancement).
    */
   async getEntries(companyId: string, filters: {
     date_from?: string;
@@ -897,7 +902,7 @@ export class AccountingEntriesService {
     is_auto?: string;
     limit?: number;
     offset?: number;
-  } = {}): Promise<{ entries: any[]; total: number }> {
+  } = {}, canAccessLuna: boolean = false): Promise<{ entries: any[]; total: number }> {
     const conditions = [sql`je.company_id = ${companyId}`];
 
     if (filters.date_from) {
@@ -911,6 +916,11 @@ export class AccountingEntriesService {
     }
     if (filters.is_auto !== undefined) {
       conditions.push(sql`je.is_auto = ${filters.is_auto === 'true'}`);
+    }
+    // Sol/Luna gate: without Luna access, pin to fiscal circuit. Legacy rows
+    // (circuit IS NULL) are treated as 'fiscal' via COALESCE.
+    if (!canAccessLuna) {
+      conditions.push(sql`COALESCE(je.circuit, 'fiscal') = 'fiscal'`);
     }
 
     const whereClause = sql.join(conditions, sql` AND `);
@@ -1071,7 +1081,7 @@ export class AccountingEntriesService {
   async getBalance(companyId: string, filters: {
     date_from?: string;
     date_to?: string;
-  } = {}): Promise<any[]> {
+  } = {}, canAccessLuna: boolean = false): Promise<any[]> {
     const dateConditions: any[] = [];
     if (filters.date_from) {
       dateConditions.push(sql`je.date >= ${filters.date_from}::date`);
@@ -1083,6 +1093,13 @@ export class AccountingEntriesService {
     const dateFilter = dateConditions.length > 0
       ? sql`AND ${sql.join(dateConditions, sql` AND `)}`
       : sql``;
+
+    // Sol/Luna: without Luna access, sum only fiscal-circuit entry lines. We
+    // apply the filter to the JOIN so the `LEFT JOIN` still yields accounts
+    // without any matching entries (they appear with zero balance).
+    const circuitFilter = canAccessLuna
+      ? sql``
+      : sql`AND COALESCE(je.circuit, 'fiscal') = 'fiscal'`;
 
     try {
       const result = await db.execute(sql`
@@ -1098,7 +1115,7 @@ export class AccountingEntriesService {
           (COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0))::numeric as balance
         FROM chart_of_accounts coa
         LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
-        LEFT JOIN journal_entries je ON je.id = jel.entry_id AND je.company_id = ${companyId} ${dateFilter}
+        LEFT JOIN journal_entries je ON je.id = jel.entry_id AND je.company_id = ${companyId} ${dateFilter} ${circuitFilter}
         WHERE coa.company_id = ${companyId}
         GROUP BY coa.id, coa.code, coa.name, coa.type, coa.level, coa.is_header
         ORDER BY coa.code

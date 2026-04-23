@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, mockClientQuery, resetMocks } from './helpers/setup'
 
 import { ReceiptsService } from '../src/modules/receipts/receipts.service'
 
@@ -55,18 +55,13 @@ describe('ReceiptsService', () => {
 
     it('creates receipt with multiple invoice items (partial payments)', async () => {
       mockMigrations()
-      mockDbRows([{ next_number: '5' }])
-      mockDbVoid() // BEGIN
-      mockDbVoid() // INSERT receipt
-      // First item
-      mockDbVoid() // INSERT receipt_item
-      mockDbRows([{ enterprise_id: 'ent-1', order_id: 'order-1' }]) // invoice lookup
-      mockDbVoid() // INSERT cobro
-      // Second item
-      mockDbVoid() // INSERT receipt_item
-      mockDbRows([{ enterprise_id: 'ent-2', order_id: 'order-2' }])
-      mockDbVoid() // INSERT cobro
-      mockDbVoid() // COMMIT
+      // Wave 3A: MAX, BEGIN, INSERTs, COMMIT all go through mockClientQuery.
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) return Promise.resolve({ rows: [{ next_number: '5' }] })
+        if (/FROM invoices WHERE id/.test(s)) return Promise.resolve({ rows: [{ enterprise_id: 'ent-1', order_id: 'order-1' }] })
+        return Promise.resolve({ rows: [] })
+      })
 
       const result = await service.createReceipt('company-1', 'user-1', {
         receipt_date: '2025-01-15',
@@ -83,11 +78,11 @@ describe('ReceiptsService', () => {
 
     it('creates simple receipt without invoice items (direct amount)', async () => {
       mockMigrations()
-      mockDbRows([{ next_number: '3' }])
-      mockDbVoid() // BEGIN
-      mockDbVoid() // INSERT receipt
-      mockDbVoid() // INSERT cobro (simple, no invoice)
-      mockDbVoid() // COMMIT
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) return Promise.resolve({ rows: [{ next_number: '3' }] })
+        return Promise.resolve({ rows: [] })
+      })
 
       const result = await service.createReceipt('company-1', 'user-1', {
         receipt_date: '2025-01-20',
@@ -103,44 +98,35 @@ describe('ReceiptsService', () => {
 
     it('uses transaction (BEGIN/COMMIT)', async () => {
       mockMigrations()
-      mockDbRows([{ next_number: '1' }])
 
-      const executeCalls: string[] = []
-      mockDbExecute.mockImplementation((...args: any[]) => {
-        const tpl = args[0]
-        if (tpl?.strings) {
-          const first = tpl.strings[0] || ''
-          if (first.includes('BEGIN')) executeCalls.push('BEGIN')
-          if (first.includes('COMMIT')) executeCalls.push('COMMIT')
-        }
-        return Promise.resolve({ rows: [{ enterprise_id: null, order_id: null }] })
+      const clientCalls: string[] = []
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr).trim()
+        if (/^BEGIN/i.test(s)) clientCalls.push('BEGIN')
+        if (/^COMMIT/i.test(s)) clientCalls.push('COMMIT')
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) return Promise.resolve({ rows: [{ next_number: '1' }] })
+        if (/FROM invoices WHERE id/.test(s)) return Promise.resolve({ rows: [{ enterprise_id: null, order_id: null }] })
+        return Promise.resolve({ rows: [] })
       })
 
       await service.createReceipt('company-1', 'user-1', {
         items: [{ invoice_id: 'inv-1', amount: '100' }],
       })
 
-      expect(executeCalls).toContain('BEGIN')
-      expect(executeCalls).toContain('COMMIT')
+      expect(clientCalls).toContain('BEGIN')
+      expect(clientCalls).toContain('COMMIT')
     })
 
     it('rolls back on failure (ROLLBACK)', async () => {
       mockMigrations()
-      mockDbRows([{ next_number: '1' }])
 
-      const executeCalls: string[] = []
-      let callIndex = 0
-      mockDbExecute.mockImplementation((...args: any[]) => {
-        callIndex++
-        const tpl = args[0]
-        if (tpl?.strings) {
-          const first = tpl.strings[0] || ''
-          if (first.includes('BEGIN')) executeCalls.push('BEGIN')
-          if (first.includes('ROLLBACK')) executeCalls.push('ROLLBACK')
-          if (first.includes('INSERT INTO receipts (')) {
-            return Promise.reject(new Error('DB connection lost'))
-          }
-        }
+      const clientCalls: string[] = []
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr).trim()
+        if (/^BEGIN/i.test(s)) clientCalls.push('BEGIN')
+        if (/^ROLLBACK/i.test(s)) clientCalls.push('ROLLBACK')
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) return Promise.resolve({ rows: [{ next_number: '1' }] })
+        if (/INSERT INTO receipts/.test(s)) return Promise.reject(new Error('DB connection lost'))
         return Promise.resolve({ rows: [] })
       })
 
@@ -150,8 +136,8 @@ describe('ReceiptsService', () => {
         })
       ).rejects.toThrow()
 
-      expect(executeCalls).toContain('BEGIN')
-      expect(executeCalls).toContain('ROLLBACK')
+      expect(clientCalls).toContain('BEGIN')
+      expect(clientCalls).toContain('ROLLBACK')
     })
 
     it('throws error with empty items array and no amount', async () => {
@@ -192,13 +178,12 @@ describe('ReceiptsService', () => {
 
     it('auto-generates sequential receipt_number', async () => {
       mockMigrations()
-      mockDbRows([{ next_number: '42' }])
-      mockDbVoid() // BEGIN
-      mockDbVoid() // INSERT receipt
-      mockDbVoid() // INSERT receipt_item
-      mockDbRows([{ enterprise_id: null, order_id: null }])
-      mockDbVoid() // INSERT cobro
-      mockDbVoid() // COMMIT
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/COALESCE\(MAX\(receipt_number/.test(s)) return Promise.resolve({ rows: [{ next_number: '42' }] })
+        if (/FROM invoices WHERE id/.test(s)) return Promise.resolve({ rows: [{ enterprise_id: null, order_id: null }] })
+        return Promise.resolve({ rows: [] })
+      })
 
       const result = await service.createReceipt('company-1', 'user-1', {
         items: [{ invoice_id: 'inv-1', amount: '100' }],

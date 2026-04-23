@@ -147,11 +147,35 @@ export class AccountingService {
           ) as customer_cuit,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) > 0 THEN COALESCE(CAST(ii.subtotal AS decimal), 0) ELSE 0 END), 0) as neto_gravado,
           COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 0 THEN COALESCE(CAST(ii.subtotal AS decimal), 0) ELSE 0 END), 0) as neto_no_gravado,
-          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 27 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.27, 2) ELSE 0 END), 0) as iva_27,
-          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 21 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.21, 2) ELSE 0 END), 0) as iva_21,
-          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 10.5 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.105, 2) ELSE 0 END), 0) as iva_10_5,
-          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 5 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.05, 2) ELSE 0 END), 0) as iva_5,
-          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 2.5 THEN ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.025, 2) ELSE 0 END), 0) as iva_2_5,
+          -- Wave 3C C2: prefer the stored per-item vat_amount (rounded at
+          -- create-time, so SUM equals invoices.vat_amount exactly).
+          -- Historical rows with vat_amount = 0 fall back to the legacy
+          -- ROUND(subtotal * rate, 2) so pre-fix invoices still report.
+          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 27 THEN
+            CASE WHEN COALESCE(CAST(ii.vat_amount AS decimal), 0) > 0
+                 THEN CAST(ii.vat_amount AS decimal)
+                 ELSE ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.27, 2) END
+            ELSE 0 END), 0) as iva_27,
+          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 21 THEN
+            CASE WHEN COALESCE(CAST(ii.vat_amount AS decimal), 0) > 0
+                 THEN CAST(ii.vat_amount AS decimal)
+                 ELSE ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.21, 2) END
+            ELSE 0 END), 0) as iva_21,
+          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 10.5 THEN
+            CASE WHEN COALESCE(CAST(ii.vat_amount AS decimal), 0) > 0
+                 THEN CAST(ii.vat_amount AS decimal)
+                 ELSE ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.105, 2) END
+            ELSE 0 END), 0) as iva_10_5,
+          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 5 THEN
+            CASE WHEN COALESCE(CAST(ii.vat_amount AS decimal), 0) > 0
+                 THEN CAST(ii.vat_amount AS decimal)
+                 ELSE ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.05, 2) END
+            ELSE 0 END), 0) as iva_5,
+          COALESCE(SUM(CASE WHEN COALESCE(CAST(ii.vat_rate AS decimal), 21) = 2.5 THEN
+            CASE WHEN COALESCE(CAST(ii.vat_amount AS decimal), 0) > 0
+                 THEN CAST(ii.vat_amount AS decimal)
+                 ELSE ROUND(COALESCE(CAST(ii.subtotal AS decimal), 0) * 0.025, 2) END
+            ELSE 0 END), 0) as iva_2_5,
           0 as iva_0,
           COALESCE(CAST(i.vat_amount AS decimal), 0) as total_iva,
           COALESCE(CAST(i.total_amount AS decimal), 0) as total

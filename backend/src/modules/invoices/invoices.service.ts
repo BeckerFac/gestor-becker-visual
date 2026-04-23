@@ -17,6 +17,37 @@ function validateNumeric(value: unknown, fieldName: string, { min = 0, max = Inf
 }
 
 /**
+ * Wave 3C C3: exchange_rate validator for multi-currency invoices.
+ * Returns null for ARS (no rate needed) and a sane positive number for
+ * foreign currencies, throwing 400 when missing / zero / negative / absurd.
+ * Shared by createInvoice, updateDraftInvoice and authorizeInvoice so the
+ * rule stays in one place.
+ */
+export function parseAndValidateExchangeRate(
+  currency: string | null | undefined,
+  raw: unknown,
+): number | null {
+  const cur = (currency || 'ARS').toUpperCase();
+  if (cur === 'ARS') {
+    // For ARS, either no rate or a positive rate (ignored) is fine.
+    if (raw == null || raw === '') return null;
+    const n = parseFloat(String(raw));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if (raw == null || raw === '') {
+    throw new ApiError(400, `exchange_rate requerido y > 0 para moneda ${cur}`);
+  }
+  const rate = parseFloat(String(raw));
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new ApiError(400, `exchange_rate requerido y > 0 para moneda ${cur}`);
+  }
+  if (rate > 1_000_000) {
+    throw new ApiError(400, 'exchange_rate invalido (fuera de rango razonable)');
+  }
+  return rate;
+}
+
+/**
  * Resolve the current product cost from product_pricing for snapshot on
  * invoice_items.cost. Returns 0 when:
  *  - productId is null (manual line item, no linked product),
@@ -104,6 +135,12 @@ export class InvoicesService {
       // historical rows that have NULL here.
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_cuit VARCHAR(20)`);
       await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS receiver_razon_social VARCHAR(255)`);
+
+      // Wave 3C C2/C4: store per-item rounded VAT so SUM(items.vat_amount)
+      // matches invoices.vat_amount exactly (no ROUND drift per row in
+      // Libro IVA). Historical rows get 0 and are recomputed by read-time
+      // COALESCE (see accounting.service.ts).
+      await db.execute(sql`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS vat_amount DECIMAL(12,2) DEFAULT 0`);
 
       this.migrationsRun = true;
     } catch (error) {
@@ -209,6 +246,21 @@ export class InvoicesService {
   async createInvoice(companyId: string, userId: string, data: any) {
     await this.ensureMigrations();
 
+    // Wave 3D D11: reject invoices without items. Previously an empty array
+    // or missing `items` created a $0 invoice that later broke subtotals,
+    // AFIP payloads, and CC reconciliation.
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new ApiError(400, 'Al menos un item es requerido');
+    }
+
+    // Wave 3D D12: whitelist invoice_type against the set of values the
+    // system actually supports. Anything else would be silently accepted
+    // then 500 at the DB enum check or produce garbage AFIP payloads.
+    const VALID_INVOICE_TYPES = ['A', 'B', 'C', 'E', 'LUN', 'NC_A', 'NC_B', 'NC_C', 'NC_E', 'ND_A', 'ND_B', 'ND_C', 'ND_E'];
+    if (data.invoice_type && !VALID_INVOICE_TYPES.includes(data.invoice_type)) {
+      throw new ApiError(400, `invoice_type invalido. Valores: ${VALID_INVOICE_TYPES.join(', ')}`);
+    }
+
     // Sol/Luna: cross-circuit validation against linked order (must happen
     // BEFORE inferring fiscal_type so we can use the order's circuit as
     // default and reject explicit mismatches).
@@ -289,43 +341,11 @@ export class InvoicesService {
       const invoiceType = fiscalType === 'no_fiscal'
         ? 'LUN'
         : (fiscalType === 'interno' ? null : (data.invoice_type || 'B'));
+      // Wave 3D: hoisted from inside the pool.connect() try (previously
+      // unreachable at the later export_data UPDATE and breaking tsc).
+      const isExportType = ['E', 'NC_E', 'ND_E'].includes(invoiceType || '');
 
-      // PR2-T3: advisory lock para serializar generacion de invoice_number
-      // Previene race condition cuando 2 requests crean facturas del mismo tipo
-      // simultaneamente (mismo patron que remitos.service.ts). El lock se libera
-      // en el COMMIT / ROLLBACK mas abajo.
-      await db.execute(sql`BEGIN`);
-      const lockKey = `invoice_num:${companyId}:${fiscalType}:${invoiceType || 'null'}`;
-      await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
-
-      // Get next sequential invoice number — separate sequences for fiscal vs internal vs Luna
-      let nextNumber: number;
-      if (fiscalType === 'no_fiscal') {
-        // Luna: dedicated sequence scoped by invoice_type='LUN'
-        const maxResult = await db.execute(sql`
-          SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
-          FROM invoices WHERE company_id = ${companyId} AND fiscal_type = 'no_fiscal' AND invoice_type = 'LUN'
-        `);
-        const rows = (maxResult as any).rows || maxResult || [];
-        nextNumber = parseInt(rows[0]?.next_number || '1');
-      } else if (fiscalType === 'interno') {
-        const maxResult = await db.execute(sql`
-          SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
-          FROM invoices WHERE company_id = ${companyId} AND fiscal_type = ${fiscalType}
-        `);
-        const rows = (maxResult as any).rows || maxResult || [];
-        nextNumber = parseInt(rows[0]?.next_number || '1');
-      } else {
-        const maxResult = await db.execute(sql`
-          SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
-          FROM invoices WHERE company_id = ${companyId} AND invoice_type = ${invoiceType}
-            AND (fiscal_type = 'fiscal' OR fiscal_type IS NULL)
-        `);
-        const rows = (maxResult as any).rows || maxResult || [];
-        nextNumber = parseInt(rows[0]?.next_number || '1');
-      }
-
-      // BUG S9 #3: validate customer belongs to company (IDOR fix)
+      // BUG S9 #3: validate customer belongs to company (IDOR fix) — BEFORE tx.
       if (data.customer_id) {
         const custCheck = await db.execute(sql`
           SELECT id FROM customers WHERE id = ${data.customer_id} AND company_id = ${companyId}
@@ -356,46 +376,86 @@ export class InvoicesService {
         if (custRows[0]?.enterprise_id) enterpriseId = custRows[0].enterprise_id;
       }
 
-      // -- TRANSACTION started above (PR2-T3 advisory lock) --
-      const isExportType = ['E', 'NC_E', 'ND_E'].includes(invoiceType || '');
-      if (fiscalType === 'no_fiscal') {
-        // Luna: raw SQL insert with invoice_type='LUN', status='emitido'
-        await db.execute(sql`
-          INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
-            subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
-          VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, 'LUN', ${nextNumber}, NOW(),
-            '0', '0', '0', 'emitido', 'no_fiscal', ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
-        `);
-      } else if (fiscalType === 'interno') {
-        // Legacy internal vouchers: invoice_type NULL, status 'emitido'
-        await db.execute(sql`
-          INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
-            subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
-          VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, NULL, ${nextNumber}, NOW(),
-            '0', '0', '0', 'emitido', 'interno', ${data.business_unit_id || null}, ${userId}, NOW(), NOW())
-        `);
-      } else if (isExportType) {
-        // Export invoices: use raw SQL to handle extended enum values safely
-        await db.execute(sql`
-          INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
-            subtotal, vat_amount, total_amount, status, created_by, created_at, updated_at)
-          VALUES (${invoiceId}, ${companyId}, ${data.customer_id || null}, ${invoiceType}, ${nextNumber}, NOW(),
-            '0', '0', '0', 'draft', ${userId}, NOW(), NOW())
-        `);
-      } else {
-        await db.insert(invoices).values({
-          id: invoiceId,
-          company_id: companyId,
-          customer_id: data.customer_id,
-          invoice_type: invoiceType! as any,
-          invoice_number: nextNumber,
-          invoice_date: new Date(),
-          subtotal: '0',
-          vat_amount: '0',
-          total_amount: '0',
-          status: 'draft',
-          created_by: userId,
-        }).returning();
+      // Wave 3A: real TX on a pooled connection so advisory_xact_lock + MAX() + INSERT
+      // run on the SAME physical connection. Previous `db.execute(sql\`BEGIN\`)` pattern
+      // released the connection back to the pool between statements — the lock was
+      // effectively discarded, producing duplicate invoice numbers under concurrency.
+      const client = await pool.connect();
+      let nextNumber: number;
+      try {
+        await client.query('BEGIN');
+
+        // PR2-T3: advisory lock para serializar generacion de invoice_number
+        // Previene race condition cuando 2 requests crean facturas del mismo tipo
+        // simultaneamente. El lock se libera automaticamente en COMMIT/ROLLBACK.
+        const lockKey = `invoice_num:${companyId}:${fiscalType}:${invoiceType || 'null'}`;
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
+
+        // Get next sequential invoice number — separate sequences for fiscal vs internal vs Luna
+        if (fiscalType === 'no_fiscal') {
+          // Luna: dedicated sequence scoped by invoice_type='LUN'
+          const numRes = await client.query(
+            `SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
+             FROM invoices WHERE company_id = $1 AND fiscal_type = 'no_fiscal' AND invoice_type = 'LUN'`,
+            [companyId]
+          );
+          nextNumber = parseInt(numRes.rows[0]?.next_number || '1');
+        } else if (fiscalType === 'interno') {
+          const numRes = await client.query(
+            `SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
+             FROM invoices WHERE company_id = $1 AND fiscal_type = $2`,
+            [companyId, fiscalType]
+          );
+          nextNumber = parseInt(numRes.rows[0]?.next_number || '1');
+        } else {
+          const numRes = await client.query(
+            `SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number
+             FROM invoices WHERE company_id = $1 AND invoice_type = $2
+               AND (fiscal_type = 'fiscal' OR fiscal_type IS NULL)`,
+            [companyId, invoiceType]
+          );
+          nextNumber = parseInt(numRes.rows[0]?.next_number || '1');
+        }
+
+        // INSERT invoice header on the SAME client (otherwise the advisory lock is moot).
+        // Wave 3D: isExportType now hoisted above pool.connect() so the later
+        // export_data UPDATE block outside this try can reuse it.
+        if (fiscalType === 'no_fiscal') {
+          await client.query(
+            `INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+              subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
+             VALUES ($1, $2, $3, 'LUN', $4, NOW(), '0', '0', '0', 'emitido', 'no_fiscal', $5, $6, NOW(), NOW())`,
+            [invoiceId, companyId, data.customer_id || null, nextNumber, data.business_unit_id || null, userId]
+          );
+        } else if (fiscalType === 'interno') {
+          await client.query(
+            `INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+              subtotal, vat_amount, total_amount, status, fiscal_type, business_unit_id, created_by, created_at, updated_at)
+             VALUES ($1, $2, $3, NULL, $4, NOW(), '0', '0', '0', 'emitido', 'interno', $5, $6, NOW(), NOW())`,
+            [invoiceId, companyId, data.customer_id || null, nextNumber, data.business_unit_id || null, userId]
+          );
+        } else if (isExportType) {
+          await client.query(
+            `INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+              subtotal, vat_amount, total_amount, status, created_by, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW(), '0', '0', '0', 'draft', $6, NOW(), NOW())`,
+            [invoiceId, companyId, data.customer_id || null, invoiceType, nextNumber, userId]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO invoices (id, company_id, customer_id, invoice_type, invoice_number, invoice_date,
+              subtotal, vat_amount, total_amount, status, created_by, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW(), '0', '0', '0', 'draft', $6, NOW(), NOW())`,
+            [invoiceId, companyId, data.customer_id || null, invoiceType, nextNumber, userId]
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        client.release();
       }
 
       // Nor feedback item 4: resolve and snapshot the receiver fiscal identity.
@@ -434,7 +494,11 @@ export class InvoicesService {
 
       // Set order_id, enterprise_id, fiscal_type, business_unit_id, related_invoice_id, currency, and retenciones_esperadas via raw SQL (columns added by migration)
       const currency = data.currency || 'ARS';
-      const exchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+      // Wave 3C C3: non-ARS invoices REQUIRE a valid, positive exchange_rate.
+      // Without this, amount_foreign and totals get stored as NaN/0 and the
+      // ARS-equivalent columns (used by every report) go to zero, silently
+      // breaking AR / DSO / cobranzas.
+      const exchangeRate = parseAndValidateExchangeRate(currency, data.exchange_rate);
       // Sol/Luna: Luna circuit has no retenciones concept — always force empty array.
       const retencionesEsperadas = fiscalType === 'no_fiscal'
         ? '[]'
@@ -465,6 +529,27 @@ export class InvoicesService {
           WHERE id = ${invoiceId}
         `);
       }
+
+      // Wave 3C C4: resolve the order's discount_percent once so we can
+      // propagate it to each invoice_item. Without this, the order-level
+      // descuento would reduce the invoice header totals while
+      // invoice_items kept PRE-discount subtotals, making Libro IVA per-row
+      // sums disagree with the header.
+      let orderDiscountPercent = 0;
+      if (data.order_id) {
+        try {
+          const discRes = await db.execute(sql`
+            SELECT COALESCE(CAST(discount_percent AS decimal), 0) as dp
+            FROM orders WHERE id = ${data.order_id} AND company_id = ${companyId}
+          `);
+          const dp = ((discRes as any).rows || [])[0]?.dp;
+          const parsed = parseFloat(dp ?? '0');
+          orderDiscountPercent = Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 0;
+        } catch {
+          orderDiscountPercent = 0;
+        }
+      }
+      const discountMultiplier = 1 - orderDiscountPercent / 100;
 
       // Add items
       const collectedOrderItemIds: string[] = [];
@@ -521,8 +606,12 @@ export class InvoicesService {
           }
 
           const qty = validateNumeric(item.quantity, 'Cantidad', { min: 0.001, max: 999999, allowZero: false });
-          const itemSubtotal = unitPrice * qty;
-          const itemVat = itemSubtotal * (vatRate / 100);
+          // Wave 3C C2 + C4: round subtotal + VAT per line with order-level
+          // descuento already applied. Storing the rounded values makes
+          // header totals == SUM(items.*) exactly (no Libro IVA drift).
+          const rawSubtotal = unitPrice * qty;
+          const itemSubtotal = Math.round(rawSubtotal * discountMultiplier * 100) / 100;
+          const itemVat = Math.round(itemSubtotal * vatRate) / 100;
           subtotal += itemSubtotal;
           vatAmount += itemVat;
 
@@ -539,6 +628,7 @@ export class InvoicesService {
             unit_price: unitPrice.toString(),
             vat_rate: vatRate.toString(),
             subtotal: itemSubtotal.toString(),
+            vat_amount: itemVat.toString(),
             cost: itemCost,
           });
 
@@ -625,8 +715,7 @@ export class InvoicesService {
         `);
       }
 
-      await db.execute(sql`COMMIT`);
-      // -- END TRANSACTION --
+      // -- END TRANSACTION (committed above via client.query('COMMIT')) --
 
       // Sol/Luna: lock the linked order (idempotent). Called after commit so
       // the lock only lives if the invoice actually persisted. Covers both
@@ -706,7 +795,6 @@ export class InvoicesService {
         status: (fiscalType === 'interno' || fiscalType === 'no_fiscal') ? 'emitido' : 'draft',
       };
     } catch (error) {
-      await db.execute(sql`ROLLBACK`).catch(() => {});
       console.error('Create invoice error:', error);
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, `Failed to create invoice: ${(error as Error).message}`);
@@ -1047,58 +1135,109 @@ export class InvoicesService {
         }
       }
 
+      // Wave 3C C3: re-validate exchange_rate if currency is being updated.
+      if (data.currency !== undefined) {
+        const newCurrency = String(data.currency || 'ARS').toUpperCase();
+        const newRate = parseAndValidateExchangeRate(newCurrency, data.exchange_rate);
+        await db.execute(sql`
+          UPDATE invoices SET currency = ${newCurrency}, exchange_rate = ${newRate}, updated_at = NOW()
+          WHERE id = ${invoiceId}
+        `);
+      }
+
+      // Wave 3C C4: propagate current order-level descuento to invoice_items
+      // when they're replaced — keeps header == SUM(items.*).
+      let updateDiscountPercent = 0;
+      try {
+        const linkRes = await db.execute(sql`
+          SELECT COALESCE(CAST(o.discount_percent AS decimal), 0) as dp
+          FROM invoices i
+          LEFT JOIN orders o ON o.id = i.order_id AND o.company_id = i.company_id
+          WHERE i.id = ${invoiceId} AND i.company_id = ${companyId}
+        `);
+        const dp = ((linkRes as any).rows || [])[0]?.dp;
+        const parsed = parseFloat(dp ?? '0');
+        updateDiscountPercent = Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 0;
+      } catch {
+        updateDiscountPercent = 0;
+      }
+      const updateDiscountMultiplier = 1 - updateDiscountPercent / 100;
+
       // Update items if provided
       if (data.items && Array.isArray(data.items)) {
-        // Atomic replace: BEGIN -> DELETE old items -> INSERT new items -> COMMIT
-        await db.execute(sql`BEGIN`);
-        // Delete existing items
-        await db.delete(invoice_items).where(eq(invoice_items.invoice_id, invoiceId));
-
+        // Wave 3A: atomic replace on a single pooled client. Previous
+        // `db.execute(sql\`BEGIN\`)` pattern let DELETE and INSERT run on
+        // DIFFERENT pool connections, breaking atomicity.
+        // Precompute costs (async product_pricing lookups) BEFORE the tx to
+        // minimize the lock window.
+        const computedItems = [] as Array<{
+          itemId: string; product_id: string | null; product_name: string;
+          quantity: string; unit_price: string; vat_rate: string; subtotal: string;
+          vat_amount: string; cost: string; order_item_id: string | null;
+        }>;
         let subtotal = 0;
         let vatAmount = 0;
-
         for (const item of data.items) {
           const unitPrice = validateNumeric(item.unit_price || 0, 'Precio unitario', { min: 0, max: 999999999 });
           const vatRate = validateNumeric(item.vat_rate || 21, 'Tasa IVA', { min: 0, max: 100 });
           const qty = validateNumeric(item.quantity || 0, 'Cantidad', { min: 0.001, max: 999999, allowZero: false });
-          const itemSubtotal = unitPrice * qty;
-          const itemVat = itemSubtotal * (vatRate / 100);
+          // Wave 3C C2 + C4: per-item rounding + discount propagation.
+          const rawSubtotal = unitPrice * qty;
+          const itemSubtotal = Math.round(rawSubtotal * updateDiscountMultiplier * 100) / 100;
+          const itemVat = Math.round(itemSubtotal * vatRate) / 100;
           subtotal += itemSubtotal;
           vatAmount += itemVat;
-
-          const itemId = uuid();
-          // Snapshot cost from product_pricing (updateInvoice path).
           const itemCost = await resolveProductCost(item.product_id || null);
-          await db.insert(invoice_items).values({
-            id: itemId,
-            invoice_id: invoiceId,
+          computedItems.push({
+            itemId: uuid(),
             product_id: item.product_id || null,
             product_name: item.product_name || '',
             quantity: qty.toString(),
             unit_price: unitPrice.toString(),
             vat_rate: vatRate.toString(),
             subtotal: itemSubtotal.toString(),
+            vat_amount: itemVat.toString(),
             cost: itemCost,
+            order_item_id: item.order_item_id || null,
           });
-
-          if (item.order_item_id) {
-            await db.execute(sql`
-              UPDATE invoice_items SET order_item_id = ${item.order_item_id} WHERE id = ${itemId}
-            `);
-          }
         }
-
         const total = subtotal + vatAmount;
-        await db.update(invoices)
-          .set({
-            subtotal: subtotal.toString(),
-            vat_amount: vatAmount.toString(),
-            total_amount: total.toString(),
-            updated_at: new Date(),
-          })
-          .where(eq(invoices.id, invoiceId));
 
-        await db.execute(sql`COMMIT`);
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          // Re-verify status under row lock — prevents racing against authorize.
+          const lockRes = await client.query(
+            `SELECT status FROM invoices WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+            [invoiceId, companyId]
+          );
+          if (lockRes.rows.length === 0) throw new ApiError(404, 'Factura no encontrada');
+          if (!editableStatuses.includes(lockRes.rows[0].status)) {
+            throw new ApiError(400, 'Solo se pueden editar facturas en borrador o comprobantes internos');
+          }
+
+          await client.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [invoiceId]);
+
+          for (const ci of computedItems) {
+            await client.query(
+              `INSERT INTO invoice_items (id, invoice_id, product_id, product_name, quantity, unit_price, vat_rate, subtotal, vat_amount, cost, order_item_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+              [ci.itemId, invoiceId, ci.product_id, ci.product_name, ci.quantity, ci.unit_price, ci.vat_rate, ci.subtotal, ci.vat_amount, ci.cost, ci.order_item_id]
+            );
+          }
+
+          await client.query(
+            `UPDATE invoices SET subtotal = $1, vat_amount = $2, total_amount = $3, updated_at = NOW() WHERE id = $4`,
+            [subtotal.toString(), vatAmount.toString(), total.toString(), invoiceId]
+          );
+
+          await client.query('COMMIT');
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          client.release();
+        }
       }
 
       // Wave 2C audit.
@@ -1117,7 +1256,6 @@ export class InvoicesService {
 
       return await this.getInvoice(companyId, invoiceId);
     } catch (error) {
-      try { await db.execute(sql`ROLLBACK`); } catch { /* not in tx */ }
       if (error instanceof ApiError) throw error;
       console.error('Update draft invoice error:', error);
       throw new ApiError(500, 'Error al actualizar borrador');
@@ -1342,15 +1480,32 @@ export class InvoicesService {
   }
 
   async authorizeInvoice(companyId: string, invoiceId: string, puntoVenta: number = 1, overrideCondicionIva?: number, userId?: string) {
+    // Wave 3A: acquire a row-level lock on the invoice (FOR UPDATE) on a pooled
+    // client and HOLD IT through the AFIP round-trip so two concurrent
+    // authorize requests cannot both pass the status=='draft' check and get
+    // duplicate CAE assignments. The lock is released on COMMIT/ROLLBACK at
+    // the end of the method.
+    const lockClient = await pool.connect();
     try {
-      // Block internal + Luna vouchers from AFIP authorization
-      const ftCheck = await db.execute(sql`SELECT fiscal_type FROM invoices WHERE id = ${invoiceId} AND company_id = ${companyId}`);
-      const ft = ((ftCheck as any).rows || [])[0]?.fiscal_type;
+      await lockClient.query('BEGIN');
+      const lockRes = await lockClient.query(
+        `SELECT id, fiscal_type, status FROM invoices
+         WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+        [invoiceId, companyId]
+      );
+      if (lockRes.rows.length === 0) {
+        throw new ApiError(404, 'Factura no encontrada');
+      }
+      const ft = lockRes.rows[0].fiscal_type;
+      const lockedStatus = lockRes.rows[0].status;
       if (ft === 'no_fiscal') {
         throw new ApiError(400, 'Los comprobantes Luna no se autorizan en AFIP');
       }
       if (ft === 'interno') {
         throw new ApiError(400, 'Los comprobantes internos/no fiscales no pueden autorizarse en AFIP');
+      }
+      if (lockedStatus !== 'draft') {
+        throw new ApiError(400, 'La factura no puede ser autorizada (estado: ' + lockedStatus + ')');
       }
 
       validateNumeric(puntoVenta, 'Punto de venta', { min: 1, max: 99999, allowZero: false });
@@ -1361,6 +1516,18 @@ export class InvoicesService {
       const totalAmount = parseFloat(invoice.total_amount?.toString() || '0');
       if (totalAmount <= 0) {
         throw new ApiError(400, 'La factura no tiene importe. Verifique que los items tengan precios.');
+      }
+
+      // Wave 3C C3: invoice may have been created via legacy import with
+      // currency!=ARS but no exchange_rate. Block AFIP authorization before
+      // it sends a broken MonCotiz.
+      const invCurrency = ((invoice as any).currency || 'ARS').toString().toUpperCase();
+      if (invCurrency !== 'ARS') {
+        const invRate = (invoice as any).exchange_rate;
+        const parsedRate = invRate != null ? parseFloat(invRate.toString()) : NaN;
+        if (!Number.isFinite(parsedRate) || parsedRate <= 0) {
+          throw new ApiError(400, `exchange_rate requerido y > 0 para autorizar factura en ${invCurrency}`);
+        }
       }
 
       // Get customer CUIT and condicion_iva.
@@ -1624,7 +1791,10 @@ export class InvoicesService {
         exportData,
       };
 
-      // Authorize with AFIP (real or mock)
+      // Authorize with AFIP (real or mock).
+      // The lockClient row-lock on invoices is still held here — any concurrent
+      // authorizeInvoice() call on the same row will block at the FOR UPDATE
+      // above until we COMMIT below.
       const authorization = await afipService.authorizeInvoice(companyId, authInput);
 
       // Save authorization result
@@ -1713,11 +1883,18 @@ export class InvoicesService {
         });
       } catch (e) { console.error('[audit] failed:', e); }
 
+      // Wave 3A: commit the authorization lock transaction. From here on
+      // other concurrent authorize calls on this invoice will see status !=
+      // 'draft' and fail fast at the FOR UPDATE guard above.
+      await lockClient.query('COMMIT');
       return updated;
     } catch (error) {
+      await lockClient.query('ROLLBACK').catch(() => {});
       if (error instanceof ApiError) throw error;
       console.error('Authorize invoice error:', error);
       throw new ApiError(500, 'Error al autorizar factura');
+    } finally {
+      lockClient.release();
     }
   }
   /**
@@ -1827,8 +2004,32 @@ export class InvoicesService {
 
   /**
    * Get invoice detail for expandable row (items + cobros applied + balance).
+   *
+   * Sol/Luna: non-Luna users requesting a Luna invoice must get 404 (existence
+   * leak prevention). The fiscal_type is read from the initial SELECT and the
+   * check happens BEFORE emitting items/cobros queries, so a Luna invoice never
+   * leaks its items/applications to Sol users.
    */
-  async getInvoiceDetail(companyId: string, invoiceId: string) {
+  async getInvoiceDetail(companyId: string, invoiceId: string, userCanAccessLuna: boolean = true) {
+    // Invoice row first — needed to enforce the Luna gate before returning any child rows.
+    const invResult = await db.execute(sql`
+      SELECT i.fiscal_type, i.total_amount, i.subtotal, i.vat_amount, i.invoice_type, i.invoice_number,
+        e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address, e.tax_condition,
+        cust.name as customer_name
+      FROM invoices i
+      LEFT JOIN enterprises e ON i.enterprise_id = e.id
+      LEFT JOIN customers cust ON i.customer_id = cust.id
+      WHERE i.id = ${invoiceId} AND i.company_id = ${companyId}
+    `);
+    const invoice = ((invResult as any).rows || [])[0];
+    if (!invoice) return null;
+
+    // Sol/Luna row-level guard: missing fiscal_type is treated as 'fiscal' (legacy rows).
+    const invoiceFiscal = (invoice.fiscal_type || 'fiscal') as 'fiscal' | 'no_fiscal';
+    if (invoiceFiscal === 'no_fiscal' && !userCanAccessLuna) {
+      return null; // controller maps null -> 404
+    }
+
     // Items (with order info for grouping)
     const itemsResult = await db.execute(sql`
       SELECT ii.*, p.name as product_name, p.sku,
@@ -1860,19 +2061,6 @@ export class InvoicesService {
 
     // Saldo pendiente
     const totalApplied = cobros_aplicados.reduce((s: number, c: any) => s + parseFloat(c.amount_applied || 0), 0);
-
-    // Invoice data (para total)
-    const invResult = await db.execute(sql`
-      SELECT i.total_amount, i.subtotal, i.vat_amount, i.invoice_type, i.invoice_number,
-        e.name as enterprise_name, e.cuit as enterprise_cuit, e.address as enterprise_address, e.tax_condition,
-        cust.name as customer_name
-      FROM invoices i
-      LEFT JOIN enterprises e ON i.enterprise_id = e.id
-      LEFT JOIN customers cust ON i.customer_id = cust.id
-      WHERE i.id = ${invoiceId} AND i.company_id = ${companyId}
-    `);
-    const invoice = ((invResult as any).rows || [])[0];
-    if (!invoice) return null;
 
     const total = parseFloat(invoice.total_amount || 0);
 

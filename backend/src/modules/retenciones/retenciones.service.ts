@@ -44,6 +44,7 @@ interface RetencionFilters {
   cobro_id?: string;
   purchase_invoice_id?: string;
   invoice_id?: string;
+  canAccessLuna?: boolean;
 }
 
 interface PadronEntry {
@@ -326,11 +327,25 @@ export class RetencionesService {
       if (filters.invoice_id) {
         whereClause = sql`${whereClause} AND r.invoice_id = ${filters.invoice_id}`;
       }
+      // Sol/Luna: retenciones carry no fiscal_type, but they are linked to
+      // cobro (sufrida on a venta) or pago (practicada on a compra) and those
+      // rows do. When the requesting user cannot access Luna, hide any
+      // retencion whose source cobro/pago is on the Luna circuit. Retenciones
+      // without a linked cobro/pago (pre-creation / legacy) default to Sol.
+      if (!filters.canAccessLuna) {
+        whereClause = sql`${whereClause} AND (
+          (r.cobro_id IS NULL AND r.pago_id IS NULL)
+          OR COALESCE(co.fiscal_type, 'fiscal') = 'fiscal'
+          OR COALESCE(pa.fiscal_type, 'fiscal') = 'fiscal'
+        )`;
+      }
 
       const result = await db.execute(sql`
         SELECT r.*, e.name as enterprise_name
         FROM retenciones r
         LEFT JOIN enterprises e ON r.enterprise_id = e.id
+        LEFT JOIN cobros co ON r.cobro_id = co.id
+        LEFT JOIN pagos pa ON r.pago_id = pa.id
         WHERE ${whereClause}
         ORDER BY r.date DESC
       `);

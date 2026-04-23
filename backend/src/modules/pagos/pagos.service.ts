@@ -182,6 +182,26 @@ export class PagosService {
   async createPago(companyId: string, userId: string, data: any) {
     await this.ensureTables();
 
+    // Wave 3D D4: validate exchange_rate UPFRONT (mirror of invoices Wave 3C).
+    // Non-ARS currency REQUIRES a positive numeric exchange_rate; without this,
+    // NaN / 0 / negative would reach the DECIMAL column and nuke ARS totals.
+    const earlyCurrency = data.currency || 'ARS';
+    if (data.exchange_rate !== undefined && data.exchange_rate !== null && data.exchange_rate !== '') {
+      const parsed = Number(data.exchange_rate);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new ApiError(400, 'exchange_rate invalido: debe ser un numero positivo');
+      }
+      if (parsed > 1_000_000_000) {
+        throw new ApiError(400, 'exchange_rate fuera de rango');
+      }
+    }
+    if (
+      earlyCurrency !== 'ARS' &&
+      (data.exchange_rate === undefined || data.exchange_rate === null || data.exchange_rate === '')
+    ) {
+      throw new ApiError(400, 'exchange_rate es requerido cuando la moneda no es ARS');
+    }
+
     // Auto-assign default business_unit_id if not provided
     if (!data.business_unit_id) {
       try {
@@ -428,7 +448,24 @@ export class PagosService {
       }
 
       const pagoCurrency = data.currency || 'ARS';
-      const pagoExchangeRate = data.exchange_rate ? parseFloat(data.exchange_rate) : null;
+      // Wave 3D D4: validate exchange_rate mirroring what Wave 3C enforces on
+      // invoices. Reject NaN / <= 0 / > 1e9 / non-ARS with null rate. Previous
+      // code parseFloat'd blindly — a "abc" string became NaN and was written
+      // into the DECIMAL column triggering a 500.
+      let pagoExchangeRate: number | null = null;
+      if (data.exchange_rate !== undefined && data.exchange_rate !== null && data.exchange_rate !== '') {
+        const parsed = Number(data.exchange_rate);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw new ApiError(400, 'exchange_rate invalido: debe ser un numero positivo');
+        }
+        if (parsed > 1_000_000_000) {
+          throw new ApiError(400, 'exchange_rate fuera de rango');
+        }
+        pagoExchangeRate = parsed;
+      }
+      if (pagoCurrency !== 'ARS' && pagoExchangeRate === null) {
+        throw new ApiError(400, 'exchange_rate es requerido cuando la moneda no es ARS');
+      }
 
       await client.query(
         `INSERT INTO pagos (id, company_id, enterprise_id, purchase_id, amount, total_amount,

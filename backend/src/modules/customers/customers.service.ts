@@ -48,6 +48,17 @@ export class CustomersService {
         validateEnterpriseIdOrThrow(data.enterprise_id);
       }
 
+      // Wave 3D D9/D10: length caps + email regex.
+      if (data.name !== undefined && data.name !== null && String(data.name).length > 255) {
+        throw new ApiError(400, 'El nombre no puede exceder 255 caracteres');
+      }
+      if (data.notes !== undefined && data.notes !== null && String(data.notes).length > 2000) {
+        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+      }
+      if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(data.email))) {
+        throw new ApiError(400, 'Email invalido');
+      }
+
       // CUIT is optional (Nor feedback item 2). Validate format only if provided.
       // Accept "20-12345678-9" or "20123456789"; store normalized as NULL when empty.
       const rawCuit = typeof data.cuit === 'string' ? data.cuit.trim() : '';
@@ -196,6 +207,17 @@ export class CustomersService {
     try {
       await this.ensureMigrations();
       await this.getCustomer(companyId, customerId);
+
+      // Wave 3D D9/D10: length caps + email regex on partial updates.
+      if ('name' in data && data.name && String(data.name).length > 255) {
+        throw new ApiError(400, 'El nombre no puede exceder 255 caracteres');
+      }
+      if ('notes' in data && data.notes && String(data.notes).length > 2000) {
+        throw new ApiError(400, 'Las notas no pueden exceder 2000 caracteres');
+      }
+      if ('email' in data && data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(data.email))) {
+        throw new ApiError(400, 'Email invalido');
+      }
 
       // Handle access_code separately (not in Drizzle schema)
       if (data.access_code !== undefined) {

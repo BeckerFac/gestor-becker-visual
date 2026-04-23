@@ -11,7 +11,11 @@ export class EnterprisesController {
   }
 
   async getEnterprise(req: AuthRequest, res: Response) {
-    const data = await enterprisesService.getEnterprise(req.user!.company_id, req.params.id);
+    const data = await enterprisesService.getEnterprise(
+      req.user!.company_id,
+      req.params.id,
+      !!(req.user as any)?.can_access_luna,
+    );
     res.json(data);
   }
 

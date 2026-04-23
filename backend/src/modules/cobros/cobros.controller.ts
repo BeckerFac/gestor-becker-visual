@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middlewares/auth';
 import { cobrosService } from './cobros.service';
 import { pdfService } from '../pdf/pdf.service';
+import { ApiError } from '../../middlewares/errorHandler';
 
 export class CobrosController {
   async getCobros(req: AuthRequest, res: Response) {
@@ -59,6 +60,18 @@ export class CobrosController {
 
   async getReceiptPdf(req: AuthRequest, res: Response) {
     try {
+      // Sol/Luna gate: propagate the 404 that cobrosService.getCobroById emits
+      // for Luna-as-Sol row lookups. The receipt PDF would otherwise render the
+      // complete receipt of a Luna cobro for a Sol-only user.
+      const userCanAccessLuna = !!(req.user as any)?.can_access_luna;
+      try {
+        await cobrosService.getCobroById(req.user!.company_id, req.params.id, { userCanAccessLuna });
+      } catch (gateErr) {
+        if (gateErr instanceof ApiError && gateErr.statusCode === 404) {
+          return res.status(404).json({ error: 'Cobro no encontrado' });
+        }
+        throw gateErr;
+      }
       const pdf = await pdfService.generateReceiptPdf(req.params.id, req.user!.company_id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename=recibo-${req.params.id}.pdf`);

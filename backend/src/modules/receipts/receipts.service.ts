@@ -1,4 +1,4 @@
-import { db } from '../../config/db';
+import { db, pool } from '../../config/db';
 import { sql } from 'drizzle-orm';
 import { ApiError } from '../../middlewares/errorHandler';
 import { v4 as uuid } from 'uuid';
@@ -180,14 +180,6 @@ export class ReceiptsService {
         }
       }
 
-      // Auto-generate receipt_number
-      const maxResult = await db.execute(sql`
-        SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number
-        FROM receipts WHERE company_id = ${companyId}
-      `);
-      const rows = (maxResult as any).rows || maxResult || [];
-      const receiptNumber = parseInt(rows[0]?.next_number || '1');
-
       // Calculate total: from items if present, otherwise from direct amount
       const invoiceItemsTotal = hasItems
         ? items.reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0)
@@ -200,107 +192,155 @@ export class ReceiptsService {
         : parseFloat(amount);
 
       const receiptId = uuid();
+      const collectedOrderIds: string[] = [];
 
-      // Transaction: all inserts succeed or all rollback
-      await db.execute(sql`BEGIN`);
+      // Wave 3A: real transaction on a pooled client. The previous pattern
+      // generated receipt_number via db.execute() BEFORE a `db.execute('BEGIN')`
+      // that didn't actually tie subsequent db.execute calls to the same
+      // connection — MAX + INSERT happened on DIFFERENT pool connections
+      // which allowed duplicate receipt numbers under concurrent load.
+      let receiptNumber: number;
+      const client = await pool.connect();
       try {
-        await db.execute(sql`
-          INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, enterprise_id, bank_id, reference, created_by, created_at)
-          VALUES (${receiptId}, ${companyId}, ${receiptNumber}, ${receipt_date || new Date().toISOString()}, ${totalAmount.toFixed(2)}, ${payment_method || null}, ${notes || null}, ${enterprise_id || null}, ${bank_id || null}, ${reference || null}, ${userId}, NOW())
-        `);
+        await client.query('BEGIN');
+
+        // Advisory lock serializes receipt_number generation per company.
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`receipts_num:${companyId}`]
+        );
+
+        const nextNumRes = await client.query(
+          `SELECT COALESCE(MAX(receipt_number), 0) + 1 as next_number
+             FROM receipts WHERE company_id = $1`,
+          [companyId]
+        );
+        receiptNumber = parseInt(nextNumRes.rows[0]?.next_number || '1');
+
+        await client.query(
+          `INSERT INTO receipts (id, company_id, receipt_number, receipt_date, total_amount, payment_method, notes, enterprise_id, bank_id, reference, created_by, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+          [
+            receiptId, companyId, receiptNumber,
+            receipt_date || new Date().toISOString(),
+            totalAmount.toFixed(2), payment_method || null, notes || null,
+            enterprise_id || null, bank_id || null, reference || null, userId,
+          ]
+        );
 
         // Track first cobro ID for cheque linking
         let firstCobroId: string | null = null;
 
         if (hasItems) {
-          // Receipt with invoice items
           for (const item of items) {
             const itemId = uuid();
-            await db.execute(sql`
-              INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
-              VALUES (${itemId}, ${receiptId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, NOW())
-            `);
+            await client.query(
+              `INSERT INTO receipt_items (id, receipt_id, invoice_id, amount, created_at)
+               VALUES ($1, $2, $3, $4, NOW())`,
+              [itemId, receiptId, item.invoice_id, parseFloat(item.amount).toFixed(2)]
+            );
 
             const cobroId = uuid();
             if (!firstCobroId) firstCobroId = cobroId;
-            const invResult = await db.execute(sql`
-              SELECT enterprise_id, order_id FROM invoices WHERE id = ${item.invoice_id}
-            `);
-            const invRows = (invResult as any).rows || invResult || [];
-            const invEnterpriseId = invRows[0]?.enterprise_id || null;
-            const orderId = invRows[0]?.order_id || null;
+            const invRes2 = await client.query(
+              `SELECT enterprise_id, order_id FROM invoices WHERE id = $1`,
+              [item.invoice_id]
+            );
+            const invEnterpriseId = invRes2.rows[0]?.enterprise_id || null;
+            const orderId = invRes2.rows[0]?.order_id || null;
 
-            await db.execute(sql`
-              INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
-              VALUES (${cobroId}, ${companyId}, ${invEnterpriseId}, ${orderId}, ${item.invoice_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
-            `);
+            await client.query(
+              `INSERT INTO cobros (id, company_id, enterprise_id, order_id, invoice_id, amount, payment_method, reference, payment_date, notes, created_by, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+              [
+                cobroId, companyId, invEnterpriseId, orderId, item.invoice_id,
+                parseFloat(item.amount).toFixed(2), payment_method || 'efectivo',
+                `Recibo #${receiptNumber}`,
+                receipt_date || new Date().toISOString(),
+                notes || null, userId,
+              ]
+            );
           }
         }
         if (hasOrderItems) {
-          // Receipt with order items (pedidos sin facturar)
           for (const item of order_items) {
             const cobroId = uuid();
             if (!firstCobroId) firstCobroId = cobroId;
-            // Get enterprise_id from the order
-            const orderResult = await db.execute(sql`
-              SELECT o.id, COALESCE(e.id, c2.enterprise_id) as enterprise_id
-              FROM orders o
-              LEFT JOIN enterprises e ON o.enterprise_id = e.id
-              LEFT JOIN customers c2 ON o.customer_id = c2.id
-              WHERE o.id = ${item.order_id}
-            `);
-            const orderRows = (orderResult as any).rows || orderResult || [];
-            const orderEnterpriseId = orderRows[0]?.enterprise_id || enterprise_id || null;
+            const orderRes = await client.query(
+              `SELECT o.id, COALESCE(e.id, c2.enterprise_id) as enterprise_id
+                 FROM orders o
+            LEFT JOIN enterprises e ON o.enterprise_id = e.id
+            LEFT JOIN customers c2 ON o.customer_id = c2.id
+                WHERE o.id = $1`,
+              [item.order_id]
+            );
+            const orderEnterpriseId = orderRes.rows[0]?.enterprise_id || enterprise_id || null;
 
-            await db.execute(sql`
-              INSERT INTO cobros (id, company_id, enterprise_id, order_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
-              VALUES (${cobroId}, ${companyId}, ${orderEnterpriseId}, ${item.order_id}, ${parseFloat(item.amount).toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${`Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
-            `);
-
-            // Recalculate payment status for linked order
-            const { cobrosService } = await import('../cobros/cobros.service');
-            await cobrosService.recalculateOrderPaymentStatus(item.order_id);
+            await client.query(
+              `INSERT INTO cobros (id, company_id, enterprise_id, order_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+              [
+                cobroId, companyId, orderEnterpriseId, item.order_id,
+                parseFloat(item.amount).toFixed(2), payment_method || 'efectivo',
+                bank_id || null,
+                `Recibo #${receiptNumber}`,
+                receipt_date || new Date().toISOString(),
+                notes || null, userId,
+              ]
+            );
+            collectedOrderIds.push(item.order_id);
           }
         }
 
         if (!hasItems && !hasOrderItems) {
-          // Simple receipt without invoices or orders - create a single cobro
           const cobroId = uuid();
           firstCobroId = cobroId;
-          await db.execute(sql`
-            INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
-            VALUES (${cobroId}, ${companyId}, ${enterprise_id || null}, ${totalAmount.toFixed(2)}, ${payment_method || 'efectivo'}, ${bank_id || null}, ${reference || `Recibo #${receiptNumber}`}, ${receipt_date || new Date().toISOString()}, ${notes || null}, ${userId}, NOW())
-          `);
+          await client.query(
+            `INSERT INTO cobros (id, company_id, enterprise_id, amount, payment_method, bank_id, reference, payment_date, notes, created_by, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+            [
+              cobroId, companyId, enterprise_id || null,
+              totalAmount.toFixed(2), payment_method || 'efectivo',
+              bank_id || null,
+              reference || `Recibo #${receiptNumber}`,
+              receipt_date || new Date().toISOString(),
+              notes || null, userId,
+            ]
+          );
         }
 
-        // If cheque_data is provided, create a cheque linked to the first cobro
         if (cheque_data && payment_method === 'cheque') {
           const chequeId = uuid();
-          await db.execute(sql`
-            INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, notes, created_by)
-            VALUES (
-              ${chequeId},
-              ${companyId},
-              ${cheque_data.number},
-              ${cheque_data.bank},
-              ${cheque_data.drawer},
-              ${cheque_data.drawer_cuit || null},
-              ${cheque_data.cheque_type || 'comun'},
-              ${totalAmount.toFixed(2)},
-              ${new Date(cheque_data.issue_date)},
-              ${new Date(cheque_data.due_date)},
-              'a_cobrar',
-              ${firstCobroId},
-              ${notes || null},
-              ${userId}
-            )
-          `);
+          await client.query(
+            `INSERT INTO cheques (id, company_id, number, bank, drawer, drawer_cuit, cheque_type, amount, issue_date, due_date, status, cobro_id, notes, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'a_cobrar',$11,$12,$13)`,
+            [
+              chequeId, companyId,
+              cheque_data.number, cheque_data.bank, cheque_data.drawer,
+              cheque_data.drawer_cuit || null,
+              cheque_data.cheque_type || 'comun',
+              totalAmount.toFixed(2),
+              new Date(cheque_data.issue_date),
+              new Date(cheque_data.due_date),
+              firstCobroId, notes || null, userId,
+            ]
+          );
         }
 
-        await db.execute(sql`COMMIT`);
+        await client.query('COMMIT');
       } catch (txError) {
-        await db.execute(sql`ROLLBACK`);
+        await client.query('ROLLBACK').catch(() => {});
         throw txError;
+      } finally {
+        client.release();
+      }
+
+      // Recalc order payment statuses AFTER commit (uses its own db connections).
+      if (collectedOrderIds.length > 0) {
+        const { cobrosService } = await import('../cobros/cobros.service');
+        for (const oid of collectedOrderIds) {
+          await cobrosService.recalculateOrderPaymentStatus(oid);
+        }
       }
 
       return { id: receiptId, receipt_number: receiptNumber, total_amount: totalAmount };

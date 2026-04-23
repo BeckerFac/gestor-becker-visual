@@ -436,4 +436,142 @@ describe('CAT-8 Sol/Luna — business reports + dashboard', () => {
       expect(timeQuery!).not.toMatch(LUNA_FRAGMENT)
     })
   })
+
+  // ════════════════════════════════════════════════════════════════════════
+  // WAVE 3B LEAK DEFENSES — globalSearch, getSalesReport, getTopProducts.
+  // Regression: these endpoints never passed CircuitOpts, so Luna rows leaked
+  // to Sol-only users via search and dashboard charts.
+  // ════════════════════════════════════════════════════════════════════════
+
+  describe('globalSearch fiscal filter (Wave 3B)', () => {
+    function queueSearchMocks(n: number = 6) {
+      for (let i = 0; i < n; i++) mockDbExecute.mockResolvedValueOnce({ rows: [] })
+    }
+
+    it('default opts -> invoices/orders/purchases carry the Sol fragment', async () => {
+      queueSearchMocks()
+      await reports.globalSearch('c', 'acme', undefined, undefined)
+      const calls = allCallsJoined()
+      const invoiceQueries = calls.filter(s => /FROM invoices i/.test(s))
+      const orderQueries = calls.filter(s => /FROM orders o/.test(s))
+      const purchaseQueries = calls.filter(s => /FROM purchases p/.test(s))
+      expect(invoiceQueries.length + orderQueries.length + purchaseQueries.length).toBeGreaterThan(0)
+      for (const q of [...invoiceQueries, ...orderQueries, ...purchaseQueries]) {
+        expect(q).toMatch(SOL_FRAGMENT)
+        expect(q).not.toMatch(LUNA_FRAGMENT)
+      }
+    })
+
+    it('Luna user + [no_fiscal] -> invoices/orders/purchases carry the Luna fragment', async () => {
+      queueSearchMocks()
+      await reports.globalSearch('c', 'acme', undefined, {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: true,
+      })
+      const calls = allCallsJoined()
+      const invoiceQueries = calls.filter(s => /FROM invoices i/.test(s))
+      for (const q of invoiceQueries) expect(q).toMatch(LUNA_FRAGMENT)
+    })
+
+    it('non-Luna user + [no_fiscal] -> silently downgraded to Sol in all circuit queries', async () => {
+      queueSearchMocks()
+      await reports.globalSearch('c', 'acme', undefined, {
+        fiscal_types: ['no_fiscal'],
+        userCanAccessLuna: false,
+      })
+      const calls = allCallsJoined()
+      const circuitQueries = calls.filter(s =>
+        /FROM invoices i/.test(s) || /FROM orders o/.test(s) || /FROM purchases p/.test(s)
+      )
+      expect(circuitQueries.length).toBeGreaterThan(0)
+      for (const q of circuitQueries) {
+        expect(q).toMatch(SOL_FRAGMENT)
+        expect(q).not.toMatch(LUNA_FRAGMENT)
+      }
+    })
+
+    it('non-Luna user -> enterprise rows with default_fiscal_type=no_fiscal are hidden', async () => {
+      queueSearchMocks()
+      await reports.globalSearch('c', 'acme', undefined, {
+        userCanAccessLuna: false,
+      })
+      const entQuery = allCallsJoined().find(s => /FROM enterprises\b/.test(s) && /name ILIKE/.test(s))
+      expect(entQuery).toBeDefined()
+      expect(entQuery!).toMatch(/COALESCE\(default_fiscal_type, 'fiscal'\) = 'fiscal'/)
+    })
+
+    it('Luna user -> enterprise query has no default_fiscal_type filter', async () => {
+      queueSearchMocks()
+      await reports.globalSearch('c', 'acme', undefined, {
+        userCanAccessLuna: true,
+      })
+      const entQuery = allCallsJoined().find(s => /FROM enterprises\b/.test(s) && /name ILIKE/.test(s))
+      expect(entQuery).toBeDefined()
+      expect(entQuery!).not.toMatch(/default_fiscal_type/)
+    })
+
+    it('returns empty envelope when query is too short (no SQL emitted)', async () => {
+      const result = await reports.globalSearch('c', 'a', undefined, undefined)
+      expect(result).toEqual({
+        enterprises: [], customers: [], orders: [], purchases: [], products: [], invoices: [],
+      })
+      expect(mockDbExecute).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('getSalesReport fiscal filter (Wave 3B)', () => {
+    it('default opts -> emits Sol fragment on invoices query', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getSalesReport('c', 7)
+      const call = allCallsJoined().find(s => /FROM invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(SOL_FRAGMENT)
+      expect(call!).not.toMatch(LUNA_FRAGMENT)
+    })
+
+    it('Luna user + [no_fiscal] -> emits Luna fragment', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getSalesReport('c', 7, { fiscal_types: ['no_fiscal'], userCanAccessLuna: true })
+      const call = allCallsJoined().find(s => /FROM invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(LUNA_FRAGMENT)
+    })
+
+    it('non-Luna user + [no_fiscal] -> silently downgraded to Sol', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getSalesReport('c', 7, { fiscal_types: ['no_fiscal'], userCanAccessLuna: false })
+      const call = allCallsJoined().find(s => /FROM invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(SOL_FRAGMENT)
+      expect(call!).not.toMatch(LUNA_FRAGMENT)
+    })
+  })
+
+  describe('getTopProducts fiscal filter (Wave 3B)', () => {
+    it('default opts -> emits Sol fragment on JOIN invoices', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getTopProducts('c', 5)
+      const call = allCallsJoined().find(s => /JOIN invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(SOL_FRAGMENT)
+      expect(call!).not.toMatch(LUNA_FRAGMENT)
+    })
+
+    it('Luna user + [no_fiscal] -> emits Luna fragment', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getTopProducts('c', 5, { fiscal_types: ['no_fiscal'], userCanAccessLuna: true })
+      const call = allCallsJoined().find(s => /JOIN invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(LUNA_FRAGMENT)
+    })
+
+    it('non-Luna user + [no_fiscal] -> silently downgraded to Sol', async () => {
+      mockDbExecute.mockResolvedValueOnce({ rows: [] })
+      await reports.getTopProducts('c', 5, { fiscal_types: ['no_fiscal'], userCanAccessLuna: false })
+      const call = allCallsJoined().find(s => /JOIN invoices i/.test(s))
+      expect(call).toBeDefined()
+      expect(call!).toMatch(SOL_FRAGMENT)
+      expect(call!).not.toMatch(LUNA_FRAGMENT)
+    })
+  })
 })

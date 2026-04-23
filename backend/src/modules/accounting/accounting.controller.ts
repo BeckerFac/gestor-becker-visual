@@ -28,6 +28,7 @@ export class AccountingController {
   }
 
   async getEntries(req: AuthRequest, res: Response) {
+    const canAccessLuna = !!(req.user as any)?.can_access_luna;
     const data = await accountingEntriesService.getEntries(req.user!.company_id, {
       date_from: req.query.date_from as string,
       date_to: req.query.date_to as string,
@@ -35,7 +36,7 @@ export class AccountingController {
       is_auto: req.query.is_auto as string,
       limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
       offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
-    });
+    }, canAccessLuna);
     res.json(data);
   }
 
@@ -65,10 +66,11 @@ export class AccountingController {
   }
 
   async getBalance(req: AuthRequest, res: Response) {
+    const canAccessLuna = !!(req.user as any)?.can_access_luna;
     const data = await accountingEntriesService.getBalance(req.user!.company_id, {
       date_from: req.query.date_from as string,
       date_to: req.query.date_to as string,
-    });
+    }, canAccessLuna);
     res.json(data);
   }
 

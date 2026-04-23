@@ -21,6 +21,7 @@ export class RetencionesController {
       cobro_id: req.query.cobro_id as string,
       purchase_invoice_id: req.query.purchase_invoice_id as string,
       invoice_id: req.query.invoice_id as string,
+      canAccessLuna: !!(req.user as any)?.can_access_luna,
     });
     res.json(data);
   }

@@ -21,6 +21,23 @@ pool.on('error', (err) => {
   // and creates a new one on next query. No manual intervention needed.
 });
 
+// Wave 3C C5 fix: force every connection to run in Argentina TZ so that
+// `col::date` expressions evaluate correctly against our business-day
+// boundaries. Before this, Render (UTC) pushed an invoice emitted at
+// 2026-03-31T23:30-03:00 (still "March 31" in ART) into April in reports.
+// Applying it at the pool level replaces ~20 scattered `AT TIME ZONE`
+// casts across business.service.ts, secretaria.*, cuenta-corriente.service
+// and invoices.service.ts with a single guarantee. accounting.service.ts
+// already uses explicit `AT TIME ZONE` casts — those stay correct (the
+// session TZ only affects implicit conversions).
+pool.on('connect', (client) => {
+  client
+    .query("SET TIME ZONE 'America/Argentina/Buenos_Aires'")
+    .catch((err) => {
+      console.error('Failed to set session TZ on new connection', err);
+    });
+});
+
 export const db = drizzle(pool, { schema });
 
 /**
@@ -257,6 +274,31 @@ export async function runCriticalMigrations() {
   await tryMig(
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_chart_of_accounts_company_code ON chart_of_accounts(company_id, code)`,
     'critical: chart_of_accounts UNIQUE(company_id, code)'
+  );
+
+  // ════════════════════════════════════════════════════════════════
+  // Wave 3A: defense-in-depth against concurrency-driven duplicate
+  // sequence numbers. Even if application code fails, the DB rejects
+  // duplicate (company_id, invoice_type, invoice_number) etc.
+  // Partial indexes (WHERE ... IS NOT NULL) let legacy NULL rows coexist.
+  // ════════════════════════════════════════════════════════════════
+  await tryMig(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_company_type_number
+       ON invoices(company_id, invoice_type, invoice_number)
+       WHERE invoice_number IS NOT NULL`,
+    'wave-3A: invoices UNIQUE(company_id, invoice_type, invoice_number)'
+  );
+  await tryMig(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_cobros_company_receipt_number
+       ON cobros(company_id, receipt_number)
+       WHERE receipt_number IS NOT NULL`,
+    'wave-3A: cobros UNIQUE(company_id, receipt_number)'
+  );
+  await tryMig(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_receipts_company_number
+       ON receipts(company_id, receipt_number)
+       WHERE receipt_number IS NOT NULL`,
+    'wave-3A: receipts UNIQUE(company_id, receipt_number)'
   );
 
   // ════════════════════════════════════════════════════════════════

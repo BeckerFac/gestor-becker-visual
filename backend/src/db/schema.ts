@@ -267,6 +267,10 @@ export const invoice_items = pgTable('invoice_items', {
   unit_price: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
   vat_rate: decimal('vat_rate', { precision: 5, scale: 2 }).notNull(),
   subtotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull(),
+  // Wave 3C C2: rounded per-item VAT amount (subtotal * vat_rate, ROUND to 2).
+  // Header vat_amount = SUM(items.vat_amount) exactly, so Libro IVA per-row
+  // sums match the header without recomputation drift.
+  vat_amount: decimal('vat_amount', { precision: 12, scale: 2 }).default('0'),
   // Snapshot of product cost at emission time. Used by the Rentabilidad
   // report to compute per-line margin. Defaulted to 0 for historical rows;
   // createInvoice/updateInvoice resolve it from product_pricing.

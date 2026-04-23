@@ -1059,6 +1059,21 @@ export class ProductsService {
       if (productIds.length === 0) throw new ApiError(400, 'No products selected');
       if (percentIncrease === 0) throw new ApiError(400, 'Percentage must be non-zero');
 
+      // Wave 3D D1 (CRITICAL IDOR): validate every productId belongs to companyId
+      // BEFORE running any UPDATE. Without this, a tenant could rewrite another
+      // tenant's product_pricing by passing foreign UUIDs — the original query
+      // only scoped by product_id, not company_id.
+      const validRes = await pool.query(
+        `SELECT id FROM products WHERE id = ANY($1::uuid[]) AND company_id = $2`,
+        [productIds, companyId]
+      );
+      const validIds = new Set<string>((validRes.rows || []).map((r: any) => r.id));
+      for (const pid of productIds) {
+        if (!validIds.has(pid)) {
+          throw new ApiError(403, 'Producto ajeno: uno o mas productos no pertenecen a tu compania');
+        }
+      }
+
       const multiplier = 1 + percentIncrease / 100;
       // FIXED formula: update cost, then recalculate final_price preserving margin% and vat%
       for (const pid of productIds) {

@@ -11,6 +11,7 @@ export class ChequesController {
       due_to: req.query.due_to as string,
       business_unit_id: req.query.business_unit_id as string,
       direction: req.query.direction as 'recibido' | 'emitido' | undefined,
+      canAccessLuna: !!(req.user as any)?.can_access_luna,
     });
     res.json(data);
   }

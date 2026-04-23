@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mockDbExecute, mockDbRows, mockDbEmpty, mockDbVoid, resetMocks } from './helpers/setup'
+import { mockDbExecute, mockClientQuery, resetMocks } from './helpers/setup'
 
 // Sol/Luna: stub ordersService so dynamic import() resolves to a controllable mock.
 // We spy on lockOrder/unlockOrder to assert the createInvoice -> lockOrder wiring.
@@ -22,10 +22,78 @@ vi.mock('../src/modules/accounting/accounting-entries.service', () => ({
 import { InvoicesService } from '../src/modules/invoices/invoices.service'
 import { PdfService } from '../src/modules/pdf/pdf.service'
 
-// Helper: prime the no-op migration calls that ensureMigrations burns through.
-// Count updated when new ALTER TABLEs are added to invoices.service ensureMigrations.
-function primeMigrations() {
-  for (let i = 0; i < 35; i++) mockDbVoid()
+/**
+ * Wave 3A+3D alignment:
+ *   - createInvoice/updateDraftInvoice/authorizeInvoice/deleteDraftInvoice
+ *     switched from `db.execute(sql`BEGIN`)` to `pool.connect()` +
+ *     client.query(...). Tests now use mockClientQuery (in addition to
+ *     mockDbExecute) to match the new pattern.
+ *   - createInvoice now REQUIRES items (Wave 3D D11); all create tests
+ *     provide at least one item.
+ *   - We drive mockDbExecute via mockImplementation so tests don't care
+ *     about the exact ordering of reads the service performs.
+ */
+function primeFiscalLookups(opts: {
+  orderFiscalType?: 'fiscal' | 'no_fiscal' | null,
+  customerExists?: boolean,
+  enterpriseExists?: boolean,
+  customerEnterpriseId?: string | null,
+} = {}) {
+  const {
+    orderFiscalType = null,
+    customerExists = true,
+    enterpriseExists = true,
+    customerEnterpriseId = null,
+  } = opts
+  mockDbExecute.mockImplementation((tpl: any) => {
+    const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+    // Order fiscal_type lookup (first thing createInvoice does if order_id set)
+    if (/SELECT\s+fiscal_type\s+FROM\s+orders/i.test(s)) {
+      return orderFiscalType
+        ? Promise.resolve({ rows: [{ fiscal_type: orderFiscalType }] })
+        : Promise.resolve({ rows: [] })
+    }
+    // Default BU lookup
+    if (/FROM\s+business_units/i.test(s)) {
+      return Promise.resolve({ rows: [{ id: 'bu-1' }] })
+    }
+    // Order items availability check (only triggers when an item has order_item_id)
+    if (/FROM\s+order_items\s+oi/i.test(s)) {
+      return Promise.resolve({ rows: [{ total_qty: '10', invoiced_qty: '0' }] })
+    }
+    // Customer IDOR + customer->enterprise resolution
+    if (/FROM\s+customers\s+WHERE\s+id/i.test(s)) {
+      if (!customerExists) return Promise.resolve({ rows: [] })
+      return Promise.resolve({ rows: [{ id: 'cust-1', enterprise_id: customerEnterpriseId }] })
+    }
+    // Customer SELECT inside resolveInvoiceFiscalIdentity (wider column set)
+    if (/FROM\s+customers\s+c/i.test(s)) {
+      return Promise.resolve({ rows: [] })
+    }
+    // Enterprise IDOR check
+    if (/FROM\s+enterprises\s+WHERE\s+id/i.test(s)) {
+      if (!enterpriseExists) return Promise.resolve({ rows: [] })
+      return Promise.resolve({ rows: [{ id: 'ent-1' }] })
+    }
+    // Enterprise SELECT inside resolveInvoiceFiscalIdentity
+    if (/FROM\s+enterprises\s/i.test(s)) {
+      return Promise.resolve({ rows: [] })
+    }
+    // Re-read totals/items AFTER commit (non-fiscal accounting branch)
+    if (/FROM\s+invoices\s+WHERE\s+id/i.test(s)) {
+      return Promise.resolve({
+        rows: [{
+          subtotal: '0', vat_amount: '0', total_amount: '0',
+          invoice_date: new Date().toISOString(),
+        }],
+      })
+    }
+    if (/FROM\s+invoice_items\s+WHERE\s+invoice_id/i.test(s)) {
+      return Promise.resolve({ rows: [] })
+    }
+    // UPDATEs / INSERTs / DELETEs — generic OK
+    return Promise.resolve({ rows: [] })
+  })
 }
 
 describe('Sol/Luna Invoices (CAT-4)', () => {
@@ -34,9 +102,11 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
   beforeEach(() => {
     resetMocks()
     service = new InvoicesService()
+    // Skip ensureMigrations DDL noise (it uses raw db.execute and swallows errors,
+    // but returning undefined from db.execute breaks the .catch chained call).
+    ;(service as any).migrationsRun = true
     lockOrderSpy.mockClear()
     unlockOrderSpy.mockClear()
-    vi.clearAllMocks()
   })
 
   // -------------------------------------------------------------------------
@@ -45,19 +115,13 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
 
   describe('createInvoice — Sol (fiscal)', () => {
     it('creates a Sol invoice in draft status (regression)', async () => {
-      primeMigrations()
-      mockDbVoid() // auto-assign business_unit_id lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '10' }]) // next sequential fiscal number
-      mockDbRows([{ id: 'cust-1' }]) // customer IDOR check
-      mockDbEmpty() // customer enterprise lookup
-      mockDbVoid() // UPDATE order_id / enterprise_id / fiscal_type
+      primeFiscalLookups()
 
       const result = await service.createInvoice('company-1', 'user-1', {
         fiscal_type: 'fiscal',
         invoice_type: 'A',
         customer_id: 'cust-1',
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1, vat_rate: 21 }],
       })
       expect(result.fiscal_type).toBe('fiscal')
       expect(result.invoice_type).toBe('A')
@@ -67,20 +131,13 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
 
   describe('createInvoice — Luna (no_fiscal)', () => {
     it('forces invoice_type=LUN and status=emitido', async () => {
-      primeMigrations()
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }]) // Luna sequence
-      mockDbRows([{ id: 'cust-1' }]) // customer IDOR check
-      mockDbEmpty() // customer enterprise lookup
-      mockDbVoid() // INSERT raw
-      mockDbVoid() // UPDATE order_id etc
+      primeFiscalLookups()
 
       const result = await service.createInvoice('company-1', 'user-1', {
         fiscal_type: 'no_fiscal',
         invoice_type: 'B', // should be ignored
         customer_id: 'cust-1',
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
       })
 
       expect(result.fiscal_type).toBe('no_fiscal')
@@ -90,25 +147,18 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('rejects Luna NC_A as unsupported', async () => {
+      primeFiscalLookups()
       await expect(
         service.createInvoice('company-1', 'user-1', {
           fiscal_type: 'no_fiscal',
           invoice_type: 'NC_A',
+          items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
         })
       ).rejects.toThrow(/Notas de Credito Luna no soportadas/)
     })
 
     it('calculates Luna totals with IVA=0 and precio final per line', async () => {
-      primeMigrations()
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
-      mockDbEmpty() // no customer lookup
-      mockDbVoid() // INSERT raw
-      mockDbVoid() // UPDATE order_id etc
-      // No order_item_id → no per-item UPDATEs in the items loop
-      // Final totals UPDATE via drizzle is mocked by the chainable mock (no execute call)
+      primeFiscalLookups()
 
       const result = await service.createInvoice('company-1', 'user-1', {
         fiscal_type: 'no_fiscal',
@@ -124,19 +174,12 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('forces retenciones_esperadas=[] for Luna', async () => {
-      primeMigrations()
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
-      mockDbEmpty() // customer lookup
-      mockDbVoid() // INSERT raw
-      // Capture the UPDATE that sets retenciones_esperadas to verify the param.
-      mockDbVoid()
+      primeFiscalLookups()
 
       await service.createInvoice('company-1', 'user-1', {
         fiscal_type: 'no_fiscal',
         retenciones_esperadas: [{ type: 'iibb', rate: 3.5 }], // should be discarded
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
       })
       // Scan mock calls for the UPDATE that carries retenciones_esperadas template.
       const calls = mockDbExecute.mock.calls
@@ -151,116 +194,95 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('uses dedicated Luna advisory lock key', async () => {
-      primeMigrations()
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
-      mockDbEmpty()
-      mockDbVoid()
-      mockDbVoid()
+      primeFiscalLookups()
 
-      await service.createInvoice('company-1', 'user-1', { fiscal_type: 'no_fiscal' })
+      await service.createInvoice('company-1', 'user-1', {
+        fiscal_type: 'no_fiscal',
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
+      })
 
-      const calls = mockDbExecute.mock.calls
-      const lockCall = calls.find((c: any[]) => {
-        const s = c[0]?.strings?.join?.(' ') || ''
-        return s.includes('pg_advisory_xact_lock')
+      // Wave 3A: advisory lock is now issued via client.query, not db.execute.
+      const lockCall = mockClientQuery.mock.calls.find((c: any[]) => {
+        return /pg_advisory_xact_lock/.test(String(c[0] || ''))
       })
       expect(lockCall).toBeDefined()
-      const keyVal = lockCall?.[0]?.values?.[0]
+      const keyVal = lockCall?.[1]?.[0]
       expect(String(keyVal)).toContain('no_fiscal')
       expect(String(keyVal)).toContain('LUN')
     })
 
     it('uses LUN-scoped next_number query', async () => {
-      primeMigrations()
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '42' }])
-      mockDbEmpty()
-      mockDbVoid()
-      mockDbVoid()
-
-      const result = await service.createInvoice('company-1', 'user-1', { fiscal_type: 'no_fiscal' })
-      expect(result.invoice_number).toBe(42)
-      const calls = mockDbExecute.mock.calls
-      const maxQuery = calls.find((c: any[]) => {
-        const s = c[0]?.strings?.join?.(' ') || ''
-        return s.includes('COALESCE(MAX(invoice_number)') && s.includes("invoice_type = 'LUN'")
+      primeFiscalLookups()
+      // Override client impl to supply a deterministic nextNumber.
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/COALESCE\(MAX\(invoice_number/.test(s)) {
+          return Promise.resolve({ rows: [{ next_number: '42' }] })
+        }
+        return Promise.resolve({ rows: [] })
       })
-      expect(maxQuery).toBeDefined()
+
+      const result = await service.createInvoice('company-1', 'user-1', {
+        fiscal_type: 'no_fiscal',
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
+      })
+      expect(result.invoice_number).toBe(42)
+      // Confirm the MAX query is LUN-scoped.
+      const maxCall = mockClientQuery.mock.calls.find((c: any[]) => {
+        const s = String(c[0] || '')
+        return /COALESCE\(MAX\(invoice_number/.test(s) && /invoice_type\s*=\s*'LUN'/.test(s)
+      })
+      expect(maxCall).toBeDefined()
     })
   })
 
   describe('createInvoice — cross-circuit validation', () => {
     it('rejects Luna invoice from a Sol order', async () => {
-      primeMigrations()
-      // Order fiscal_type lookup
-      mockDbRows([{ fiscal_type: 'fiscal' }])
+      primeFiscalLookups({ orderFiscalType: 'fiscal' })
 
       await expect(
         service.createInvoice('company-1', 'user-1', {
           order_id: 'order-sol',
           fiscal_type: 'no_fiscal',
           invoice_type: 'B',
+          items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
         })
       ).rejects.toThrow(/circuito del comprobante no coincide/)
     })
 
     it('rejects Sol invoice from a Luna order', async () => {
-      primeMigrations()
-      mockDbRows([{ fiscal_type: 'no_fiscal' }])
+      primeFiscalLookups({ orderFiscalType: 'no_fiscal' })
 
       await expect(
         service.createInvoice('company-1', 'user-1', {
           order_id: 'order-luna',
           fiscal_type: 'fiscal',
           invoice_type: 'A',
+          items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
         })
       ).rejects.toThrow(/circuito del comprobante no coincide/)
     })
 
     it('defaults invoice.fiscal_type to order.fiscal_type when not provided', async () => {
-      primeMigrations()
-      mockDbRows([{ fiscal_type: 'no_fiscal' }]) // order says Luna
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '1' }])
-      mockDbEmpty() // customer
-      mockDbVoid() // INSERT
-      mockDbVoid() // UPDATE
-      // order_id update paths — INSERT invoice_orders + UPDATE orders.has_invoice
-      mockDbVoid()
-      mockDbVoid()
+      primeFiscalLookups({ orderFiscalType: 'no_fiscal' })
 
       const result = await service.createInvoice('company-1', 'user-1', {
         order_id: 'order-luna',
         // no fiscal_type specified — should default to 'no_fiscal'
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1 }],
       })
       expect(result.fiscal_type).toBe('no_fiscal')
       expect(result.invoice_type).toBe('LUN')
     })
 
     it('invokes lockOrder after successful create with order_id', async () => {
-      primeMigrations()
-      mockDbRows([{ fiscal_type: 'fiscal' }]) // order lookup
-      mockDbVoid() // BU lookup
-      mockDbVoid() // BEGIN
-      mockDbVoid() // advisory lock
-      mockDbRows([{ next_number: '5' }])
-      mockDbEmpty() // customer
-      mockDbVoid() // INSERT (drizzle chain actually — BU lookup uses .execute; INSERT uses db.insert)
-      mockDbVoid() // UPDATE order_id
-      mockDbVoid() // INSERT invoice_orders
-      mockDbVoid() // UPDATE orders.has_invoice
+      primeFiscalLookups({ orderFiscalType: 'fiscal' })
 
       await service.createInvoice('company-1', 'user-1', {
         order_id: 'order-1',
         fiscal_type: 'fiscal',
         invoice_type: 'A',
+        items: [{ product_name: 'X', unit_price: 100, quantity: 1, vat_rate: 21 }],
       })
       expect(lockOrderSpy).toHaveBeenCalled()
       const args = lockOrderSpy.mock.calls[0]
@@ -271,19 +293,35 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // authorizeInvoice
+  // authorizeInvoice — Wave 3A: opens with SELECT ... FOR UPDATE on pool client
   // -------------------------------------------------------------------------
 
   describe('authorizeInvoice', () => {
     it('rejects Luna invoices with a Luna-specific message', async () => {
-      mockDbRows([{ fiscal_type: 'no_fiscal' }])
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/FOR UPDATE/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-1', fiscal_type: 'no_fiscal', status: 'draft' }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
       await expect(
         service.authorizeInvoice('company-1', 'inv-1')
       ).rejects.toThrow(/Los comprobantes Luna no se autorizan en AFIP/)
     })
 
     it('still rejects legacy interno invoices', async () => {
-      mockDbRows([{ fiscal_type: 'interno' }])
+      mockClientQuery.mockImplementation((sqlStr: string) => {
+        const s = String(sqlStr)
+        if (/FOR UPDATE/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-1', fiscal_type: 'interno', status: 'draft' }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
       await expect(
         service.authorizeInvoice('company-1', 'inv-1')
       ).rejects.toThrow(/comprobantes internos/)
@@ -296,21 +334,35 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
 
   describe('deleteDraftInvoice — unlock cascade', () => {
     it('calls unlockOrder after deletion when invoice has order_id', async () => {
-      primeMigrations()
-      mockDbRows([{ id: 'inv-1', status: 'emitido', order_id: 'order-1', cae: null }])
-      // Delete items (drizzle chain), DELETE invoice_orders, DELETE invoice
-      mockDbVoid() // DELETE invoice_orders
-      mockDbRows([{ cnt: '0' }]) // remaining count
-      mockDbVoid() // UPDATE orders.has_invoice
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+        // Initial SELECT id, status, order_id, cae ...
+        if (/SELECT\s+id,\s*status,\s*order_id,\s*cae/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-1', status: 'emitido', order_id: 'order-1', cae: null }],
+          })
+        }
+        // has_invoice recount query
+        if (/SELECT\s+COUNT\(\*\)\s+as\s+cnt\s+FROM\s+invoices/i.test(s)) {
+          return Promise.resolve({ rows: [{ cnt: '0' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       await service.deleteDraftInvoice('company-1', 'inv-1')
       expect(unlockOrderSpy).toHaveBeenCalledWith('order-1')
     })
 
     it('does NOT call unlockOrder when invoice had no order', async () => {
-      primeMigrations()
-      mockDbRows([{ id: 'inv-1', status: 'emitido', order_id: null, cae: null }])
-      mockDbVoid() // DELETE invoice_orders
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+        if (/SELECT\s+id,\s*status,\s*order_id,\s*cae/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-1', status: 'emitido', order_id: null, cae: null }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       await service.deleteDraftInvoice('company-1', 'inv-1')
       expect(unlockOrderSpy).not.toHaveBeenCalled()
@@ -321,17 +373,18 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
   // getInvoices — circuit filtering
   // -------------------------------------------------------------------------
 
-  // Note: the WHERE clause is composed via nested sql`` fragments which drizzle
-  // stitches at prepare time — the template's `strings` array does not flatten
-  // nested fragments in our test mock. Instead we assert on the service's
-  // observable output (which fiscal_type value it actually resolves to by
-  // peeking at a deterministic side-effect: the query succeeds and returns
-  // the expected shape). We rely on the 'all' branch needing extra mocks.
   describe('getInvoices — visibility by can_access_luna', () => {
+    beforeEach(() => {
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+        if (/SELECT\s+COUNT\(\*\)\s+as\s+total/i.test(s)) {
+          return Promise.resolve({ rows: [{ total: '0' }] })
+        }
+        return Promise.resolve({ rows: [] })
+      })
+    })
+
     it('accepts fiscal_type=no_fiscal when userCanAccessLuna=false without throwing (silently forced to fiscal)', async () => {
-      primeMigrations()
-      mockDbEmpty()
-      mockDbRows([{ total: '0' }])
       const res = await service.getInvoices('company-1', {
         fiscal_type: 'no_fiscal',
         userCanAccessLuna: false,
@@ -341,9 +394,6 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('accepts fiscal_type=no_fiscal when userCanAccessLuna=true', async () => {
-      primeMigrations()
-      mockDbEmpty()
-      mockDbRows([{ total: '0' }])
       const res = await service.getInvoices('company-1', {
         fiscal_type: 'no_fiscal',
         userCanAccessLuna: true,
@@ -352,18 +402,12 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('resolves to all-circuits when userCanAccessLuna=true and fiscal_type undefined', async () => {
-      primeMigrations()
-      mockDbEmpty()
-      mockDbRows([{ total: '0' }])
       const res = await service.getInvoices('company-1', { userCanAccessLuna: true })
       expect(res).toHaveProperty('items')
       expect(res).toHaveProperty('total')
     })
 
     it('defaults to fiscal-only when userCanAccessLuna is undefined (back-compat)', async () => {
-      primeMigrations()
-      mockDbEmpty()
-      mockDbRows([{ total: '0' }])
       const res = await service.getInvoices('company-1', {})
       expect(res).toHaveProperty('items')
       expect(res).toHaveProperty('total')
@@ -376,9 +420,15 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
 
   describe('getInvoice — Luna existence leak defense', () => {
     it('returns 404 when non-Luna user accesses a Luna invoice', async () => {
-      primeMigrations()
-      // Main invoice select
-      mockDbRows([{ id: 'inv-luna', fiscal_type: 'no_fiscal', company_id: 'company-1' }])
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+        if (/FROM\s+invoices\s+i\s+LEFT\s+JOIN/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-luna', fiscal_type: 'no_fiscal', company_id: 'company-1' }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       await expect(
         service.getInvoice('company-1', 'inv-luna', false)
@@ -386,17 +436,22 @@ describe('Sol/Luna Invoices (CAT-4)', () => {
     })
 
     it('returns the invoice when Luna user accesses a Luna invoice', async () => {
-      primeMigrations()
-      mockDbRows([{ id: 'inv-luna', fiscal_type: 'no_fiscal', company_id: 'company-1' }])
-      mockDbRows([]) // items query
+      mockDbExecute.mockImplementation((tpl: any) => {
+        const s = tpl?.strings ? tpl.strings.join(' ') : String(tpl || '')
+        if (/FROM\s+invoices\s+i\s+LEFT\s+JOIN/i.test(s)) {
+          return Promise.resolve({
+            rows: [{ id: 'inv-luna', fiscal_type: 'no_fiscal', company_id: 'company-1' }],
+          })
+        }
+        return Promise.resolve({ rows: [] })
+      })
 
       const inv = await service.getInvoice('company-1', 'inv-luna', true)
       expect(inv.fiscal_type).toBe('no_fiscal')
     })
 
     it('returns 404 when invoice is not found (cross-tenant)', async () => {
-      primeMigrations()
-      mockDbEmpty()
+      mockDbExecute.mockImplementation(() => Promise.resolve({ rows: [] }))
 
       await expect(
         service.getInvoice('company-1', 'inv-foreign', true)
