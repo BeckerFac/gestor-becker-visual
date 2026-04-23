@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { invoicesService } from './invoices.service';
 import { AuthRequest } from '../../middlewares/auth';
 import { ApiError } from '../../middlewares/errorHandler';
+import { validateBase64Upload } from '../../lib/upload-validation';
+import { parseAfipInvoicePdfText } from './afip-pdf-parser';
 
 export class InvoicesController {
   async createInvoice(req: AuthRequest, res: Response) {
@@ -135,6 +137,43 @@ export class InvoicesController {
         return res.status(error.statusCode).json({ error: error.message });
       }
       res.status(500).json({ error: 'Failed to import invoice' });
+    }
+  }
+
+  // Accepts an AFIP "Factura A/B/C" PDF (base64) and returns pre-parsed fields
+  // so the frontend can pre-fill the "Importar Factura Manual" form. Best-effort:
+  // fields that fail to parse come back as null and the user can fill them in.
+  async parseAfipPdf(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user?.company_id) throw new ApiError(401, 'Unauthorized');
+      const { base64 } = req.body || {};
+      if (!base64) throw new ApiError(400, 'base64 field is required');
+
+      // Defense-in-depth: magic-byte + size check before handing bytes to pdf-parse.
+      validateBase64Upload(base64, {
+        maxSize: 10 * 1024 * 1024,
+        allowedMimes: ['application/pdf'],
+      });
+
+      const pdfParseMod: any = await import('pdf-parse');
+      const pdfParse: any = pdfParseMod.default || pdfParseMod;
+      const buf = Buffer.from(base64.split(',').pop() || base64, 'base64');
+      let text = '';
+      try {
+        const result = await pdfParse(buf);
+        text = String(result?.text || '');
+      } catch (e: any) {
+        throw new ApiError(400, `No se pudo leer el PDF: ${e?.message || 'formato invalido'}`);
+      }
+
+      const parsed = parseAfipInvoicePdfText(text);
+      res.json(parsed);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error('parseAfipPdf error:', error);
+      res.status(500).json({ error: 'Failed to parse AFIP PDF' });
     }
   }
 

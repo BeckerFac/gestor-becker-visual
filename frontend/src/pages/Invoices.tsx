@@ -423,6 +423,7 @@ export const Invoices: React.FC = () => {
   // Import modal
   const [showImportForm, setShowImportForm] = useState(false)
   const [importSaving, setImportSaving] = useState(false)
+  const [parsingPdf, setParsingPdf] = useState(false)
   const [importData, setImportData] = useState({
     invoice_type: 'A' as InvoiceType,
     invoice_number_full: '',
@@ -1820,6 +1821,88 @@ export const Invoices: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-5">
+              {/* PDF auto-fill: parse an AFIP "Factura A/B/C" PDF and pre-fill all fields. */}
+              <div className="p-3 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/40 dark:bg-indigo-900/20 dark:border-indigo-700">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">
+                      Autocompletar desde PDF de AFIP
+                    </p>
+                    <p className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">
+                      Subí el PDF que emite AFIP/ARCA y leemos tipo, CAE, fechas, CUIT cliente e items.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 cursor-pointer transition-colors">
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="hidden"
+                      disabled={parsingPdf}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        if (file.size > 10 * 1024 * 1024) {
+                          toast.error('El PDF supera los 10 MB')
+                          return
+                        }
+                        setParsingPdf(true)
+                        try {
+                          const base64 = await new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader()
+                            reader.onload = () => {
+                              const r = String(reader.result || '')
+                              const b64 = r.includes(',') ? r.split(',')[1] : r
+                              resolve(b64)
+                            }
+                            reader.onerror = () => reject(new Error('No se pudo leer el archivo'))
+                            reader.readAsDataURL(file)
+                          })
+                          const parsed = await api.parseAfipPdf(base64)
+                          // Pre-fill header fields (only overwrite when we got a value).
+                          setImportData(prev => {
+                            const next = { ...prev }
+                            if (parsed.invoice_type) next.invoice_type = parsed.invoice_type
+                            if (parsed.invoice_number_full) next.invoice_number_full = parsed.invoice_number_full
+                            if (parsed.invoice_date) next.invoice_date = parsed.invoice_date
+                            if (parsed.cae) next.cae = parsed.cae
+                            if (parsed.cae_expiry_date) next.cae_expiry_date = parsed.cae_expiry_date
+                            if (parsed.customer_cuit) next.customer_cuit = parsed.customer_cuit
+                            // Try to match enterprise by CUIT automatically.
+                            if (parsed.customer_cuit) {
+                              const ent = enterprises.find(x => (x.cuit || '').replace(/\D/g, '') === parsed.customer_cuit)
+                              if (ent) next.enterprise_id = ent.id
+                            }
+                            return next
+                          })
+                          // Pre-fill items with the parsed lines.
+                          if (parsed.items.length > 0) {
+                            setImportItems(parsed.items.map(it => ({
+                              product_id: undefined,
+                              product_name: it.product_name,
+                              quantity: it.quantity,
+                              unit_price: it.unit_price,
+                              vat_rate: it.vat_rate,
+                              subtotal: it.unit_price * it.quantity,
+                            })))
+                          }
+                          if (parsed.warnings.length) {
+                            toast.info(`PDF leído con advertencias: ${parsed.warnings.join(' · ')}`)
+                          } else {
+                            toast.success('PDF leído. Revisá los datos antes de guardar.')
+                          }
+                        } catch (err: any) {
+                          toast.error(err?.response?.data?.error || err?.message || 'No se pudo leer el PDF')
+                        } finally {
+                          setParsingPdf(false)
+                          e.target.value = '' // allow re-uploading the same file
+                        }
+                      }}
+                    />
+                    {parsingPdf ? 'Leyendo PDF...' : 'Subir PDF'}
+                  </label>
+                </div>
+              </div>
+
               {/* Row 1: Type + Number + Date */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">

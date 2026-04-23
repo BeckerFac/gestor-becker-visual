@@ -810,6 +810,24 @@ export const api = {
     const { data } = await client.post('/invoices/import', importData)
     return data
   },
+  parseAfipPdf: async (base64: string) => {
+    const { data } = await client.post('/invoices/parse-afip-pdf', { base64 })
+    return data as {
+      invoice_type: 'A' | 'B' | 'C' | null
+      punto_venta: string | null
+      invoice_number: string | null
+      invoice_number_full: string | null
+      invoice_date: string | null
+      cae: string | null
+      cae_expiry_date: string | null
+      seller_cuit: string | null
+      customer_cuit: string | null
+      customer_name: string | null
+      items: Array<{ code: string | null; product_name: string; quantity: number; unit_price: number; vat_rate: number; subtotal: number; subtotal_with_vat: number | null }>
+      totals: { neto: number | null; iva: number | null; total: number | null }
+      warnings: string[]
+    }
+  },
   getInvoice: async (id: string) => {
     const { data } = await client.get(`/invoices/${id}`)
     return data

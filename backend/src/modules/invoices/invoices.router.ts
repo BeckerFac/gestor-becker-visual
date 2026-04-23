@@ -8,6 +8,7 @@ export const invoicesRouter = Router();
 invoicesRouter.get('/', authorize('invoices', 'view'), authorizeCircuit('query'), (req, res) => invoicesController.getInvoices(req, res));
 invoicesRouter.post('/', authorize('invoices', 'create'), authorizeCircuit('body'), (req, res) => invoicesController.createInvoice(req, res));
 invoicesRouter.post('/import', authorize('invoices', 'create'), (req, res) => invoicesController.importInvoice(req, res));
+invoicesRouter.post('/parse-afip-pdf', authorize('invoices', 'create'), (req, res) => invoicesController.parseAfipPdf(req as any, res));
 // IMPORTANT: Static routes MUST be before /:id to avoid Express matching them as params
 invoicesRouter.get('/available-order-items', authorize('invoices', 'view'), (req, res) => invoicesController.getAvailableOrderItems(req as any, res));
 invoicesRouter.get('/order/:orderId/remaining', authorize('invoices', 'view'), (req, res) => invoicesController.getOrderRemainingToInvoice(req as any, res));
