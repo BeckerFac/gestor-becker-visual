@@ -218,6 +218,28 @@ export const Cheques: React.FC = () => {
     return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current) }
   }, [search, dueDateFrom, dueDateTo])
 
+  // Deep-link ?expand=<chequeId> from Global Search / other pages.
+  const expandConsumedRef = useRef(false)
+  useEffect(() => {
+    if (expandConsumedRef.current) return
+    if (loading) return
+    const expandId = searchParams.get('expand')
+    if (!expandId) return
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(expandId)) return
+    const target = cheques.find(c => c.id === expandId)
+    if (!target) return
+    setExpandedId(expandId)
+    expandConsumedRef.current = true
+    // Fetch history async (same as handleRowClick)
+    api.getChequeHistory(expandId).then(h => setChequeHistory(Array.isArray(h) ? h : [])).catch(() => setChequeHistory([]))
+    setSearchParams(prev => { const np = new URLSearchParams(prev); np.delete('expand'); return np }, { replace: true })
+    setTimeout(() => {
+      const el = document.getElementById('cheque-detail-card')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 150)
+  }, [loading, cheques, searchParams, setSearchParams])
+
   // Load company fiscal data once (for emitido + propio auto-fill)
   useEffect(() => {
     api.getMyCompany().then((c: any) => {
@@ -581,7 +603,7 @@ export const Cheques: React.FC = () => {
             const cheque = cheques.find(c => c.id === expandedId)
             if (!cheque) return null
             return (
-              <Card className="border-blue-200 bg-blue-50/30 animate-fadeIn">
+              <Card id="cheque-detail-card" className="border-blue-200 bg-blue-50/30 animate-fadeIn">
                 <CardContent className="pt-4">
                   <div className="flex justify-between items-start mb-4">
                     <div>

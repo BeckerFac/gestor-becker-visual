@@ -408,6 +408,26 @@ export const Orders: React.FC = () => {
     setSearchParams({}, { replace: true })
   }, [loading, enterprises, customers, searchParams, setSearchParams])
 
+  // Deep-link from Global Search / other pages: ?expand=<orderId>
+  // Auto-expand the order row and scroll it into view. Consumed once per mount.
+  const expandConsumedRef = useRef(false)
+  useEffect(() => {
+    if (expandConsumedRef.current) return
+    if (loading) return
+    const expandId = searchParams.get('expand')
+    if (!expandId) return
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(expandId)) return
+    if (!orders.some((o: any) => o.id === expandId)) return
+    setExpandedOrder(expandId)
+    expandConsumedRef.current = true
+    setSearchParams(prev => { const np = new URLSearchParams(prev); np.delete('expand'); return np }, { replace: true })
+    setTimeout(() => {
+      const el = document.getElementById(`order-row-${expandId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+  }, [loading, orders, searchParams, setSearchParams])
+
   // Close category dropdown on click outside
   useEffect(() => {
     if (openCatDropdown === null) return
@@ -1909,6 +1929,7 @@ export const Orders: React.FC = () => {
                   <React.Fragment key={order.id}>
                     {/* Compact row */}
                     <tr
+                      id={`order-row-${order.id}`}
                       className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${expandedOrder === order.id ? 'bg-blue-50 dark:bg-blue-900/20 border-b-0' : 'border-b dark:border-gray-700'}`}
                       onClick={() => toggleExpand(order.id)}
                       onContextMenu={(e) => {

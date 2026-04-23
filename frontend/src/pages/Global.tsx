@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -57,9 +57,9 @@ const TABS: { key: TabKey; label: string }[] = [
 export const Global: React.FC = () => {
   // Wave B: support ?enterprise_id=<id> (deep link from /empresas context menu).
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
-  const [filteredEnterprises, setFilteredEnterprises] = useState<Enterprise[]>([])
   const [selectedEnterprise, setSelectedEnterprise] = useState<Enterprise | null>(null)
   const [showDropdown, setShowDropdown] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('contactos')
@@ -67,6 +67,24 @@ export const Global: React.FC = () => {
   const [tabLoading, setTabLoading] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const prefillConsumedRef = useRef(false)
+
+  // Enterprises ordered alphabetically (stable reference across renders)
+  const sortedEnterprises = useMemo(() => {
+    return [...enterprises].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' })
+    )
+  }, [enterprises])
+
+  // Filtered list for dropdown: empty search = full alphabetical list; typing narrows it.
+  const filteredEnterprises = useMemo(() => {
+    if (!searchTerm.trim()) return sortedEnterprises
+    const q = searchTerm.toLowerCase()
+    return sortedEnterprises.filter(e =>
+      e.name.toLowerCase().includes(q) ||
+      (e.cuit && e.cuit.includes(q)) ||
+      (e.razon_social && e.razon_social.toLowerCase().includes(q))
+    )
+  }, [searchTerm, sortedEnterprises])
 
   // Tab data
   const [contacts, setContacts] = useState<any[]>([])
@@ -91,24 +109,6 @@ export const Global: React.FC = () => {
     }
     loadEnterprises()
   }, [])
-
-  // Filter enterprises as user types
-  useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredEnterprises([])
-      setShowDropdown(false)
-      return
-    }
-    const q = searchTerm.toLowerCase()
-    const matches = enterprises.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        (e.cuit && e.cuit.includes(q)) ||
-        (e.razon_social && e.razon_social.toLowerCase().includes(q))
-    )
-    setFilteredEnterprises(matches.slice(0, 10))
-    setShowDropdown(matches.length > 0)
-  }, [searchTerm, enterprises])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -254,11 +254,13 @@ export const Global: React.FC = () => {
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
-              placeholder="Buscar empresa por nombre o CUIT..."
+              placeholder="Click para ver todas las empresas o escribi para filtrar..."
               value={searchTerm}
+              onFocus={() => { if (!selectedEnterprise) setShowDropdown(true) }}
               onChange={(e) => {
                 setSearchTerm(e.target.value)
                 if (selectedEnterprise) clearSelection()
+                setShowDropdown(true)
               }}
               className="text-lg py-3"
             />
@@ -274,8 +276,8 @@ export const Global: React.FC = () => {
         </div>
 
         {/* Dropdown */}
-        {showDropdown && !selectedEnterprise && (
-          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+        {showDropdown && !selectedEnterprise && filteredEnterprises.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-96 overflow-y-auto">
             {filteredEnterprises.map((ent) => (
               <button
                 key={ent.id}
@@ -437,7 +439,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {contacts.map((c: any) => (
-                            <tr key={c.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={c.id}
+                              onClick={() => selectedEnterprise && navigate(`/enterprises?expand=${selectedEnterprise.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver contacto en Empresas"
+                            >
                               <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">{c.name}</td>
                               <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{c.contact_name || '-'}</td>
                               <td className="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">{c.cuit || '-'}</td>
@@ -484,7 +491,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {orders.map((o: any) => (
-                            <tr key={o.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={o.id}
+                              onClick={() => navigate(`/orders?expand=${o.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver pedido"
+                            >
                               <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">
                                 #{String(o.order_number || 0).padStart(4, '0')}
                               </td>
@@ -547,7 +559,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {quotes.map((q: any) => (
-                            <tr key={q.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={q.id}
+                              onClick={() => navigate(`/quotes?expand=${q.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver cotizacion"
+                            >
                               <td className="px-4 py-3 text-sm font-mono font-bold text-blue-700">
                                 #{String(q.quote_number || 0).padStart(4, '0')}
                               </td>
@@ -611,7 +628,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {invoices.map((inv: any) => (
-                            <tr key={inv.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={inv.id}
+                              onClick={() => navigate(`/invoices?expand=${inv.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver factura"
+                            >
                               <td className="px-4 py-3 text-sm">
                                 <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-bold text-xs">
                                   {inv.invoice_type}
@@ -681,7 +703,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {cobros.map((c: any) => (
-                            <tr key={c.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={c.id}
+                              onClick={() => navigate(`/cobros?expand=${c.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver recibo"
+                            >
                               <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(c.payment_date || c.created_at)}
                               </td>
@@ -737,7 +764,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {pagos.map((p: any) => (
-                            <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={p.id}
+                              onClick={() => navigate(`/pagos?expand=${p.id}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver orden de pago"
+                            >
                               <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                                 {formatDate(p.payment_date || p.created_at)}
                               </td>
@@ -840,8 +872,18 @@ export const Global: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {movCobrar.map((m: any, idx: number) => (
-                                  <tr key={`cobrar-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
+                                {movCobrar.map((m: any, idx: number) => {
+                                  const target =
+                                    m.tipo === 'fact_venta' && m.ref_id ? `/invoices?expand=${m.ref_id}` :
+                                    m.tipo === 'recibo' && m.ref_id ? `/cobros?expand=${m.ref_id}` :
+                                    null
+                                  return (
+                                  <tr
+                                    key={`cobrar-${idx}`}
+                                    onClick={() => target && navigate(target)}
+                                    className={`border-b border-gray-100 even:bg-gray-50/50 ${target ? 'hover:bg-blue-50 cursor-pointer transition-colors' : ''}`}
+                                    title={target ? 'Ver comprobante' : undefined}
+                                  >
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
@@ -856,7 +898,8 @@ export const Global: React.FC = () => {
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
                                     <td className="px-4 py-2 text-right font-medium">{formatCurrency(m.saldo)}</td>
                                   </tr>
-                                ))}
+                                  )
+                                })}
                               </tbody>
                             </table>
                           </CardContent>
@@ -888,8 +931,18 @@ export const Global: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody>
-                                {movPagar.map((m: any, idx: number) => (
-                                  <tr key={`pagar-${idx}`} className="border-b border-gray-100 even:bg-gray-50/50">
+                                {movPagar.map((m: any, idx: number) => {
+                                  const target =
+                                    m.tipo === 'fact_compra' && m.ref_id ? `/facturas-compra?expand=${m.ref_id}` :
+                                    m.tipo === 'orden_pago' && m.ref_id ? `/pagos?expand=${m.ref_id}` :
+                                    null
+                                  return (
+                                  <tr
+                                    key={`pagar-${idx}`}
+                                    onClick={() => target && navigate(target)}
+                                    className={`border-b border-gray-100 even:bg-gray-50/50 ${target ? 'hover:bg-blue-50 cursor-pointer transition-colors' : ''}`}
+                                    title={target ? 'Ver comprobante' : undefined}
+                                  >
                                     <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{formatDate(m.fecha)}</td>
                                     <td className="px-4 py-2">
                                       <StatusBadge
@@ -904,7 +957,8 @@ export const Global: React.FC = () => {
                                     <td className="px-4 py-2 text-right">{m.haber ? formatCurrency(m.haber) : '-'}</td>
                                     <td className="px-4 py-2 text-right font-medium">{formatCurrency(m.saldo)}</td>
                                   </tr>
-                                ))}
+                                  )
+                                })}
                               </tbody>
                             </table>
                           </CardContent>
@@ -948,7 +1002,12 @@ export const Global: React.FC = () => {
                         </thead>
                         <tbody>
                           {cheques.map((ch: any) => (
-                            <tr key={ch.id} className="border-b border-gray-200 hover:bg-gray-50">
+                            <tr
+                              key={ch.id}
+                              onClick={() => navigate(`/cheques?expand=${ch.id}${ch.direction ? `&direction=${ch.direction}` : ''}`)}
+                              className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                              title="Ver cheque"
+                            >
                               <td className="px-4 py-3 text-sm font-mono font-medium">{ch.number}</td>
                               <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{ch.bank}</td>
                               <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{ch.drawer}</td>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { DateInput } from '@/components/ui/DateInput'
@@ -175,6 +175,8 @@ function restorePending() { localStorage.removeItem(DISMISSED_PENDING_KEY) }
 
 export const Pagos: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const expandConsumedRef = useRef(false)
 
   // Data
   const [pagos, setPagos] = useState<Pago[]>([])
@@ -345,6 +347,24 @@ export const Pagos: React.FC = () => {
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setCurrentPage(1) }, [filterEnterprise, filterMethod, filterStatus, dateFrom, dateTo, pageSize])
+
+  // Deep-link ?expand=<pagoId> from Global Search / other pages.
+  useEffect(() => {
+    if (expandConsumedRef.current) return
+    if (loading) return
+    const expandId = searchParams.get('expand')
+    if (!expandId) return
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_REGEX.test(expandId)) return
+    if (!pagos.some(p => p.id === expandId)) return
+    setExpandedPagoId(expandId)
+    expandConsumedRef.current = true
+    setSearchParams(prev => { const np = new URLSearchParams(prev); np.delete('expand'); return np }, { replace: true })
+    setTimeout(() => {
+      const el = document.getElementById(`pago-row-${expandId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+  }, [loading, pagos, searchParams, setSearchParams])
 
   // Load purchase invoices for selected enterprise (for linking)
   useEffect(() => {
@@ -1237,10 +1257,11 @@ export const Pagos: React.FC = () => {
                   return (
                     <React.Fragment key={pago.id}>
                       <tr
+                        id={`pago-row-${pago.id}`}
                         onClick={() => setExpandedPagoId(prev => prev === pago.id ? null : pago.id)}
                         className={`border-b dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
-                          isAnulado ? 'opacity-60 bg-red-50/30 dark:bg-red-900/10 line-through' : ''
-                        }`}
+                          expandedPagoId === pago.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                        } ${isAnulado ? 'opacity-60 bg-red-50/30 dark:bg-red-900/10 line-through' : ''}`}
                         title={isAnulado ? `Anulado — ${pago.anulled_reason || 'sin motivo'}` : undefined}
                       >
                         <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{fmtDate(pago.payment_date)}</td>
