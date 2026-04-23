@@ -2390,6 +2390,37 @@ export const Invoices: React.FC = () => {
                               Link de pago
                             </button>
                           )}
+                          {/* Delete action visible in the row for drafts without CAE
+                              AND for manually-imported invoices (CAE was typed by
+                              the user, not AFIP). Backend enforces the same rules. */}
+                          {(
+                            (invoice.status === 'draft' && !invoice.cae) ||
+                            (invoice as any).source === 'manual_import'
+                          ) && (
+                            <PermissionGate module="invoices" action="delete">
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  const isImport = (invoice as any).source === 'manual_import'
+                                  const label = isImport
+                                    ? `Eliminar importacion ${invoice.invoice_type} ${invoice.invoice_number}? (no afecta AFIP)`
+                                    : `Eliminar borrador ${invoice.invoice_type} ${invoice.invoice_number}?`
+                                  if (!window.confirm(label)) return
+                                  try {
+                                    await api.deleteDraftInvoice(invoice.id)
+                                    toast.success('Factura eliminada')
+                                    await loadInvoices()
+                                  } catch (err: any) {
+                                    toast.error(err?.response?.data?.error || err?.message || 'Error al eliminar')
+                                  }
+                                }}
+                                className="inline-flex items-center justify-center w-7 h-7 text-red-500 hover:text-white hover:bg-red-500 rounded transition-colors"
+                                title={(invoice as any).source === 'manual_import' ? 'Eliminar importacion' : 'Eliminar borrador'}
+                              >
+                                x
+                              </button>
+                            </PermissionGate>
+                          )}
                         </div>
                       </td>
                     </tr>
