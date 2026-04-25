@@ -67,8 +67,20 @@ async function start() {
     }, 4 * 60 * 1000); // Every 4 minutes
 
     logger.info('All systems initialized successfully');
-  } catch (error) {
-    logger.fatal({ error }, 'Failed to start server');
+  } catch (error: any) {
+    // 2026-04-25: pino serializes Error props as enumerable only — the prod
+    // outage showed `{length:119, name:'error', code:'XX000'}` with no
+    // `message`. Explicitly extract the diagnostic fields so logs are useful.
+    logger.fatal(
+      {
+        message: error?.message || String(error),
+        code: error?.code,
+        severity: error?.severity,
+        stack: error?.stack,
+        cause: error?.cause?.message,
+      },
+      'Failed to start server'
+    );
     process.exit(1);
   }
 }
