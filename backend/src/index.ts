@@ -58,13 +58,22 @@ async function start() {
     // Start SecretarIA morning brief scheduler
     secretariaScheduler.start();
 
-    // Keep Neon DB warm (prevent scale-to-zero cold starts)
-    setInterval(async () => {
-      try {
-        const { pool } = await import('./config/db');
-        await pool.query('SELECT 1');
-      } catch { /* non-critical */ }
-    }, 4 * 60 * 1000); // Every 4 minutes
+    // Keep Neon DB warm (prevent scale-to-zero cold starts).
+    // Opt-IN via DB_KEEP_WARM=1 — by default we LET the DB scale to zero
+    // because the previous unconditional 4-minute ping drained the Neon
+    // free-tier compute-time quota and crashed the prod boot on 2026-04-25.
+    // With initDb retries, a 1-2s cold start hit is acceptable; quota
+    // exhaustion isn't.
+    if (process.env.DB_KEEP_WARM === '1') {
+      const intervalMin = parseInt(process.env.DB_KEEP_WARM_MINUTES || '15', 10);
+      setInterval(async () => {
+        try {
+          const { pool } = await import('./config/db');
+          await pool.query('SELECT 1');
+        } catch { /* non-critical */ }
+      }, Math.max(1, intervalMin) * 60 * 1000);
+      logger.info({ intervalMin }, 'DB keep-warm enabled');
+    }
 
     logger.info('All systems initialized successfully');
   } catch (error: any) {
