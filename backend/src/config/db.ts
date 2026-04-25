@@ -63,15 +63,46 @@ export async function tryMig(sql: string, label: string): Promise<boolean> {
 }
 
 export async function initDb() {
-  try {
-    await pool.query('SELECT 1');
-    console.log('✅ Database connected successfully');
-    await runAutoMigrations();
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    throw error;
+  // 2026-04-25 prod outage: a single SELECT 1 against Neon during a cold
+  // start can return code XX000 with no detail (the internal_error the user
+  // saw on Render). Retrying with backoff gets past the cold start without
+  // breaking the boot. We also log full message + stack — pino's default
+  // error serializer skips non-enumerable props on PostgresError, which is
+  // why the previous outage showed `{length: 119, name: 'error', ...}` with
+  // no `message`.
+  const maxAttempts = 5;
+  let lastErr: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      if (attempt > 1) {
+        console.log(`✅ Database connected successfully (attempt ${attempt}/${maxAttempts})`);
+      } else {
+        console.log('✅ Database connected successfully');
+      }
+      await runAutoMigrations();
+      return true;
+    } catch (error: any) {
+      lastErr = error;
+      console.error(
+        `❌ Database connection attempt ${attempt}/${maxAttempts} failed:`,
+        error?.code, error?.message, error?.severity || '', error?.stack?.split('\n').slice(0, 3).join('\n')
+      );
+      if (attempt < maxAttempts) {
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000); // 1s, 2s, 4s, 8s
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
   }
+  // Re-throw with explicit message so pino captures it (the previous outage
+  // showed only enumerable PostgresError fields, hiding the actual reason).
+  const wrapped: any = new Error(
+    `initDb failed after ${maxAttempts} attempts: ${lastErr?.code || ''} ${lastErr?.message || lastErr || 'unknown'}`
+  );
+  wrapped.cause = lastErr;
+  wrapped.code = lastErr?.code;
+  wrapped.severity = lastErr?.severity;
+  throw wrapped;
 }
 
 /**
