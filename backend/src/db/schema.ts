@@ -303,6 +303,10 @@ export const stock = pgTable('stock', {
 
 export const stock_movements = pgTable('stock_movements', {
   id: uuid('id').primaryKey().defaultRandom(),
+  // 2026-05-15: schema lo había olvidado, pero todos los services
+  // (remitos, invoices, purchases, inventory) lo insertan. La migración
+  // defensiva en runCriticalMigrations agrega la columna en prod.
+  company_id: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
   product_id: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   warehouse_id: uuid('warehouse_id').notNull().references(() => warehouses.id, { onDelete: 'cascade' }),
   movement_type: stockMovementTypeEnum('movement_type'),
@@ -314,6 +318,7 @@ export const stock_movements = pgTable('stock_movements', {
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
   dateIdx: index('stock_movements_date_idx').on(table.created_at),
+  companyIdx: index('stock_movements_company_idx').on(table.company_id),
 }));
 
 // ============ RECURRING INVOICES (Abonos) ============

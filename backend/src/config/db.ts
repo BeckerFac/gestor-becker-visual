@@ -240,6 +240,25 @@ export async function runCriticalMigrations() {
     [`UPDATE users SET can_access_luna=TRUE WHERE role IN ('owner','admin') AND can_access_luna IS DISTINCT FROM TRUE`, 'backfill: users.can_access_luna admins=true'],
 
     // ════════════════════════════════════════════════════════════════
+    // 2026-05-15 — stock_movements.company_id missing in prod.
+    // Schema definition lo había olvidado, pero remitos.service /
+    // invoices.service / purchases.service / inventory.service todos
+    // hacen INSERT INTO stock_movements (id, company_id, ...).
+    // Sin esta columna, crear cualquier remito o factura con descuento
+    // de stock falla con: column "company_id" of relation "stock_movements"
+    // does not exist.
+    // ════════════════════════════════════════════════════════════════
+    [`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS company_id UUID`, 'stock_movements.company_id'],
+    [`CREATE INDEX IF NOT EXISTS stock_movements_company_idx ON stock_movements(company_id)`, 'stock_movements_company_idx'],
+    // Backfill: para filas pre-existentes, derivar company_id desde el producto.
+    // products.company_id es authoritative (los productos siempre tuvieron company_id).
+    [`UPDATE stock_movements sm
+        SET company_id = p.company_id
+        FROM products p
+        WHERE sm.product_id = p.id AND sm.company_id IS NULL`,
+      'stock_movements.company_id backfill from products'],
+
+    // ════════════════════════════════════════════════════════════════
     // Accounting: bring legacy chart_of_accounts + journal_entries up to
     // the current schema. Prod created these tables from the OLD definition
     // (without is_header, without UNIQUE(company_id, code), without is_auto).
